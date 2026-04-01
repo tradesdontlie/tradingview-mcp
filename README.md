@@ -26,7 +26,7 @@ The debug port is disabled by default and must be explicitly enabled by you usin
 - Store, transmit, or redistribute any market data
 - Work without a valid TradingView subscription and installed Desktop app
 - Bypass any TradingView paywall or access restriction
-- Execute real trades (chart interaction only)
+- Execute real trades (read-only trade observation — does not place, modify, or cancel orders)
 - Work if TradingView changes their internal Electron structure
 
 ## Research Context
@@ -65,6 +65,7 @@ Gives your AI assistant eyes and hands on your own chart:
 - **Screenshots** — capture chart state for AI visual analysis
 - **Multi-pane layouts** — set up 2x2, 3x1, etc. grids with different symbols per pane
 - **Monitor your chart** — stream JSONL from your locally running chart for local monitoring scripts
+- **Trade journaling** — pull live positions, orders, account data, and Risk/Reward tool readings for instant trade documentation
 - **CLI access** — every MCP tool is also a `tv` CLI command, pipe-friendly with JSON output
 - **Launch TradingView** — auto-detect and launch with debug mode from any platform
 
@@ -175,6 +176,7 @@ tv layout list/switch
 tv pane list/layout/focus/symbol
 tv tab list/new/close/switch
 tv replay start/step/stop/status/autoplay/trade
+tv trading account/positions/orders/notifications/risk-reward
 tv stream quote/bars/values/lines/labels/tables/all
 tv ui click/keyboard/hover/scroll/find/eval/type/panel/fullscreen/mouse
 tv screenshot / discover / ui-state / range / scroll
@@ -210,12 +212,14 @@ Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project
 | "Give me a full analysis" | `quote_get` → `data_get_study_values` → `data_get_pine_lines` → `data_get_pine_labels` → `data_get_pine_tables` → `data_get_ohlcv` (summary) → `capture_screenshot` |
 | "Switch to AAPL daily" | `chart_set_symbol` → `chart_set_timeframe` |
 | "Write a Pine Script for..." | `pine_set_source` → `pine_smart_compile` → `pine_get_errors` |
+| "What's my position?" | `trading_get_positions` → `trading_get_risk_reward` |
+| "Journal this trade" | `trading_get_positions` → `trading_get_risk_reward` → `trading_get_account` → `capture_screenshot` |
 | "Start replay at March 1st" | `replay_start` → `replay_step` → `replay_trade` |
 | "Set up a 4-chart grid" | `pane_set_layout` → `pane_set_symbol` for each pane |
 | "Draw a level at 24500" | `draw_shape` (horizontal_line) |
 | "Take a screenshot" | `capture_screenshot` |
 
-## Tool Reference (78 MCP tools)
+## Tool Reference (83 MCP tools)
 
 ### Chart Reading
 
@@ -295,6 +299,40 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 | `replay_status` | Check position, P&L, date |
 | `replay_stop` | Return to realtime |
 
+### Trading & Trade Journaling
+
+Read-only access to your connected broker's trading panel. These tools do not place, modify, or cancel orders — they observe your live trading state for analysis and journaling.
+
+| Tool | What it does | Output size |
+|------|-------------|-------------|
+| `trading_get_positions` | Open positions — symbol, side, qty, avg fill, P&L | ~200B/position |
+| `trading_get_orders` | Pending/open orders — symbol, side, type, qty, limit/stop, status | ~300B/order |
+| `trading_get_account` | Account summary — balance, equity, margin, net liquidation | ~300-500B |
+| `trading_get_notifications` | Broker messages — fill confirmations, errors, status updates | ~100B/entry |
+| `trading_get_risk_reward` | Risk/Reward drawing tools — entry, stop, target prices, R:R ratio | ~400B/tool |
+
+> **Requires** the trading panel to be open with a broker connected (e.g., Tradovate, TradeStation). `trading_get_risk_reward` reads chart drawings and works independently of the trading panel.
+
+#### Use Case: Trade Journaling with Risk/Reward
+
+The Risk/Reward tools on your chart become machine-readable trade plans. When you enter a trade, Claude can pull together a complete journal entry in one shot:
+
+**What you say:** *"I just entered a trade, journal it"*
+
+**What Claude does:**
+1. `trading_get_positions` — reads your live fill (symbol, side, qty, avg price, unrealized P&L)
+2. `trading_get_risk_reward` — reads your R:R drawing tool (entry, stop, target, R:R ratio) and auto-matches it to your position
+3. `capture_screenshot` — captures the chart state at time of entry
+
+**What you get:**
+- Entry price, stop loss, and profit target from the R:R tool
+- Risk in points and dollars, reward in points and dollars
+- R:R ratio (e.g., 1.62:1 — target is 1.62× the risk)
+- Current P&L and account state
+- A screenshot of the exact chart setup at entry
+
+This turns TradingView's visual Risk/Reward tool into structured data that Claude can read, format, and archive — giving you a complete trade journal entry without manual logging.
+
 ### Drawing, Alerts, UI Automation
 
 | Tool | What it does |
@@ -351,7 +389,7 @@ npm test
 Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  TradingView Desktop (Electron)
 ```
 
-- **Transport**: MCP over stdio (78 tools) + CLI (`tv` command, 30 commands with 66 subcommands)
+- **Transport**: MCP over stdio (83 tools) + CLI (`tv` command, 30 commands with 66 subcommands)
 - **Connection**: Chrome DevTools Protocol on localhost:9222
 - **Streaming**: Poll-and-diff loop with deduplication, JSONL output to stdout
 - **No dependencies** beyond `@modelcontextprotocol/sdk` and `chrome-remote-interface`
