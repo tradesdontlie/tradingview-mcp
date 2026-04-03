@@ -13,6 +13,9 @@ function parseFlexDate(input) {
   // Already ISO-like
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s;
 
+  // Compact date "20250301" → "2025-03-01"
+  if (/^\d{8}$/.test(s)) return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
+
   // "today", "yesterday"
   const now = new Date();
   if (/^today$/i.test(s)) return now.toISOString().slice(0, 10);
@@ -62,7 +65,7 @@ function parseFlexDate(input) {
 function parseTime(str) {
   if (!str || !str.trim()) return null;
   const s = str.trim();
-  // "14:00", "14:30"
+  // "14:00", "14:30", "9:30"
   const mil = s.match(/^(\d{1,2}):(\d{2})$/);
   if (mil) return `${mil[1].padStart(2, '0')}:${mil[2]}`;
   // "2pm", "2:30pm", "14"
@@ -74,43 +77,82 @@ function parseTime(str) {
     if (ampm[3].toLowerCase() === 'am' && h === 12) h = 0;
     return `${String(h).padStart(2, '0')}:${m}`;
   }
+  // Bare 4-digit time "0930" → "09:30"
+  if (/^\d{4}$/.test(s)) return `${s.slice(0, 2)}:${s.slice(2)}`;
   // Bare hour "14"
   if (/^\d{1,2}$/.test(s)) return `${s.padStart(2, '0')}:00`;
   return null;
+}
+
+/**
+ * Map human-friendly speed multipliers to TradingView autoplay delays.
+ * Lower delay = faster. "1x" is baseline (1000ms).
+ */
+const SPEED_MAP = {
+  '10x': 100, '7x': 143, '5x': 200, '3x': 300,
+  '1x': 1000, '0.5x': 2000, '0.3x': 3000, '0.2x': 5000, '0.1x': 10000,
+};
+
+function parseSpeed(str) {
+  if (!str) return undefined;
+  const s = str.trim().toLowerCase();
+  if (SPEED_MAP[s] !== undefined) return SPEED_MAP[s];
+  const n = Number(s);
+  if (!isNaN(n) && n > 0) return n; // raw ms passthrough
+  const valid = Object.keys(SPEED_MAP).join(', ');
+  throw new Error(`Invalid speed "${str}". Use: ${valid} (or raw ms: 100-10000)`);
+}
+
+/**
+ * Normalize interval input: case-insensitive, accept friendly aliases.
+ */
+function parseInterval(str) {
+  if (!str) return undefined;
+  const s = str.trim().toLowerCase();
+  const aliases = { 'chart': 'auto', 'tick': '1T', '1t': '1T', '1s': '1S' };
+  if (aliases[s]) return aliases[s];
+  return str.trim(); // pass through as-is (runtime validation will catch bad values)
 }
 
 register('replay', {
   description: 'Replay mode controls',
   subcommands: new Map([
     ['start', {
-      description: 'Start replay (accepts --timeframe, --interval, --speed for one-shot setup)',
+      description: 'Start replay: tv replay start -d 20250301 0930 -tf 5 -s 3x -i 1s',
       options: {
-        date: { type: 'string', short: 'd', description: 'Start date: 2025-03-01, 3/1, "mar 1 2pm", yesterday, -7d' },
-        timeframe: { type: 'string', short: 't', description: 'Set chart timeframe before starting (e.g., 5, 15, 60, D)' },
-        interval: { type: 'string', short: 'i', description: 'Replay tick interval: 1T, 1S, 1, 5, auto' },
-        speed: { type: 'string', short: 's', description: 'Autoplay delay in ms (100=fast, 1000=normal, 10000=slow)' },
+        date: { type: 'string', short: 'd', description: 'Date: 20250301, 3/1, "mar 1", yesterday, -7d' },
+        hour: { type: 'string', short: 'h', description: 'Time: 0930, 9:30, 2pm, 14' },
+        tf: { type: 'string', description: 'Chart timeframe (5, 15, 60, D)' },
+        speed: { type: 'string', short: 's', description: 'Speed: 1x, 3x, 5x, 7x, 10x (or raw ms)' },
+        interval: { type: 'string', short: 'i', description: 'Tick interval: 1s, 1t, 1, 5, chart/auto' },
       },
       handler: async (opts, positionals) => {
-        const date = parseFlexDate(opts.date || positionals[0]);
+        // Combine -d and -h, or pick up positionals
+        let dateStr = opts.date || positionals[0];
+        const hourStr = opts.hour || positionals[opts.date ? 0 : 1];
+        if (dateStr && hourStr && parseTime(hourStr)) {
+          dateStr = dateStr + ' ' + hourStr;
+        }
+        const date = parseFlexDate(dateStr);
         const results = {};
 
         // Set timeframe first if requested
-        if (opts.timeframe) {
-          results.timeframe = await chartCore.setTimeframe({ timeframe: opts.timeframe });
+        if (opts.tf) {
+          results.timeframe = await chartCore.setTimeframe({ timeframe: opts.tf });
           await new Promise(r => setTimeout(r, 500));
         }
 
         // Start replay
         results.replay = await core.start({ date });
 
-        // Set resolution if requested
-        if (opts.interval) {
-          results.resolution = await core.setResolution({ interval: opts.interval });
+        // Set speed and start autoplay if requested (before interval — feels right to set pace first)
+        if (opts.speed) {
+          results.autoplay = await core.autoplay({ speed: parseSpeed(opts.speed) });
         }
 
-        // Set speed and start autoplay if requested
-        if (opts.speed) {
-          results.autoplay = await core.autoplay({ speed: Number(opts.speed) });
+        // Set resolution if requested
+        if (opts.interval) {
+          results.resolution = await core.setResolution({ interval: parseInterval(opts.interval) });
         }
 
         return { success: true, ...results };
@@ -129,18 +171,18 @@ register('replay', {
       handler: () => core.status(),
     }],
     ['resolution', {
-      description: 'Set replay update interval (1T=tick, 1S=second, 1=minute, 5=5min, auto)',
+      description: 'Set tick interval: tv replay resolution 1s (1t, 1s, 1, 5, chart/auto)',
       options: {
-        interval: { type: 'string', short: 'i', description: 'Update interval: 1T, 1S, 1, 5, auto' },
+        interval: { type: 'string', short: 'i', description: 'Interval: 1t=tick, 1s=second, 1=min, 5=5min, chart/auto' },
       },
-      handler: (opts, positionals) => core.setResolution({ interval: opts.interval || positionals[0] }),
+      handler: (opts, positionals) => core.setResolution({ interval: parseInterval(opts.interval || positionals[0]) }),
     }],
     ['autoplay', {
-      description: 'Toggle autoplay in replay mode',
+      description: 'Toggle autoplay: tv replay autoplay -s 3x',
       options: {
-        speed: { type: 'string', short: 's', description: 'Autoplay delay in ms (lower = faster)' },
+        speed: { type: 'string', short: 's', description: 'Speed: 1x, 3x, 5x, 7x, 10x (or raw ms)' },
       },
-      handler: (opts) => core.autoplay({ speed: opts.speed ? Number(opts.speed) : undefined }),
+      handler: (opts, positionals) => core.autoplay({ speed: parseSpeed(opts.speed || positionals[0]) }),
     }],
     ['trade', {
       description: 'Execute a trade in replay mode (buy, sell, close)',
