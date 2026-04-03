@@ -21,13 +21,19 @@ REM Check MSIX / Windows Store installs
 if "%TV_EXE%"=="" (
     for /f "tokens=*" %%i in ('dir /s /b "%PROGRAMFILES%\WindowsApps\TradingView*\TradingView.exe" 2^>nul') do set "TV_EXE=%%i"
 )
+REM Use Get-AppxPackage for Appx installs when WindowsApps directory listing is blocked
+if "%TV_EXE%"=="" (
+    for /f "tokens=*" %%i in ('powershell -NoProfile -Command "Get-AppxPackage -Name '*TradingView*' | Select-Object -ExpandProperty InstallLocation" 2^>nul') do (
+        if exist "%%i\TradingView.exe" set "TV_EXE=%%i\TradingView.exe"
+    )
+)
 if "%TV_EXE%"=="" (
     for /f "tokens=*" %%i in ('where TradingView.exe 2^>nul') do set "TV_EXE=%%i"
 )
 
 if "%TV_EXE%"=="" (
     echo Error: TradingView not found.
-    echo Checked: %%LOCALAPPDATA%%\TradingView, %%PROGRAMFILES%%\TradingView, WindowsApps
+    echo Checked: %%LOCALAPPDATA%%\TradingView, %%PROGRAMFILES%%\TradingView, WindowsApps, Get-AppxPackage, PATH
     echo.
     echo If installed elsewhere, run manually:
     echo   "C:\path\to\TradingView.exe" --remote-debugging-port=%PORT%

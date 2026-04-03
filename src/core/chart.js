@@ -5,6 +5,18 @@ import { evaluate, evaluateAsync } from '../connection.js';
 import { waitForChartReady } from '../wait.js';
 
 const CHART_API = 'window.TradingViewApi._activeChartWidgetWV.value()';
+const FALLBACK_CHART_TYPES = {
+  Bars: 0,
+  Candles: 1,
+  Line: 2,
+  Area: 3,
+  Renko: 4,
+  Kagi: 5,
+  PointAndFigure: 6,
+  LineBreak: 7,
+  HeikinAshi: 8,
+  HollowCandles: 9,
+};
 
 export async function getState() {
   const state = await evaluate(`
@@ -54,14 +66,15 @@ export async function setTimeframe({ timeframe }) {
 }
 
 export async function setType({ chart_type }) {
-  const typeMap = {
-    'Bars': 0, 'Candles': 1, 'Line': 2, 'Area': 3,
-    'Renko': 4, 'Kagi': 5, 'PointAndFigure': 6, 'LineBreak': 7,
-    'HeikinAshi': 8, 'HollowCandles': 9,
-  };
-  const typeNum = typeMap[chart_type] ?? Number(chart_type);
+  const available = await getAvailableChartTypes();
+  const typeMap = available.length
+    ? Object.fromEntries(available.map(({ name, value }) => [name, value]))
+    : FALLBACK_CHART_TYPES;
+
+  const typeNum = resolveChartType(chart_type, typeMap);
   if (isNaN(typeNum)) {
-    throw new Error(`Unknown chart type: ${chart_type}. Use a name (Candles, Line, etc.) or number (0-9).`);
+    const valid = formatAvailableChartTypes(typeMap);
+    throw new Error(`Unknown chart type: ${chart_type}. Available chart types: ${valid}`);
   }
   await evaluate(`
     (function() {
@@ -70,6 +83,93 @@ export async function setType({ chart_type }) {
     })()
   `);
   return { success: true, chart_type, type_num: typeNum };
+}
+
+async function getAvailableChartTypes() {
+  const result = await evaluate(`
+    (function() {
+      var chart = ${CHART_API};
+      var seen = {};
+      var out = [];
+
+      function push(name, value) {
+        if (typeof value !== 'number' || !isFinite(value)) return;
+        if (!name || typeof name !== 'string') name = String(value);
+        var key = name + '|' + value;
+        if (seen[key]) return;
+        seen[key] = true;
+        out.push({ name: name.replace(/\\s+/g, ''), value: value });
+      }
+
+      function read(entry, fallbackKey) {
+        if (entry == null) return;
+        if (Array.isArray(entry)) {
+          for (var i = 0; i < entry.length; i++) read(entry[i], String(i));
+          return;
+        }
+        if (typeof entry === 'object' && typeof entry.value === 'function') {
+          try { read(entry.value(), fallbackKey); } catch (e) {}
+          return;
+        }
+        if (typeof entry === 'object') {
+          var name = entry.name || entry.title || entry.label || entry.text || entry.id || entry.key || fallbackKey;
+          var value = entry.value;
+          if (typeof value !== 'number') value = entry.type;
+          if (typeof value !== 'number') value = entry.index;
+          if (typeof value === 'number') push(name, value);
+          return;
+        }
+      }
+
+      function readObject(obj) {
+        if (!obj || typeof obj !== 'object') return;
+        var keys = Object.keys(obj);
+        for (var i = 0; i < keys.length; i++) {
+          var key = keys[i];
+          var value = obj[key];
+          if (typeof value === 'number') push(key, value);
+          else if (value && typeof value === 'object') read(value, key);
+        }
+      }
+
+      var candidates = [
+        chart.chartTypes,
+        chart.getChartTypes && chart.getChartTypes(),
+        chart._chartTypes,
+        chart._chartWidget && chart._chartWidget._chartTypes,
+        window.TradingView && window.TradingView.ChartType,
+        window.TradingView && window.TradingView.ChartTypes,
+        window.ChartType,
+        window.ChartTypes,
+      ];
+
+      for (var i = 0; i < candidates.length; i++) {
+        read(candidates[i]);
+        readObject(candidates[i]);
+      }
+
+      return out;
+    })()
+  `);
+  return Array.isArray(result) ? result : [];
+}
+
+function resolveChartType(input, typeMap) {
+  if (Object.prototype.hasOwnProperty.call(typeMap, input)) return typeMap[input];
+
+  const normalized = String(input).replace(/\s+/g, '').toLowerCase();
+  for (const [name, value] of Object.entries(typeMap)) {
+    if (name.toLowerCase() === normalized) return value;
+  }
+
+  return Number(input);
+}
+
+function formatAvailableChartTypes(typeMap) {
+  return Object.entries(typeMap)
+    .sort((a, b) => a[1] - b[1])
+    .map(([name, value]) => `${name}(${value})`)
+    .join(', ');
 }
 
 export async function manageIndicator({ action, indicator, entity_id, inputs: inputsRaw }) {

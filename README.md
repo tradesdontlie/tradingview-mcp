@@ -331,7 +331,7 @@ Launch scripts and `tv_launch` auto-detect TradingView. If auto-detection fails:
 | Platform | Common Locations |
 |----------|-----------------|
 | **Mac** | `/Applications/TradingView.app/Contents/MacOS/TradingView` |
-| **Windows** | `%LOCALAPPDATA%\TradingView\TradingView.exe`, `%PROGRAMFILES%\WindowsApps\TradingView*\TradingView.exe` |
+| **Windows** | `%LOCALAPPDATA%\TradingView\TradingView.exe`, `%PROGRAMFILES%\WindowsApps\TradingView*\TradingView.exe` (`Get-AppxPackage` fallback for Appx installs) |
 | **Linux** | `/opt/TradingView/tradingview`, `~/.local/share/TradingView/TradingView`, `/snap/tradingview/current/tradingview` |
 
 The key flag: `--remote-debugging-port=9222`

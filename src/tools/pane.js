@@ -9,7 +9,7 @@ export function registerPaneTools(server) {
   });
 
   server.tool('pane_set_layout', 'Change the chart grid layout (e.g., single, 2x2, 2h, 3v)', {
-    layout: z.string().describe('Layout code: s (single), 2h, 2v, 2-1, 1-2, 3h, 3v, 4 (2x2), 6, 8. Also accepts: single, 2x1, 1x2, 2x2, quad'),
+    layout: z.string().describe('Layout code or alias. Common values: s, 2h, 2v, 2-1, 1-2, 3h, 3v, 4, 6, 8, plus aliases like single, 2x1, 1x2, 2x2, quad. Valid values are checked against TradingView runtime state when available.'),
   }, async ({ layout }) => {
     try { return jsonResult(await core.setLayout({ layout })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }

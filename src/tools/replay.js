@@ -16,7 +16,7 @@ export function registerReplayTools(server) {
   });
 
   server.tool('replay_autoplay', 'Toggle autoplay in replay mode, optionally set speed', {
-    speed: z.coerce.number().optional().describe('Autoplay delay in ms (lower = faster). Leave empty to just toggle. (default 0)'),
+    speed: z.coerce.number().optional().describe('Autoplay delay in ms (lower = faster). Leave empty to just toggle. Valid values are checked against TradingView runtime state when available, with a safe fallback list if it is not exposed.'),
   }, async ({ speed }) => {
     try { return jsonResult(await core.autoplay({ speed })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
