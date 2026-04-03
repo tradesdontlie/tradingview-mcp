@@ -22,6 +22,13 @@ export function registerReplayTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
+  server.tool('replay_set_resolution', 'Set replay update interval (tick granularity)', {
+    interval: z.string().optional().describe('Update interval. Values depend on chart timeframe — e.g., on 5m chart: "1T" (tick), "1S" (second), "1" (1 min), "5" (5 min). On daily: "1H", "2H", "3H", "4H", "1D". Use "auto" to reset. 1T/1S may require paid plan.'),
+  }, async ({ interval }) => {
+    try { return jsonResult(await core.setResolution({ interval })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
   server.tool('replay_stop', 'Stop replay and return to realtime', {}, async () => {
     try { return jsonResult(await core.stop()); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }

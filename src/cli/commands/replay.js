@@ -23,6 +23,13 @@ register('replay', {
       description: 'Get current replay state',
       handler: () => core.status(),
     }],
+    ['resolution', {
+      description: 'Set replay update interval (1T=tick, 1S=second, 1=minute, 5=5min, auto)',
+      options: {
+        interval: { type: 'string', short: 'i', description: 'Update interval: 1T, 1S, 1, 5, auto' },
+      },
+      handler: (opts, positionals) => core.setResolution({ interval: opts.interval || positionals[0] }),
+    }],
     ['autoplay', {
       description: 'Toggle autoplay in replay mode',
       options: {

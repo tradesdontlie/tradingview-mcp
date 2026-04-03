@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 // Direct import for autoplay validation test
-import { autoplay } from '../src/core/replay.js';
+import { autoplay, setResolution } from '../src/core/replay.js';
 
 const VALID_DELAYS = [100, 143, 200, 300, 1000, 2000, 3000, 5000, 10000];
 
@@ -64,6 +64,40 @@ describe('replay autoplay — delay validation', () => {
         `omitted speed should skip validation: ${err.message}`,
       );
     }
+  });
+});
+
+describe('replay setResolution — interval validation', () => {
+  // Valid resolutions are dynamic (depend on chart timeframe), so validation
+  // happens at runtime by querying TradingView. Without a live connection,
+  // we can only verify that "auto"/omitted resolve correctly before the CDP call.
+
+  it('accepts "auto" (resolves to null internally, no validation error)', async () => {
+    try {
+      await setResolution({ interval: 'auto' });
+    } catch (err) {
+      // Connection errors are expected (no TradingView running).
+      // Validation errors should NOT happen for "auto".
+      assert.ok(
+        !err.message.includes('Invalid replay resolution'),
+        `"auto" should be accepted: ${err.message}`,
+      );
+    }
+  });
+
+  it('accepts omitted interval (defaults to auto)', async () => {
+    try {
+      await setResolution({});
+    } catch (err) {
+      assert.ok(
+        !err.message.includes('Invalid replay resolution'),
+        `omitted interval should default to auto: ${err.message}`,
+      );
+    }
+  });
+
+  it('setResolution is exported and callable', () => {
+    assert.equal(typeof setResolution, 'function');
   });
 });
 

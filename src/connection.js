@@ -141,6 +141,10 @@ export async function getReplayApi() {
   return verifyAndReturn(KNOWN_PATHS.replayApi, 'Replay API');
 }
 
+export async function getReplayUIController() {
+  return verifyAndReturn(KNOWN_PATHS.replayApi + '._replayUIController', 'Replay UI Controller');
+}
+
 export async function getMainSeriesBars() {
   return verifyAndReturn(KNOWN_PATHS.mainSeriesBars, 'Main Series Bars');
 }

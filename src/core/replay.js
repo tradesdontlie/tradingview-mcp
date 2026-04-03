@@ -1,9 +1,19 @@
 /**
  * Core replay mode logic.
  */
-import { evaluate, getReplayApi } from '../connection.js';
+import { evaluate, getReplayApi, getReplayUIController, safeString } from '../connection.js';
 
 const VALID_AUTOPLAY_DELAYS = [100, 143, 200, 300, 1000, 2000, 3000, 5000, 10000];
+
+// Replay update interval labels for human-readable output.
+// Valid resolutions are dynamic (depend on chart timeframe) so we query TradingView at runtime.
+// Known values: "1T" = 1 tick, "1S" = 1 second, "1" = 1 minute, "5" = 5 minutes, "10" = 10 minutes, etc.
+const REPLAY_RESOLUTION_LABELS = {
+  '1T': '1 tick', '1S': '1 second',
+  '1': '1 min', '3': '3 min', '5': '5 min', '10': '10 min', '15': '15 min', '30': '30 min',
+  '1H': '1 hour', '2H': '2 hours', '3H': '3 hours', '4H': '4 hours',
+  '1D': '1 day', auto: 'auto',
+};
 
 function wv(path) {
   return `(function(){ var v = ${path}; return (v && typeof v === 'object' && typeof v.value === 'function') ? v.value() : v; })()`;
@@ -95,6 +105,37 @@ export async function trade({ action }) {
   return { success: true, action, position, realized_pnl: pnl };
 }
 
+export async function setResolution({ interval } = {}) {
+  // Resolve "auto" to null (TradingView's internal representation)
+  const value = (!interval || interval === 'auto') ? null : interval;
+
+  const rp = await getReplayApi();
+  const started = await evaluate(wv(`${rp}.isReplayStarted()`));
+  if (!started) throw new Error('Replay is not started. Use replay_start first.');
+
+  const ctrl = await getReplayUIController();
+
+  // Query valid resolutions from TradingView — these are dynamic (depend on chart timeframe).
+  // Validate BEFORE calling changeReplayResolution to prevent cloud state corruption.
+  const available = await evaluate(wv(`${ctrl}._allReplayResolutions.value()`));
+  if (!Array.isArray(available))
+    throw new Error('Could not retrieve available replay resolutions from TradingView.');
+  if (value !== null && !available.includes(value))
+    throw new Error(`Invalid replay resolution "${interval}". Available for current timeframe: ${available.join(', ')}, auto. Note: 1T and 1S may require a paid TradingView plan.`);
+
+  await evaluate(`${ctrl}.changeReplayResolution(${value === null ? 'null' : safeString(value)})`);
+
+  const current = await evaluate(wv(`${ctrl}._currentReplayResolution.value()`));
+  const auto = await evaluate(wv(`${ctrl}._autoReplayResolution.value()`));
+  const label = resolveLabel(current, auto);
+  return { success: true, resolution: current, resolution_label: label, auto_resolution: auto };
+}
+
+function resolveLabel(current, auto) {
+  if (current === null) return `auto (${REPLAY_RESOLUTION_LABELS[auto] || auto})`;
+  return REPLAY_RESOLUTION_LABELS[current] || current;
+}
+
 export async function status() {
   const rp = await getReplayApi();
   const st = await evaluate(`
@@ -113,5 +154,17 @@ export async function status() {
   `);
   const pos = await evaluate(wv(`${rp}.position()`));
   const pnl = await evaluate(wv(`${rp}.realizedPL()`));
-  return { success: true, ...st, position: pos, realized_pnl: pnl };
+
+  // Include replay resolution info
+  let replay_resolution = null;
+  let replay_resolution_label = null;
+  try {
+    const ctrl = await getReplayUIController();
+    const current = await evaluate(wv(`${ctrl}._currentReplayResolution.value()`));
+    const auto = await evaluate(wv(`${ctrl}._autoReplayResolution.value()`));
+    replay_resolution = current;
+    replay_resolution_label = resolveLabel(current, auto);
+  } catch {}
+
+  return { success: true, ...st, replay_resolution, replay_resolution_label, position: pos, realized_pnl: pnl };
 }
