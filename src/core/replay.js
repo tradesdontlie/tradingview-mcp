@@ -3,6 +3,8 @@
  */
 import { evaluate, getReplayApi } from '../connection.js';
 
+const VALID_AUTOPLAY_DELAYS = [100, 143, 200, 300, 1000, 2000, 3000, 5000, 10000];
+
 function wv(path) {
   return `(function(){ var v = ${path}; return (v && typeof v === 'object' && typeof v.value === 'function') ? v.value() : v; })()`;
 }
@@ -34,7 +36,6 @@ export async function start({ date } = {}) {
   if (toast) {
     // Stop replay to recover chart
     try { await evaluate(`${rp}.stopReplay()`); } catch {}
-    try { await evaluate(`${rp}.hideReplayToolbar()`); } catch {}
     throw new Error(`Replay date unavailable: "${toast}". The requested date has no data for this timeframe. Try a more recent date or switch to a higher timeframe (e.g., Daily).`);
   }
 
@@ -53,6 +54,10 @@ export async function step() {
 }
 
 export async function autoplay({ speed } = {}) {
+  if (speed > 0 && !VALID_AUTOPLAY_DELAYS.includes(speed)) {
+    throw new Error(`Invalid autoplay delay ${speed}. Valid values: ${VALID_AUTOPLAY_DELAYS.join(', ')}`);
+  }
+
   const rp = await getReplayApi();
   const started = await evaluate(wv(`${rp}.isReplayStarted()`));
   if (!started) throw new Error('Replay is not started. Use replay_start first.');
@@ -67,12 +72,9 @@ export async function stop() {
   const rp = await getReplayApi();
   const started = await evaluate(wv(`${rp}.isReplayStarted()`));
   if (!started) {
-    // Try to hide toolbar even if not started
-    try { await evaluate(`${rp}.hideReplayToolbar()`); } catch {}
     return { success: true, action: 'already_stopped' };
   }
   await evaluate(`${rp}.stopReplay()`);
-  try { await evaluate(`${rp}.hideReplayToolbar()`); } catch {}
   return { success: true, action: 'replay_stopped' };
 }
 
