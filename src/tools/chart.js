@@ -23,7 +23,7 @@ export function registerChartTools(server) {
   });
 
   server.tool('chart_set_type', 'Change chart type', {
-    chart_type: z.string().describe('Chart type: Bars(0), Candles(1), Line(2), Area(3), Renko(4), Kagi(5), PointAndFigure(6), LineBreak(7), HeikinAshi(8), HollowCandles(9) — pass name or number'),
+    chart_type: z.string().describe('Chart type name or numeric code. Common examples: Candles, Line, Area, Bars, Renko, HeikinAshi. Valid values are checked against TradingView runtime state when available.'),
   }, async ({ chart_type }) => {
     try { return jsonResult(await core.setType({ chart_type })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }

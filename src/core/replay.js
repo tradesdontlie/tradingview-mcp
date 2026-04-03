@@ -3,6 +3,8 @@
  */
 import { evaluate, getReplayApi } from '../connection.js';
 
+const FALLBACK_AUTOPLAY_DELAYS = [100, 143, 200, 300, 1000, 2000, 3000, 5000, 10000];
+
 function wv(path) {
   return `(function(){ var v = ${path}; return (v && typeof v === 'object' && typeof v.value === 'function') ? v.value() : v; })()`;
 }
@@ -56,6 +58,10 @@ export async function autoplay({ speed } = {}) {
   const rp = await getReplayApi();
   const started = await evaluate(wv(`${rp}.isReplayStarted()`));
   if (!started) throw new Error('Replay is not started. Use replay_start first.');
+  const validDelays = await getAvailableAutoplayDelays(rp);
+  if (speed > 0 && !validDelays.includes(speed)) {
+    throw new Error(`Invalid autoplay delay ${speed}. Available delays: ${validDelays.join(', ')}`);
+  }
   if (speed > 0) await evaluate(`${rp}.changeAutoplayDelay(${speed})`);
   await evaluate(`${rp}.toggleAutoplay()`);
   const isAutoplay = await evaluate(wv(`${rp}.isAutoplayStarted()`));
@@ -110,4 +116,58 @@ export async function status() {
   const pos = await evaluate(wv(`${rp}.position()`));
   const pnl = await evaluate(wv(`${rp}.realizedPL()`));
   return { success: true, ...st, position: pos, realized_pnl: pnl };
+}
+
+async function getAvailableAutoplayDelays(rp) {
+  const result = await evaluate(`
+    (function() {
+      var replay = ${rp};
+      var seen = {};
+      var out = [];
+
+      function push(value) {
+        if (typeof value !== 'number' || !isFinite(value)) return;
+        if (seen[value]) return;
+        seen[value] = true;
+        out.push(value);
+      }
+
+      function read(entry) {
+        if (entry == null) return;
+        if (Array.isArray(entry)) {
+          for (var i = 0; i < entry.length; i++) read(entry[i]);
+          return;
+        }
+        if (typeof entry === 'number') {
+          push(entry);
+          return;
+        }
+        if (typeof entry === 'object' && typeof entry.value === 'function') {
+          try { read(entry.value()); } catch (e) {}
+          return;
+        }
+        if (typeof entry === 'object') {
+          if (typeof entry.value === 'number') push(entry.value);
+          if (typeof entry.id === 'number') push(entry.id);
+          if (typeof entry.delay === 'number') push(entry.delay);
+          if (typeof entry.autoplayDelay === 'number') push(entry.autoplayDelay);
+        }
+      }
+
+      var candidates = [
+        replay.findAutoplayDelayOptionItems && replay.findAutoplayDelayOptionItems(),
+        replay._replayManager && replay._replayManager.findAutoplayDelayOptionItems && replay._replayManager.findAutoplayDelayOptionItems(),
+        replay._replayUIController && replay._replayUIController._replayManager &&
+          replay._replayUIController._replayManager.findAutoplayDelayOptionItems &&
+          replay._replayUIController._replayManager.findAutoplayDelayOptionItems(),
+      ];
+
+      for (var i = 0; i < candidates.length; i++) {
+        try { read(candidates[i]); } catch (e) {}
+      }
+
+      return out.sort(function(a, b) { return a - b; });
+    })()
+  `);
+  return Array.isArray(result) && result.length ? result : FALLBACK_AUTOPLAY_DELAYS;
 }

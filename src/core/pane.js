@@ -90,9 +90,11 @@ export async function setLayout({ layout }) {
     '3x1': '3h', '1x3': '3v',
   };
   const resolved = aliases[code] || code;
+  const availableLayouts = await getAvailableLayouts();
+  const knownLayouts = availableLayouts.length ? availableLayouts : Object.keys(LAYOUT_NAMES);
 
-  if (!LAYOUT_NAMES[resolved]) {
-    const available = Object.entries(LAYOUT_NAMES).map(([k, v]) => `  ${k} — ${v}`).join('\n');
+  if (!knownLayouts.includes(resolved)) {
+    const available = knownLayouts.map(k => `  ${k} — ${LAYOUT_NAMES[k] || k}`).join('\n');
     throw new Error(`Unknown layout "${layout}". Available layouts:\n${available}`);
   }
 
@@ -103,10 +105,79 @@ export async function setLayout({ layout }) {
   return {
     success: true,
     layout: resolved,
-    layout_name: LAYOUT_NAMES[resolved],
+    layout_name: LAYOUT_NAMES[resolved] || resolved,
     chart_count: state.chart_count,
     panes: state.panes,
   };
+}
+
+async function getAvailableLayouts() {
+  const result = await evaluate(`
+    (function() {
+      var cwc = ${CWC};
+      var seen = {};
+      var out = [];
+      var layoutCode = /^(s|\\d+h|\\d+v|\\d+s|\\d+(?:-\\d+)?)$/i;
+
+      function push(value) {
+        if (typeof value !== 'string') return;
+        var code = value.replace(/\\s+/g, '');
+        if (!layoutCode.test(code)) return;
+        code = code.toLowerCase();
+        if (seen[code]) return;
+        seen[code] = true;
+        out.push(code);
+      }
+
+      function read(entry, fallbackKey) {
+        if (entry == null) return;
+        if (Array.isArray(entry)) {
+          for (var i = 0; i < entry.length; i++) read(entry[i], String(i));
+          return;
+        }
+        if (typeof entry === 'object' && typeof entry.value === 'function') {
+          try { read(entry.value(), fallbackKey); } catch (e) {}
+          return;
+        }
+        if (typeof entry === 'string') {
+          push(entry);
+          return;
+        }
+        if (typeof entry === 'object') {
+          push(entry.code);
+          push(entry.id);
+          push(entry.key);
+          push(entry.value);
+          push(entry.layoutType);
+          push(entry.name);
+          push(fallbackKey);
+        }
+      }
+
+      var candidates = [
+        cwc._layoutTypeItems,
+        cwc.layoutTypeItems,
+        cwc._layoutTypeOptions,
+        cwc.layoutTypeOptions,
+        cwc._availableLayouts,
+        cwc.availableLayouts,
+        cwc._layouts,
+        cwc.layouts,
+        cwc.getLayoutTypes && cwc.getLayoutTypes(),
+      ];
+
+      for (var i = 0; i < candidates.length; i++) read(candidates[i]);
+
+      var keys = Object.keys(cwc || {});
+      for (var j = 0; j < keys.length; j++) {
+        var key = keys[j];
+        if (/layout/i.test(key)) read(cwc[key], key);
+      }
+
+      return out;
+    })()
+  `);
+  return Array.isArray(result) ? result : [];
 }
 
 /**
