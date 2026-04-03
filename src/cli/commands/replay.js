@@ -1,6 +1,26 @@
 import { register } from '../router.js';
 import * as core from '../../core/replay.js';
 import * as chartCore from '../../core/chart.js';
+import * as tabCore from '../../core/tab.js';
+
+/**
+ * Switch to a tab matching a symbol, title substring, or chart ID.
+ * Returns the matched tab or null if no match / only one tab.
+ */
+async function switchToChart(name) {
+  if (!name) return null;
+  const { tabs } = await tabCore.list();
+  if (tabs.length <= 1) return null;
+  const q = name.toLowerCase();
+  const match = tabs.find(t =>
+    t.title.toLowerCase().includes(q) ||
+    (t.chart_id && t.chart_id.toLowerCase() === q)
+  );
+  if (!match) throw new Error(`No tab matching "${name}". Open tabs: ${tabs.map(t => t.title).join(', ')}`);
+  await tabCore.switchTab({ index: match.index });
+  await new Promise(r => setTimeout(r, 500));
+  return match;
+}
 
 /**
  * Parse flexible date/time strings into ISO format for TradingView.
@@ -118,8 +138,9 @@ register('replay', {
   description: 'Replay mode controls',
   subcommands: new Map([
     ['start', {
-      description: 'Start replay: tv replay start -d 20250301 -h 0930 -tf 5 -s 3x -i 1s',
+      description: 'Start replay: tv replay start -d 20250301 -h 0930 -tf 5 -s 3x -i 1s [-c ES]',
       options: {
+        chart: { type: 'string', short: 'c', description: 'Switch to tab matching symbol/name (e.g., ES, AAPL, "My Layout")' },
         date: { type: 'string', short: 'd', description: 'Date: 20250301, 3/1, "mar 1", yesterday, -7d' },
         hour: { type: 'string', short: 'h', description: 'Time: 0930, 9:30, 2pm, 14' },
         tf: { type: 'string', description: 'Chart timeframe (5, 15, 60, D)' },
@@ -135,6 +156,11 @@ register('replay', {
         }
         const date = parseFlexDate(dateStr);
         const results = {};
+
+        // Switch to matching tab if requested
+        if (opts.chart) {
+          results.tab = await switchToChart(opts.chart);
+        }
 
         // Set timeframe first if requested
         if (opts.tf) {
