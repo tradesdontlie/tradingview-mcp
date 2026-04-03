@@ -159,25 +159,26 @@ export async function uiState() {
   return { success: true, ...state };
 }
 
-export async function launch({ port, kill_existing } = {}) {
+export async function launch({ port, kill_existing, _deps } = {}) {
+  const deps = { spawn, execSync, existsSync, platform: process.platform, env: process.env, httpGet: null, ..._deps };
   const cdpPort = port || 9222;
   const killFirst = kill_existing !== false;
-  const platform = process.platform;
+  const platform = deps.platform;
 
   const pathMap = {
     darwin: [
       '/Applications/TradingView.app/Contents/MacOS/TradingView',
-      `${process.env.HOME}/Applications/TradingView.app/Contents/MacOS/TradingView`,
+      `${deps.env.HOME}/Applications/TradingView.app/Contents/MacOS/TradingView`,
     ],
     win32: [
-      `${process.env.LOCALAPPDATA}\\TradingView\\TradingView.exe`,
-      `${process.env.PROGRAMFILES}\\TradingView\\TradingView.exe`,
-      `${process.env['PROGRAMFILES(X86)']}\\TradingView\\TradingView.exe`,
+      `${deps.env.LOCALAPPDATA}\\TradingView\\TradingView.exe`,
+      `${deps.env.PROGRAMFILES}\\TradingView\\TradingView.exe`,
+      `${deps.env['PROGRAMFILES(X86)']}\\TradingView\\TradingView.exe`,
     ],
     linux: [
       '/opt/TradingView/tradingview',
       '/opt/TradingView/TradingView',
-      `${process.env.HOME}/.local/share/TradingView/TradingView`,
+      `${deps.env.HOME}/.local/share/TradingView/TradingView`,
       '/usr/bin/tradingview',
       '/snap/tradingview/current/tradingview',
     ],
@@ -186,48 +187,101 @@ export async function launch({ port, kill_existing } = {}) {
   let tvPath = null;
   const candidates = pathMap[platform] || pathMap.linux;
   for (const p of candidates) {
-    if (p && existsSync(p)) { tvPath = p; break; }
+    if (p && deps.existsSync(p)) { tvPath = p; break; }
   }
 
   if (!tvPath) {
     try {
       const cmd = platform === 'win32' ? 'where TradingView.exe' : 'which tradingview';
-      tvPath = execSync(cmd, { timeout: 3000 }).toString().trim().split('\n')[0];
-      if (tvPath && !existsSync(tvPath)) tvPath = null;
+      tvPath = deps.execSync(cmd, { timeout: 3000 }).toString().trim().split('\n')[0];
+      if (tvPath && !deps.existsSync(tvPath)) tvPath = null;
     } catch { /* ignore */ }
   }
 
   if (!tvPath && platform === 'darwin') {
     try {
-      const found = execSync('mdfind "kMDItemFSName == TradingView.app" | head -1', { timeout: 5000 }).toString().trim();
+      const found = deps.execSync('mdfind "kMDItemFSName == TradingView.app" | head -1', { timeout: 5000 }).toString().trim();
       if (found) {
         const candidate = `${found}/Contents/MacOS/TradingView`;
-        if (existsSync(candidate)) tvPath = candidate;
+        if (deps.existsSync(candidate)) tvPath = candidate;
       }
     } catch { /* ignore */ }
   }
 
   if (!tvPath) {
-    throw new Error(`TradingView not found on ${platform}. Searched: ${candidates.join(', ')}. Launch manually with: /path/to/TradingView --remote-debugging-port=${cdpPort}`);
+    throw new Error(`TradingView not found on ${platform}. Searched: ${candidates.join(', ')}. Launch manually with: /path/to/TradingView --remote-debugging-port=${cdpPort} (note: TradingView v2.14.0+ may reject this flag)`);
   }
 
   if (killFirst) {
     try {
-      if (platform === 'win32') execSync('taskkill /F /IM TradingView.exe', { timeout: 5000 });
-      else execSync('pkill -f TradingView', { timeout: 5000 });
+      if (platform === 'win32') deps.execSync('taskkill /F /IM TradingView.exe', { timeout: 5000 });
+      else deps.execSync('pkill -f TradingView', { timeout: 5000 });
       await new Promise(r => setTimeout(r, 1500));
     } catch { /* may not be running */ }
   }
 
-  const child = spawn(tvPath, [`--remote-debugging-port=${cdpPort}`], { detached: true, stdio: 'ignore' });
-  child.unref();
+  // Try direct spawn first (works on TradingView < v2.14 / Electron < 38).
+  // Electron 38+ (Node 22) rejects --remote-debugging-port as an unknown CLI flag
+  // before Chromium can process it. Detect that and fall back to platform-specific strategies.
+  let child = deps.spawn(tvPath, [`--remote-debugging-port=${cdpPort}`], { detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
+  const spawnFailed = await new Promise((resolve) => {
+    let settled = false;
+    const settle = (val) => { if (!settled) { settled = true; resolve(val); } };
+    child.stderr.on('data', () => {});
+    child.on('error', () => { clearTimeout(timer); settle(true); });
+    child.on('exit', (code) => {
+      if (code !== null && code !== 0) { clearTimeout(timer); settle(true); }
+    });
+    const timer = setTimeout(() => {
+      // Process survived 2s — flag was accepted. Detach stderr so parent can exit.
+      child.stderr.destroy();
+      settle(false);
+    }, 2000);
+  });
 
+  if (spawnFailed) {
+    // Direct flag rejected (Electron 38+ / Node 22 strict validation).
+    // Try platform-specific fallbacks.
+    child = null;
+
+    if (platform === 'darwin') {
+      // Kill any running instance first — `open -a` only works if no existing
+      // instance is running, otherwise macOS just activates the old (non-CDP) window.
+      try { deps.execSync('pkill -f TradingView', { timeout: 5000 }); } catch { /* may not be running */ }
+      await new Promise(r => setTimeout(r, 2000));
+
+      // Derive the .app bundle path from the binary path for `open -a`.
+      const appMatch = tvPath.match(/^(.+\.app)\//);
+      if (appMatch) {
+        const appBundle = appMatch[1];
+        try {
+          deps.execSync(`open -a "${appBundle}" --args --remote-debugging-port=${cdpPort}`, { timeout: 5000 });
+        } catch { /* ignore — open may return non-zero even on success */ }
+      } else {
+        // No .app bundle found; try spawning without the flag as last resort.
+        const fallback = deps.spawn(tvPath, [], { detached: true, stdio: 'ignore' });
+        fallback.unref();
+      }
+    } else {
+      // Linux / Windows: try environment variable hint, then bare launch.
+      const fallback = deps.spawn(tvPath, [`--remote-debugging-port=${cdpPort}`], {
+        detached: true, stdio: 'ignore',
+        env: { ...deps.env, REMOTE_DEBUGGING_PORT: String(cdpPort) },
+      });
+      fallback.unref();
+    }
+  } else {
+    child.unref();
+  }
+
+  // Poll for CDP regardless of launch strategy.
+  // deps.httpGet allows tests to inject a fake; production uses real http.get.
+  const httpGet = deps.httpGet || (await import('http')).get;
   for (let i = 0; i < 15; i++) {
     await new Promise(r => setTimeout(r, 1000));
     try {
-      const http = await import('http');
       const ready = await new Promise((resolve) => {
-        http.get(`http://localhost:${cdpPort}/json/version`, (res) => {
+        httpGet(`http://localhost:${cdpPort}/json/version`, (res) => {
           let data = '';
           res.on('data', (chunk) => data += chunk);
           res.on('end', () => resolve(data));
@@ -236,16 +290,26 @@ export async function launch({ port, kill_existing } = {}) {
       if (ready) {
         const info = JSON.parse(ready);
         return {
-          success: true, platform, binary: tvPath, pid: child.pid,
+          success: true, platform, binary: tvPath, pid: child?.pid ?? null,
           cdp_port: cdpPort, cdp_url: `http://localhost:${cdpPort}`,
           browser: info.Browser, user_agent: info['User-Agent'],
+          ...(spawnFailed ? { fallback_used: true } : {}),
         };
       }
     } catch { /* retry */ }
   }
 
+  if (spawnFailed) {
+    return {
+      success: false, platform, binary: tvPath, cdp_port: cdpPort, cdp_ready: false,
+      error: `TradingView launched but CDP not available on port ${cdpPort}. ` +
+        'This is likely TradingView v2.14.0+ (Electron 38 / Node 22) which rejects --remote-debugging-port as a CLI flag. ' +
+        'Workaround: pkill -f TradingView; sleep 2; open -a TradingView --args --remote-debugging-port=' + cdpPort,
+    };
+  }
+
   return {
-    success: true, platform, binary: tvPath, pid: child.pid, cdp_port: cdpPort, cdp_ready: false,
+    success: true, platform, binary: tvPath, pid: child?.pid ?? null, cdp_port: cdpPort, cdp_ready: false,
     warning: 'TradingView launched but CDP not responding yet. It may still be loading. Try tv_health_check in a few seconds.',
   };
 }
