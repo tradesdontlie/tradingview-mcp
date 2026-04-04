@@ -55,4 +55,4 @@ Report:
 
 - Step through 5-10 bars at a time to find setups, then slow down for entry timing
 - Use `replay_autoplay` with speed control for faster scanning
-- Add drawings with `draw_shape` to mark entry/exit points for review
+- Add drawings with `draw` to mark entry/exit points for review

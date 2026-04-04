@@ -36,9 +36,11 @@ After adding, use `indicator_set_inputs` to customize settings (e.g., change EMA
 ## Step 4: Annotate
 
 Use drawing tools to mark up the chart:
-- `draw_shape` with `horizontal_line` for support/resistance
-- `draw_shape` with `trend_line` for trend channels (needs two points)
-- `draw_shape` with `text` for annotations
+- `draw` with `horizontal_line` for support/resistance
+- `draw` with `trend_line` for trend channels (needs two points)
+- `draw` with `text` for annotations
+- `draw` with `price_range` / `measure` for measurements
+- `draw` with `fibonacci_retracement` for fib levels
 
 ## Step 5: Capture and Analyze
 

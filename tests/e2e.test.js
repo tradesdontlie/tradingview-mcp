@@ -929,7 +929,7 @@ val = array.get(a, 5)`;
       try { await evaluate(`${CHART_API}.removeAllShapes()`); } catch {}
     });
 
-    it('draw_shape — create horizontal line', async () => {
+    it('draw — create horizontal line', async () => {
       const quote = await evaluate(`
         (function() {
           var bars = ${BARS_PATH};

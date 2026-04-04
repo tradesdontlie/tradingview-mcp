@@ -7,18 +7,18 @@ register('draw', {
     ['shape', {
       description: 'Draw a shape on the chart',
       options: {
-        type: { type: 'string', short: 't', description: 'Shape type: horizontal_line, trend_line, rectangle, text' },
+        type: { type: 'string', short: 't', description: 'Drawing tool name (e.g., horizontal_line, trend_line, price_range, fibonacci_retracement)' },
         price: { type: 'string', short: 'p', description: 'Price level' },
         time: { type: 'string', description: 'Unix timestamp' },
-        price2: { type: 'string', description: 'Second point price (for trend_line, rectangle)' },
-        time2: { type: 'string', description: 'Second point time (for trend_line, rectangle)' },
-        text: { type: 'string', description: 'Text content (for text shapes)' },
+        price2: { type: 'string', description: 'Second point price' },
+        time2: { type: 'string', description: 'Second point time' },
+        text: { type: 'string', description: 'Text content (for annotation tools)' },
         overrides: { type: 'string', description: 'JSON style overrides' },
       },
       handler: (opts) => {
-        const point = { time: Number(opts.time), price: Number(opts.price) };
-        const point2 = opts.price2 ? { time: Number(opts.time2), price: Number(opts.price2) } : undefined;
-        return core.drawShape({ shape: opts.type || 'horizontal_line', point, point2, overrides: opts.overrides, text: opts.text });
+        const points = [{ time: Number(opts.time), price: Number(opts.price) }];
+        if (opts.price2) points.push({ time: Number(opts.time2), price: Number(opts.price2) });
+        return core.drawShape({ shape: opts.type || 'horizontal_line', points, overrides: opts.overrides, text: opts.text });
       },
     }],
     ['list', {
