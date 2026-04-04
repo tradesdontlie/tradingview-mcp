@@ -47,6 +47,15 @@ test('package.json wires codex guidance into the codex validation script', () =>
   assert.match(manifest.scripts['test:codex'], /tests\/codex_guidance\.test\.js/);
 });
 
+test('package.json keeps npm test on the offline codex-aware path', () => {
+  const manifest = JSON.parse(readFileSync(packagePath, 'utf8'));
+
+  assert.doesNotMatch(manifest.scripts.test, /tests\/e2e\.test\.js/);
+  assert.match(manifest.scripts.test, /tests\/codex_agent_wrapper\.test\.js/);
+  assert.match(manifest.scripts.test, /tests\/codex_guidance\.test\.js/);
+  assert.match(manifest.scripts.test, /tests\/codex_docs\.test\.js/);
+});
+
 test('codex-tradingview skill defines the entry workflow and default command sequences', () => {
   assert.equal(existsSync(skillPath), true);
   for (const target of handoffTargets) {
