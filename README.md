@@ -153,6 +153,7 @@ Use Codex through the repository-local wrapper:
 ```bash
 node scripts/tv-agent.js status
 node scripts/tv-agent.js quote
+node scripts/tv-agent.js ohlcv --summary
 ```
 
 Project guidance lives in `AGENTS.md` and `skills/codex-tradingview/SKILL.md`.
