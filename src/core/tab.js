@@ -89,7 +89,7 @@ export async function switchTab({ index }) {
   const tabs = await list();
   const idx = Number(index);
 
-  if (idx >= tabs.tab_count) {
+  if (idx < 0 || idx >= tabs.tab_count || isNaN(idx)) {
     throw new Error(`Tab index ${idx} out of range (have ${tabs.tab_count} tabs)`);
   }
 

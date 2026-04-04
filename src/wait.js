@@ -67,6 +67,6 @@ export async function waitForChartReady(expectedSymbol = null, expectedTf = null
     await new Promise(r => setTimeout(r, POLL_INTERVAL));
   }
 
-  // Timeout — return true anyway, caller should verify
+  // Timeout — chart may not be fully ready
   return false;
 }
