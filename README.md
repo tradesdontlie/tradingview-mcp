@@ -228,7 +228,7 @@ Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project
 
 ### Custom Indicator Data (Pine Drawings)
 
-Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any visible Pine indicator.
+Read `line.new()`, `label.new()`, `table.new()`, `box.new()`, and `plotshape()` output from any visible Pine indicator.
 
 | Tool | When to use | Output size |
 |------|------------|-------------|
@@ -236,6 +236,7 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 | `data_get_pine_labels` | Read text annotations + prices ("PDH 24550", "Bias Long") | ~2-5KB |
 | `data_get_pine_tables` | Read data tables (session stats, analytics dashboards) | ~1-4KB |
 | `data_get_pine_boxes` | Read price zones / ranges as {high, low} pairs | ~1-2KB |
+| `data_get_pine_shapes` | Read plotshape/plotchar signals (triangles, squares, diamonds) with OHLC | ~2-10KB |
 
 **Always use `study_filter`** to target a specific indicator: `study_filter: "Profiler"`.
 

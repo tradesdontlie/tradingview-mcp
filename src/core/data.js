@@ -429,6 +429,125 @@ export async function getPineTables({ study_filter } = {}) {
   return { success: true, study_count: studies.length, studies };
 }
 
+/**
+ * Read plotshape/plotchar markers from Pine Script indicators.
+ * These are stored in the study's bar data series (not _primitivesCollection),
+ * so buildGraphicsJS can't reach them. We scan each study's metaInfo for
+ * "shapes" type plots, then read the bar data to find which bars have active markers.
+ */
+export async function getPineShapes({ study_filter, last_n_bars } = {}) {
+  const filter = study_filter || '';
+  const maxBars = last_n_bars || 100;
+  const raw = await evaluate(`
+    (function() {
+      var chart = window.TradingViewApi._activeChartWidgetWV.value()._chartWidget;
+      var model = chart.model();
+      var sources = model.model().dataSources();
+      var mainSeries = model.mainSeries();
+      var mainBars = mainSeries.bars();
+      var filter = ${safeString(filter)};
+      var maxBars = ${maxBars};
+      var results = [];
+
+      for (var si = 0; si < sources.length; si++) {
+        var s = sources[si];
+        if (!s.metaInfo) continue;
+        try {
+          var meta = s.metaInfo();
+          var name = meta.description || meta.shortDescription || '';
+          if (!name) continue;
+          if (filter && name.indexOf(filter) === -1) continue;
+          if (!meta.plots) continue;
+
+          // Find shape-type plots and their metadata
+          var shapePlots = [];
+          for (var pi = 0; pi < meta.plots.length; pi++) {
+            var plot = meta.plots[pi];
+            if (plot.type !== 'shapes') continue;
+            var style = meta.styles && meta.styles[plot.id] ? meta.styles[plot.id] : {};
+            var defaults = meta.defaults && meta.defaults.styles && meta.defaults.styles[plot.id]
+              ? meta.defaults.styles[plot.id] : {};
+            shapePlots.push({
+              plotIndex: pi,
+              dataIndex: pi + 1,
+              id: plot.id,
+              title: style.title || plot.id,
+              shape: defaults.plottype || 'unknown',
+              location: defaults.location || 'AboveBar',
+              color: defaults.color || null,
+              size: style.size || 'auto'
+            });
+          }
+          if (shapePlots.length === 0) continue;
+
+          // Scan bar data for active shape markers
+          var data = s._data;
+          if (!data) continue;
+          var lastIdx = data.lastIndex();
+          var firstIdx = Math.max(data.firstIndex(), lastIdx - maxBars + 1);
+
+          var signals = [];
+          for (var b = lastIdx; b >= firstIdx; b--) {
+            var row = data.valueAt(b);
+            if (!row) continue;
+            for (var sp = 0; sp < shapePlots.length; sp++) {
+              var di = shapePlots[sp].dataIndex;
+              var val = row[di];
+              if (val && val !== 0 && !isNaN(val)) {
+                // Get OHLC from main series
+                var mainRow = mainBars.valueAt(b);
+                var ohlc = null;
+                if (mainRow) {
+                  ohlc = {
+                    time: new Date(mainRow[0] * 1000).toISOString(),
+                    timestamp: mainRow[0],
+                    open: mainRow[1],
+                    high: mainRow[2],
+                    low: mainRow[3],
+                    close: mainRow[4]
+                  };
+                }
+                signals.push({
+                  plot: shapePlots[sp].title,
+                  shape: shapePlots[sp].shape,
+                  location: shapePlots[sp].location,
+                  color: shapePlots[sp].color,
+                  barIndex: b,
+                  value: val,
+                  ohlc: ohlc
+                });
+              }
+            }
+          }
+
+          if (shapePlots.length > 0) {
+            results.push({
+              name: name,
+              shapePlots: shapePlots,
+              signals: signals,
+              signalCount: signals.length,
+              barsScanned: lastIdx - firstIdx + 1
+            });
+          }
+        } catch(e) {}
+      }
+      return results;
+    })()
+  `);
+
+  if (!raw || raw.length === 0) return { success: true, study_count: 0, studies: [] };
+
+  const studies = raw.map(s => ({
+    name: s.name,
+    shape_plots: s.shapePlots,
+    signal_count: s.signalCount,
+    bars_scanned: s.barsScanned,
+    signals: s.signals,
+  }));
+
+  return { success: true, study_count: studies.length, studies };
+}
+
 export async function getPineBoxes({ study_filter, verbose } = {}) {
   const filter = study_filter || '';
   const raw = await evaluate(buildGraphicsJS('dwgboxes', 'boxes', filter));

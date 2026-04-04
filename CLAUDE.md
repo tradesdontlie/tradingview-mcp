@@ -30,6 +30,7 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 3. `data_get_pine_lines` → key price levels from custom indicators
 4. `data_get_pine_labels` → labeled levels with context (e.g., "Settlement", "ASN O/U")
 5. `data_get_pine_tables` → session stats, analytics tables
+6. `data_get_pine_shapes` → plotshape/plotchar signals (triangles, diamonds, squares) with OHLC of the bar they fired on
 6. `data_get_ohlcv` with `summary: true` → price action summary
 7. `capture_screenshot` → visual confirmation
 
