@@ -1,4 +1,5 @@
 node_modules/
+.worktrees/
 screenshots/
 scripts/current.pine
 temp_*
