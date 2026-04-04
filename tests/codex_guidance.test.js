@@ -35,7 +35,7 @@ test('AGENTS.md points Codex at the local TradingView skill and tv-agent entrypo
   assert.match(content, /node scripts\/tv-agent\.js/);
   assertInOrder(content, [
     /node scripts\/tv-agent\.js status/,
-    /node scripts\/tv-agent\.js launch/,
+    /node scripts\/tv-agent\.js launch --no-kill/,
     /node scripts\/tv-agent\.js status/,
   ]);
 });
@@ -51,6 +51,8 @@ test('package.json keeps npm test on the offline codex-aware path', () => {
   const manifest = JSON.parse(readFileSync(packagePath, 'utf8'));
 
   assert.doesNotMatch(manifest.scripts.test, /tests\/e2e\.test\.js/);
+  assert.match(manifest.scripts.test, /tests\/sanitization\.test\.js/);
+  assert.match(manifest.scripts.test, /tests\/replay\.test\.js/);
   assert.match(manifest.scripts.test, /tests\/codex_agent_wrapper\.test\.js/);
   assert.match(manifest.scripts.test, /tests\/codex_guidance\.test\.js/);
   assert.match(manifest.scripts.test, /tests\/codex_docs\.test\.js/);
@@ -65,7 +67,7 @@ test('codex-tradingview skill defines the entry workflow and default command seq
   const content = readFileSync(skillPath, 'utf8');
   assert.match(content, /name:\s*codex-tradingview/);
   assert.match(content, /Use when/i);
-  assert.match(content, /status\s*->\s*launch\s*->\s*status/);
+  assert.match(content, /status\s*->\s*launch\s*--no-kill\s*->\s*status/);
   assert.match(content, /state\s*->\s*values\s*->\s*quote/);
   assert.match(content, /ohlcv\s+--summary/);
   assert.match(content, /skills\/pine-develop\/SKILL\.md/);

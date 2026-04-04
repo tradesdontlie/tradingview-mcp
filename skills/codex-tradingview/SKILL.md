@@ -10,10 +10,10 @@ Use `node scripts/tv-agent.js` as the default entrypoint.
 ## Entry workflow
 
 1. Run `node scripts/tv-agent.js status`
-2. If disconnected, run `node scripts/tv-agent.js launch`
+2. If disconnected, run `node scripts/tv-agent.js launch --no-kill` first
 3. Run `node scripts/tv-agent.js status` again
 
-Workflow: status -> launch -> status
+Workflow: status -> launch --no-kill -> status
 
 ## Default command sequences
 

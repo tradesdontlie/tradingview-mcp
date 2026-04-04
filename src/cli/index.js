@@ -28,4 +28,20 @@ import './commands/stream.js';
 
 // Run
 import { run } from './router.js';
-process.exitCode = await run(process.argv);
+import { disconnect } from '../connection.js';
+
+export async function main(argv = process.argv, deps = {}) {
+  const runCommand = deps.run ?? run;
+  const closeConnection = deps.disconnect ?? disconnect;
+
+  let exitCode = 1;
+
+  try {
+    exitCode = await runCommand(argv);
+    return exitCode;
+  } finally {
+    await closeConnection();
+  }
+}
+
+process.exitCode = await main(process.argv);
