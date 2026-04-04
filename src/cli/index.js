@@ -28,4 +28,4 @@ import './commands/stream.js';
 
 // Run
 import { run } from './router.js';
-await run(process.argv);
+process.exitCode = await run(process.argv);
