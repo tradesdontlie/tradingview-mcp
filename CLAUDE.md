@@ -63,7 +63,7 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 - `batch_run` with `symbols: ["ES1!", "NQ1!", "YM1!"]` and `action: "screenshot"` or `"get_ohlcv"`
 
 ### "Draw on the chart"
-- `draw_shape` → horizontal_line, trend_line, rectangle, text (pass point + optional point2)
+- `draw` → 80+ tools: lines, fibonacci, measurement (price_range, ruler), patterns, analysis (anchored_vwap, volume_profile), trading positions, annotations. Pass tool + point + optional point2.
 - `draw_list` → see what's drawn
 - `draw_remove_one` → remove by ID
 - `draw_clear` → remove all

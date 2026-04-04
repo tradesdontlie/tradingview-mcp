@@ -212,7 +212,7 @@ Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project
 | "Write a Pine Script for..." | `pine_set_source` → `pine_smart_compile` → `pine_get_errors` |
 | "Start replay at March 1st" | `replay_start` → `replay_step` → `replay_trade` |
 | "Set up a 4-chart grid" | `pane_set_layout` → `pane_set_symbol` for each pane |
-| "Draw a level at 24500" | `draw_shape` (horizontal_line) |
+| "Draw a level at 24500" | `draw` (horizontal_line) |
 | "Take a screenshot" | `capture_screenshot` |
 
 ## Tool Reference (78 MCP tools)
@@ -299,7 +299,7 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 
 | Tool | What it does |
 |------|-------------|
-| `draw_shape` | Draw horizontal_line, trend_line, rectangle, text |
+| `draw` | Draw 80+ tools: lines, fibonacci, measurement, patterns, analysis, trading, annotations |
 | `draw_list` / `draw_remove_one` / `draw_clear` | Manage drawings |
 | `alert_create` / `alert_list` / `alert_delete` | Manage price alerts |
 | `capture_screenshot` | Screenshot (regions: full, chart, strategy_tester) |

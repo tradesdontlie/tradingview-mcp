@@ -7,31 +7,33 @@ function _resolve(deps) {
   return { evaluate: deps?.evaluate || _evaluate, getChartApi: deps?.getChartApi || _getChartApi };
 }
 
-export async function drawShape({ shape, point, point2, overrides: overridesRaw, text, _deps }) {
+export async function drawShape({ shape, points, overrides: overridesRaw, text, _deps }) {
   const { evaluate, getChartApi } = _resolve(_deps);
   const overrides = overridesRaw ? (typeof overridesRaw === 'string' ? JSON.parse(overridesRaw) : overridesRaw) : {};
   const apiPath = await getChartApi();
   const overridesStr = JSON.stringify(overrides || {});
   const textStr = text ? JSON.stringify(text) : '""';
 
-  const p1time = requireFinite(point.time, 'point.time');
-  const p1price = requireFinite(point.price, 'point.price');
+  const validatedPoints = points.map((p, i) => ({
+    time: requireFinite(p.time, `points[${i}].time`),
+    price: requireFinite(p.price, `points[${i}].price`),
+  }));
+
+  const pointsStr = JSON.stringify(validatedPoints);
 
   const before = await evaluate(`${apiPath}.getAllShapes().map(function(s) { return s.id; })`);
 
-  if (point2) {
-    const p2time = requireFinite(point2.time, 'point2.time');
-    const p2price = requireFinite(point2.price, 'point2.price');
+  if (validatedPoints.length === 1) {
     await evaluate(`
-      ${apiPath}.createMultipointShape(
-        [{ time: ${p1time}, price: ${p1price} }, { time: ${p2time}, price: ${p2price} }],
+      ${apiPath}.createShape(
+        ${JSON.stringify(validatedPoints[0])},
         { shape: ${safeString(shape)}, overrides: ${overridesStr}, text: ${textStr} }
       )
     `);
   } else {
     await evaluate(`
-      ${apiPath}.createShape(
-        { time: ${p1time}, price: ${p1price} },
+      ${apiPath}.createMultipointShape(
+        ${pointsStr},
         { shape: ${safeString(shape)}, overrides: ${overridesStr}, text: ${textStr} }
       )
     `);
@@ -40,12 +42,12 @@ export async function drawShape({ shape, point, point2, overrides: overridesRaw,
   await new Promise(r => setTimeout(r, 200));
   const after = await evaluate(`${apiPath}.getAllShapes().map(function(s) { return s.id; })`);
   const newId = (after || []).find(id => !(before || []).includes(id)) || null;
-  const result = { entity_id: newId };
-  return { success: true, shape, entity_id: result?.entity_id };
+  return { success: true, shape, entity_id: newId };
 }
 
-export async function listDrawings() {
-  const apiPath = await getChartApi();
+export async function listDrawings(_deps) {
+  const { evaluate } = _resolve(_deps);
+  const apiPath = await (_deps?.getChartApi || _getChartApi)();
   const shapes = await evaluate(`
     (function() {
       var api = ${apiPath};
@@ -56,8 +58,9 @@ export async function listDrawings() {
   return { success: true, count: shapes?.length || 0, shapes: shapes || [] };
 }
 
-export async function getProperties({ entity_id }) {
-  const apiPath = await getChartApi();
+export async function getProperties({ entity_id, _deps }) {
+  const { evaluate } = _resolve(_deps);
+  const apiPath = await (_deps?.getChartApi || _getChartApi)();
   const result = await evaluate(`
     (function() {
       var api = ${apiPath};
@@ -85,8 +88,9 @@ export async function getProperties({ entity_id }) {
   return { success: true, ...result };
 }
 
-export async function removeOne({ entity_id }) {
-  const apiPath = await getChartApi();
+export async function removeOne({ entity_id, _deps }) {
+  const { evaluate } = _resolve(_deps);
+  const apiPath = await (_deps?.getChartApi || _getChartApi)();
   const result = await evaluate(`
     (function() {
       var api = ${apiPath};
@@ -106,8 +110,9 @@ export async function removeOne({ entity_id }) {
   return { success: true, entity_id: result?.entity_id, removed: result?.removed, remaining_shapes: result?.remaining_shapes };
 }
 
-export async function clearAll() {
-  const apiPath = await getChartApi();
+export async function clearAll(_deps) {
+  const { evaluate } = _resolve(_deps);
+  const apiPath = await (_deps?.getChartApi || _getChartApi)();
   await evaluate(`${apiPath}.removeAllShapes()`);
   return { success: true, action: 'all_shapes_removed' };
 }
