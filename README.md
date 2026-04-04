@@ -146,6 +146,17 @@ npm link
 node src/cli/index.js <command>
 ```
 
+### Codex
+
+Use Codex through the repository-local wrapper:
+
+```bash
+node scripts/tv-agent.js status
+node scripts/tv-agent.js quote
+```
+
+Project guidance lives in `AGENTS.md` and `skills/codex-tradingview/SKILL.md`.
+
 ### Quick Examples
 
 ```bash
