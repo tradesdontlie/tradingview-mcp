@@ -1,7 +1,8 @@
 /**
  * Core data access logic.
  */
-import { evaluate, evaluateAsync, KNOWN_PATHS, safeString } from '../connection.js';
+import { evaluate, evaluateAsync, KNOWN_PATHS } from '../connection.js';
+import { escapeJsString } from '../sanitize.js';
 
 const MAX_OHLCV_BARS = 500;
 const MAX_TRADES = 20;
@@ -9,13 +10,14 @@ const CHART_API = KNOWN_PATHS.chartApi;
 const BARS_PATH = KNOWN_PATHS.mainSeriesBars;
 
 function buildGraphicsJS(collectionName, mapKey, filter) {
+  const safeFilter = escapeJsString(filter);
   return `
     (function() {
       var chart = window.TradingViewApi._activeChartWidgetWV.value()._chartWidget;
       var model = chart.model();
       var sources = model.model().dataSources();
       var results = [];
-      var filter = ${safeString(filter || '')};
+      var filter = '${safeFilter}';
       for (var si = 0; si < sources.length; si++) {
         var s = sources[si];
         if (!s.metaInfo) continue;
@@ -107,11 +109,12 @@ export async function getOhlcv({ count, summary } = {}) {
 }
 
 export async function getIndicator({ entity_id }) {
+  const escapedId = escapeJsString(entity_id);
   const data = await evaluate(`
     (function() {
       var api = ${CHART_API};
-      var study = api.getStudyById(${safeString(entity_id)});
-      if (!study) return { error: 'Study not found: ' + ${safeString(entity_id)} };
+      var study = api.getStudyById('${escapedId}');
+      if (!study) return { error: 'Study not found: ${escapedId}' };
       var result = { name: null, inputs: null, visible: null };
       try { result.visible = study.isVisible(); } catch(e) {}
       try { result.inputs = study.getInputValues(); } catch(e) { result.inputs_error = e.message; }
@@ -246,7 +249,7 @@ export async function getQuote({ symbol } = {}) {
   const data = await evaluate(`
     (function() {
       var api = ${CHART_API};
-      var sym = ${safeString(symbol || '')};
+      var sym = '${escapeJsString(symbol || '')}';
       if (!sym) { try { sym = api.symbol(); } catch(e) {} }
       if (!sym) { try { sym = api.symbolExt().symbol; } catch(e) {} }
       var ext = {};
