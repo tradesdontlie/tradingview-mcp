@@ -18,7 +18,7 @@
     "test": "node --test tests/e2e.test.js tests/pine_analyze.test.js tests/codex_agent_wrapper.test.js tests/codex_guidance.test.js",
     "test:e2e": "node --test tests/e2e.test.js",
     "test:unit": "node --test tests/pine_analyze.test.js tests/cli.test.js tests/codex_agent_wrapper.test.js tests/codex_guidance.test.js",
-    "test:codex": "node --test tests/codex_agent_wrapper.test.js",
+    "test:codex": "node --test tests/codex_agent_wrapper.test.js tests/codex_guidance.test.js",
     "test:cli": "node --test tests/cli.test.js",
     "test:all": "node --test tests/e2e.test.js tests/pine_analyze.test.js tests/cli.test.js tests/codex_agent_wrapper.test.js tests/codex_guidance.test.js",
     "test:verbose": "node --test --test-reporter=spec tests/e2e.test.js tests/pine_analyze.test.js",

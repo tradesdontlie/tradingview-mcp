@@ -6,7 +6,9 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
+const packagePath = join(root, 'package.json');
 const agentsPath = join(root, 'AGENTS.md');
+const agentScriptPath = join(root, 'scripts', 'tv-agent.js');
 const skillPath = join(root, 'skills', 'codex-tradingview', 'SKILL.md');
 const handoffTargets = [
   join(root, 'skills', 'pine-develop', 'SKILL.md'),
@@ -26,6 +28,7 @@ function assertInOrder(content, patterns) {
 
 test('AGENTS.md points Codex at the local TradingView skill and tv-agent entrypoint', () => {
   assert.equal(existsSync(agentsPath), true);
+  assert.equal(existsSync(agentScriptPath), true);
 
   const content = readFileSync(agentsPath, 'utf8');
   assert.match(content, /skills\/codex-tradingview\/SKILL\.md/);
@@ -35,6 +38,13 @@ test('AGENTS.md points Codex at the local TradingView skill and tv-agent entrypo
     /node scripts\/tv-agent\.js launch/,
     /node scripts\/tv-agent\.js status/,
   ]);
+});
+
+test('package.json wires codex guidance into the codex validation script', () => {
+  const manifest = JSON.parse(readFileSync(packagePath, 'utf8'));
+
+  assert.match(manifest.scripts['tv:agent'], /^node scripts\/tv-agent\.js$/);
+  assert.match(manifest.scripts['test:codex'], /tests\/codex_guidance\.test\.js/);
 });
 
 test('codex-tradingview skill defines the entry workflow and default command sequences', () => {
