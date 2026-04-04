@@ -5,6 +5,93 @@ import { getClient, getTargetInfo, evaluate } from '../connection.js';
 import { existsSync } from 'fs';
 import { execSync, spawn } from 'child_process';
 
+function firstLine(value) {
+  return String(value).trim().split(/\r?\n/)[0] || '';
+}
+
+function execText(exec, command, options) {
+  const output = exec(command, options);
+  return firstLine(Buffer.isBuffer(output) ? output.toString() : output);
+}
+
+export function resolveLaunchTarget({
+  platform = process.platform,
+  env = process.env,
+  exists = existsSync,
+  exec = execSync,
+} = {}) {
+  const pathMap = {
+    darwin: [
+      '/Applications/TradingView.app/Contents/MacOS/TradingView',
+      `${env.HOME}/Applications/TradingView.app/Contents/MacOS/TradingView`,
+    ],
+    win32: [
+      `${env.LOCALAPPDATA}\\TradingView\\TradingView.exe`,
+      `${env.PROGRAMFILES}\\TradingView\\TradingView.exe`,
+      `${env['PROGRAMFILES(X86)']}\\TradingView\\TradingView.exe`,
+    ],
+    linux: [
+      '/opt/TradingView/tradingview',
+      '/opt/TradingView/TradingView',
+      `${env.HOME}/.local/share/TradingView/TradingView`,
+      '/usr/bin/tradingview',
+      '/snap/tradingview/current/tradingview',
+    ],
+  };
+
+  const candidates = pathMap[platform] || pathMap.linux;
+  for (const candidate of candidates) {
+    if (candidate && exists(candidate)) {
+      return { tvPath: candidate, candidates };
+    }
+  }
+
+  try {
+    const command = platform === 'win32' ? 'where TradingView.exe' : 'which tradingview';
+    const candidate = execText(exec, command, { timeout: 3000 });
+    if (candidate && exists(candidate)) {
+      return { tvPath: candidate, candidates };
+    }
+  } catch {
+    // ignore lookup failure
+  }
+
+  if (platform === 'win32') {
+    try {
+      const installLocation = execText(
+        exec,
+        'powershell -NoProfile -Command "(Get-AppxPackage *TradingView* | Sort-Object Version -Descending | Select-Object -First 1 -ExpandProperty InstallLocation)"',
+        { timeout: 5000 },
+      );
+
+      if (installLocation) {
+        const candidate = `${installLocation}\\TradingView.exe`;
+        if (exists(candidate)) {
+          return { tvPath: candidate, candidates };
+        }
+      }
+    } catch {
+      // ignore AppX lookup failure
+    }
+  }
+
+  if (platform === 'darwin') {
+    try {
+      const found = execText(exec, 'mdfind "kMDItemFSName == TradingView.app" | head -1', { timeout: 5000 });
+      if (found) {
+        const candidate = `${found}/Contents/MacOS/TradingView`;
+        if (exists(candidate)) {
+          return { tvPath: candidate, candidates };
+        }
+      }
+    } catch {
+      // ignore Spotlight failure
+    }
+  }
+
+  return { tvPath: null, candidates };
+}
+
 export async function healthCheck() {
   await getClient();
   const target = await getTargetInfo();
@@ -163,49 +250,7 @@ export async function launch({ port, kill_existing } = {}) {
   const cdpPort = port || 9222;
   const killFirst = kill_existing !== false;
   const platform = process.platform;
-
-  const pathMap = {
-    darwin: [
-      '/Applications/TradingView.app/Contents/MacOS/TradingView',
-      `${process.env.HOME}/Applications/TradingView.app/Contents/MacOS/TradingView`,
-    ],
-    win32: [
-      `${process.env.LOCALAPPDATA}\\TradingView\\TradingView.exe`,
-      `${process.env.PROGRAMFILES}\\TradingView\\TradingView.exe`,
-      `${process.env['PROGRAMFILES(X86)']}\\TradingView\\TradingView.exe`,
-    ],
-    linux: [
-      '/opt/TradingView/tradingview',
-      '/opt/TradingView/TradingView',
-      `${process.env.HOME}/.local/share/TradingView/TradingView`,
-      '/usr/bin/tradingview',
-      '/snap/tradingview/current/tradingview',
-    ],
-  };
-
-  let tvPath = null;
-  const candidates = pathMap[platform] || pathMap.linux;
-  for (const p of candidates) {
-    if (p && existsSync(p)) { tvPath = p; break; }
-  }
-
-  if (!tvPath) {
-    try {
-      const cmd = platform === 'win32' ? 'where TradingView.exe' : 'which tradingview';
-      tvPath = execSync(cmd, { timeout: 3000 }).toString().trim().split('\n')[0];
-      if (tvPath && !existsSync(tvPath)) tvPath = null;
-    } catch { /* ignore */ }
-  }
-
-  if (!tvPath && platform === 'darwin') {
-    try {
-      const found = execSync('mdfind "kMDItemFSName == TradingView.app" | head -1', { timeout: 5000 }).toString().trim();
-      if (found) {
-        const candidate = `${found}/Contents/MacOS/TradingView`;
-        if (existsSync(candidate)) tvPath = candidate;
-      }
-    } catch { /* ignore */ }
-  }
+  const { tvPath, candidates } = resolveLaunchTarget();
 
   if (!tvPath) {
     throw new Error(`TradingView not found on ${platform}. Searched: ${candidates.join(', ')}. Launch manually with: /path/to/TradingView --remote-debugging-port=${cdpPort}`);
