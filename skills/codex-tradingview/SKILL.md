@@ -18,8 +18,12 @@ Workflow: status -> launch -> status
 ## Default command sequences
 
 - Chart snapshot: state -> values -> quote
+- Price history: ohlcv --summary
 - Price view: quote -> state
 - Session check: status -> state
+- Pine work: hand off to skills/pine-develop/SKILL.md
+- Chart review: hand off to skills/chart-analysis/SKILL.md
+- Multi-symbol scanning: hand off to skills/multi-symbol-scan/SKILL.md
 
 ## Guardrails
 

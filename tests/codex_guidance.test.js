@@ -26,4 +26,8 @@ test('codex-tradingview skill defines the entry workflow and default command seq
   assert.match(content, /Use when/i);
   assert.match(content, /status\s*->\s*launch\s*->\s*status/);
   assert.match(content, /state\s*->\s*values\s*->\s*quote/);
+  assert.match(content, /ohlcv\s+--summary/);
+  assert.match(content, /skills\/pine-develop\/SKILL\.md/);
+  assert.match(content, /skills\/chart-analysis\/SKILL\.md/);
+  assert.match(content, /skills\/multi-symbol-scan\/SKILL\.md/);
 });
