@@ -1,6 +1,6 @@
 # TradingView MCP — Claude Instructions
 
-68 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
+83 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
 
 ## Decision Tree — Which Tool When
 
@@ -59,6 +59,16 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 5. `replay_status` → check position, P&L, current date
 6. `replay_stop` → return to realtime
 
+### "Check my trading account / positions / orders"
+1. `trading_get_account` → account balance, equity, profit, net liquidation, margin info
+2. `trading_get_positions` → open positions (symbol, side, qty, avg fill price, P&L)
+3. `trading_get_orders` → pending/open orders (symbol, side, type, qty, limit/stop, status)
+4. `trading_get_notifications` → fill confirmations, errors, status messages from broker
+5. `trading_get_risk_reward` → all Risk/Reward tools on chart with entry/stop/target prices, R:R ratio, auto-matched to positions and orders
+
+**Note:** Tools 1-4 require the trading panel to be open with a broker connected (e.g., Tradovate, TradeStation).
+Tool 5 reads chart drawings and works independently of the trading panel.
+
 ### "Screen multiple symbols"
 - `batch_run` with `symbols: ["ES1!", "NQ1!", "YM1!"]` and `action: "screenshot"` or `"get_ohlcv"`
 
@@ -109,6 +119,11 @@ These tools can return large payloads. Follow these rules to avoid context bloat
 | `data_get_ohlcv` (summary) | ~500 bytes |
 | `data_get_ohlcv` (100 bars) | ~8 KB |
 | `capture_screenshot` | ~300 bytes (returns file path, not image data) |
+| `trading_get_account` | ~300-500 bytes |
+| `trading_get_positions` | ~200 bytes per position |
+| `trading_get_orders` | ~300 bytes per order |
+| `trading_get_notifications` | ~100 bytes per entry |
+| `trading_get_risk_reward` | ~400 bytes per R:R tool |
 
 ## Tool Conventions
 
