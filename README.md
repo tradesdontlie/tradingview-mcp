@@ -351,7 +351,7 @@ The key flag: `--remote-debugging-port=9222`
 ## Testing
 
 ```bash
-# Offline/default verification
+# Default verification without a local TradingView instance
 npm test
 
 # Codex-specific guidance and wrapper checks
@@ -361,7 +361,7 @@ npm run test:codex
 npm run test:e2e
 ```
 
-`npm test` is the default offline suite. `npm run test:e2e` requires TradingView Desktop running with `--remote-debugging-port=9222`.
+`npm test` is the default suite when you do not have a local TradingView Desktop instance attached over CDP. Some checks still call TradingView's remote Pine compile endpoint. `npm run test:e2e` requires TradingView Desktop running with `--remote-debugging-port=9222`.
 
 ## Architecture
 

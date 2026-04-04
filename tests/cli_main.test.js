@@ -1,6 +1,26 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { dirname, join } from 'node:path';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 import { main } from '../src/cli/index.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const indexUrl = pathToFileURL(join(__dirname, '..', 'src', 'cli', 'index.js')).href;
+
+test('importing src/cli/index.js does not execute the CLI', () => {
+  const result = spawnSync('node', [
+    '--input-type=module',
+    '-e',
+    `import ${JSON.stringify(indexUrl)}; console.log('imported');`,
+  ], {
+    encoding: 'utf8',
+  });
+
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout.trim(), 'imported');
+  assert.equal(result.stderr.trim(), '');
+});
 
 test('main disconnects after a successful run', async () => {
   let disconnected = false;

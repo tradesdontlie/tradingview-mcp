@@ -9,6 +9,8 @@
  * Pipe-friendly: every command outputs JSON for use with jq.
  */
 
+import { pathToFileURL } from 'node:url';
+
 // Register all commands
 import './commands/health.js';
 import './commands/chart.js';
@@ -44,4 +46,7 @@ export async function main(argv = process.argv, deps = {}) {
   }
 }
 
-process.exitCode = await main(process.argv);
+const entryUrl = process.argv[1] ? pathToFileURL(process.argv[1]).href : null;
+if (entryUrl && import.meta.url === entryUrl) {
+  process.exitCode = await main(process.argv);
+}
