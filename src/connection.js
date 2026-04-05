@@ -120,6 +120,10 @@ export async function evaluate(expression, opts = {}) {
   return result.result?.value;
 }
 
+export async function evaluateFnc(fn, opts = {}) {
+  return evaluate(`(${fn})()`, opts);
+}
+
 export async function evaluateAsync(expression) {
   return evaluate(expression, { awaitPromise: true });
 }

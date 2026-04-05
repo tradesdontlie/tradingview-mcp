@@ -4,3 +4,6 @@ scripts/current.pine
 temp_*
 *.log
 discovery-log.json
+
+# use only one lock file
+pnpm-lock.yaml

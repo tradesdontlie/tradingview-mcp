@@ -1,7 +1,7 @@
 /**
  * Core health/discovery/launch logic.
  */
-import { getClient, getTargetInfo, evaluate } from '../connection.js';
+import { getClient, getTargetInfo, evaluate, evaluateFnc } from '../connection.js';
 import { existsSync } from 'fs';
 import { execSync, spawn } from 'child_process';
 
@@ -9,8 +9,8 @@ export async function healthCheck() {
   await getClient();
   const target = await getTargetInfo();
 
-  const state = await evaluate(`
-    (function() {
+  const state = await evaluateFnc(
+    function() {
       var result = { url: window.location.href, title: document.title };
       try {
         var chart = window.TradingViewApi._activeChartWidgetWV.value();
@@ -26,8 +26,8 @@ export async function healthCheck() {
         result.apiError = e.message;
       }
       return result;
-    })()
-  `);
+    }
+  );
 
   return {
     success: true,
