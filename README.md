@@ -68,6 +68,264 @@ Gives your AI assistant eyes and hands on your own chart:
 - **CLI access** — every MCP tool is also a `tv` CLI command, pipe-friendly with JSON output
 - **Launch TradingView** — auto-detect and launch with debug mode from any platform
 
+## AI Market Analysis
+
+In raw images the ai will mistake prices.LLM's are better at recognising patterns in ASCII than in raw data or images.
+Four tools give Claude a structured, text-based view of price action that it can reason over directly — no screenshot required. All tools require a candlestick-based chart type (Candles, Bars, Hollow Candles, Heikin Ashi). Renko, Kagi, P&F, and Line Break charts are unsupported. 
+
+Combined with chart images it helps the LLM to accurately determine prices and price action sequences and patterns.
+
+---
+
+### `chart_structure` — Swing Structure, Trend Lines, S/R, Al Brooks Signals
+
+The primary analysis tool. Detects swing highs and lows using a ±lookback bar window, labels each confirmed swing as **HH / LH / HL / LL** relative to the prior swing, derives trend lines through consecutive swing points, extracts support and resistance levels, and overlays **Al Brooks consecutive H/L signal bar counts** (H1/H2/H3/H4 = consecutive bullish signal bars; L1/L2/L3/L4 = consecutive bearish).
+
+```
+   4825.70 ┤                                     H         H │
+           ┤                                 █ █ ▓       │ █ █ ▓
+           ┤                               │ █ │ ▓ ▓ │ │ █ █ │ ▓
+           ┤                 H       █ │   █ █     ▓ █ ▓ █     ▓
+   4774.04 ┤                 │ │     █ ▓ │ █       ▓ █ │ │     ▓
+           ┤               █ ▓ █ ▓ █ █ ▓ █ █       L           ▓
+           ┤   │ │         █ ▓ █ ▓ █   ▓ █ │                   ▓                                                             H
+           ┤   █ ▓       │ █ ▓ █ │                             ▓ │                       H                                   │
+   4722.37 ┤ █ █ ▓ ▓ │   │ █                                   ▓ ▓ │                     │         H                       █ ▓ ▓ ▓
+           ┤ █   │ ▓ ▓ ▓ █ █                                   │ ▓ ▓ ▓ │                 █ ▓       │ │               │   █ █   │ ▓ █
+           ┤ │         ▓ █                                     │ │ │ ▓ ▓                 █ ▓ │ │ █ █ █ │       │     │ █ █
+           ┤           L                                       │ │   │ ▓               │ █ ▓ ▓ ▓ █ │   │ │     │   █ ▓ █ │
+   4670.71 ┤                                                   L       ▓   █ ▓         █ █   │ ▓ █     ▓ ▓   │ █ ▓ █ │ │ │
+           ┤                                                           ▓   █ ▓ │ │ │ │ █ │             │ ▓ │ │ █ │
+           ┤                                                           ▓   █ ▓ █ ▓ ▓ │ █               │ ▓ █ █ │ │
+           ┤                                                           ▓ │ █   │ │ ▓ █ █               │ ▓ █
+   4619.05 ┤                                                           ▓ █ █       │ │ │                   L
+           ┤                                                           │ │             │
+           ┤                                                             │             L
+           ┤                                                             L
+           └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+               H L L   L H H       H H L   H H H L L H   H H   L     L L   H     L L H H H   L   H H   L L   H H   H     H H   L L
+               1 1 2   1 1 2       1 2 1   1 2 3 1 2 1   1 2   1     1 2   1     1 2 1 2 3   1   1 2   1 2   1 2   1     1 2   1 2
+H=SwingHigh L=SwingLow  H1/H2=Bull signal  L1/L2=Bear signal  █=Bull ▓=Bear
+```
+
+Alongside the chart, Claude receives structured data it can reason over:
+
+```json
+{
+  "trend_lines": [
+    {
+      "role": "Resistance",
+      "label": "UpTrend",
+      "from": { "bar": 43, "price": 4708.6 },
+      "to":   { "bar": 56, "price": 4733.3 },
+      "slope": 1.9,
+      "current_price": 4739.0
+    },
+    {
+      "role": "Support",
+      "label": "UpTrend",
+      "from": { "bar": 37, "price": 4605.4 },
+      "to":   { "bar": 47, "price": 4625.6 },
+      "slope": 2.02,
+      "current_price": 4649.84
+    }
+  ],
+  "resistance": [
+    { "price": 4733.3, "bar": 56, "label": "HH" },
+    { "price": 4708.6, "bar": 43, "label": "LH" },
+    { "price": 4726.5, "bar": 38, "label": "LH" }
+  ],
+  "support": [
+    { "price": 4625.6, "bar": 47, "label": "HL" },
+    { "price": 4605.4, "bar": 37, "label": "HL" },
+    { "price": 4580.3, "bar": 30, "label": "LL" }
+  ],
+  "brooks_signals": [
+    { "bar": 49, "signal": "H2", "price": 4697.7 },
+    { "bar": 51, "signal": "H1", "price": 4685.3 },
+    { "bar": 54, "signal": "H1", "price": 4714.3 },
+    { "bar": 55, "signal": "H2", "price": 4724.6 },
+    { "bar": 57, "signal": "L1", "price": 4708.9 },
+    { "bar": 58, "signal": "L2", "price": 4703.3 }
+  ]
+}
+```
+
+**Swing detection** is a direct port of `ownership.py:label_structure` — each bar in the lookback window is tested as the highest high or lowest low in a `±lookback` bar range. **Trend lines** connect the last two confirmed swing highs (resistance line) and the last two confirmed swing lows (support line), with slope in points-per-bar and a projected current price. **Al Brooks signals** count consecutive bullish or bearish breakout bars — a bar qualifies as H if it is bullish and its high exceeds the prior bar's high; as L if bearish and its low is below the prior bar's low.
+
+---
+
+### `chart_price_action` — Bar-by-Bar ASCII Candlestick Chart
+
+Renders all bars as a candlestick chart and returns per-bar structure labels Claude can reference.
+
+```
+   4825.70 ┤                 │         │ │
+           ┤             █ █ ▓       │ █ █ ▓
+           ┤           │ █ │ ▓ ▓ │ │ █ █ │ ▓
+           ┤     █ │   █ █     ▓ █ ▓ █     ▓
+   4774.04 ┤     █ ▓ │ █       ▓ █ │ │     ▓
+           ┤ ▓ █ █ ▓ █ █                   ▓
+           ┤ ▓ █   ▓ █ │                   ▓
+           ┤ │                             ▓ │                                                           │
+   4722.37 ┤                               ▓ ▓ │                     │                                 █ ▓ ▓ ▓
+           ┤                               │ ▓ ▓ ▓ │                 █ ▓       │ │               │   █ █   │ ▓ █
+           ┤                               │ │ │ ▓ ▓                 █ ▓ │ │ █ █ █ │       │     │ █ █
+           ┤                               │ │   │ ▓               │ █ ▓ ▓ ▓ █ │   │ │     │   █ ▓ █ │
+   4670.71 ┤                                       ▓   █ ▓         █ █   │ ▓ █     ▓ ▓   │ █ ▓ █ │ │ │
+           ┤                                       ▓   █ ▓ │ │ │ │ █ │             │ ▓ │ │ █ │
+           ┤                                       ▓   █ ▓ █ ▓ ▓ │ █               │ ▓ █ █ │ │
+           ┤                                       ▓ │ █   │ │ ▓ █ █               │ ▓ █
+   4619.05 ┤                                       ▓ █ █       │ │ │
+           ┤                                       │ │             │
+           ┤                                         │
+           ┤                                         │
+           └──────────────────────────────────────────────────────────────────────────────────────────────────────
+Legend: █=Bullish  ▓=Bearish  │=Wick
+```
+
+Each bar in the returned `bars` array includes:
+
+```json
+{
+  "index": 15,
+  "time": 1775091600,
+  "open": 4810.5, "high": 4812.9, "low": 4677.5, "close": 4723.7,
+  "volume": 72209,
+  "direction": "Bear",
+  "vs_high": "LH",
+  "vs_low": "LL",
+  "pattern": "Bearish Engulf",
+  "vol": "AboveAvg"
+}
+```
+
+Pass `style="heikin_ashi"` for a noise-filtered Heikin-Ashi view that makes trend direction easier to read at a glance.
+
+**Pattern classification** is a direct port of `anatomy.py` — eight patterns detected: Marubozu Bull/Bear (body > 90% of range), Hammer, Shooting Star (dominant wick > 2× the other wick and > 2× the body), Doji (body < 5% of range), Spinning Top (body < 30%, both wicks present), Bullish/Bearish Engulf (body > 60% of range).
+
+---
+
+### `chart_individual_bar` — Single Bar Anatomy
+
+Deep-dives a single bar with an ASCII anatomy diagram and battle narrative.
+
+```
+  High  4706.20  ── │  ← Upper wick (37%)
+                    │
+  Close 4705.60  ── ╔══╗  ← Body (63%) [Bullish]
+                    ║  ║
+  Open  4704.60  ── ╚══╝
+                    │
+  Low   4704.60  ── │  ← Lower wick (0%)
+```
+
+```json
+{
+  "anatomy": {
+    "total_range": 1.6,
+    "body_size":   1.0,
+    "body_pct":    63,
+    "upper_wick":  0.6,
+    "upper_wick_pct": 37,
+    "lower_wick":  0.0,
+    "lower_wick_pct": 0,
+    "direction": "Bullish"
+  },
+  "candlestick_pattern": "Bullish Engulf",
+  "volume_character": "BelowAvg",
+  "structure": { "vs_prev_high": "LH", "vs_prev_low": "HL" },
+  "battle_narrative": {
+    "open":      "Opened at 4704.60",
+    "high_move": "High 4706.20 (+1.60 from open)",
+    "low_move":  "Low 4704.60 (0.00 from open)",
+    "close":     "Closed at 4705.60 (+1.00 net)"
+  }
+}
+```
+
+Use `bar_index` to select any bar in the window (0 = oldest, default = most recent).
+
+---
+
+### `chart_volume_profile` — Volume Distribution Histogram
+
+Builds a volume profile across price buckets and renders a horizontal histogram showing where volume traded and which side dominated at each level.
+
+```
+   4817.81 ┤ █████░                   (   42949)
+   4802.02 ┤ ██████░░░                (   70441)
+   4786.24 ┤ █████░░░░                (   68784)
+   4770.45 ┤ █████░░░░░               (   75701)
+   4754.67 ┤ ███████░░░░░             (   86894)
+   4738.88 ┤ ████░░░░                 (   59923)
+   4723.10 ┤ ███████░░░░░░░░          (  113743) ← VAH
+   4707.31 ┤ ██████████░░░░░░░░░░░    (  157785)
+   4691.53 ┤ ████████████░░░░░░░░░░░░ (  178034) ← POC
+   4675.74 ┤ ███████████░░░░░░░       (  134688)
+   4659.96 ┤ █████████░░░░░░░         (  115734)
+   4644.17 ┤ ███████████░░░░░░░       (  131712)
+   4628.39 ┤ █████████░░░░░░          (  107966)
+   4612.60 ┤ ███████░░░░              (   82708)
+   4596.82 ┤ ██████████░░░░░░         (  118254)
+   4581.03 ┤ █████████░░░░░           (  106728)
+   4565.25 ┤ █████████░░░░░░░         (  119473) ← VAL
+   4549.46 ┤ ███████░░░░░░            (   94607)
+   4533.68 ┤ ████░░                   (   47326)
+   4517.89 ┤ ██                       (   11619)
+Legend: █=Buying  ░=Selling  POC=Point of Control  VAH/VAL=Value Area
+```
+
+Returns Point of Control (highest-volume price), Value Area High and Low (the band containing 70% of total session volume), and per-level buying vs selling volume split. Use to identify high-volume nodes where price accepted value, thin areas price will move through quickly, and the dominant side at each level.
+
+
+### Example Usage
+```
+Analyse the chart using al brooks and price action tools
+```
+
+```
+**MGC1! — Micro Gold Futures | 5-min | 4720.00**
+
+---
+
+**Macro Structure (60 bars)**
+
+Bullish HH sequence intact: 4688 → 4693 → 4720.7 → **4733.3** — four consecutive higher highs. However, the swing low sequence **broke down**: after HL at 4723.4, the last swing low printed **LL at 4712.4**. That LL is the warning sign — the uptrend is cracking.
+
+**Resistance trend line** (through HHs): slope +0.63/bar, currently projecting **4742** — still rising but price is lagging it.
+**Support trend line** (through lows): slope -0.85/bar, now at **4708** — falling, meaning bears are accelerating their lows.
+
+---
+
+**Recent Tape (last 15 bars)**
+
+| Phase | What happened |
+|---|---|
+| **Bar 35** | Shooting Star at 4733.3 — top wick rejection, warned of exhaustion |
+| **Bars 36–38** | Two Bearish Engulfs + above-avg volume (1886 on bar 37) — bears asserted hard, L1/L2 printed |
+| **Bar 39** | H1 bull recovery — but stalled below 4724, couldn't make HH |
+| **Bars 40–41** | Bearish Engulf cascade, LL confirmed at 4712.5 — bears broke the HL |
+| **Bars 42–47** | Choppy bull recovery, two H1s — low conviction, spinning tops, no follow-through |
+| **Bar 48** | ⚠️ **Key bar**: Opens 4722.1 → wicks to 4708.9 → closes 4718.9. Range 13.2pts, AboveAvg volume (1776). Bears drove 13 points and bulls only recovered 10. L1 signal. This bar dominates the recent context. |
+| **Bar 49 (now)** | Hammer at 4719.7, BelowAvg volume (131) — tentative bounce, no conviction |
+
+---
+
+**Current Context**
+
+Price is sitting on **old swing high 4720.7** — now being tested as support. The battle is whether this level holds as a pullback or cracks as a failed breakout.
+
+- **Bulls need:** Close above 4724 (last H1 high) to signal H2 continuation toward 4733 then 4742
+- **Bears need:** Break below 4712.4 (confirmed LL) to trigger next leg toward 4708 trend line → 4693 old HH
+
+**The big bar 48 is the tell** — 13-point bear range on elevated volume means institutional selling returned at 4722. The current hammer is low volume and sitting inside bar 48's range. Until price breaks above 4722, bears own this pullback.
+
+**Bias:** Neutral-to-bearish at 4720. Watch 4724 for bull reclaim, 4712 for bear continuation.
+```
+
+---
+
 ## Install with Claude Code
 
 Paste this into Claude Code and it will handle the rest:
