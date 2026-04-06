@@ -14,6 +14,7 @@ import { registerWatchlistTools } from './tools/watchlist.js';
 import { registerUiTools } from './tools/ui.js';
 import { registerPaneTools } from './tools/pane.js';
 import { registerTabTools } from './tools/tab.js';
+import { registerChartAnalysisTools } from './tools/chart_analysis.js';
 
 const server = new McpServer(
   {
@@ -51,6 +52,12 @@ Pine Script development:
 - pine_get_errors → read errors, pine_get_console → read log output
 - WARNING: pine_get_source can return 200KB+ for complex scripts — avoid unless editing
 
+ASCII Charts (pattern recognition):
+- chart_price_action → candlestick or heikin_ashi ASCII chart with per-bar structure labels
+- chart_individual_bar → single bar anatomy: body/wick %, candlestick pattern (Python-exact), battle narrative
+- chart_volume_profile → horizontal histogram: POC, Value Area High/Low, buying vs selling per level
+- chart_structure → swing H/L markers, HH/HL/LH/LL labels, trend lines with slope + projected price, S/R levels, Al Brooks H1/H2/L1/L2 signals
+
 Screenshots: capture_screenshot → regions: "full", "chart", "strategy_tester"
 Replay: replay_start → replay_step → replay_trade → replay_status → replay_stop
 Batch: batch_run → run action across multiple symbols/timeframes
@@ -84,6 +91,7 @@ registerWatchlistTools(server);
 registerUiTools(server);
 registerPaneTools(server);
 registerTabTools(server);
+registerChartAnalysisTools(server);
 
 // Startup notice (stderr so it doesn't interfere with MCP stdio protocol)
 process.stderr.write('⚠  tradingview-mcp  |  Unofficial tool. Not affiliated with TradingView Inc. or Anthropic.\n');
