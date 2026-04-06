@@ -1,0 +1,331 @@
+//@version=6
+indicator("Apex Scalp Scanner", "APEX", overlay=true, max_lines_count=50, max_labels_count=50, max_boxes_count=20)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// APEX SCALP SCANNER — All-in-one indicator for automated scalp trade detection
+// Combines: EMA Ribbon, RSI+Divergence, MACD, VWAP, Bollinger Bands,
+//           Volume Profile, ATR Stops, Order Blocks, FVG, Liquidity Sweeps,
+//           Multi-TF Confluence, and Signal Scoring
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── INPUTS ──────────────────────────────────────────────────────────────────
+// EMA Ribbon
+ema_fast_len    = input.int(9, "EMA Fast", group="EMA Ribbon")
+ema_mid_len     = input.int(21, "EMA Mid", group="EMA Ribbon")
+ema_slow_len    = input.int(55, "EMA Slow", group="EMA Ribbon")
+ema_trend_len   = input.int(200, "EMA Trend", group="EMA Ribbon")
+
+// RSI
+rsi_len         = input.int(14, "RSI Length", group="RSI")
+rsi_ob          = input.int(70, "RSI Overbought", group="RSI")
+rsi_os          = input.int(30, "RSI Oversold", group="RSI")
+
+// MACD
+macd_fast       = input.int(12, "MACD Fast", group="MACD")
+macd_slow       = input.int(26, "MACD Slow", group="MACD")
+macd_signal     = input.int(9, "MACD Signal", group="MACD")
+
+// Bollinger Bands
+bb_len          = input.int(20, "BB Length", group="Bollinger")
+bb_mult         = input.float(2.0, "BB Mult", group="Bollinger")
+
+// ATR
+atr_len         = input.int(14, "ATR Length", group="ATR")
+atr_sl_mult     = input.float(1.5, "ATR SL Multiplier", group="ATR")
+atr_tp1_mult    = input.float(1.0, "ATR TP1 Multiplier", group="ATR")
+atr_tp2_mult    = input.float(2.0, "ATR TP2 Multiplier", group="ATR")
+atr_tp3_mult    = input.float(3.0, "ATR TP3 Multiplier", group="ATR")
+
+// Volume
+vol_ma_len      = input.int(20, "Volume MA Length", group="Volume")
+vol_spike_mult  = input.float(1.5, "Volume Spike Multiplier", group="Volume")
+
+// Order Blocks
+ob_lookback     = input.int(10, "OB Lookback", group="Smart Money")
+fvg_enabled     = input.bool(true, "Show FVGs", group="Smart Money")
+liq_sweep_len   = input.int(20, "Liquidity Sweep Lookback", group="Smart Money")
+
+// Multi-TF
+use_htf         = input.bool(true, "Use Higher TF Confirmation", group="Multi-TF")
+htf_tf          = input.timeframe("240", "Higher Timeframe", group="Multi-TF")
+
+// Signal
+min_score       = input.int(60, "Min Signal Score (0-100)", group="Signal")
+show_table      = input.bool(true, "Show Dashboard", group="Display")
+
+// ── EMA RIBBON ──────────────────────────────────────────────────────────────
+ema_fast   = ta.ema(close, ema_fast_len)
+ema_mid    = ta.ema(close, ema_mid_len)
+ema_slow   = ta.ema(close, ema_slow_len)
+ema_trend  = ta.ema(close, ema_trend_len)
+
+plot(ema_fast, "EMA Fast", color.new(#00ff88, 30), 1)
+plot(ema_mid, "EMA Mid", color.new(#00aaff, 30), 1)
+plot(ema_slow, "EMA Slow", color.new(#ff8800, 30), 1)
+plot(ema_trend, "EMA 200", color.new(#ff0055, 30), 2)
+
+ema_bull = ema_fast > ema_mid and ema_mid > ema_slow
+ema_bear = ema_fast < ema_mid and ema_mid < ema_slow
+above_trend = close > ema_trend
+below_trend = close < ema_trend
+
+// ── RSI ─────────────────────────────────────────────────────────────────────
+rsi_val = ta.rsi(close, rsi_len)
+
+// RSI Divergence detection — precompute pivots globally
+rsi_pl = ta.pivotlow(rsi_val, 5, 5)
+rsi_ph = ta.pivothigh(rsi_val, 5, 5)
+price_pl = ta.pivotlow(low, 5, 5)
+price_ph = ta.pivothigh(high, 5, 5)
+
+rsi_pl_found = not na(rsi_pl)
+rsi_ph_found = not na(rsi_ph)
+price_pl_found = not na(price_pl)
+price_ph_found = not na(price_ph)
+
+prev_rsi_low  = ta.valuewhen(rsi_pl_found, rsi_val[5], 1)
+prev_rsi_high = ta.valuewhen(rsi_ph_found, rsi_val[5], 1)
+prev_price_low  = ta.valuewhen(price_pl_found, low[5], 1)
+prev_price_high = ta.valuewhen(price_ph_found, high[5], 1)
+
+bull_div = price_pl_found and rsi_pl_found and low[5] < prev_price_low and rsi_val[5] > prev_rsi_low
+bear_div = price_ph_found and rsi_ph_found and high[5] > prev_price_high and rsi_val[5] < prev_rsi_high
+
+// ── MACD ────────────────────────────────────────────────────────────────────
+[macd_line, signal_line, hist] = ta.macd(close, macd_fast, macd_slow, macd_signal)
+macd_bull_cross = ta.crossover(macd_line, signal_line)
+macd_bear_cross = ta.crossunder(macd_line, signal_line)
+macd_bull = macd_line > signal_line
+macd_bear = macd_line < signal_line
+hist_growing = hist > hist[1]
+
+// ── BOLLINGER BANDS ─────────────────────────────────────────────────────────
+[bb_mid, bb_upper, bb_lower] = ta.bb(close, bb_len, bb_mult)
+bb_width = (bb_upper - bb_lower) / bb_mid * 100
+bb_squeeze = bb_width < ta.lowest(bb_width, 50) * 1.1
+bb_at_lower = close <= bb_lower
+bb_at_upper = close >= bb_upper
+
+p_bbu = plot(bb_upper, "BB Upper", color.new(#888888, 70))
+p_bbl = plot(bb_lower, "BB Lower", color.new(#888888, 70))
+fill(p_bbu, p_bbl, color.new(#444488, 90))
+
+// ── VWAP ────────────────────────────────────────────────────────────────────
+vwap_val = ta.vwap(hlc3)
+plot(vwap_val, "VWAP", color.new(#ffff00, 30), 2, plot.style_circles)
+above_vwap = close > vwap_val
+
+// ── ATR & LEVELS ────────────────────────────────────────────────────────────
+atr_val = ta.atr(atr_len)
+
+// ── VOLUME ANALYSIS ─────────────────────────────────────────────────────────
+vol_ma = ta.sma(volume, vol_ma_len)
+vol_spike = volume > vol_ma * vol_spike_mult
+vol_climax = volume > vol_ma * 2.5
+vol_dry = volume < vol_ma * 0.5
+
+// ── ORDER BLOCKS (Simplified) ───────────────────────────────────────────────
+// Bullish OB: last red candle before impulsive move up
+bull_ob_cond = close[2] < open[2] and close[1] > open[1] and close > high[2] and volume[1] > vol_ma
+bear_ob_cond = close[2] > open[2] and close[1] < open[1] and close < low[2] and volume[1] > vol_ma
+
+var float bull_ob_high = na
+var float bull_ob_low = na
+var float bear_ob_high = na
+var float bear_ob_low = na
+
+if bull_ob_cond
+    bull_ob_high := high[2]
+    bull_ob_low := low[2]
+
+if bear_ob_cond
+    bear_ob_high := high[2]
+    bear_ob_low := low[2]
+
+// ── FAIR VALUE GAPS ─────────────────────────────────────────────────────────
+bull_fvg = fvg_enabled and low > high[2] and close[1] > open[1]
+bear_fvg = fvg_enabled and high < low[2] and close[1] < open[1]
+
+if bull_fvg
+    box.new(bar_index - 1, low, bar_index, high[2], border_color=color.new(#00ff88, 60), bgcolor=color.new(#00ff88, 85))
+
+if bear_fvg
+    box.new(bar_index - 1, low[2], bar_index, high, border_color=color.new(#ff0055, 60), bgcolor=color.new(#ff0055, 85))
+
+// ── LIQUIDITY SWEEPS ────────────────────────────────────────────────────────
+recent_high = ta.highest(high, liq_sweep_len)
+recent_low  = ta.lowest(low, liq_sweep_len)
+
+// Sweep high then close back below = bull trap / potential short
+sweep_high = high > recent_high[1] and close < recent_high[1]
+// Sweep low then close back above = bear trap / potential long
+sweep_low  = low < recent_low[1] and close > recent_low[1]
+
+// ── MULTI-TIMEFRAME CONFIRMATION ────────────────────────────────────────────
+htf_ema_fast = request.security(syminfo.tickerid, htf_tf, ta.ema(close, ema_fast_len))
+htf_ema_slow = request.security(syminfo.tickerid, htf_tf, ta.ema(close, ema_slow_len))
+htf_rsi      = request.security(syminfo.tickerid, htf_tf, ta.rsi(close, rsi_len))
+htf_macd_h   = request.security(syminfo.tickerid, htf_tf, hist)
+
+htf_bull = htf_ema_fast > htf_ema_slow and htf_rsi > 45
+htf_bear = htf_ema_fast < htf_ema_slow and htf_rsi < 55
+
+// ── SIGNAL SCORING ENGINE ───────────────────────────────────────────────────
+// Each factor contributes points. Max theoretical = 100.
+
+var int bull_score = 0
+var int bear_score = 0
+
+// --- LONG SCORE ---
+bull_score := 0
+bull_score += ema_bull ? 12 : ema_fast > ema_mid ? 6 : 0
+bull_score += above_trend ? 8 : 0
+bull_score += rsi_val > 40 and rsi_val < 65 ? 10 : rsi_val <= 30 ? 12 : 0
+bull_score += bull_div ? 10 : 0
+bull_score += macd_bull ? 8 : 0
+bull_score += macd_bull_cross ? 7 : hist_growing and macd_bull ? 3 : 0
+bull_score += above_vwap ? 8 : 0
+bull_score += bb_at_lower ? 8 : close < bb_mid ? 4 : 0
+bull_score += bb_squeeze ? 5 : 0
+bull_score += vol_spike ? 8 : 0
+bull_score += sweep_low ? 10 : 0
+bull_score += (not na(bull_ob_low) and low <= bull_ob_high and low >= bull_ob_low) ? 7 : 0
+bull_score += bull_fvg ? 5 : 0
+bull_score += (use_htf and htf_bull) ? 12 : 0
+
+// --- SHORT SCORE ---
+bear_score := 0
+bear_score += ema_bear ? 12 : ema_fast < ema_mid ? 6 : 0
+bear_score += below_trend ? 8 : 0
+bear_score += rsi_val < 60 and rsi_val > 35 ? 10 : rsi_val >= 70 ? 12 : 0
+bear_score += bear_div ? 10 : 0
+bear_score += macd_bear ? 8 : 0
+bear_score += macd_bear_cross ? 7 : (not hist_growing) and macd_bear ? 3 : 0
+bear_score += (not above_vwap) ? 8 : 0
+bear_score += bb_at_upper ? 8 : close > bb_mid ? 4 : 0
+bear_score += bb_squeeze ? 5 : 0
+bear_score += vol_spike ? 8 : 0
+bear_score += sweep_high ? 10 : 0
+bear_score += (not na(bear_ob_high) and high >= bear_ob_low and high <= bear_ob_high) ? 7 : 0
+bear_score += bear_fvg ? 5 : 0
+bear_score += (use_htf and htf_bear) ? 12 : 0
+
+// ── SIGNAL GENERATION ───────────────────────────────────────────────────────
+long_signal  = bull_score >= min_score and bull_score > bear_score + 15
+short_signal = bear_score >= min_score and bear_score > bull_score + 15
+
+// Prevent rapid signals
+var int bars_since_signal = 0
+bars_since_signal += 1
+
+long_trigger  = long_signal and bars_since_signal > 3
+short_trigger = short_signal and bars_since_signal > 3
+
+if long_trigger or short_trigger
+    bars_since_signal := 0
+
+// ── TRADE LEVELS ────────────────────────────────────────────────────────────
+sl_long  = close - atr_val * atr_sl_mult
+tp1_long = close + atr_val * atr_tp1_mult
+tp2_long = close + atr_val * atr_tp2_mult
+tp3_long = close + atr_val * atr_tp3_mult
+
+sl_short  = close + atr_val * atr_sl_mult
+tp1_short = close - atr_val * atr_tp1_mult
+tp2_short = close - atr_val * atr_tp2_mult
+tp3_short = close - atr_val * atr_tp3_mult
+
+// ── PLOT SIGNALS ────────────────────────────────────────────────────────────
+plotshape(long_trigger, "LONG", shape.triangleup, location.belowbar, #00ff88, size=size.normal)
+plotshape(short_trigger, "SHORT", shape.triangledown, location.abovebar, #ff0055, size=size.normal)
+
+// Draw levels on signal
+if long_trigger
+    lbl = label.new(bar_index, low, "LONG " + str.tostring(bull_score) + "/100\nSL: " + str.tostring(sl_long, format.mintick) + "\nTP1: " + str.tostring(tp1_long, format.mintick) + "\nTP2: " + str.tostring(tp2_long, format.mintick) + "\nTP3: " + str.tostring(tp3_long, format.mintick), style=label.style_label_up, color=#00ff88, textcolor=color.black, size=size.small)
+    line.new(bar_index, sl_long, bar_index + 20, sl_long, color=#ff0055, style=line.style_dashed, width=1)
+    line.new(bar_index, tp1_long, bar_index + 20, tp1_long, color=#00ff88, style=line.style_dotted, width=1)
+    line.new(bar_index, tp2_long, bar_index + 20, tp2_long, color=#00aaff, style=line.style_dotted, width=1)
+    line.new(bar_index, tp3_long, bar_index + 20, tp3_long, color=#ffaa00, style=line.style_dotted, width=1)
+
+if short_trigger
+    lbl = label.new(bar_index, high, "SHORT " + str.tostring(bear_score) + "/100\nSL: " + str.tostring(sl_short, format.mintick) + "\nTP1: " + str.tostring(tp1_short, format.mintick) + "\nTP2: " + str.tostring(tp2_short, format.mintick) + "\nTP3: " + str.tostring(tp3_short, format.mintick), style=label.style_label_down, color=#ff0055, textcolor=color.white, size=size.small)
+    line.new(bar_index, sl_short, bar_index + 20, sl_short, color=#ff0055, style=line.style_dashed, width=1)
+    line.new(bar_index, tp1_short, bar_index + 20, tp1_short, color=#00ff88, style=line.style_dotted, width=1)
+    line.new(bar_index, tp2_short, bar_index + 20, tp2_short, color=#00aaff, style=line.style_dotted, width=1)
+    line.new(bar_index, tp3_short, bar_index + 20, tp3_short, color=#ffaa00, style=line.style_dotted, width=1)
+
+// ── OUTPUTS FOR MCP READING ─────────────────────────────────────────────────
+// These plot values can be read by data_get_study_values
+plot(bull_score, "Bull Score", display=display.data_window)
+plot(bear_score, "Bear Score", display=display.data_window)
+plot(long_trigger ? 1 : 0, "Long Signal", display=display.data_window)
+plot(short_trigger ? 1 : 0, "Short Signal", display=display.data_window)
+plot(rsi_val, "RSI", display=display.data_window)
+plot(atr_val, "ATR", display=display.data_window)
+plot(vol_spike ? 1 : 0, "Vol Spike", display=display.data_window)
+plot(bb_squeeze ? 1 : 0, "BB Squeeze", display=display.data_window)
+plot(sweep_low ? 1 : 0, "Sweep Low", display=display.data_window)
+plot(sweep_high ? 1 : 0, "Sweep High", display=display.data_window)
+plot(htf_bull ? 1 : 0, "HTF Bull", display=display.data_window)
+plot(htf_bear ? 1 : 0, "HTF Bear", display=display.data_window)
+
+// ── DASHBOARD TABLE ─────────────────────────────────────────────────────────
+if show_table and barstate.islast
+    var table dash = table.new(position.top_right, 2, 16, bgcolor=color.new(#000000, 20), border_width=1, border_color=color.new(#333333, 0))
+
+    table.cell(dash, 0, 0, "APEX SCANNER", text_color=#ffaa00, text_size=size.small)
+    table.cell(dash, 1, 0, syminfo.ticker, text_color=color.white, text_size=size.small)
+
+    table.cell(dash, 0, 1, "Bull Score", text_color=#888888, text_size=size.tiny)
+    table.cell(dash, 1, 1, str.tostring(bull_score), text_color=bull_score >= min_score ? #00ff88 : #888888, text_size=size.tiny)
+
+    table.cell(dash, 0, 2, "Bear Score", text_color=#888888, text_size=size.tiny)
+    table.cell(dash, 1, 2, str.tostring(bear_score), text_color=bear_score >= min_score ? #ff0055 : #888888, text_size=size.tiny)
+
+    table.cell(dash, 0, 3, "Signal", text_color=#888888, text_size=size.tiny)
+    sig_txt = long_trigger ? "LONG ▲" : short_trigger ? "SHORT ▼" : "—"
+    sig_col = long_trigger ? #00ff88 : short_trigger ? #ff0055 : #555555
+    table.cell(dash, 1, 3, sig_txt, text_color=sig_col, text_size=size.tiny)
+
+    table.cell(dash, 0, 4, "RSI", text_color=#888888, text_size=size.tiny)
+    table.cell(dash, 1, 4, str.tostring(rsi_val, "#.#"), text_color=rsi_val > rsi_ob ? #ff0055 : rsi_val < rsi_os ? #00ff88 : color.white, text_size=size.tiny)
+
+    table.cell(dash, 0, 5, "MACD", text_color=#888888, text_size=size.tiny)
+    table.cell(dash, 1, 5, macd_bull ? "Bullish" : "Bearish", text_color=macd_bull ? #00ff88 : #ff0055, text_size=size.tiny)
+
+    table.cell(dash, 0, 6, "VWAP", text_color=#888888, text_size=size.tiny)
+    table.cell(dash, 1, 6, above_vwap ? "Above" : "Below", text_color=above_vwap ? #00ff88 : #ff0055, text_size=size.tiny)
+
+    table.cell(dash, 0, 7, "EMA Trend", text_color=#888888, text_size=size.tiny)
+    table.cell(dash, 1, 7, ema_bull ? "Bull ▲" : ema_bear ? "Bear ▼" : "Neutral", text_color=ema_bull ? #00ff88 : ema_bear ? #ff0055 : #ffaa00, text_size=size.tiny)
+
+    table.cell(dash, 0, 8, "BB Squeeze", text_color=#888888, text_size=size.tiny)
+    table.cell(dash, 1, 8, bb_squeeze ? "YES ⚡" : "No", text_color=bb_squeeze ? #ffaa00 : #555555, text_size=size.tiny)
+
+    table.cell(dash, 0, 9, "Volume", text_color=#888888, text_size=size.tiny)
+    table.cell(dash, 1, 9, vol_spike ? "SPIKE ⚡" : vol_dry ? "Dry" : "Normal", text_color=vol_spike ? #ffaa00 : #555555, text_size=size.tiny)
+
+    table.cell(dash, 0, 10, "HTF Bias", text_color=#888888, text_size=size.tiny)
+    table.cell(dash, 1, 10, htf_bull ? "Bullish ▲" : htf_bear ? "Bearish ▼" : "Neutral", text_color=htf_bull ? #00ff88 : htf_bear ? #ff0055 : #ffaa00, text_size=size.tiny)
+
+    table.cell(dash, 0, 11, "Liq Sweep", text_color=#888888, text_size=size.tiny)
+    table.cell(dash, 1, 11, sweep_low ? "Low ✓" : sweep_high ? "High ✓" : "—", text_color=sweep_low ? #00ff88 : sweep_high ? #ff0055 : #555555, text_size=size.tiny)
+
+    table.cell(dash, 0, 12, "ATR", text_color=#888888, text_size=size.tiny)
+    table.cell(dash, 1, 12, str.tostring(atr_val, format.mintick) + " (" + str.tostring(atr_val / close * 100, "#.##") + "%)", text_color=color.white, text_size=size.tiny)
+
+    table.cell(dash, 0, 13, "OB Zone", text_color=#888888, text_size=size.tiny)
+    in_bull_ob = not na(bull_ob_low) and low <= bull_ob_high and low >= bull_ob_low
+    in_bear_ob = not na(bear_ob_high) and high >= bear_ob_low and high <= bear_ob_high
+    table.cell(dash, 1, 13, in_bull_ob ? "Bull OB ✓" : in_bear_ob ? "Bear OB ✓" : "—", text_color=in_bull_ob ? #00ff88 : in_bear_ob ? #ff0055 : #555555, text_size=size.tiny)
+
+    table.cell(dash, 0, 14, "Divergence", text_color=#888888, text_size=size.tiny)
+    table.cell(dash, 1, 14, bull_div ? "Bullish ✓" : bear_div ? "Bearish ✓" : "—", text_color=bull_div ? #00ff88 : bear_div ? #ff0055 : #555555, text_size=size.tiny)
+
+    table.cell(dash, 0, 15, "EMA 200", text_color=#888888, text_size=size.tiny)
+    table.cell(dash, 1, 15, above_trend ? "Above" : "Below", text_color=above_trend ? #00ff88 : #ff0055, text_size=size.tiny)
+
+// ── ALERTS ──────────────────────────────────────────────────────────────────
+alertcondition(long_trigger, "Apex Long Signal", "APEX LONG on {{ticker}} | Score: {{plot_2}} | Price: {{close}}")
+alertcondition(short_trigger, "Apex Short Signal", "APEX SHORT on {{ticker}} | Score: {{plot_3}} | Price: {{close}}")
+alertcondition(long_trigger or short_trigger, "Any Apex Signal", "APEX SIGNAL on {{ticker}} | Price: {{close}}")
