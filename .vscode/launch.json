@@ -1,0 +1,119 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug MCP Server",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/server.js",
+      "runtimeArgs": ["--experimental-vm-modules"],
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "outputCapture": "std",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"],
+      "env": {
+        "NODE_ENV": "development"
+      }
+    },
+    {
+      "name": "Debug MCP Server (Break on Start)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/server.js",
+      "runtimeArgs": ["--experimental-vm-modules"],
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "outputCapture": "std",
+      "stopOnEntry": true,
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"],
+      "env": {
+        "NODE_ENV": "development"
+      }
+    },
+    {
+      "name": "Debug CLI (tv)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/cli/index.js",
+      "args": ["${input:cliArgs}"],
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"],
+      "env": {
+        "NODE_ENV": "development"
+      }
+    },
+    {
+      "name": "Debug: Attach to Running Server",
+      "type": "node",
+      "request": "attach",
+      "port": 9229,
+      "restart": true,
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
+    },
+    {
+      "name": "Debug Tests (e2e)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/node_modules/.bin/node",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["--test"],
+      "args": ["${workspaceFolder}/tests/e2e.test.js"],
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
+    },
+    {
+      "name": "Debug Tests (unit)",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["--test"],
+      "args": [
+        "${workspaceFolder}/tests/pine_analyze.test.js",
+        "${workspaceFolder}/tests/cli.test.js"
+      ],
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
+    },
+    {
+      "name": "Debug CLI — TV_DEBUG mode (renderer step-through)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/cli/index.js",
+      "args": ["${input:cliArgs}"],
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"],
+      "env": {
+        "NODE_ENV": "development",
+        "TV_DEBUG": "1"
+      }
+    },
+    {
+      "name": "Debug Harness Script",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/${input:harnessFile}",
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"],
+      "env": {
+        "NODE_ENV": "development",
+        "TV_DEBUG": "1"
+      }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "cliArgs",
+      "type": "promptString",
+      "description": "CLI arguments (e.g. get-ohlcv --count 10)"
+    },
+    {
+      "id": "harnessFile",
+      "type": "promptString",
+      "description": "Harness script path relative to workspace (e.g. tmp/debug_strategy.mjs)",
+      "default": "tmp/debug_strategy.mjs"
+    }
+  ]
+}
