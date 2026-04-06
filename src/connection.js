@@ -77,6 +77,14 @@ export async function connect() {
       await client.Page.enable();
       await client.DOM.enable();
 
+      // Inject the Bridge Configuration into the renderer's global scope.
+      const bootstrap = `
+        window.TV_CONFIG = ${JSON.stringify(KNOWN_PATHS)};
+        window.TV_CONFIG.isDebug = ${process.env.TV_DEBUG === '1'};
+        console.log('--- TradingView MCP Bridge Initialized ---');
+      `;
+      await evaluate(bootstrap);
+
       return client;
     } catch (err) {
       lastError = err;
@@ -118,6 +126,10 @@ export async function evaluate(expression, opts = {}) {
     throw new Error(`JS evaluation error: ${msg}`);
   }
   return result.result?.value;
+}
+
+export async function evaluateFnc(fn, opts = {}) {
+  return evaluate(`(${fn})()`, opts);
 }
 
 export async function evaluateAsync(expression) {

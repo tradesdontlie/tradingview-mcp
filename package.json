@@ -23,7 +23,13 @@
     "test:count": "node --test --test-reporter=spec tests/e2e.test.js 2>&1 | tail -5"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.1",
-    "chrome-remote-interface": "^0.33.2"
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "chrome-remote-interface": "^0.34.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.38.0",
+    "eslint": "^9.38.0",
+    "globals": "^17.4.0"
   }
 }

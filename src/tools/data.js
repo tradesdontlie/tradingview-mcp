@@ -23,6 +23,11 @@ export function registerDataTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
+  server.tool('data_get_strategy_performance', 'Get strategy performance metrics from Strategy Tester', {}, async () => {
+    try { return jsonResult(await core.getStrategyPerformance()); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
   server.tool('data_get_trades', 'Get trade list from Strategy Tester', {
     max_trades: z.coerce.number().optional().describe('Maximum trades to return'),
   }, async ({ max_trades }) => {
