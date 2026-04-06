@@ -1,0 +1,93 @@
+//@version=6
+strategy("XAUUSD London/NY Breakout [KOZ]",
+     overlay            = true,
+     initial_capital    = 10000,
+     default_qty_type   = strategy.fixed,
+     default_qty_value  = 1,
+     commission_type    = strategy.commission.cash_per_contract,
+     commission_value   = 0,
+     slippage           = 0,
+     margin_long        = 0,
+     margin_short       = 0,
+     currency           = currency.USD)
+
+// ─── Inputs ───────────────────────────────────────────────
+ema_fast  = input.int(9,   "Fast EMA")
+ema_slow  = input.int(21,  "Slow EMA")
+ema_trend = input.int(50,  "Trend EMA")
+atr_len   = input.int(14,  "ATR Length")
+sl_atr    = input.float(1.5, "SL (×ATR)",   step = 0.25)
+tp1_atr   = input.float(2.5, "TP1 (×ATR)",  step = 0.25)
+tp2_atr   = input.float(5.0, "TP2 (×ATR)",  step = 0.25)
+
+// ─── Sessions (UTC) ──────────────────────────────────────
+TZ       = "America/New_York"
+ASIA_WIN = "2000-0300"
+LNDN_WIN = "0300-0800"
+NY_WIN   = "0800-1200"
+TRAD_WIN = "0300-1500"
+EOD_WIN  = "1500-1600"
+
+// ─── Calcs ────────────────────────────────────────────────
+atr   = ta.atr(atr_len)
+ema_f = ta.ema(close, ema_fast)
+ema_s = ta.ema(close, ema_slow)
+ema_t = ta.ema(close, ema_trend)
+
+in_asia = not na(time(timeframe.period, ASIA_WIN, TZ))
+in_lndn = not na(time(timeframe.period, LNDN_WIN, TZ))
+in_ny   = not na(time(timeframe.period, NY_WIN, TZ))
+in_trad = not na(time(timeframe.period, TRAD_WIN, TZ))
+in_eod  = not na(time(timeframe.period, EOD_WIN, TZ))
+new_day = ta.change(time("D")) != 0
+
+// ─── Asian Session Range ──────────────────────────────────
+var float asia_h   = na
+var float asia_l   = na
+var bool  asia_set = false
+var bool  traded   = false
+
+if new_day
+    asia_h   := na
+    asia_l   := na
+    asia_set := false
+    traded   := false
+
+if in_asia
+    asia_h   := na(asia_h) ? high : math.max(asia_h, high)
+    asia_l   := na(asia_l) ? low  : math.min(asia_l, low)
+    asia_set := false
+
+if not in_asia and not na(asia_h)
+    asia_set := true
+
+// ─── Entries ──────────────────────────────────────────────
+bull = ema_f > ema_s and close > ema_t
+bear = ema_f < ema_s and close < ema_t
+
+go_long  = asia_set and in_trad and bull and close > asia_h and not traded and strategy.position_size == 0
+go_short = asia_set and in_trad and bear and close < asia_l and not traded and strategy.position_size == 0
+
+if go_long
+    traded := true
+    strategy.entry("L", strategy.long)
+    strategy.exit("L-X", "L", qty_percent = 50, limit = close + tp1_atr * atr, stop = close - sl_atr * atr)
+    strategy.exit("L-X2","L", qty_percent = 50, limit = close + tp2_atr * atr, stop = close - sl_atr * atr)
+
+if go_short
+    traded := true
+    strategy.entry("S", strategy.short)
+    strategy.exit("S-X", "S", qty_percent = 50, limit = close - tp1_atr * atr, stop = close + sl_atr * atr)
+    strategy.exit("S-X2","S", qty_percent = 50, limit = close - tp2_atr * atr, stop = close + sl_atr * atr)
+
+if in_eod and strategy.position_size != 0
+    strategy.close_all(comment = "EOD")
+
+// ─── Plots ────────────────────────────────────────────────
+plot(ema_f, "EMA Fast",  color.new(#2962ff, 0), 1)
+plot(ema_s, "EMA Slow",  color.new(#ff6d00, 0), 1)
+plot(ema_t, "EMA Trend", color.new(#888888, 40), 2)
+plot(asia_set ? asia_h : na, "Asia H", color.new(#089981, 0), 2, plot.style_linebr)
+plot(asia_set ? asia_l : na, "Asia L", color.new(#f23645, 0), 2, plot.style_linebr)
+plotshape(go_long,  "", shape.triangleup,   location.belowbar, #089981, size = size.small)
+plotshape(go_short, "", shape.triangledown, location.abovebar, #f23645, size = size.small)

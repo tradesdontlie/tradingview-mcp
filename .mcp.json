@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "tradingview": {
+      "type": "stdio",
+      "command": "/opt/homebrew/bin/node",
+      "args": ["/Users/kamilkoz56/tradingview-mcp/src/server.js"]
+    }
+  }
+}
