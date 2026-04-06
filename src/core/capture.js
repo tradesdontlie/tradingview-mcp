@@ -2,19 +2,16 @@
  * Core screenshot/capture logic.
  */
 import { getClient, evaluate, getChartCollection } from '../connection.js';
-import { writeFileSync, mkdirSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { writeFileSync } from 'fs';
+import { join } from 'path';
+import { resolveScreenshotDir } from './paths.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const SCREENSHOT_DIR = join(dirname(dirname(__dirname)), 'screenshots');
-
-export async function captureScreenshot({ region, filename, method } = {}) {
-  mkdirSync(SCREENSHOT_DIR, { recursive: true });
+export async function captureScreenshot({ region, filename, method, output_dir } = {}) {
+  const targetDir = resolveScreenshotDir(output_dir);
 
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
   const fname = (filename || `tv_${region}_${ts}`).replace(/[\/\\]/g, '_');
-  const filePath = join(SCREENSHOT_DIR, `${fname}.png`);
+  const filePath = join(targetDir, `${fname}.png`);
 
   if (method === 'api') {
     try {
