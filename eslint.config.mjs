@@ -4,7 +4,7 @@ import globals from 'globals';
 export default [
   eslint.configs.recommended,
   {
-    files: ['src/**/*.js'],
+    files: ['src/**/*.js', 'tmp/**/*.js'],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module',
@@ -12,11 +12,13 @@ export default [
         ...globals.node,
         ...globals.browser,
         ...globals.electron,
+        TV_CONFIG: 'readonly',
       },
     },
     rules: {
       'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
       'no-undef': 'error',
+      'no-eval': 'error',
     },
   },
 ];

@@ -1,7 +1,7 @@
 /**
  * Core data access logic.
  */
-import { evaluate, evaluateAsync, KNOWN_PATHS, safeString } from '../connection.js';
+import { evaluate, evaluateAsync, evaluateFnc, KNOWN_PATHS, safeString } from '../connection.js';
 
 const MAX_OHLCV_BARS = 500;
 const MAX_TRADES = 20;
@@ -162,6 +162,29 @@ export async function getStrategyResults() {
     })()
   `);
   return { success: true, metric_count: Object.keys(results?.metrics || {}).length, source: results?.source, metrics: results?.metrics || {}, error: results?.error };
+}
+
+export async function getStrategyPerformance() {
+  const results = await evaluateFnc(
+    function() {
+      try {
+        // eslint-disable-next-line no-eval
+        var api = eval(TV_CONFIG.chartApi);
+        var chart = api._chartWidget;
+        var sources = chart.model().model().dataSources();
+        //is .metaInfo().is_price_study necessary?
+        var strategies = sources.filter(source => source.reportData && source.performance);
+        if (!strategies || strategies.length === 0) return {metrics: {}, source: 'internal_api', error: 'No strategy found on chart. Add a strategy indicator first.'};
+        var performance = {}; 
+        //TODO could be multiple strategies on the chart with reportData?
+        if (strategies[0].reportData) {
+          var rd = typeof strategies[0].reportData === 'function' ? strategies[0].reportData() : strategies[0].reportData;
+          performance = rd.performance;
+        }
+        return { performance: performance, source: strategies[0].name() };
+      } catch(e) { return {performance: {}, source: 'internal_api', error: e.message}; }
+    });
+  return { success: true, source: results?.source, performance: results?.performance || {}, error: results?.error };
 }
 
 export async function getTrades({ max_trades } = {}) {

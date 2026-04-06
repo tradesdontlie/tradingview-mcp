@@ -85,7 +85,38 @@ await evaluate(`
 
 ---
 
-## 5. Example Harness Script (`tmp/debug_strategy.mjs`)
+## 5. Debugging inside `evaluateFnc` (Bridge Pattern)
+
+When using the new bridge pattern, you can use the `isDebug` flag to add conditional breakpoints that only fire when `TV_DEBUG=1` is set.
+
+### A. Conditional `debugger`
+
+Add this at the start of your injected function:
+
+```javascript
+await evaluateFnc(() => {
+  if (TV_CONFIG.isDebug) debugger; // Only pauses if TV_DEBUG=1
+  
+  const api = eval(TV_CONFIG.chartApi);
+  // ...
+});
+```
+
+### B. Virtual Filename (`sourceURL`)
+
+Even with `evaluateFnc`, you can give your code a filename to make it easy to find in the **Sources** tab:
+
+```javascript
+// Manually stringify to add a sourceURL footer
+await evaluate(`(${function myTask() {
+  if (TV_CONFIG.isDebug) debugger;
+  // ...
+}})();\n//# sourceURL=myTask.js`);
+```
+
+---
+
+## 6. Example Harness Script (`tmp/debug_strategy.mjs`)
 
 You can use a simple script like this to trigger the extraction logic directly from your terminal or VS Code.
 

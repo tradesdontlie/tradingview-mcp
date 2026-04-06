@@ -62,6 +62,10 @@ register('data', {
       description: 'Get strategy performance metrics',
       handler: () => core.getStrategyResults(),
     }],
+    ['strategy-performance', {
+      description: 'Get strategy performance metrics',
+      handler: () => core.getStrategyPerformance(),
+    }],
     ['trades', {
       description: 'Get strategy trade list',
       options: {
