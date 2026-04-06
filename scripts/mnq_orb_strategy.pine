@@ -1,0 +1,89 @@
+//@version=6
+strategy("MNQ ORB + EMA Trend [KOZ]",
+     overlay            = true,
+     initial_capital    = 10000,
+     default_qty_type   = strategy.fixed,
+     default_qty_value  = 1,
+     commission_type    = strategy.commission.cash_per_contract,
+     commission_value   = 0,
+     slippage           = 0,
+     margin_long        = 0,
+     margin_short       = 0,
+     currency           = currency.USD)
+
+// ─── Inputs ───────────────────────────────────────────────
+ema_fast  = input.int(9,   "Fast EMA")
+ema_slow  = input.int(21,  "Slow EMA")
+ema_trend = input.int(50,  "Trend EMA")
+atr_len   = input.int(14,  "ATR Length")
+sl_atr    = input.float(1.5, "SL (×ATR)",   step = 0.25)
+tp1_atr   = input.float(2.0, "TP1 (×ATR)",  step = 0.25)
+tp2_atr   = input.float(4.0, "TP2 (×ATR)",  step = 0.25)
+
+// ─── Session (NY ET) ──────────────────────────────────────
+TZ      = "America/New_York"
+ORB_WIN = "0930-1000"
+SES_WIN = "1000-1555"
+EOD_WIN = "1555-1600"
+
+// ─── Calcs ────────────────────────────────────────────────
+atr   = ta.atr(atr_len)
+ema_f = ta.ema(close, ema_fast)
+ema_s = ta.ema(close, ema_slow)
+ema_t = ta.ema(close, ema_trend)
+
+in_orb  = not na(time(timeframe.period, ORB_WIN, TZ))
+in_sess = not na(time(timeframe.period, SES_WIN, TZ))
+in_eod  = not na(time(timeframe.period, EOD_WIN, TZ))
+new_day = ta.change(time("D")) != 0
+
+// ─── Opening Range ────────────────────────────────────────
+var float orb_h   = na
+var float orb_l   = na
+var bool  orb_set = false
+var bool  traded  = false
+
+if new_day
+    orb_h   := na
+    orb_l   := na
+    orb_set := false
+    traded  := false
+
+if in_orb
+    orb_h   := na(orb_h) ? high : math.max(orb_h, high)
+    orb_l   := na(orb_l) ? low  : math.min(orb_l, low)
+    orb_set := false
+
+if not in_orb and not na(orb_h)
+    orb_set := true
+
+// ─── Entries ──────────────────────────────────────────────
+bull = ema_f > ema_s and close > ema_t
+bear = ema_f < ema_s and close < ema_t
+
+go_long  = orb_set and in_sess and bull and close > orb_h and not traded and strategy.position_size == 0
+go_short = orb_set and in_sess and bear and close < orb_l and not traded and strategy.position_size == 0
+
+if go_long
+    traded := true
+    strategy.entry("L", strategy.long)
+    strategy.exit("L-X", "L", qty_percent = 50, limit = close + tp1_atr * atr, stop = close - sl_atr * atr)
+    strategy.exit("L-X2","L", qty_percent = 50, limit = close + tp2_atr * atr, stop = close - sl_atr * atr)
+
+if go_short
+    traded := true
+    strategy.entry("S", strategy.short)
+    strategy.exit("S-X", "S", qty_percent = 50, limit = close - tp1_atr * atr, stop = close + sl_atr * atr)
+    strategy.exit("S-X2","S", qty_percent = 50, limit = close - tp2_atr * atr, stop = close + sl_atr * atr)
+
+if in_eod and strategy.position_size != 0
+    strategy.close_all(comment = "EOD")
+
+// ─── Plots ────────────────────────────────────────────────
+plot(ema_f, "EMA9",  color.new(#2962ff, 0), 1)
+plot(ema_s, "EMA21", color.new(#ff6d00, 0), 1)
+plot(ema_t, "EMA50", color.new(#888888, 40), 2)
+plot(orb_set ? orb_h : na, "ORB H", color.new(#089981, 0), 2, plot.style_linebr)
+plot(orb_set ? orb_l : na, "ORB L", color.new(#f23645, 0), 2, plot.style_linebr)
+plotshape(go_long,  "", shape.triangleup,   location.belowbar, #089981, size = size.small)
+plotshape(go_short, "", shape.triangledown, location.abovebar, #f23645, size = size.small)
