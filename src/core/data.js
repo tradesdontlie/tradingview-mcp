@@ -133,35 +133,137 @@ export async function getIndicator({ entity_id }) {
 }
 
 export async function getStrategyResults() {
-  const results = await evaluate(`
+  // Phase 1: find strategy source and inspect its properties
+  const inspection = await evaluate(`
     (function() {
       try {
         var chart = ${CHART_API}._chartWidget;
         var sources = chart.model().model().dataSources();
         var strat = null;
+        // Strategy detection: ordersData is the definitive marker (only strategies have it)
+        // Pass 1: check for ordersData (most reliable)
         for (var i = 0; i < sources.length; i++) {
-          var s = sources[i];
-          if (s.metaInfo && s.metaInfo().is_price_study === false && (s.reportData || s.performance)) { strat = s; break; }
+          if (sources[i].ordersData) { strat = sources[i]; break; }
         }
-        if (!strat) return {metrics: {}, source: 'internal_api', error: 'No strategy found on chart. Add a strategy indicator first.'};
-        var metrics = {};
-        if (strat.reportData) {
-          var rd = typeof strat.reportData === 'function' ? strat.reportData() : strat.reportData;
-          if (rd && typeof rd === 'object') {
-            if (typeof rd.value === 'function') rd = rd.value();
-            if (rd) { var keys = Object.keys(rd); for (var k = 0; k < keys.length; k++) { var val = rd[keys[k]]; if (val !== null && val !== undefined && typeof val !== 'function') metrics[keys[k]] = val; } }
+        // Pass 2: check metaInfo for strategy markers
+        if (!strat) {
+          var skip = ['volume','dividends','splits','earnings','dates calculator'];
+          for (var i = 0; i < sources.length; i++) {
+            var s = sources[i];
+            try {
+              if (!s.metaInfo) continue;
+              var mi = s.metaInfo();
+              var desc = (mi.description || mi.shortDescription || '').toLowerCase();
+              var isBuiltIn = false;
+              for (var sk = 0; sk < skip.length; sk++) { if (desc.indexOf(skip[sk]) !== -1) { isBuiltIn = true; break; } }
+              if (isBuiltIn) continue;
+              if (mi.pine && mi.pine.scriptType === 'strategy') { strat = s; break; }
+              if (mi.scriptType === 'strategy') { strat = s; break; }
+              // is_price_study=false AND has reportData → likely strategy
+              if (mi.is_price_study === false && s.reportData) { strat = s; break; }
+            } catch(e) {}
           }
         }
-        if (Object.keys(metrics).length === 0 && strat.performance) {
-          var perf = strat.performance();
-          if (perf && typeof perf.value === 'function') perf = perf.value();
-          if (perf && typeof perf === 'object') { var pkeys = Object.keys(perf); for (var p = 0; p < pkeys.length; p++) { var pval = perf[pkeys[p]]; if (pval !== null && pval !== undefined && typeof pval !== 'function') metrics[pkeys[p]] = pval; } }
+        if (!strat) return { found: false, error: 'No strategy found on chart.' };
+
+        // Detect which properties exist and strategy state
+        var has = {};
+        var check = ['reportData','performance','strategyReport','_strategyReport','_report','reportManager'];
+        for (var c = 0; c < check.length; c++) {
+          if (strat[check[c]] !== undefined) has[check[c]] = typeof strat[check[c]];
         }
-        return {metrics: metrics, source: 'internal_api'};
-      } catch(e) { return {metrics: {}, source: 'internal_api', error: e.message}; }
+        var state = { completed: false, failed: false, loading: false };
+        try { state.completed = strat.isCompleted(); } catch(e) {}
+        try { state.failed = strat.isFailed(); } catch(e) {}
+        try { state.loading = strat.isLoading(); } catch(e) {}
+        return { found: true, has: has, state: state, source_count: sources.length };
+      } catch(e) { return { found: false, error: e.message }; }
     })()
   `);
-  return { success: true, metric_count: Object.keys(results?.metrics || {}).length, source: results?.source, metrics: results?.metrics || {}, error: results?.error };
+
+  if (!inspection || !inspection.found) {
+    return { success: true, metric_count: 0, source: 'internal_api', metrics: {}, error: inspection?.error || 'No strategy found on chart.' };
+  }
+
+  // Check strategy state — if failed or not completed, metrics won't be available
+  const state = inspection.state || {};
+  if (state.failed) {
+    return { success: true, metric_count: 0, source: 'internal_api', metrics: {}, error: 'Strategy is in failed state (compilation error or runtime error). Recompile the strategy.', state };
+  }
+  if (state.loading) {
+    return { success: true, metric_count: 0, source: 'internal_api', metrics: {}, error: 'Strategy is still loading/computing. Wait and retry.', state };
+  }
+
+  // Phase 2: extract metrics via reportData() — the authoritative source
+  let metrics = {};
+  const tried = [];
+
+  try {
+    tried.push('reportData');
+    const data = await evaluate(`
+      (function() {
+        var chart = ${CHART_API}._chartWidget;
+        var sources = chart.model().model().dataSources();
+        var strat = null;
+        for (var i = 0; i < sources.length; i++) { if (sources[i].ordersData) { strat = sources[i]; break; } }
+        if (!strat || typeof strat.reportData !== 'function') return null;
+        var rd = strat.reportData();
+        if (!rd || !rd.performance) return null;
+        var perf = rd.performance;
+        var out = {};
+        // Top-level performance metrics
+        var topKeys = ['maxStrategyDrawDown','maxStrategyDrawDownPercent','maxStrategyRunUp','maxStrategyRunUpPercent',
+                       'sharpeRatio','sortinoRatio','openPL','openPLPercent','buyHoldReturn','buyHoldReturnPercent'];
+        for (var t = 0; t < topKeys.length; t++) {
+          if (perf[topKeys[t]] !== undefined) out[topKeys[t]] = perf[topKeys[t]];
+        }
+        // Flatten performance.all (combined long+short metrics)
+        if (perf.all && typeof perf.all === 'object') {
+          var ak = Object.keys(perf.all);
+          for (var a = 0; a < ak.length; a++) {
+            var v = perf.all[ak[a]];
+            if (v !== null && v !== undefined && typeof v !== 'function' && typeof v !== 'object') out[ak[a]] = v;
+          }
+        }
+        // Add settings info
+        if (rd.settings && rd.settings.dateRange) out._dateRange = JSON.stringify(rd.settings.dateRange);
+        out._currency = rd.currency || '';
+        out._tradeCount = rd.trades ? (Array.isArray(rd.trades) ? rd.trades.length : 0) : 0;
+        // Get strategy name from metaInfo
+        try {
+          var mi = strat.metaInfo();
+          out.strategyName = mi.description || mi.shortDescription || '';
+        } catch(e) {}
+        return out;
+      })()
+    `);
+    if (data && typeof data === 'object' && Object.keys(data).length > 0) metrics = data;
+  } catch (e) {
+    tried.push('reportData error: ' + (e.message || '').substring(0, 100));
+  }
+
+  // Phase 3: if still empty, collect debug info about strategy source properties
+  let debug;
+  if (Object.keys(metrics).length === 0) {
+    try {
+      debug = await evaluate(`
+        (function() {
+          var chart = ${CHART_API}._chartWidget;
+          var sources = chart.model().model().dataSources();
+          var strat = null;
+          for (var i = 0; i < sources.length; i++) { if (sources[i].ordersData) { strat = sources[i]; break; } }
+          if (!strat) return null;
+          var own = Object.getOwnPropertyNames(strat).slice(0, 50);
+          var proto = Object.getPrototypeOf(strat);
+          var protoNames = proto ? Object.getOwnPropertyNames(proto).filter(function(n) { return /report|perf|strat|result|metric|stat/i.test(n); }) : [];
+          return { own_props: own, report_proto_methods: protoNames };
+        })()
+      `);
+    } catch (e) { debug = { error: e.message }; }
+    if (debug) debug.tried = tried;
+  }
+
+  return { success: true, metric_count: Object.keys(metrics).length, source: 'internal_api', metrics, error: Object.keys(metrics).length === 0 ? 'Strategy found but metrics extraction failed' : undefined, debug };
 }
 
 export async function getTrades({ max_trades } = {}) {
@@ -427,6 +529,112 @@ export async function getPineTables({ study_filter } = {}) {
     return { name: s.name, tables: tableList };
   });
   return { success: true, study_count: studies.length, studies };
+}
+
+export async function evaluateJs({ expression }) {
+  if (!expression) {
+    return { success: false, error: 'expression is required' };
+  }
+  try {
+    const result = await evaluate(expression);
+    return { success: true, result };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function getStrategyMetricsFromDom() {
+  try {
+    // First, ensure the "지표" (metrics) tab is active in the strategy tester
+    await evaluate(`
+      (function() {
+        var bottom = document.querySelector('.layout__area--bottom');
+        if (!bottom) return;
+        var buttons = bottom.querySelectorAll('button');
+        for (var i = 0; i < buttons.length; i++) {
+          var t = buttons[i].textContent.trim();
+          if (t === '지표' || t === 'Performance Summary' || t === 'Overview') {
+            buttons[i].click();
+            break;
+          }
+        }
+      })()
+    `);
+    // Wait for tab switch
+    await new Promise(r => setTimeout(r, 500));
+
+    const raw = await evaluate(`
+      (function() {
+        var bottom = document.querySelector('.layout__area--bottom');
+        if (!bottom) return { error: 'Strategy tester panel not found. Open it via the bottom panel.' };
+
+        var bRect = bottom.getBoundingClientRect();
+        var yMin = bRect.top;
+        var yMax = bRect.bottom;
+
+        var all = bottom.querySelectorAll('*');
+        var m = {};
+        var prev = '';
+
+        for (var i = 0; i < all.length; i++) {
+          var el = all[i];
+          if (el.children.length !== 0) continue;
+          var rect = el.getBoundingClientRect();
+          if (rect.width <= 0 || rect.height <= 0) continue;
+          if (rect.y < yMin || rect.y > yMax) continue;
+
+          var t = el.textContent.trim();
+          if (!t) continue;
+
+          // Strategy name detection
+          if (t.includes('HEX') || t.includes('v5.') || t.includes('v4.') || t.includes('[AR]')
+              || t.includes('Strategy') || t.includes('strategy'))
+            m.name = t;
+          // Korean + English labels
+          else if (t === '총 손익' || t === 'Net Profit') prev = 'np';
+          else if (t === '최대 자본 감소' || t === 'Max Drawdown') prev = 'dd';
+          else if (t === '총 거래횟수' || t === 'Total Closed Trades') prev = 'tr';
+          else if (t === '수익성 거래' || t === 'Percent Profitable') prev = 'wr';
+          else if (t === '수익지수' || t === 'Profit Factor') prev = 'pf';
+          else if (t === 'CAGR' || t === 'Compounding Annual Return') prev = 'cagr';
+          else if (t === 'Sharpe Ratio' || t === '샤프 레이쇼') prev = 'sharpe';
+          else if (t === 'Sortino Ratio' || t === '소르티노 레이쇼') prev = 'sortino';
+          else if (t === 'Max Run-up' || t === '최대 실현 수익') prev = 'runup';
+          else if (t === 'Avg Trade' || t === '평균 거래' || t === '평균 손익') prev = 'avg_trade';
+          else if (prev && /[\\d.+\\-,]+%/.test(t)) {
+            if (prev === 'np') m.net_profit_pct = t;
+            else if (prev === 'dd') m.max_dd_pct = t;
+            else if (prev === 'wr') m.win_rate = t;
+            else if (prev === 'cagr') m.cagr = t;
+            else if (prev === 'avg_trade' && !m.avg_trade_pct) m.avg_trade_pct = t;
+            prev = '';
+          }
+          else if (prev === 'tr' && /^[\\d,]+$/.test(t)) { m.trades = t.replace(/,/g, ''); prev = ''; }
+          else if (prev === 'pf' && /^[\\d.]+$/.test(t)) { m.profit_factor = t; prev = ''; }
+          else if (prev === 'sharpe' && /^[\\-\\d.]+$/.test(t)) { m.sharpe_ratio = t; prev = ''; }
+          else if (prev === 'sortino' && /^[\\-\\d.]+$/.test(t)) { m.sortino_ratio = t; prev = ''; }
+          else if (prev === 'np' && /^[+\\-][\\d,]/.test(t)) m.net_profit_usdt = t;
+          else if (prev === 'dd' && /^[\\d,]/.test(t)) m.max_dd_usdt = t;
+          else if (prev === 'runup' && /^[+\\-]?[\\d,]/.test(t)) { m.max_runup = t; prev = ''; }
+          else if (prev === 'avg_trade' && /^[+\\-]?[\\d,.]/.test(t)) { m.avg_trade = t; }
+        }
+        return m;
+      })()
+    `);
+
+    if (raw?.error) {
+      return { success: false, error: raw.error };
+    }
+
+    const metricCount = Object.keys(raw || {}).length;
+    if (metricCount === 0) {
+      return { success: false, error: 'No strategy metrics found in DOM. Make sure the Strategy Tester panel is open and a strategy is loaded.' };
+    }
+
+    return { success: true, source: 'dom', metric_count: metricCount, metrics: raw };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
 }
 
 export async function getPineBoxes({ study_filter, verbose } = {}) {

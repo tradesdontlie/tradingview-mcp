@@ -24,7 +24,7 @@ register('values', {
 });
 
 register('data', {
-  description: 'Advanced data tools (lines, labels, tables, boxes, strategy, trades, equity, depth)',
+  description: 'Advanced data tools (lines, labels, tables, boxes, strategy, trades, equity, depth, evaluate-js, strategy-dom)',
   subcommands: new Map([
     ['lines', {
       description: 'Get Pine Script line.new() price levels',
@@ -83,6 +83,21 @@ register('data', {
         if (!positionals[0]) throw new Error('Entity ID required. Usage: tv data indicator eFu1Ot');
         return core.getIndicator({ entity_id: positionals[0] });
       },
+    }],
+    ['evaluate-js', {
+      description: 'Execute JavaScript in the TradingView page via CDP',
+      options: {
+        expression: { type: 'string', short: 'e', description: 'JavaScript expression to evaluate' },
+      },
+      handler: (opts, positionals) => {
+        const expression = opts.expression || positionals[0];
+        if (!expression) throw new Error('Expression required. Usage: tv data evaluate-js -e "document.title"');
+        return core.evaluateJs({ expression });
+      },
+    }],
+    ['strategy-dom', {
+      description: 'Get strategy metrics from DOM (fallback for strategy)',
+      handler: () => core.getStrategyMetricsFromDom(),
     }],
   ]),
 });
