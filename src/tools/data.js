@@ -83,4 +83,16 @@ export function registerDataTools(server) {
     try { return jsonResult(await core.getStudyValues()); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
+
+  server.tool('data_evaluate_js', 'Execute arbitrary JavaScript in the TradingView page via CDP Runtime.evaluate. Returns the result. Useful as a fallback when other tools return empty.', {
+    expression: z.string().describe('JavaScript expression to evaluate in the TradingView page context'),
+  }, async ({ expression }) => {
+    try { return jsonResult(await core.evaluateJs({ expression })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('data_get_strategy_metrics_dom', 'Fallback for data_get_strategy_results — parses strategy metrics directly from the Strategy Tester DOM panel. Use when data_get_strategy_results returns empty metrics. Extracts Net Profit, CAGR, Max Drawdown, Profit Factor, Total Trades, Win Rate, Sharpe, Sortino.', {}, async () => {
+    try { return jsonResult(await core.getStrategyMetricsFromDom()); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
 }
