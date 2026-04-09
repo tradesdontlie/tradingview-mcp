@@ -189,6 +189,19 @@ export async function launch({ port, kill_existing } = {}) {
     if (p && existsSync(p)) { tvPath = p; break; }
   }
 
+  if (!tvPath && platform === 'win32') {
+    // MSIX/Windows Store install — InstallLocation is in WindowsApps, which is ACL-restricted
+    // for normal `dir` enumeration but readable via Get-AppxPackage without elevation.
+    try {
+      const ps = 'powershell -NoProfile -Command "(Get-AppxPackage -Name \'TradingView.Desktop\' -ErrorAction SilentlyContinue).InstallLocation"';
+      const installDir = execSync(ps, { timeout: 5000 }).toString().trim();
+      if (installDir) {
+        const candidate = `${installDir}\\TradingView.exe`;
+        if (existsSync(candidate)) tvPath = candidate;
+      }
+    } catch { /* ignore */ }
+  }
+
   if (!tvPath) {
     try {
       const cmd = platform === 'win32' ? 'where TradingView.exe' : 'which tradingview';
