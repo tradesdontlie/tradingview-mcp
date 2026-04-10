@@ -1,0 +1,168 @@
+//@version=6
+strategy("Index Midday Momentum (Live Paper Variant)", overlay=true, process_orders_on_close=true, pyramiding=0, calc_on_order_fills=true, commission_type=strategy.commission.percent, commission_value=0.02)
+
+thresholdPct = input.float(0.40, "Signal Threshold %", step=0.05, group="Entry Logic") / 100.0
+useTrendFilter = input.bool(false, "Use Previous-Day EMA20 Trend Filter", group="Entry Logic")
+useGapAlign = input.bool(false, "Require Overnight Gap Alignment", group="Entry Logic")
+useRsiConfirm = input.bool(false, "Use Previous-Day RSI Confirmation", group="Entry Logic")
+useSlopeAlign = input.bool(false, "Require Previous-Day EMA20 Slope Alignment", group="Entry Logic")
+trendTf = input.timeframe("D", "Trend Timeframe", group="Entry Logic")
+signalBarInDay = input.int(3, "Signal Bar In Day", minval=1, group="Session Timing")
+forceFlatBarInDay = input.int(6, "Force Flat Bar In Day", minval=1, group="Session Timing")
+
+atrLength = input.int(14, "ATR Length", minval=1, group="ATR Exits")
+atrStopMult = input.float(1.0, "Stop ATR Multiplier", step=0.1, group="ATR Exits")
+tp1Mult = input.float(1.0, "TP1 ATR Multiplier", step=0.1, group="ATR Exits")
+tp2Mult = input.float(2.0, "TP2 ATR Multiplier", step=0.1, group="ATR Exits")
+tp3Mult = input.float(3.0, "TP3 ATR Multiplier", step=0.1, group="ATR Exits")
+tp1Qty = input.float(50.0, "TP1 Qty %", minval=0.0, maxval=100.0, step=1.0, group="ATR Exits")
+tp2Qty = input.float(30.0, "TP2 Qty %", minval=0.0, maxval=100.0, step=1.0, group="ATR Exits")
+tp3Qty = input.float(20.0, "TP3 Qty %", minval=0.0, maxval=100.0, step=1.0, group="ATR Exits")
+
+showBars = input.bool(true, "Show Trend Bar Colors", group="Display")
+showLabels = input.bool(true, "Show Entry Labels", group="Display")
+showTPSL = input.bool(true, "Show TP / SL Lines", group="Display")
+
+fmtPrice(x) => str.tostring(x, "#.##")
+fmtPct(x) => str.tostring(x * 100.0, "#.###")
+
+buildEntryMessage(direction, entryPrice, retPct, atrVal, tp1, tp2, tp3, sl) =>
+    str.format(
+         "event=entry;symbol={0};direction={1};entry_price={2};signal_ret_pct={3};threshold_pct={4};atr={5};tp1={6};tp2={7};tp3={8};sl={9};bar_in_day={10};time={11}",
+         syminfo.ticker,
+         direction,
+         fmtPrice(entryPrice),
+         fmtPct(retPct),
+         fmtPct(thresholdPct),
+         fmtPrice(atrVal),
+         fmtPrice(tp1),
+         fmtPrice(tp2),
+         fmtPrice(tp3),
+         fmtPrice(sl),
+         str.tostring(signalBarInDay),
+         str.format_time(time, "yyyy-MM-dd HH:mm", syminfo.timezone)
+    )
+
+buildExitMessage(direction, stage, entryPrice, exitHint, atrVal, tp1, tp2, tp3, sl) =>
+    str.format(
+         "event=exit;symbol={0};direction={1};exit_stage={2};entry_price={3};exit_hint={4};atr={5};tp1={6};tp2={7};tp3={8};sl={9};time={10}",
+         syminfo.ticker,
+         direction,
+         stage,
+         fmtPrice(entryPrice),
+         fmtPrice(exitHint),
+         fmtPrice(atrVal),
+         fmtPrice(tp1),
+         fmtPrice(tp2),
+         fmtPrice(tp3),
+         fmtPrice(sl),
+         str.format_time(time, "yyyy-MM-dd HH:mm", syminfo.timezone)
+    )
+
+isNewDay = ta.change(time("D")) != 0
+var int barInDay = 0
+var float dayOpen = na
+var float signalRet = na
+var string signalDir = "NONE"
+var float entryPrice = na
+var float atrAtSignal = na
+var float tp1Level = na
+var float tp2Level = na
+var float tp3Level = na
+var float slLevel = na
+var line lineEntry = na
+var line lineTP1 = na
+var line lineTP2 = na
+var line lineTP3 = na
+var line lineSL = na
+
+if isNewDay
+    barInDay := 0
+    dayOpen := open
+    signalRet := na
+    signalDir := "NONE"
+    entryPrice := na
+    atrAtSignal := na
+    tp1Level := na
+    tp2Level := na
+    tp3Level := na
+    slLevel := na
+else
+    barInDay += 1
+
+prevDailyClose = request.security(syminfo.tickerid, trendTf, close[1], barmerge.gaps_off, barmerge.lookahead_off)
+prevDailyEma20 = request.security(syminfo.tickerid, trendTf, ta.ema(close, 20)[1], barmerge.gaps_off, barmerge.lookahead_off)
+prevDailyEma20Slope = request.security(syminfo.tickerid, trendTf, ta.ema(close, 20)[1] - ta.ema(close, 20)[2], barmerge.gaps_off, barmerge.lookahead_off)
+prevDailyRsi14 = request.security(syminfo.tickerid, trendTf, ta.rsi(close, 14)[1], barmerge.gaps_off, barmerge.lookahead_off)
+trendDir = prevDailyClose > prevDailyEma20 ? 1 : -1
+slopeDir = prevDailyEma20Slope > 0 ? 1 : prevDailyEma20Slope < 0 ? -1 : 0
+gapDir = dayOpen > prevDailyClose ? 1 : dayOpen < prevDailyClose ? -1 : 0
+atrSeries = ta.atr(atrLength)
+
+longSignal = false
+shortSignal = false
+
+// On a 60m chart, bar 3 completes the first 4 trading hours.
+if barInDay == signalBarInDay and not na(dayOpen)
+    signalRet := (close - dayOpen) / dayOpen
+    rawDir = signalRet > 0 ? 1 : -1
+    signalDir := rawDir == 1 ? "LONG" : "SHORT"
+    passesThreshold = math.abs(signalRet) >= thresholdPct
+    passesTrend = not useTrendFilter or rawDir == trendDir
+    passesGap = not useGapAlign or gapDir == rawDir
+    passesRsi = not useRsiConfirm or (rawDir == 1 ? prevDailyRsi14 > 50 : prevDailyRsi14 < 50)
+    passesSlope = not useSlopeAlign or rawDir == slopeDir
+    longSignal := passesThreshold and rawDir == 1 and passesTrend and passesGap and passesRsi and passesSlope
+    shortSignal := passesThreshold and rawDir == -1 and passesTrend and passesGap and passesRsi and passesSlope
+
+    if longSignal or shortSignal
+        entryPrice := close
+        atrAtSignal := atrSeries
+        if longSignal
+            tp1Level := entryPrice + tp1Mult * atrAtSignal
+            tp2Level := entryPrice + tp2Mult * atrAtSignal
+            tp3Level := entryPrice + tp3Mult * atrAtSignal
+            slLevel := entryPrice - atrStopMult * atrAtSignal
+        if shortSignal
+            tp1Level := entryPrice - tp1Mult * atrAtSignal
+            tp2Level := entryPrice - tp2Mult * atrAtSignal
+            tp3Level := entryPrice - tp3Mult * atrAtSignal
+            slLevel := entryPrice + atrStopMult * atrAtSignal
+
+        if showTPSL
+            line.delete(lineEntry)
+            line.delete(lineTP1)
+            line.delete(lineTP2)
+            line.delete(lineTP3)
+            line.delete(lineSL)
+            lineEntry := line.new(bar_index, entryPrice, bar_index + 40, entryPrice, color=color.new(color.blue, 0), width=1, style=line.style_dashed, extend=extend.right)
+            lineTP1 := line.new(bar_index, tp1Level, bar_index + 40, tp1Level, color=color.new(color.green, 0), width=1, style=line.style_dashed, extend=extend.right)
+            lineTP2 := line.new(bar_index, tp2Level, bar_index + 40, tp2Level, color=color.new(color.green, 35), width=1, style=line.style_dashed, extend=extend.right)
+            lineTP3 := line.new(bar_index, tp3Level, bar_index + 40, tp3Level, color=color.new(color.green, 60), width=1, style=line.style_dashed, extend=extend.right)
+            lineSL := line.new(bar_index, slLevel, bar_index + 40, slLevel, color=color.new(color.red, 0), width=1, style=line.style_dashed, extend=extend.right)
+
+entryMessage = buildEntryMessage(signalDir, entryPrice, signalRet, atrAtSignal, tp1Level, tp2Level, tp3Level, slLevel)
+
+if longSignal
+    strategy.entry("Long", strategy.long, alert_message=entryMessage)
+if shortSignal
+    strategy.entry("Short", strategy.short, alert_message=entryMessage)
+
+if strategy.position_size > 0 and not na(tp1Level) and not na(slLevel)
+    strategy.exit("L-TP1", from_entry="Long", qty_percent=tp1Qty, limit=tp1Level, stop=slLevel, alert_message=buildExitMessage("LONG", "TP1_OR_SL", entryPrice, close, atrAtSignal, tp1Level, tp2Level, tp3Level, slLevel))
+    strategy.exit("L-TP2", from_entry="Long", qty_percent=tp2Qty, limit=tp2Level, stop=slLevel, alert_message=buildExitMessage("LONG", "TP2_OR_SL", entryPrice, close, atrAtSignal, tp1Level, tp2Level, tp3Level, slLevel))
+    strategy.exit("L-TP3", from_entry="Long", qty_percent=tp3Qty, limit=tp3Level, stop=slLevel, alert_message=buildExitMessage("LONG", "TP3_OR_SL", entryPrice, close, atrAtSignal, tp1Level, tp2Level, tp3Level, slLevel))
+
+if strategy.position_size < 0 and not na(tp1Level) and not na(slLevel)
+    strategy.exit("S-TP1", from_entry="Short", qty_percent=tp1Qty, limit=tp1Level, stop=slLevel, alert_message=buildExitMessage("SHORT", "TP1_OR_SL", entryPrice, close, atrAtSignal, tp1Level, tp2Level, tp3Level, slLevel))
+    strategy.exit("S-TP2", from_entry="Short", qty_percent=tp2Qty, limit=tp2Level, stop=slLevel, alert_message=buildExitMessage("SHORT", "TP2_OR_SL", entryPrice, close, atrAtSignal, tp1Level, tp2Level, tp3Level, slLevel))
+    strategy.exit("S-TP3", from_entry="Short", qty_percent=tp3Qty, limit=tp3Level, stop=slLevel, alert_message=buildExitMessage("SHORT", "TP3_OR_SL", entryPrice, close, atrAtSignal, tp1Level, tp2Level, tp3Level, slLevel))
+
+if barInDay == forceFlatBarInDay and strategy.position_size != 0
+    strategy.close_all("EOD Exit", buildExitMessage(strategy.position_size > 0 ? "LONG" : "SHORT", "EOD", entryPrice, close, atrAtSignal, tp1Level, tp2Level, tp3Level, slLevel))
+
+plot(dayOpen, "Day Open", color=color.new(color.gray, 70))
+barColor = longSignal ? color.new(color.green, 0) : shortSignal ? color.new(color.red, 0) : na
+barcolor(showBars ? barColor : na)
+plotshape(longSignal, title="Long Signal", style=shape.triangleup, color=color.new(color.green, 0), size=size.tiny, location=location.belowbar, text="L")
+plotshape(shortSignal, title="Short Signal", style=shape.triangledown, color=color.new(color.red, 0), size=size.tiny, location=location.abovebar, text="S")

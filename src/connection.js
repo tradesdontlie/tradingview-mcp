@@ -2,8 +2,8 @@ import CDP from 'chrome-remote-interface';
 
 let client = null;
 let targetInfo = null;
-const CDP_HOST = 'localhost';
-const CDP_PORT = 9222;
+const CDP_HOST = process.env.TV_CDP_HOST || 'localhost';
+const CDP_PORT = Number(process.env.TV_CDP_PORT || 9222);
 const MAX_RETRIES = 5;
 const BASE_DELAY = 500;
 

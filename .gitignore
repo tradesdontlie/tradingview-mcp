@@ -4,3 +4,17 @@ scripts/current.pine
 temp_*
 *.log
 discovery-log.json
+config/local.env
+config/runtime.env
+cache/
+__pycache__/
+*.pyc
+scripts/__pycache__/
+market/raw/
+market/processed/
+market/forward_trials/
+market/kite/
+market/manifest.json
+market/paper_trades/
+market/paper_trades_kite/
+market/reports/

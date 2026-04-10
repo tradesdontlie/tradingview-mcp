@@ -101,6 +101,31 @@ Then `tv status`, `tv quote`, `tv pine compile`, etc. work from anywhere.
 | Tools return stale data | TradingView may still be loading — wait a few seconds |
 | Pine Editor tools fail | Open the Pine Editor panel first (`ui_open_panel pine-editor open`) |
 
+## Browser Fallback
+
+If the TradingView Desktop app does not expose a working CDP endpoint on your machine, you can point the repo at a debuggable Chrome window instead.
+
+Mac example:
+
+```bash
+mkdir -p /tmp/codex-tv-profile
+'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' \
+  --user-data-dir=/tmp/codex-tv-profile \
+  --remote-debugging-port=9333 \
+  --no-first-run \
+  --no-default-browser-check \
+  --app='https://www.tradingview.com/chart/'
+```
+
+Then run the CLI against that port:
+
+```bash
+TV_CDP_PORT=9333 node src/cli/index.js status
+TV_CDP_PORT=9333 node src/cli/index.js ohlcv --summary
+```
+
+The connection layer now respects `TV_CDP_PORT` and `TV_CDP_HOST`, so you are not limited to port `9222`.
+
 ## What to Read Next
 
 - `CLAUDE.md` — Decision tree for which tool to use when (auto-loaded by Claude Code)

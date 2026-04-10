@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "shared": {
+    "signal_bar_index": 15,
+    "instrument_mode": "atm_option",
+    "expiry_offset": 0,
+    "latest_entry_time": "14:45:00",
+    "hard_exit_time": "15:00:00"
+  },
+  "symbols": {
+    "NIFTY": {
+      "groww_symbol": "NSE-NIFTY",
+      "nse_symbol": "NIFTY",
+      "fallback_lot_size": 65,
+      "default_threshold_pct": 0.5,
+      "default_gap_align": false,
+      "use_proxy_vwap": true,
+      "hard_exit_time": null,
+      "companion_spread_width_points": 200
+    },
+    "BANKNIFTY": {
+      "groww_symbol": "NSE-BANKNIFTY",
+      "nse_symbol": "BANKNIFTY",
+      "fallback_lot_size": 30,
+      "default_threshold_pct": 0.35,
+      "default_gap_align": false
+    }
+  }
+}

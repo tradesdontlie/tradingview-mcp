@@ -2,6 +2,41 @@
 
 Personal AI assistant for your TradingView Desktop charts. Connects Claude Code to your locally running TradingView app via Chrome DevTools Protocol for AI-assisted chart analysis, Pine Script development, and workflow automation.
 
+## Repository Extensions
+
+This repo now also contains a local India index/options research layer in addition to the original TradingView MCP bridge.
+
+The added research stack is focused on:
+
+- cached `NIFTY` / `BANKNIFTY` historical data from Kite and earlier Groww pulls
+- Nifty-only intraday signal research with expanding-window OOS evaluation
+- option-first paper trading for `NIFTY`
+- archived NSE derivative bhavcopy ingestion for historical option EOD data
+
+Start here for that layer:
+
+- [docs/NIFTY_OPTIONS_TRACK.md](/Users/mananagarwal/Desktop/trading%20view%20mcp/docs/NIFTY_OPTIONS_TRACK.md)
+- [docs/NIFTY_PATTERN_NOTES.md](/Users/mananagarwal/Desktop/trading%20view%20mcp/docs/NIFTY_PATTERN_NOTES.md)
+- [market/README.md](/Users/mananagarwal/Desktop/trading%20view%20mcp/market/README.md)
+- [scripts/README.md](/Users/mananagarwal/Desktop/trading%20view%20mcp/scripts/README.md)
+
+Important: this extension is still research and paper-trading infrastructure. It is not a production trading bot.
+
+## Repo Layout
+
+- `src/`
+  - original TradingView MCP bridge, CLI, and CDP connection layer
+- `tests/`
+  - JavaScript tests for the MCP/CLI surface
+- `scripts/`
+  - Python and Pine research, paper-trading, data-fetch, and reporting scripts
+- `config/`
+  - local strategy defaults and runtime config
+- `market/`
+  - local data lake, cached broker/archive pulls, and generated reports
+- `docs/`
+  - project-level explainers for the India/Nifty research layer
+
 > [!WARNING]
 > **This tool is not affiliated with, endorsed by, or associated with TradingView Inc.** It interacts with your locally running TradingView Desktop application via Chrome DevTools Protocol. Review the [Disclaimer](#disclaimer) before use.
 
