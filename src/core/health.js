@@ -161,7 +161,7 @@ export async function uiState() {
 
 export async function launch({ port, kill_existing } = {}) {
   const cdpPort = port || 9222;
-  const killFirst = kill_existing !== false;
+  const killFirst = kill_existing === true;
   const platform = process.platform;
 
   const pathMap = {
