@@ -1,9 +1,10 @@
 import CDP from 'chrome-remote-interface';
+import http from 'http';
 
 let client = null;
 let targetInfo = null;
-const CDP_HOST = 'localhost';
-const CDP_PORT = 9222;
+const CDP_HOST = process.env.CDP_HOST ?? 'localhost';
+const CDP_PORT = Number(process.env.CDP_PORT ?? 9222);
 const MAX_RETRIES = 5;
 const BASE_DELAY = 500;
 
@@ -70,7 +71,13 @@ export async function connect() {
         throw new Error('No TradingView chart target found. Is TradingView open with a chart?');
       }
       targetInfo = target;
-      client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: target.id });
+      // Use the WebSocket URL directly so chrome-remote-interface doesn't send
+      // a Host header that Chrome rejects (e.g. "host.docker.internal:9222").
+      // Chrome returns ws://localhost/... so we rewrite the host+port to the
+      // actual connection address.
+      const wsUrl = (target.webSocketDebuggerUrl || '')
+        .replace(/^ws:\/\/[^/]+/, `ws://${CDP_HOST}:${CDP_PORT}`);
+      client = await CDP({ target: wsUrl, headers: { Host: 'localhost' } });
 
       // Enable required domains
       await client.Runtime.enable();
@@ -87,9 +94,26 @@ export async function connect() {
   throw new Error(`CDP connection failed after ${MAX_RETRIES} attempts: ${lastError?.message}`);
 }
 
+// Node's built-in fetch treats Host as a forbidden header and ignores overrides.
+// Use http.request instead so we can force Host: localhost, which Chrome requires
+// when the connecting address is not localhost (e.g. host.docker.internal).
+function httpGet(hostname, port, path) {
+  return new Promise((resolve, reject) => {
+    const req = http.request({ hostname, port, path, method: 'GET', headers: { Host: 'localhost' } }, (res) => {
+      let data = '';
+      res.on('data', chunk => { data += chunk; });
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); }
+        catch { reject(new Error(`Invalid JSON from CDP: ${data.slice(0, 120)}`)); }
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
 async function findChartTarget() {
-  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
-  const targets = await resp.json();
+  const targets = await httpGet(CDP_HOST, CDP_PORT, '/json/list');
   // Prefer targets with tradingview.com/chart in the URL
   return targets.find(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
     || targets.find(t => t.type === 'page' && /tradingview/i.test(t.url))
