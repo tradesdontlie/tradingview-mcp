@@ -7,111 +7,12 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { analyze as _analyze } from '../src/core/pine.js';
 
-// Extracted analyze function matching the tool's logic
+// Wrapper: production analyze() takes {source} and returns {diagnostics, ...}
+// Tests were written against a bare (source) -> diagnostics[] signature
 function analyze(source) {
-  const lines = source.split('\n');
-  const diagnostics = [];
-  let isV6 = false;
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (trimmed.startsWith('//@version=6')) { isV6 = true; break; }
-    if (trimmed.startsWith('//@version=')) break;
-    if (trimmed === '' || trimmed.startsWith('//')) continue;
-    break;
-  }
-
-  const arrays = new Map();
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const fromMatch = line.match(/(\w+)\s*=\s*array\.from\(([^)]*)\)/);
-    if (fromMatch) {
-      const name = fromMatch[1].trim();
-      const args = fromMatch[2].trim();
-      const size = args === '' ? 0 : args.split(',').length;
-      arrays.set(name, { name, size, line: i + 1 });
-      continue;
-    }
-    const newMatch = line.match(/(\w+)\s*=\s*array\.new(?:<\w+>|_\w+)\((\d+)?/);
-    if (newMatch) {
-      const name = newMatch[1].trim();
-      const size = newMatch[2] !== undefined ? parseInt(newMatch[2], 10) : null;
-      arrays.set(name, { name, size, line: i + 1 });
-    }
-  }
-
-  // Array OOB
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const pattern = /array\.(get|set)\(\s*(\w+)\s*,\s*(-?\d+)/g;
-    let match;
-    while ((match = pattern.exec(line)) !== null) {
-      const method = match[1];
-      const arrName = match[2];
-      const idx = parseInt(match[3], 10);
-      const info = arrays.get(arrName);
-      if (!info || info.size === null) continue;
-      if (idx < 0 || idx >= info.size) {
-        diagnostics.push({
-          line: i + 1,
-          message: `array.${method}(${arrName}, ${idx}) — index ${idx} out of bounds (array size is ${info.size})`,
-          severity: 'error',
-        });
-      }
-    }
-  }
-
-  // Unguarded first/last on empty arrays
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const firstLastPattern = /(\w+)\.(first|last)\(\)/g;
-    let match;
-    while ((match = firstLastPattern.exec(line)) !== null) {
-      const arrName = match[1];
-      if (arrName === 'array') continue;
-      const info = arrays.get(arrName);
-      if (info && info.size === 0) {
-        diagnostics.push({
-          line: i + 1,
-          message: `${arrName}.${match[2]}() called on possibly empty array`,
-          severity: 'warning',
-        });
-      }
-    }
-  }
-
-  // strategy.entry without strategy()
-  for (let i = 0; i < lines.length; i++) {
-    const trimmed = lines[i].trim();
-    if (trimmed.includes('strategy.entry') || trimmed.includes('strategy.close')) {
-      let hasStrategyDecl = false;
-      for (const l of lines) {
-        if (l.trim().startsWith('strategy(')) { hasStrategyDecl = true; break; }
-      }
-      if (!hasStrategyDecl) {
-        diagnostics.push({
-          line: i + 1,
-          message: 'strategy.entry/close used but no strategy() declaration found',
-          severity: 'error',
-        });
-        break;
-      }
-    }
-  }
-
-  // Old version warning
-  if (!isV6 && source.includes('//@version=')) {
-    const vMatch = source.match(/\/\/@version=(\d+)/);
-    if (vMatch && parseInt(vMatch[1]) < 5) {
-      diagnostics.push({
-        line: 1,
-        message: `Script uses Pine v${vMatch[1]} — consider upgrading to v6`,
-        severity: 'info',
-      });
-    }
-  }
-
-  return diagnostics;
+  return _analyze({ source }).diagnostics;
 }
 
 describe('pine_analyze — static analysis', () => {

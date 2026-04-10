@@ -1124,11 +1124,6 @@ val = array.get(a, 5)`;
       assert.ok(results.length > 0, 'Found visible buttons');
     });
 
-    it('ui_evaluate — execute arbitrary JS', async () => {
-      const result = await evaluate('1 + 1');
-      assert.equal(result, 2, 'JS evaluation works');
-    });
-
     it('layout_list — find layout dropdown button', async () => {
       const found = await evaluate(`
         !!(document.querySelector('[data-name="save-load-menu"]')

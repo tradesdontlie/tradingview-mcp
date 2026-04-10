@@ -58,13 +58,6 @@ register('ui', {
         return core.findElement({ query: positionals.join(' '), strategy: opts.strategy });
       },
     }],
-    ['eval', {
-      description: 'Execute JavaScript in TradingView page context',
-      handler: (opts, positionals) => {
-        if (!positionals[0]) throw new Error('Expression required. Usage: tv ui eval "1+1"');
-        return core.uiEvaluate({ expression: positionals.join(' ') });
-      },
-    }],
     ['type', {
       description: 'Type text into focused input',
       handler: (opts, positionals) => {

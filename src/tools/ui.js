@@ -85,10 +85,4 @@ export function registerUiTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('ui_evaluate', 'Execute JavaScript code in the TradingView page context for advanced automation', {
-    expression: z.string().describe('JavaScript expression to evaluate in the page context. Wrap in IIFE for complex logic.'),
-  }, async ({ expression }) => {
-    try { return jsonResult(await core.uiEvaluate({ expression })); }
-    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
-  });
 }
