@@ -62,6 +62,15 @@ class SessionSpec:
     companion_spread_width_points: int | None
 
 
+def archive_caution_flags(session_day: pd.Timestamp, signal_ret: float) -> list[str]:
+    cautions: list[str] = []
+    if abs(float(signal_ret)) >= 0.01:
+        cautions.append("extreme_signal_day_archive_eod_weakness")
+    if pd.Timestamp(session_day).day_name() == "Tuesday":
+        cautions.append("tuesday_archive_slice_weakness")
+    return cautions
+
+
 def load_strategy_config(path: Path) -> dict:
     if not path.exists():
         return {}
@@ -518,6 +527,7 @@ def session_trade_report(
     base = {
         "symbol": spec.symbol,
         "session": session_day.strftime("%Y-%m-%d"),
+        "weekday": pd.Timestamp(session_day).day_name(),
         "instrument_mode": "underlying",
         "threshold_pct": round(spec.threshold * 100.0, 3),
         "gap_align": spec.gap_align,
@@ -528,6 +538,10 @@ def session_trade_report(
         "direction": direction,
         "lot_size": symbol_config["fallback_lot_size"],
         "use_proxy_vwap": spec.use_proxy_vwap,
+        "execution_style": "intraday_first",
+        "primary_vehicle": "atm_option",
+        "secondary_vehicle": "companion_debit_spread",
+        "archive_caution_flags": archive_caution_flags(session_day, signal_ret),
     }
     if proxy_vwap_dir is not None:
         base["proxy_vwap_dir"] = proxy_vwap_dir

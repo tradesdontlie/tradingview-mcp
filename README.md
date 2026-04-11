@@ -8,15 +8,16 @@ This repo now also contains a local India index/options research layer in additi
 
 The added research stack is focused on:
 
-- cached `NIFTY` / `BANKNIFTY` historical data from Kite and earlier Groww pulls
+- cached `NIFTY` historical data from Kite
 - Nifty-only intraday signal research with expanding-window OOS evaluation
-- option-first paper trading for `NIFTY`
-- archived NSE derivative bhavcopy ingestion for historical option EOD data
+- intraday-first, option-first paper trading for `NIFTY`
+- archived NSE derivative bhavcopy ingestion for historical option EOD data and regime checks
 
 Start here for that layer:
 
 - [docs/NIFTY_OPTIONS_TRACK.md](/Users/mananagarwal/Desktop/trading%20view%20mcp/docs/NIFTY_OPTIONS_TRACK.md)
 - [docs/NIFTY_PATTERN_NOTES.md](/Users/mananagarwal/Desktop/trading%20view%20mcp/docs/NIFTY_PATTERN_NOTES.md)
+- [docs/REPO_CAPABILITIES.md](/Users/mananagarwal/Desktop/trading%20view%20mcp/docs/REPO_CAPABILITIES.md)
 - [market/README.md](/Users/mananagarwal/Desktop/trading%20view%20mcp/market/README.md)
 - [scripts/README.md](/Users/mananagarwal/Desktop/trading%20view%20mcp/scripts/README.md)
 

@@ -184,6 +184,13 @@ def build_overlay(candidate_name: str) -> dict:
     payload = {
         "candidate": candidate_name,
         "option_price_model": "Entry at signal-day option close, exit at next available trade-day close for the same contract. This is an EOD archive overlay, not an intraday option backtest.",
+        "headline_findings": [
+            "Do not treat overnight ATM option carry as the default strategy.",
+            "Keep the option track intraday-first and use this archive mainly for regime checks.",
+            "ATM option buys remain the primary simple vehicle; debit spreads are a secondary overlay.",
+            "Very large 1.00%+ signal days were the weakest bucket in the current archive slice.",
+            "Tuesdays were the weakest weekday in the current archive slice.",
+        ],
         "available_trade_dates": int(option_eod["trade_date"].nunique()),
         "overlay_summary": summary,
         "by_signal_bucket": by_bucket,

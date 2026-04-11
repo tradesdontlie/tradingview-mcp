@@ -54,6 +54,16 @@ From the current archived option overlay:
 5. Do not over-read the current EOD archive overlay.
    It is useful for historical structure and regime detection, but it is not the same thing as an exact intraday option backtest.
 
+## What Is Implemented Now
+
+- The live paper runner keeps `ATM option` as the primary vehicle.
+- The debit spread remains a secondary companion overlay.
+- The runner now surfaces archive caution flags on:
+  - `1.00%+` signal days
+  - Tuesdays
+
+These are intentionally warnings, not hard filters, because the archive slice is still limited and EOD-based.
+
 ## Biggest Missing Piece
 
 We still need richer historical option bar data to answer the real question:

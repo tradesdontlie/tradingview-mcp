@@ -11,7 +11,8 @@ It exists so we do not have to keep hitting broker or archive APIs every time we
   - reference instrument dumps
   - live-paper option candle caches
 - `raw/groww/`
-  - older Groww index and option research caches
+  - older legacy caches from earlier experiments
+  - not part of the active Nifty options path
 - `raw/nse/`
   - official NSE derivative bhavcopy archive slices
   - normalized Nifty option EOD datasets
@@ -59,6 +60,7 @@ The script merges new slices into the existing local option EOD store instead of
 - Most files in this folder are gitignored because they can be large and are reproducible from scripts.
 - JSON and CSV reports are also mostly generated artifacts.
 - The repo docs point to the scripts and markdown reports, while the heavy raw data stays local.
+- The active backtest/paper path is currently `Kite intraday index data + NSE option EOD archive data`.
 - The current option archive is honest but limited:
   - it gives real historical contracts and EOD prices
   - it does not yet give exact intraday option bars across history

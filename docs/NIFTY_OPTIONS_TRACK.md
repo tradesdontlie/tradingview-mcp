@@ -12,6 +12,7 @@ The current research direction is:
 - use the underlying index signal as the signal engine
 - trade Nifty options, not futures, as the primary vehicle
 - keep execution paper-only until option-specific history and forward validation are strong enough
+- stay intraday-first, not overnight-ATM-carry-first
 
 ## Current Default Nifty Setup
 
@@ -23,6 +24,8 @@ The live-paper default now uses:
 - instrument mode: `atm_option`
 - latest entry: `14:45 IST`
 - hard exit: disabled for Nifty by default, so the option trade holds to end of day unless overridden
+- primary vehicle: ATM option buy
+- secondary vehicle: companion debit spread journal
 
 Config file:
 
@@ -41,6 +44,7 @@ Config file:
   - now supports:
     - optional hard exit
     - proxy VWAP confirmation
+    - archive-derived caution flags for extreme move days and Tuesdays
 
 ### Research
 
@@ -153,3 +157,11 @@ But it still cannot claim:
 - exact intraday ATM option P&L back to 2020
 
 for that, we still need richer historical option bar data.
+
+## Current Practical Rules
+
+- Do not treat signal-day-close to next-day-close ATM option carry as the default strategy.
+- Keep the live option path intraday-first.
+- Keep ATM option buys as the primary simple vehicle.
+- Keep spreads as a secondary overlay, especially when we want capped premium and less volatility exposure.
+- Treat `1.00%+` signal days and Tuesdays as caution regimes from the archive slice, not as hard proven skip rules yet.

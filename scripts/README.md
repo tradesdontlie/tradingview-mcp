@@ -21,6 +21,7 @@ This folder now contains two kinds of scripts:
   - main live-paper runner
   - current Nifty default path
   - supports underlying proxy, ATM option buy, and companion debit spread journal
+  - surfaces archive caution flags for extreme move days and Tuesdays
 
 - [nifty_kite_enhanced_research.py](/Users/mananagarwal/Desktop/trading%20view%20mcp/scripts/nifty_kite_enhanced_research.py)
   - Nifty-only expanding-window OOS research harness
@@ -40,10 +41,6 @@ This folder now contains two kinds of scripts:
   - downloads official NSE derivative bhavcopy archives
   - merges Nifty `OPTIDX` rows into a reusable local EOD option store
 
-- [fetch_groww_index_backtest_data.py](/Users/mananagarwal/Desktop/trading%20view%20mcp/scripts/fetch_groww_index_backtest_data.py)
-- [fetch_groww_index_intraday_data.py](/Users/mananagarwal/Desktop/trading%20view%20mcp/scripts/fetch_groww_index_intraday_data.py)
-  - older Groww cache builders kept for comparison and fallback
-
 ## Research / Diagnostics
 
 - [india_intraday_research.py](/Users/mananagarwal/Desktop/trading%20view%20mcp/scripts/india_intraday_research.py)
@@ -52,22 +49,6 @@ This folder now contains two kinds of scripts:
 
 - [kite_strict_execution_report.py](/Users/mananagarwal/Desktop/trading%20view%20mcp/scripts/kite_strict_execution_report.py)
   - applies strict Kite charge assumptions to directional futures-style proxies
-
-- [audit_kite_market_store.py](/Users/mananagarwal/Desktop/trading%20view%20mcp/scripts/audit_kite_market_store.py)
-  - checks local Kite coverage and enrichment gaps
-
-- [single_name_intraday_research.py](/Users/mananagarwal/Desktop/trading%20view%20mcp/scripts/single_name_intraday_research.py)
-  - HDFCBANK / BAJFINANCE exploratory work
-
-## Paper-Trading Utilities
-
-- [groww_index_paper_trade.py](/Users/mananagarwal/Desktop/trading%20view%20mcp/scripts/groww_index_paper_trade.py)
-- [groww_index_daily_runner.py](/Users/mananagarwal/Desktop/trading%20view%20mcp/scripts/groww_index_daily_runner.py)
-- [groww_index_ledger_report.py](/Users/mananagarwal/Desktop/trading%20view%20mcp/scripts/groww_index_ledger_report.py)
-- [index_forward_trial.py](/Users/mananagarwal/Desktop/trading%20view%20mcp/scripts/index_forward_trial.py)
-- [index_go_no_go_review.py](/Users/mananagarwal/Desktop/trading%20view%20mcp/scripts/index_go_no_go_review.py)
-
-These are still useful for historical context, but the repo's primary path has shifted toward `Kite + Nifty options`.
 
 ## Auth / Webhooks
 
@@ -84,7 +65,6 @@ These are still useful for historical context, but the repo's primary path has s
 ## Pine Scripts
 
 - [index_midday_momentum_live.pine](/Users/mananagarwal/Desktop/trading%20view%20mcp/scripts/index_midday_momentum_live.pine)
-- [nifty_midday_momentum.pine](/Users/mananagarwal/Desktop/trading%20view%20mcp/scripts/nifty_midday_momentum.pine)
 
 These are visual / alert-side strategy representations, not the canonical research engine.
 
