@@ -23,6 +23,47 @@ Start here for that layer:
 
 Important: this extension is still research and paper-trading infrastructure. It is not a production trading bot.
 
+## If You Only Care About The Nifty Options Stack
+
+Read these in order:
+
+1. [docs/NIFTY_OPTIONS_TRACK.md](/Users/mananagarwal/Desktop/trading%20view%20mcp/docs/NIFTY_OPTIONS_TRACK.md)
+   What the active Nifty workflow is and what the current defaults are.
+
+2. [docs/REPO_CAPABILITIES.md](/Users/mananagarwal/Desktop/trading%20view%20mcp/docs/REPO_CAPABILITIES.md)
+   What each major path can do and exactly what data powers it.
+
+3. [scripts/kite_index_paper_trade.py](/Users/mananagarwal/Desktop/trading%20view%20mcp/scripts/kite_index_paper_trade.py)
+   The main live-paper runner. This is the script to execute the current Nifty option workflow.
+
+4. [scripts/nifty_kite_enhanced_research.py](/Users/mananagarwal/Desktop/trading%20view%20mcp/scripts/nifty_kite_enhanced_research.py)
+   The Nifty-only research harness using expanding-window OOS selection.
+
+5. [scripts/fetch_nse_fo_bhavcopy.py](/Users/mananagarwal/Desktop/trading%20view%20mcp/scripts/fetch_nse_fo_bhavcopy.py)
+   The official NSE derivative archive fetcher used for historical option EOD data.
+
+6. [scripts/nifty_option_eod_overlay.py](/Users/mananagarwal/Desktop/trading%20view%20mcp/scripts/nifty_option_eod_overlay.py)
+   The archive overlay that tells us how historical option structure behaved on signal days.
+
+## What Is What
+
+- `src/`
+  The original TradingView MCP server, CLI, and CDP connection code.
+- `tests/`
+  JavaScript tests for the original MCP/CLI layer.
+- `scripts/`
+  The active Nifty option workflow plus supporting fetch, research, and webhook scripts.
+- `config/live_paper_strategy.json`
+  The current live-paper defaults for the Nifty option path.
+- `market/raw/kite/`
+  Local cached Kite index bars, instrument metadata, and live option candle caches.
+- `market/raw/nse/`
+  Local official NSE derivative archive slices, mainly used for Nifty option EOD history.
+- `market/reports/`
+  Generated research outputs and summary artifacts. These stay local and are mostly gitignored.
+- `docs/`
+  Human-readable explainers for the active workflow.
+
 ## Repo Layout
 
 - `src/`
