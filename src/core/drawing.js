@@ -44,6 +44,79 @@ export async function drawShape({ shape, point, point2, overrides: overridesRaw,
   return { success: true, shape, entity_id: result?.entity_id };
 }
 
+export async function drawPosition({ direction, entry_price, stop_loss, take_profit, entry_time, account_size, risk, lot_size, _deps }) {
+  const { evaluate, getChartApi } = _resolve(_deps);
+
+  if (direction !== 'long' && direction !== 'short') {
+    throw new Error('direction must be "long" or "short"');
+  }
+
+  const entry = requireFinite(entry_price, 'entry_price');
+  const sl = requireFinite(stop_loss, 'stop_loss');
+  const tp = requireFinite(take_profit, 'take_profit');
+
+  if (direction === 'long') {
+    if (sl >= entry) throw new Error('long position: stop_loss must be below entry_price');
+    if (tp <= entry) throw new Error('long position: take_profit must be above entry_price');
+  } else {
+    if (sl <= entry) throw new Error('short position: stop_loss must be above entry_price');
+    if (tp >= entry) throw new Error('short position: take_profit must be below entry_price');
+  }
+
+  const apiPath = await getChartApi();
+
+  const pricescale = await evaluate(
+    `${apiPath}._chartWidget.model().mainSeries().symbolInfo().pricescale`
+  );
+  if (!pricescale || pricescale <= 0) {
+    throw new Error('Could not determine pricescale from symbol info');
+  }
+
+  const stopLevel = Math.round(Math.abs(entry - sl) * pricescale);
+  const profitLevel = Math.round(Math.abs(tp - entry) * pricescale);
+
+  let time = entry_time;
+  if (time == null) {
+    const range = await evaluate(`${apiPath}.getVisibleRange()`);
+    time = range?.to || Math.floor(Date.now() / 1000);
+  }
+  time = requireFinite(time, 'entry_time');
+
+  const shapeName = direction === 'long' ? 'long_position' : 'short_position';
+
+  const overrides = { stopLevel, profitLevel };
+  if (account_size != null) overrides.accountSize = requireFinite(account_size, 'account_size');
+  if (risk != null) overrides.risk = requireFinite(risk, 'risk');
+  if (lot_size != null) overrides.lotSize = requireFinite(lot_size, 'lot_size');
+
+  const overridesStr = JSON.stringify(overrides);
+
+  const before = await evaluate(`${apiPath}.getAllShapes().map(function(s) { return s.id; })`);
+
+  await evaluate(`
+    ${apiPath}.createShape(
+      { time: ${time}, price: ${entry} },
+      { shape: ${safeString(shapeName)}, overrides: ${overridesStr} }
+    )
+  `);
+
+  await new Promise(r => setTimeout(r, 200));
+  const after = await evaluate(`${apiPath}.getAllShapes().map(function(s) { return s.id; })`);
+  const entityId = (after || []).find(id => !(before || []).includes(id)) || null;
+
+  const rr = stopLevel > 0 ? Math.round((profitLevel / stopLevel) * 100) / 100 : null;
+
+  return {
+    success: true,
+    direction,
+    entity_id: entityId,
+    entry_price: entry,
+    stop_loss: sl,
+    take_profit: tp,
+    risk_reward_ratio: rr,
+  };
+}
+
 export async function listDrawings() {
   const apiPath = await getChartApi();
   const shapes = await evaluate(`
