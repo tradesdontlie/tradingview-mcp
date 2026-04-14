@@ -25,4 +25,16 @@ export function registerHealthTools(server) {
     try { return jsonResult(await core.launch({ port, kill_existing })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
+
+  server.tool('tv_ensure', 'Ensure TradingView Desktop is running with CDP enabled. Idempotent: no-op if CDP is already up. If TV is running without CDP, kills and relaunches. If TV is not running, launches it. Call this before any TV tool when unsure if CDP is available.', {
+    port: z.coerce.number().optional().describe('CDP port (default 9222)'),
+  }, async ({ port }) => {
+    try { return jsonResult(await core.ensureCDP({ port })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('tv_reconnect', 'Reconnect TradingView Desktop by reloading the page to reclaim the backend session. Use when TV was opened in a browser/phone and the Desktop session went stale.', {}, async () => {
+    try { return jsonResult(await core.reconnect()); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
 }
