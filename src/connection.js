@@ -2,8 +2,12 @@ import CDP from 'chrome-remote-interface';
 
 let client = null;
 let targetInfo = null;
-const CDP_HOST = 'localhost';
-const CDP_PORT = 9222;
+let currentTargetId = null;
+let connectingPromise = null;
+let _cdpFactory = CDP;
+let _fetchFn = (...args) => fetch(...args);
+export const CDP_HOST = 'localhost';
+export const CDP_PORT = 9222;
 const MAX_RETRIES = 5;
 const BASE_DELAY = 500;
 
@@ -47,18 +51,41 @@ export function requireFinite(value, name) {
   return n;
 }
 
+export function setCurrentTarget(targetId) {
+  currentTargetId = targetId ?? null;
+  if (currentTargetId !== null && client && targetInfo?.id !== currentTargetId) {
+    client.close().catch(() => {});
+    client = null;
+    targetInfo = null;
+    connectingPromise = null;
+  }
+}
+
+export function getCurrentTargetId() {
+  return currentTargetId;
+}
+
+// Manual tab switches in the TradingView UI are NOT detected here — the pin
+// only tracks switches made through the MCP tab_switch tool.
 export async function getClient() {
+  if (connectingPromise) return connectingPromise;
   if (client) {
-    try {
-      // Quick liveness check
-      await client.Runtime.evaluate({ expression: '1', returnByValue: true });
-      return client;
-    } catch {
+    if (currentTargetId && targetInfo?.id !== currentTargetId) {
+      try { await client.close(); } catch {}
       client = null;
       targetInfo = null;
+    } else {
+      try {
+        await client.Runtime.evaluate({ expression: '1', returnByValue: true });
+        return client;
+      } catch {
+        client = null;
+        targetInfo = null;
+      }
     }
   }
-  return connect();
+  connectingPromise = connect().finally(() => { connectingPromise = null; });
+  return connectingPromise;
 }
 
 export async function connect() {
@@ -70,7 +97,7 @@ export async function connect() {
         throw new Error('No TradingView chart target found. Is TradingView open with a chart?');
       }
       targetInfo = target;
-      client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: target.id });
+      client = await _cdpFactory({ host: CDP_HOST, port: CDP_PORT, target: target.id });
 
       // Enable required domains
       await client.Runtime.enable();
@@ -88,9 +115,14 @@ export async function connect() {
 }
 
 async function findChartTarget() {
-  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
+  const resp = await _fetchFn(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
   const targets = await resp.json();
-  // Prefer targets with tradingview.com/chart in the URL
+  if (currentTargetId) {
+    const pinned = targets.find(t => t.id === currentTargetId);
+    if (pinned) return pinned;
+    // Pin target disappeared (closed/crashed); fall through to heuristic.
+    currentTargetId = null;
+  }
   return targets.find(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
     || targets.find(t => t.type === 'page' && /tradingview/i.test(t.url))
     || null;
@@ -125,12 +157,31 @@ export async function evaluateAsync(expression) {
 }
 
 export async function disconnect() {
+  connectingPromise = null;
   if (client) {
     try { await client.close(); } catch {}
     client = null;
     targetInfo = null;
   }
 }
+
+// Exposed for unit tests only — not part of the public API.
+export const _test = {
+  setCdpFactory(fn) { _cdpFactory = fn || CDP; },
+  setFetchFn(fn) { _fetchFn = fn || ((...args) => fetch(...args)); },
+  setClient(c) { client = c; },
+  setTargetInfo(t) { targetInfo = t; },
+  getClient() { return client; },
+  getTargetInfo() { return targetInfo; },
+  reset() {
+    _cdpFactory = CDP;
+    _fetchFn = (...args) => fetch(...args);
+    client = null;
+    targetInfo = null;
+    currentTargetId = null;
+    connectingPromise = null;
+  },
+};
 
 // --- Direct API path helpers ---
 // Each returns the STRING expression path after verifying it exists.
