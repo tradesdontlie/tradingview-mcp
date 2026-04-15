@@ -11,6 +11,10 @@ import { registerBatchTools } from './tools/batch.js';
 import { registerReplayTools } from './tools/replay.js';
 import { registerIndicatorTools } from './tools/indicators.js';
 import { registerWatchlistTools } from './tools/watchlist.js';
+import { registerScreenerTools } from './tools/screener.js';
+import { registerScreenerScreensTools } from './tools/screener_screens.js';
+import { registerScreenerFiltersTools } from './tools/screener_filters.js';
+import { registerScreenerColumnsTools } from './tools/screener_columns.js';
 import { registerUiTools } from './tools/ui.js';
 import { registerPaneTools } from './tools/pane.js';
 import { registerTabTools } from './tools/tab.js';
@@ -22,7 +26,7 @@ const server = new McpServer(
     description: 'AI-assisted TradingView chart analysis and Pine Script development via Chrome DevTools Protocol',
   },
   {
-    instructions: `TradingView MCP — 78 tools for reading and controlling a live TradingView Desktop chart.
+    instructions: `TradingView MCP — 85 tools for reading and controlling a live TradingView Desktop chart.
 
 TOOL SELECTION GUIDE — use this to pick the right tool:
 
@@ -59,6 +63,8 @@ Alerts: alert_create, alert_list, alert_delete
 Launch: tv_launch → auto-detect and start TradingView with CDP on any platform
 Panes: pane_list, pane_set_layout (s, 2h, 2v, 4, 6, 8), pane_focus, pane_set_symbol
 Tabs: tab_list, tab_new, tab_close, tab_switch
+Screener: screener_open → screener_get → screener_close (floating dialog of stocks with Symbol, Price, Change %, Volume, Market cap, P/E, Sector, etc.)
+Screener management: screener_screens (active/menu_actions/save preset), screener_filters (list/remove/clear pills), screener_columns (list current headers) — use these to inspect and prune the current screen. Modal-driven flows (switch/save_as/add filter/add column) return not_implemented_yet.
 
 CONTEXT MANAGEMENT:
 - ALWAYS use summary=true on data_get_ohlcv
@@ -81,6 +87,10 @@ registerBatchTools(server);
 registerReplayTools(server);
 registerIndicatorTools(server);
 registerWatchlistTools(server);
+registerScreenerTools(server);
+registerScreenerScreensTools(server);
+registerScreenerFiltersTools(server);
+registerScreenerColumnsTools(server);
 registerUiTools(server);
 registerPaneTools(server);
 registerTabTools(server);

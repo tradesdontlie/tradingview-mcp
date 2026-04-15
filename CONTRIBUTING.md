@@ -32,13 +32,14 @@ If you're unsure whether a feature fits, open an issue to discuss before submitt
 
 ```bash
 npm install
-npm test          # 29 offline tests (no TradingView needed)
-tv status         # verify CDP connection (TradingView must be running)
+npm run test:offline   # 205 offline tests (no TradingView needed)
+npm test               # live tests (TradingView must be running on port 9222)
+tv status              # verify CDP connection
 ```
 
 ## Pull Requests
 
 - Keep changes focused — one feature or fix per PR
-- Add tests for new functionality where possible
-- Ensure `npm test` passes (29/29)
+- Add tests for new functionality where possible. Use dependency-injected mocks (see `tests/screener_*.test.js` or `tests/replay.test.js`) so the test runs offline.
+- Ensure `npm run test:offline` passes (205/205) before opening the PR
 - Test against a live TradingView Desktop instance before submitting

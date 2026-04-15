@@ -62,6 +62,7 @@ Gives your AI assistant eyes and hands on your own chart:
 - **Draw on charts** — trend lines, horizontal lines, rectangles, text annotations
 - **Manage alerts** — create, list, and delete price alerts
 - **Replay practice** — step through historical bars, practice entries/exits
+- **Stock Screener** — open the built-in screener, read rows, inspect/prune the active screen (filters, columns, saved presets)
 - **Screenshots** — capture chart state for AI visual analysis
 - **Multi-pane layouts** — set up 2x2, 3x1, etc. grids with different symbols per pane
 - **Monitor your chart** — stream JSONL from your locally running chart for local monitoring scripts
@@ -175,6 +176,10 @@ tv layout list/switch
 tv pane list/layout/focus/symbol
 tv tab list/new/close/switch
 tv replay start/step/stop/status/autoplay/trade
+tv screener open/get/status/close
+tv screener active/menu-actions/save/save-as/switch/delete-screen/rename/create-new
+tv screener filters/filter-remove/filter-clear/filter-add/filter-modify
+tv screener columns/column-reset/column-remove/column-add/column-reorder
 tv stream quote/bars/values/lines/labels/tables/all
 tv ui click/keyboard/hover/scroll/find/eval/type/panel/fullscreen/mouse
 tv screenshot / discover / ui-state / range / scroll
@@ -214,8 +219,12 @@ Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project
 | "Set up a 4-chart grid" | `pane_set_layout` → `pane_set_symbol` for each pane |
 | "Draw a level at 24500" | `draw_shape` (horizontal_line) |
 | "Take a screenshot" | `capture_screenshot` |
+| "Open the Stock Screener and read rows" | `screener_open` → `screener_get` |
+| "What filters are on the screener?" | `screener_filters` (action: `list`) |
+| "Remove the Beta filter" | `screener_filters` (action: `remove`, filter: "Beta") |
+| "Save the current screen" | `screener_screens` (action: `save`) |
 
-## Tool Reference (78 MCP tools)
+## Tool Reference (85 MCP tools)
 
 ### Chart Reading
 
@@ -295,6 +304,22 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 | `replay_status` | Check position, P&L, date |
 | `replay_stop` | Return to realtime |
 
+### Stock Screener
+
+Access the built-in floating Screener dialog (Symbol, Price, Change %, Volume, Market cap, P/E, Sector, etc.).
+
+| Tool | What it does |
+|------|-------------|
+| `screener_open` | Open the Screener dialog (no-op if already open) |
+| `screener_get` | Read the active screen — `{ screen, columns, row_count, rows, filters }`. Pass `limit` to cap rows (default 100, max 500) |
+| `screener_status` | `{ open, width, height }` without touching the UI |
+| `screener_close` | Close the dialog |
+| `screener_screens` | Manage saved presets. Actions: `active`, `menu_actions`, `save`. Stretch (return `not_implemented_yet`): `list`, `switch`, `save_as`, `delete`, `rename`, `create_new` |
+| `screener_filters` | Manage filter pills. Actions: `list`, `remove` (idempotent), `clear`. Stretch: `add`, `modify` |
+| `screener_columns` | Manage table columns. Action: `list`. Stretch: `reset`, `remove`, `add`, `reorder` |
+
+Mutations persist through TradingView's cloud auto-save. Built-in presets (e.g. "All stocks") reject destructive actions that would overwrite them — fork via the TradingView UI first, then mutate the copy.
+
 ### Drawing, Alerts, UI Automation
 
 | Tool | What it does |
@@ -339,11 +364,17 @@ The key flag: `--remote-debugging-port=9222`
 ## Testing
 
 ```bash
-# Requires TradingView running with --remote-debugging-port=9222
+# Offline suite — no TradingView needed (205 tests)
+npm run test:offline
+
+# Just the screener suite (61 tests)
+npm run test:screener
+
+# Live suite — requires TradingView running with --remote-debugging-port=9222
 npm test
 ```
 
-29 tests covering: Pine Script static analysis, server-side compilation, and CLI routing.
+The offline suite covers Pine Script static analysis, CLI routing, replay flows, CDP-injection sanitization, and the full Screener surface (core + filters + columns + screens) via dependency-injected mocks. The live `npm test` suite verifies end-to-end against a running TradingView Desktop instance.
 
 ## Architecture
 
@@ -351,7 +382,7 @@ npm test
 Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  TradingView Desktop (Electron)
 ```
 
-- **Transport**: MCP over stdio (78 tools) + CLI (`tv` command, 30 commands with 66 subcommands)
+- **Transport**: MCP over stdio (85 tools) + CLI (`tv` command, 31 commands with 88 subcommands)
 - **Connection**: Chrome DevTools Protocol on localhost:9222
 - **Streaming**: Poll-and-diff loop with deduplication, JSONL output to stdout
 - **No dependencies** beyond `@modelcontextprotocol/sdk` and `chrome-remote-interface`

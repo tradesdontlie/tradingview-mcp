@@ -29,6 +29,23 @@ export async function click({ by, value }) {
 }
 
 export async function openPanel({ panel, action }) {
+  // Screener is a floating dialog, handled by a dedicated core module.
+  if (panel === 'screener') {
+    const screener = await import('./screener.js');
+    const state = await screener.status();
+    const wasOpen = !!state.open;
+    let performed = 'none';
+    if (action === 'open' && !wasOpen) { await screener.open(); performed = 'opened'; }
+    else if (action === 'close' && wasOpen) { await screener.close(); performed = 'closed'; }
+    else if (action === 'toggle') {
+      if (wasOpen) { await screener.close(); performed = 'closed'; }
+      else { await screener.open(); performed = 'opened'; }
+    } else {
+      performed = wasOpen ? 'already_open' : 'already_closed';
+    }
+    return { success: true, panel, action, was_open: wasOpen, performed };
+  }
+
   const isBottomPanel = panel === 'pine-editor' || panel === 'strategy-tester';
   if (isBottomPanel) {
     const widgetName = panel === 'pine-editor' ? 'pine-editor' : 'backtesting';
