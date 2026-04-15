@@ -18,7 +18,9 @@
     "test:e2e": "node --test tests/e2e.test.js",
     "test:unit": "node --test tests/pine_analyze.test.js tests/cli.test.js",
     "test:cli": "node --test tests/cli.test.js",
-    "test:all": "node --test tests/e2e.test.js tests/pine_analyze.test.js tests/cli.test.js",
+    "test:screener": "node --test tests/screener.test.js tests/screener_screens.test.js tests/screener_filters.test.js tests/screener_columns.test.js",
+    "test:offline": "node --test tests/cli.test.js tests/pine_analyze.test.js tests/replay.test.js tests/sanitization.test.js tests/screener.test.js tests/screener_screens.test.js tests/screener_filters.test.js tests/screener_columns.test.js",
+    "test:all": "node --test tests/*.test.js",
     "test:verbose": "node --test --test-reporter=spec tests/e2e.test.js tests/pine_analyze.test.js",
     "test:count": "node --test --test-reporter=spec tests/e2e.test.js 2>&1 | tail -5"
   },

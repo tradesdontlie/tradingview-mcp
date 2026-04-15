@@ -11,8 +11,8 @@ export function registerUiTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('ui_open_panel', 'Open, close, or toggle TradingView panels (pine-editor, strategy-tester, watchlist, alerts, trading)', {
-    panel: z.enum(['pine-editor', 'strategy-tester', 'watchlist', 'alerts', 'trading']).describe('Panel name'),
+  server.tool('ui_open_panel', 'Open, close, or toggle TradingView panels (pine-editor, strategy-tester, watchlist, alerts, trading, screener)', {
+    panel: z.enum(['pine-editor', 'strategy-tester', 'watchlist', 'alerts', 'trading', 'screener']).describe('Panel name'),
     action: z.enum(['open', 'close', 'toggle']).describe('Action to perform'),
   }, async ({ panel, action }) => {
     try { return jsonResult(await core.openPanel({ panel, action })); }

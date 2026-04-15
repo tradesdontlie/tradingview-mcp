@@ -1,6 +1,6 @@
 # TradingView MCP — Claude Instructions
 
-68 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
+85 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
 
 ## Decision Tree — Which Tool When
 
@@ -62,6 +62,25 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 ### "Screen multiple symbols"
 - `batch_run` with `symbols: ["ES1!", "NQ1!", "YM1!"]` and `action: "screenshot"` or `"get_ohlcv"`
 
+### "Use the Stock Screener"
+The built-in TradingView Screener (floating dialog with rankable columns: Price, Change %, Volume, Market cap, P/E, Sector, etc.) is available as four dedicated tools:
+
+1. `screener_open` → opens the Screener dialog (no-op if already open). First open can take 3–5s while TradingView loads data.
+2. `screener_get` → reads the currently-displayed screen. Returns `{ screen, columns, row_count, rows, filters }`. Pass `limit` to cap rows (default 100, max 500).
+3. `screener_status` → `{ open, width, height }` without touching the UI.
+4. `screener_close` → closes the dialog.
+
+You can also toggle the screener via `ui_open_panel` with `panel: "screener"`.
+
+### "Manage the active screen"
+The screener has three management tools for pruning / inspecting the current screen. Each takes an `action` parameter.
+
+- `screener_screens` — actions: `active` (current preset name), `menu_actions` (which screen-actions are enabled in the UI), `save` (persist unsaved changes). Stretch actions (`list`, `switch`, `save_as`, `delete`, `rename`, `create_new`) return `not_implemented_yet` — use TradingView UI directly for those.
+- `screener_filters` — actions: `list` (all pills), `remove` with `filter: "Beta"` (idempotent — removing a missing filter is a no-op), `clear` (remove every pill). Stretch: `add`, `modify`.
+- `screener_columns` — action: `list` (current headers). Stretch: `reset`, `remove`, `add`, `reorder`.
+
+Reading the current state (list/active) is stable. Mutations (remove/clear/save) work on any non-built-in screen and persist via TradingView's cloud auto-save. Built-in presets like "All stocks" reject mutations that would overwrite them — use the stretch `save_as` path (or TradingView UI) to fork first.
+
 ### "Draw on the chart"
 - `draw_shape` → horizontal_line, trend_line, rectangle, text (pass point + optional point2)
 - `draw_list` → see what's drawn
@@ -109,6 +128,14 @@ These tools can return large payloads. Follow these rules to avoid context bloat
 | `data_get_ohlcv` (summary) | ~500 bytes |
 | `data_get_ohlcv` (100 bars) | ~8 KB |
 | `capture_screenshot` | ~300 bytes (returns file path, not image data) |
+| `screener_get` (100 rows) | ~30 KB — pass `limit` to cap |
+| `screener_get` (5 rows) | ~2 KB — use for preview/debugging |
+| `screener_status` | ~100 bytes |
+| `screener_screens` (active) | ~100 bytes |
+| `screener_screens` (menu_actions) | ~500 bytes |
+| `screener_filters` (list, 16 pills) | ~1 KB |
+| `screener_filters` (remove/clear) | ~500 bytes |
+| `screener_columns` (list, 12 cols) | ~300 bytes |
 
 ## Tool Conventions
 
