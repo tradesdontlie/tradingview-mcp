@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>XAUUSD · Signal Dashboard</title>
+<style>
+  :root {
+    --bg:       #0a0c0f;
+    --surface:  #111318;
+    --border:   #1e2229;
+    --muted:    #3a3f4a;
+    --text:     #c8cdd8;
+    --dim:      #5a6070;
+    --green:    #00d26a;
+    --red:      #ff3b5c;
+    --yellow:   #f5c842;
+    --blue:     #4da3ff;
+    --purple:   #a78bfa;
+    --orange:   #fb923c;
+    --strong:   #00d26a;
+    --good:     #4da3ff;
+    --marginal: #f5c842;
+    --weak:     #fb923c;
+    --bad:      #ff3b5c;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── HEADER ── */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .header-left { display: flex; align-items: center; gap: 16px; }
+  .logo { font-size: 15px; font-weight: 700; letter-spacing: 1px; color: #fff; }
+  .logo span { color: var(--yellow); }
+  .pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 10px; border-radius: 20px; font-size: 11px;
+    background: rgba(0,210,106,0.12); color: var(--green);
+    border: 1px solid rgba(0,210,106,0.25);
+  }
+  .pill.bear { background: rgba(255,59,92,0.12); color: var(--red); border-color: rgba(255,59,92,0.25); }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  #clock { color: var(--dim); font-size: 12px; }
+
+  /* ── LAYOUT ── */
+  .grid {
+    display: grid;
+    grid-template-columns: 280px 1fr 320px;
+    grid-template-rows: auto 1fr;
+    gap: 1px;
+    background: var(--border);
+    height: calc(100vh - 49px);
+  }
+
+  /* ── PANELS ── */
+  .panel {
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .panel-header {
+    padding: 10px 14px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--dim);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .panel-header .badge {
+    font-size: 10px; padding: 1px 7px; border-radius: 10px;
+    background: var(--border); color: var(--dim);
+  }
+  .panel-body { flex: 1; overflow-y: auto; padding: 12px; }
+  .panel-body::-webkit-scrollbar { width: 4px; }
+  .panel-body::-webkit-scrollbar-track { background: transparent; }
+  .panel-body::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 2px; }
+
+  /* ── PRICE CARD ── */
+  .price-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 12px;
+    text-align: center;
+  }
+  .price-symbol { font-size: 11px; color: var(--dim); letter-spacing: 2px; margin-bottom: 4px; }
+  #live-price {
+    font-size: 36px; font-weight: 700; color: #fff;
+    transition: color 0.3s;
+    letter-spacing: -1px;
+  }
+  #live-price.up   { color: var(--green); }
+  #live-price.down { color: var(--red); }
+  .price-meta { display: flex; justify-content: space-around; margin-top: 10px; }
+  .price-meta .stat { text-align: center; }
+  .price-meta .stat .lbl { font-size: 10px; color: var(--dim); }
+  .price-meta .stat .val { font-size: 13px; color: var(--text); margin-top: 2px; }
+
+  /* ── INDICATORS ── */
+  .indicator-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 9px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 6px;
+    background: var(--surface);
+  }
+  .indicator-row .name { font-size: 11px; color: var(--dim); letter-spacing: 0.5px; }
+  .indicator-row .val  { font-size: 18px; }
+  .mtf-grid {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 6px; margin-top: 6px;
+  }
+  .mtf-cell {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 5px; padding: 8px 10px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .mtf-cell .tf  { font-size: 10px; color: var(--dim); }
+  .mtf-cell .ico { font-size: 16px; }
+
+  /* ── LEVELS ── */
+  .level-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 7px 10px;
+    border-radius: 5px;
+    margin-bottom: 4px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    transition: all 0.3s;
+  }
+  .level-row.triggered {
+    border-color: rgba(245,200,66,0.4);
+    background: rgba(245,200,66,0.06);
+  }
+  .level-row.triggered.bull { border-color: rgba(0,210,106,0.4); background: rgba(0,210,106,0.06); }
+  .level-row.triggered.bear { border-color: rgba(255,59,92,0.4);  background: rgba(255,59,92,0.06);  }
+  .level-row .arrow { font-size: 11px; color: var(--dim); width: 12px; }
+  .level-row .price { font-size: 13px; color: #fff; font-weight: 600; min-width: 65px; }
+  .level-row .desc  { font-size: 11px; color: var(--dim); flex: 1; }
+  .level-row .tick  { font-size: 13px; opacity: 0; }
+  .level-row.triggered .tick { opacity: 1; }
+
+  /* ── SIGNAL LOG (center) ── */
+  .log-panel {
+    grid-column: 2;
+    grid-row: 1 / 3;
+  }
+  #signal-log {
+    font-size: 12px;
+    line-height: 1.6;
+    padding: 12px;
+    flex: 1;
+    overflow-y: auto;
+  }
+  #signal-log::-webkit-scrollbar { width: 4px; }
+  #signal-log::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 2px; }
+
+  .log-line { padding: 2px 0; white-space: pre-wrap; word-break: break-all; }
+  .log-line.ts     { color: var(--dim); }
+  .log-line.price  { color: var(--text); }
+  .log-line.alert  { color: var(--yellow); font-weight: 600; }
+  .log-line.signal-buy   { color: var(--green); font-weight: 700; }
+  .log-line.signal-sell  { color: var(--red);   font-weight: 700; }
+  .log-line.heart  { color: var(--muted); }
+  .log-line.new    { animation: flashIn 0.5s ease; }
+  @keyframes flashIn { from { background: rgba(77,163,255,0.15); } to { background: transparent; } }
+
+  /* ── VERDICT CARD ── */
+  .verdict-card {
+    border-radius: 8px; padding: 14px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    margin-bottom: 8px;
+  }
+  .verdict-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .verdict-dir {
+    font-size: 13px; font-weight: 700; letter-spacing: 1px;
+    padding: 3px 10px; border-radius: 4px;
+  }
+  .verdict-dir.BUY  { background: rgba(0,210,106,0.15); color: var(--green); border: 1px solid rgba(0,210,106,0.3); }
+  .verdict-dir.SELL { background: rgba(255,59,92,0.15);  color: var(--red);   border: 1px solid rgba(255,59,92,0.3); }
+  .verdict-badge {
+    font-size: 12px; font-weight: 700; letter-spacing: 1px;
+    padding: 3px 12px; border-radius: 4px;
+  }
+  .verdict-badge.STRONG   { background: rgba(0,210,106,0.2);  color: var(--strong);   border: 1px solid rgba(0,210,106,0.4); }
+  .verdict-badge.GOOD     { background: rgba(77,163,255,0.2); color: var(--good);     border: 1px solid rgba(77,163,255,0.4); }
+  .verdict-badge.MARGINAL { background: rgba(245,200,66,0.2); color: var(--marginal); border: 1px solid rgba(245,200,66,0.4); }
+  .verdict-badge.WEAK     { background: rgba(251,146,60,0.2); color: var(--weak);     border: 1px solid rgba(251,146,60,0.4); }
+  .verdict-badge.BAD      { background: rgba(255,59,92,0.2);  color: var(--bad);      border: 1px solid rgba(255,59,92,0.4); }
+  .verdict-levels { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px; }
+  .vlevel { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 6px 8px; }
+  .vlevel .lbl { font-size: 10px; color: var(--dim); margin-bottom: 2px; }
+  .vlevel .val { font-size: 13px; color: #fff; font-weight: 600; }
+  .vlevel .rr  { font-size: 10px; color: var(--blue); margin-top: 1px; }
+  .verdict-score { font-size: 11px; color: var(--dim); text-align: right; margin-top: 6px; }
+  .verdict-ts    { font-size: 10px; color: var(--muted); }
+  #no-signals { color: var(--muted); font-size: 12px; text-align: center; padding: 40px 0; }
+
+  /* ── STATUS BAR ── */
+  .status-bar {
+    grid-column: 1 / 4;
+    display: flex; align-items: center; gap: 20px;
+    padding: 6px 20px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    font-size: 11px; color: var(--dim);
+    flex-shrink: 0;
+  }
+  .status-bar .sep { color: var(--border); }
+  .status-bar .ok  { color: var(--green); }
+  .status-bar .err { color: var(--red); }
+
+  /* ── SECTION LABEL ── */
+  .section-label {
+    font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase;
+    color: var(--muted); margin: 12px 0 6px;
+  }
+
+  /* ── SCROLL TO BOTTOM BTN ── */
+  #scroll-btn {
+    position: fixed; bottom: 40px; right: 340px;
+    background: var(--blue); color: #000; border: none; cursor: pointer;
+    width: 32px; height: 32px; border-radius: 50%; font-size: 16px;
+    display: none; align-items: center; justify-content: center;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4); z-index: 50;
+  }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header>
+  <div class="header-left">
+    <div class="logo">XAU<span>/</span>USD</div>
+    <span class="pill" id="conn-pill"><span class="dot"></span> LIVE</span>
+    <span class="pill" id="trend-pill" style="display:none"></span>
+  </div>
+  <div id="clock">--:--:--</div>
+</header>
+
+<!-- GRID -->
+<div class="grid">
+
+  <!-- LEFT: Price + Indicators + Levels -->
+  <div class="panel" style="grid-row: 1/3; overflow-y:auto;">
+    <div class="panel-header">Market State</div>
+    <div class="panel-body">
+
+      <!-- Price -->
+      <div class="price-card">
+        <div class="price-symbol">XAU / USD</div>
+        <div id="live-price">——</div>
+        <div class="price-meta">
+          <div class="stat"><div class="lbl">HIGH</div><div class="val" id="p-high">—</div></div>
+          <div class="stat"><div class="lbl">LOW</div><div class="val"  id="p-low">—</div></div>
+          <div class="stat"><div class="lbl">VOL</div><div class="val"  id="p-vol">—</div></div>
+        </div>
+      </div>
+
+      <!-- Indicator state -->
+      <div class="section-label">BTrader Indicators</div>
+      <div class="indicator-row">
+        <span class="name">SESSION TREND</span>
+        <span class="val" id="ind-trend">—</span>
+      </div>
+      <div class="indicator-row">
+        <span class="name">INST FLOW</span>
+        <span class="val" id="ind-inst">—</span>
+      </div>
+      <div class="indicator-row">
+        <span class="name">MARKET DIR</span>
+        <span class="val" id="ind-market">—</span>
+      </div>
+
+      <!-- MTF placeholders — populated from log -->
+      <div class="section-label">Multi-Timeframe</div>
+      <div class="mtf-grid">
+        <div class="mtf-cell"><span class="tf">4H</span><span class="ico" id="mtf-4h">—</span></div>
+        <div class="mtf-cell"><span class="tf">1H</span><span class="ico" id="mtf-1h">—</span></div>
+        <div class="mtf-cell"><span class="tf">30m</span><span class="ico" id="mtf-30">—</span></div>
+        <div class="mtf-cell"><span class="tf">15m</span><span class="ico" id="mtf-15">—</span></div>
+      </div>
+
+      <!-- Key levels -->
+      <div class="section-label">Key Levels</div>
+      <div id="levels-list">
+        <!-- injected by JS -->
+      </div>
+
+    </div>
+  </div>
+
+  <!-- CENTER: Live log -->
+  <div class="panel log-panel">
+    <div class="panel-header">
+      Live Feed
+      <div style="display:flex;gap:8px;align-items:center">
+        <span class="badge" id="log-count">0 lines</span>
+        <label style="display:flex;align-items:center;gap:4px;cursor:pointer;color:var(--dim);font-size:10px">
+          <input type="checkbox" id="auto-scroll" checked style="accent-color:var(--blue)"> AUTO-SCROLL
+        </label>
+      </div>
+    </div>
+    <div id="signal-log"></div>
+  </div>
+
+  <!-- RIGHT: Signal verdicts -->
+  <div class="panel" style="grid-row: 1/3; overflow-y:auto;">
+    <div class="panel-header">
+      Signal Verdicts
+      <span class="badge" id="sig-count">0</span>
+    </div>
+    <div class="panel-body" id="verdicts-panel">
+      <div id="no-signals">No signals yet.<br>Watching for BUY / SELL...</div>
+    </div>
+  </div>
+
+</div>
+
+<button id="scroll-btn" onclick="scrollLog()">↓</button>
+
+<script>
+// ── CONFIG ───────────────────────────────────────────────────
+const LEVELS = [
+  { key:'INVALIDATION', price:4823.06, side:'above', label:'INVALIDATION',  type:'bull' },
+  { key:'BEAR_OB',      price:4820.36, side:'above', label:'Bear OB top',   type:'bear' },
+  { key:'SELL_ZONE',    price:4818.00, side:'above', label:'Sell Zone',     type:'bear' },
+  { key:'SELL_REV',     price:4814.40, side:'below', label:'Sell Reversal', type:'bear' },
+  { key:'T1',           price:4811.87, side:'below', label:'Target 1',      type:'bear' },
+  { key:'SSL_TWIN',     price:4811.59, side:'below', label:'SSL Twin Lows', type:'bear' },
+  { key:'T2',           price:4805.17, side:'below', label:'Target 2',      type:'bear' },
+  { key:'PDL',          price:4786.08, side:'below', label:'PDL',           type:'bear' },
+];
+
+// ── STATE ────────────────────────────────────────────────────
+const triggered = new Set();
+let   lastPrice  = null;
+let   logLines   = 0;
+let   sigCount   = 0;
+let   connected  = false;
+
+// ── CLOCK ────────────────────────────────────────────────────
+setInterval(() => {
+  document.getElementById('clock').textContent = new Date().toTimeString().slice(0,8);
+}, 1000);
+
+// ── LEVELS ───────────────────────────────────────────────────
+function buildLevels() {
+  const el = document.getElementById('levels-list');
+  el.innerHTML = LEVELS.map(l => `
+    <div class="level-row" id="lvl-${l.key}" data-price="${l.price}" data-side="${l.side}" data-type="${l.type}">
+      <span class="arrow">${l.side==='above'?'⬆':'⬇'}</span>
+      <span class="price">${l.price.toFixed(2)}</span>
+      <span class="desc">${l.label}</span>
+      <span class="tick">✓</span>
+    </div>
+  `).join('');
+}
+buildLevels();
+
+function updateLevels(price) {
+  LEVELS.forEach(l => {
+    const hit = l.side==='above' ? price >= l.price : price <= l.price;
+    if (hit) triggered.add(l.key);
+    const el = document.getElementById(`lvl-${l.key}`);
+    if (!el) return;
+    el.classList.toggle('triggered', triggered.has(l.key));
+    if (triggered.has(l.key)) el.classList.add(l.type);
+  });
+}
+
+// ── PRICE ────────────────────────────────────────────────────
+function updatePrice(state) {
+  if (!state.price) return;
+  const p = state.price.last;
+  const el = document.getElementById('live-price');
+  el.textContent = p.toFixed(2);
+  if (lastPrice !== null) {
+    el.className = p > lastPrice ? 'up' : p < lastPrice ? 'down' : '';
+  }
+  lastPrice = p;
+  document.getElementById('p-high').textContent = state.price.high?.toFixed(2) || '—';
+  document.getElementById('p-low').textContent  = state.price.low?.toFixed(2)  || '—';
+  document.getElementById('p-vol').textContent  = state.price.volume ? Math.round(state.price.volume) : '—';
+  updateLevels(p);
+}
+
+// ── INDICATORS ───────────────────────────────────────────────
+function updateIndicators(state) {
+  if (state.trend)  document.getElementById('ind-trend').textContent  = state.trend;
+  if (state.inst)   document.getElementById('ind-inst').textContent   = state.inst;
+  if (state.market) document.getElementById('ind-market').textContent = state.market;
+
+  // Header pill
+  if (state.trend) {
+    const pill = document.getElementById('trend-pill');
+    const bull = state.trend === '🐂';
+    pill.style.display = 'inline-flex';
+    pill.className = 'pill' + (bull ? '' : ' bear');
+    pill.innerHTML = `<span class="dot"></span> ${bull ? 'BULL TREND' : 'BEAR TREND'}`;
+  }
+}
+
+// ── LOG RENDERING ─────────────────────────────────────────────
+const logEl = document.getElementById('signal-log');
+const autoScrollCb = document.getElementById('auto-scroll');
+const scrollBtn    = document.getElementById('scroll-btn');
+
+logEl.addEventListener('scroll', () => {
+  const atBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 30;
+  scrollBtn.style.display = atBottom ? 'none' : 'flex';
+});
+
+function scrollLog() { logEl.scrollTop = logEl.scrollHeight; }
+
+function classifyLine(line) {
+  if (/💓/.test(line))               return 'heart';
+  if (/BUY|LONG/i.test(line))        return 'signal-buy';
+  if (/SELL|SHORT/i.test(line))      return 'signal-sell';
+  if (/ALERT|TARGET|TRIGGERED/i.test(line)) return 'alert';
+  if (/▲|▼|→/.test(line))           return 'price';
+  return 'ts';
+}
+
+function appendLine(line, isNew = false) {
+  const d = document.createElement('div');
+  d.className = 'log-line ' + classifyLine(line) + (isNew ? ' new' : '');
+  d.textContent = line;
+  logEl.appendChild(d);
+  logLines++;
+  document.getElementById('log-count').textContent = logLines + ' lines';
+  if (autoScrollCb.checked) scrollLog();
+}
+
+// ── VERDICT PARSING ───────────────────────────────────────────
+/*
+  Signal lines look like:
+  ╔══ 🟢 BUY SIGNAL ══╗ or ╔══ 🔴 SELL SIGNAL ══╗
+  Entry: 1234.56  SL: 1230.00
+  TP1: 1240.00 (R:R 1.5)  TP2: 1250.00 (R:R 2.8)  TP3: 1260.00 (R:R 4.0)
+  Score: +7  →  ✅ STRONG
+*/
+let pendingVerdict = null;
+
+function tryParseVerdict(line) {
+  // Signal header
+  const sigMatch = line.match(/([🟢🔴])\s*(BUY|SELL)\s*SIGNAL/i);
+  if (sigMatch) {
+    pendingVerdict = { dir: sigMatch[2].toUpperCase(), ts: new Date().toTimeString().slice(0,8) };
+    return;
+  }
+  if (!pendingVerdict) return;
+
+  const entryMatch = line.match(/Entry:\s*([\d.]+)/i);
+  if (entryMatch) pendingVerdict.entry = entryMatch[1];
+
+  const slMatch = line.match(/SL:\s*([\d.]+)/i);
+  if (slMatch) pendingVerdict.sl = slMatch[1];
+
+  const tp1Match = line.match(/TP1:\s*([\d.]+)/i);
+  if (tp1Match) pendingVerdict.tp1 = tp1Match[1];
+
+  const tp2Match = line.match(/TP2:\s*([\d.]+)/i);
+  if (tp2Match) pendingVerdict.tp2 = tp2Match[1];
+
+  const tp3Match = line.match(/TP3:\s*([\d.]+)/i);
+  if (tp3Match) pendingVerdict.tp3 = tp3Match[1];
+
+  const rr1Match = line.match(/TP1.*?\(R:R\s*([\d.]+)\)/i);
+  if (rr1Match) pendingVerdict.rr1 = rr1Match[1];
+  const rr2Match = line.match(/TP2.*?\(R:R\s*([\d.]+)\)/i);
+  if (rr2Match) pendingVerdict.rr2 = rr2Match[1];
+  const rr3Match = line.match(/TP3.*?\(R:R\s*([\d.]+)\)/i);
+  if (rr3Match) pendingVerdict.rr3 = rr3Match[1];
+
+  const scoreMatch = line.match(/Score:\s*([+-]?\d+)\s*→\s*(STRONG|GOOD|MARGINAL|WEAK|BAD)/i);
+  if (scoreMatch) {
+    pendingVerdict.score   = scoreMatch[1];
+    pendingVerdict.verdict = scoreMatch[2].toUpperCase();
+    renderVerdict(pendingVerdict);
+    pendingVerdict = null;
+  }
+}
+
+function renderVerdict(v) {
+  sigCount++;
+  document.getElementById('sig-count').textContent = sigCount;
+  document.getElementById('no-signals').style.display = 'none';
+
+  const card = document.createElement('div');
+  card.className = 'verdict-card';
+  card.innerHTML = `
+    <div class="verdict-header">
+      <span class="verdict-dir ${v.dir}">${v.dir === 'BUY' ? '▲' : '▼'} ${v.dir}</span>
+      <span class="verdict-badge ${v.verdict}">${v.verdict}</span>
+    </div>
+    <div class="verdict-levels">
+      <div class="vlevel">
+        <div class="lbl">ENTRY</div>
+        <div class="val">${v.entry || '—'}</div>
+      </div>
+      <div class="vlevel">
+        <div class="lbl">STOP LOSS</div>
+        <div class="val" style="color:var(--red)">${v.sl || '—'}</div>
+      </div>
+      <div class="vlevel">
+        <div class="lbl">TP 1</div>
+        <div class="val" style="color:var(--green)">${v.tp1 || '—'}</div>
+        ${v.rr1 ? `<div class="rr">R:R ${v.rr1}</div>` : ''}
+      </div>
+      <div class="vlevel">
+        <div class="lbl">TP 2</div>
+        <div class="val" style="color:var(--green)">${v.tp2 || '—'}</div>
+        ${v.rr2 ? `<div class="rr">R:R ${v.rr2}</div>` : ''}
+      </div>
+      <div class="vlevel" style="grid-column:1/3">
+        <div class="lbl">TP 3</div>
+        <div class="val" style="color:var(--green)">${v.tp3 || '—'}</div>
+        ${v.rr3 ? `<div class="rr">R:R ${v.rr3}</div>` : ''}
+      </div>
+    </div>
+    <div class="verdict-score">Score: ${v.score}  ·  ${v.ts}</div>
+  `;
+  const panel = document.getElementById('verdicts-panel');
+  panel.insertBefore(card, panel.firstChild);
+}
+
+// ── SSE CONNECTION ────────────────────────────────────────────
+function connect() {
+  const es = new EventSource('/events');
+
+  es.addEventListener('history', e => {
+    const lines = JSON.parse(e.data);
+    lines.forEach(({ line }) => {
+      appendLine(line, false);
+      tryParseVerdict(line);
+    });
+    scrollLog();
+  });
+
+  es.addEventListener('log', e => {
+    const { line } = JSON.parse(e.data);
+    appendLine(line, true);
+    tryParseVerdict(line);
+  });
+
+  es.addEventListener('state', e => {
+    const state = JSON.parse(e.data);
+    updatePrice(state);
+    updateIndicators(state);
+  });
+
+  es.onopen = () => {
+    connected = true;
+    const pill = document.getElementById('conn-pill');
+    pill.innerHTML = '<span class="dot"></span> LIVE';
+    pill.className = 'pill';
+  };
+
+  es.onerror = () => {
+    connected = false;
+    const pill = document.getElementById('conn-pill');
+    pill.innerHTML = '<span class="dot" style="background:var(--red)"></span> RECONNECTING';
+    pill.className = 'pill bear';
+    setTimeout(connect, 3000);
+    es.close();
+  };
+}
+
+connect();
+</script>
+</body>
+</html>
