@@ -3,7 +3,30 @@
  */
 import { getClient, getTargetInfo, evaluate } from '../connection.js';
 import { existsSync } from 'fs';
+import { join } from 'path';
 import { execSync, spawn } from 'child_process';
+
+/**
+ * Find TradingView.exe inside the Windows MSIX (Microsoft Store) install
+ * location. The WindowsApps folder is ACL-protected so readdir throws EPERM
+ * for non-admin users — ask the AppX system instead via Get-AppxPackage,
+ * which always works for the current user's installed packages.
+ * Returns the absolute path to TradingView.exe or null.
+ */
+function findMsixTradingView() {
+  try {
+    const out = execSync(
+      'powershell -NoProfile -NonInteractive -Command ' +
+      '"(Get-AppxPackage -Name TradingView.Desktop | Select-Object -First 1).InstallLocation"',
+      { timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }
+    ).toString().trim();
+    if (!out) return null;
+    const exe = join(out, 'TradingView.exe');
+    return existsSync(exe) ? exe : null;
+  } catch {
+    return null;
+  }
+}
 
 export async function healthCheck() {
   await getClient();
@@ -173,6 +196,7 @@ export async function launch({ port, kill_existing } = {}) {
       `${process.env.LOCALAPPDATA}\\TradingView\\TradingView.exe`,
       `${process.env.PROGRAMFILES}\\TradingView\\TradingView.exe`,
       `${process.env['PROGRAMFILES(X86)']}\\TradingView\\TradingView.exe`,
+      findMsixTradingView(),
     ],
     linux: [
       '/opt/TradingView/tradingview',
