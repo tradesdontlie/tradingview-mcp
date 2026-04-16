@@ -5,3 +5,4 @@ temp_*
 *.log
 discovery-log.json
 .worktrees/
+CHART-PULSE-*.md
