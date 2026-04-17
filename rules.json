@@ -1,0 +1,42 @@
+{
+  "watchlist": ["BTCUSD", "ETHUSD", "SOLUSD", "AAPL", "TSLA", "NVDA"],
+  "timeframes": ["1W", "1D", "4H"],
+  "biasCriteria": {
+    "bullish": [
+      "RSI(14) above 50 and rising",
+      "MACD histogram positive and increasing",
+      "Price above 21 EMA and 50 EMA",
+      "21 EMA above 50 EMA (golden alignment)"
+    ],
+    "bearish": [
+      "RSI(14) below 50 and falling",
+      "MACD histogram negative and decreasing",
+      "Price below 21 EMA and 50 EMA",
+      "21 EMA below 50 EMA (death alignment)"
+    ],
+    "neutral": [
+      "Mixed signals across indicators",
+      "Price choppy between 21 and 50 EMA",
+      "RSI between 45-55 with no clear trend"
+    ]
+  },
+  "riskRules": {
+    "maxPositionSize": "2% of portfolio per trade",
+    "stopLossRequired": true,
+    "riskRewardMinimum": 2.0,
+    "preSessionChecklist": [
+      "Check for major news events",
+      "Verify no earnings announcements today",
+      "Check overall market sentiment (SPX/VIX)"
+    ]
+  },
+  "twelveHrUpdate": {
+    "enabled": true,
+    "scheduleHours": [9, 21],
+    "reportFormat": "structured",
+    "includeKeyLevels": true,
+    "includeVolumeAnalysis": true,
+    "saveHistory": true,
+    "historyDir": "~/.tradingview-mcp/sessions"
+  }
+}
