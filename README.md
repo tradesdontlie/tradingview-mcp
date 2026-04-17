@@ -67,7 +67,6 @@ Gives your AI assistant eyes and hands on your own chart:
 - **Monitor your chart** — stream JSONL from your locally running chart for local monitoring scripts
 - **CLI access** — every MCP tool is also a `tv` CLI command, pipe-friendly with JSON output
 - **Launch TradingView** — auto-detect and launch with debug mode from any platform
-- **Multi-agent chart analysis** — `/chart-pulse` runs 5 read-only specialist subagents (trend, setup, momentum, risk, thesis) in parallel against your loaded chart and writes a composite report; `/chart-quick` is a no-subagent 60-second snapshot. See `docs/REFERENCE-skills-and-agent-teams.md` for the pattern.
 
 ## Install with Claude Code
 

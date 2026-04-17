@@ -3,14 +3,7 @@ name: performance-analyst
 description: Trading strategy performance analyst. Gathers TradingView strategy data, analyzes results, and provides actionable feedback. Use when reviewing backtest results.
 model: sonnet
 tools:
-  - mcp__tradingview__data_get_strategy_results
-  - mcp__tradingview__data_get_trades
-  - mcp__tradingview__data_get_equity
-  - mcp__tradingview__chart_get_state
-  - mcp__tradingview__symbol_info
-  - mcp__tradingview__capture_screenshot
-  - Read
-  - Write
+  - "*"
 ---
 
 You are a trading strategy performance analyst. Your job is to gather all available performance data from TradingView and provide a thorough analysis.

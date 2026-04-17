@@ -84,12 +84,6 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 - `tv_launch` → auto-detect and launch TradingView with CDP on Mac/Win/Linux
 - `tv_health_check` → verify connection is working
 
-### "Run a multi-agent analysis" (fibwise-style orchestrator)
-- `/chart-quick` → 60-second terminal-only snapshot of the currently loaded chart. No subagents. Read-only. Use for a fast triage.
-- `/chart-pulse [symbol]` → full 3-phase analysis: discovery brief → 5 parallel specialist subagents (trend, setup, momentum, risk, thesis) → composite score + `CHART-PULSE-<SYMBOL>.md` report. Read-only. Use when the user asks for "full analysis", "deep read", or "multi-angle pulse".
-  - See `docs/REFERENCE-skills-and-agent-teams.md` for the pattern this follows.
-  - Neither skill mutates chart state — they analyse whatever is currently loaded.
-
 ## Context Management Rules
 
 These tools can return large payloads. Follow these rules to avoid context bloat:
@@ -102,7 +96,6 @@ These tools can return large payloads. Follow these rules to avoid context bloat
 6. **Use `capture_screenshot`** for visual context instead of pulling large datasets — a screenshot is ~300KB but gives you the full visual picture
 7. **Call `chart_get_state` once** at the start to get entity IDs, then reference them — don't re-call repeatedly
 8. **Cap your OHLCV requests** — `count: 20` for quick analysis, `count: 100` for deeper work, `count: 500` only when specifically needed
-9. **Prefer `/chart-pulse` over ad-hoc multi-tool workflows** — the orchestrator builds a shared DISCOVERY_BRIEF once and dispatches 5 specialists in parallel, avoiding the 5×-redundant-reads problem that a sequential analysis would produce.
 
 ### Output Size Estimates (compact mode)
 | Tool | Typical Output |
