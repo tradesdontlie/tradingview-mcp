@@ -140,14 +140,47 @@ describe('TradingView MCP — Full E2E (70 tools)', () => {
     });
 
     it('tv_launch — auto-detect binary (verify path resolution only)', async () => {
-      // tv_launch is destructive (kills TradingView), so we only test path detection
+      // tv_launch is destructive (kills TradingView), so we only verify that
+      // *some* install is discoverable on this platform — legacy binary, or
+      // (Windows only) an MSIX package.
       const { existsSync } = await import('fs');
-      const paths = [
-        '/Applications/TradingView.app/Contents/MacOS/TradingView',
-        `${process.env.HOME}/Applications/TradingView.app/Contents/MacOS/TradingView`,
-      ];
-      const found = paths.some(p => existsSync(p));
-      assert.ok(found, 'TradingView binary found on disk');
+      const { execSync } = await import('child_process');
+      const platform = process.platform;
+
+      const candidatePaths = {
+        darwin: [
+          '/Applications/TradingView.app/Contents/MacOS/TradingView',
+          `${process.env.HOME}/Applications/TradingView.app/Contents/MacOS/TradingView`,
+        ],
+        win32: [
+          `${process.env.LOCALAPPDATA}\\TradingView\\TradingView.exe`,
+          `${process.env.PROGRAMFILES}\\TradingView\\TradingView.exe`,
+          `${process.env['PROGRAMFILES(X86)']}\\TradingView\\TradingView.exe`,
+        ],
+        linux: [
+          '/opt/TradingView/tradingview',
+          '/opt/TradingView/TradingView',
+          `${process.env.HOME}/.local/share/TradingView/TradingView`,
+          '/usr/bin/tradingview',
+          '/snap/tradingview/current/tradingview',
+        ],
+      };
+
+      const paths = candidatePaths[platform] || candidatePaths.linux;
+      let found = paths.some(p => p && existsSync(p));
+
+      // Windows: also accept MSIX packaged install (now supported by launch()).
+      if (!found && platform === 'win32') {
+        try {
+          const out = execSync(
+            'powershell -NoProfile -Command "Get-AppxPackage -Name TradingView.Desktop | Select -First 1 -ExpandProperty PackageFamilyName"',
+            { timeout: 8000, windowsHide: true }
+          ).toString().trim();
+          if (out) found = true;
+        } catch { /* ignore */ }
+      }
+
+      assert.ok(found, `TradingView install not found on ${platform}`);
     });
   });
 
