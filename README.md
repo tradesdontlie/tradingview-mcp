@@ -100,6 +100,8 @@ TradingView Desktop must be running with Chrome DevTools Protocol enabled on por
 scripts\launch_tv_debug.bat
 ```
 
+> **Windows MSIX note:** TradingView Desktop on Windows ships as an MSIX package (even when downloaded from tradingview.com/desktop/), installed under `C:\Program Files\WindowsApps\`. The Windows sandbox blocks direct `.exe` invocation with CLI flags, so `launch_tv_debug.bat` will not find a native install. Use the MCP tool `tv_launch` instead (or your AI assistant) — it auto-detects the MSIX package and launches via `IApplicationActivationManager`, the official Microsoft COM API for activating packaged apps with arguments.
+
 **Linux:**
 ```bash
 ./scripts/launch_tv_debug_linux.sh
@@ -331,7 +333,8 @@ Launch scripts and `tv_launch` auto-detect TradingView. If auto-detection fails:
 | Platform | Common Locations |
 |----------|-----------------|
 | **Mac** | `/Applications/TradingView.app/Contents/MacOS/TradingView` |
-| **Windows** | `%LOCALAPPDATA%\TradingView\TradingView.exe`, `%PROGRAMFILES%\WindowsApps\TradingView*\TradingView.exe` |
+| **Windows (legacy)** | `%LOCALAPPDATA%\TradingView\TradingView.exe`, `%PROGRAMFILES%\TradingView\TradingView.exe` |
+| **Windows (MSIX)** | Auto-detected via `Get-AppxPackage -Name TradingView.Desktop`; launched via `IApplicationActivationManager` COM API — use `tv_launch`, not `.exe` directly |
 | **Linux** | `/opt/TradingView/tradingview`, `~/.local/share/TradingView/TradingView`, `/snap/tradingview/current/tradingview` |
 
 The key flag: `--remote-debugging-port=9222`

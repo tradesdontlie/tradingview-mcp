@@ -4,6 +4,49 @@
 import { getClient, getTargetInfo, evaluate } from '../connection.js';
 import { existsSync } from 'fs';
 import { execSync, spawn } from 'child_process';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const MSIX_LAUNCHER_SCRIPT = join(__dirname, '..', '..', 'scripts', 'launch_msix.ps1');
+
+// Detect MSIX TradingView install on Windows. TradingView ships its Windows
+// Desktop app as an MSIX package even from tradingview.com/desktop/, which
+// installs under C:\Program Files\WindowsApps\ where the exe cannot be
+// launched directly with --remote-debugging-port=<port> due to Windows
+// packaged-app sandbox restrictions.
+//
+// Returns { packageFamilyName, installLocation } on success, null otherwise.
+function findMsixTradingView() {
+  if (process.platform !== 'win32') return null;
+  try {
+    const cmd = 'powershell -NoProfile -Command "Get-AppxPackage -Name \'TradingView.Desktop\' | Select-Object -First 1 PackageFamilyName, InstallLocation | ConvertTo-Json -Compress"';
+    const out = execSync(cmd, { timeout: 8000, windowsHide: true }).toString().trim();
+    if (!out) return null;
+    const info = JSON.parse(out);
+    if (!info || !info.PackageFamilyName) return null;
+    return {
+      packageFamilyName: info.PackageFamilyName,
+      installLocation: info.InstallLocation || null,
+      aumid: `${info.PackageFamilyName}!TradingView.Desktop`,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// Launch an MSIX-packaged TradingView via IApplicationActivationManager.
+// Returns { pid, aumid, port }.
+function launchMsixTradingView({ aumid, port }) {
+  const cmd = `powershell -NoProfile -ExecutionPolicy Bypass -File "${MSIX_LAUNCHER_SCRIPT}" -Aumid "${aumid}" -Port ${port}`;
+  const out = execSync(cmd, { timeout: 15000, windowsHide: true }).toString().trim();
+  const result = JSON.parse(out);
+  if (!result.success) {
+    throw new Error(`MSIX launch failed: ${result.error || 'unknown'}`);
+  }
+  return { pid: result.pid, aumid: result.aumid, port: result.port };
+}
 
 export async function healthCheck() {
   await getClient();
@@ -207,7 +250,11 @@ export async function launch({ port, kill_existing } = {}) {
     } catch { /* ignore */ }
   }
 
-  if (!tvPath) {
+  // Windows: if no native .exe was found, TradingView may be installed as an
+  // MSIX packaged app. Detect via Get-AppxPackage and launch via COM.
+  const msix = !tvPath ? findMsixTradingView() : null;
+
+  if (!tvPath && !msix) {
     throw new Error(`TradingView not found on ${platform}. Searched: ${candidates.join(', ')}. Launch manually with: /path/to/TradingView --remote-debugging-port=${cdpPort}`);
   }
 
@@ -219,8 +266,19 @@ export async function launch({ port, kill_existing } = {}) {
     } catch { /* may not be running */ }
   }
 
-  const child = spawn(tvPath, [`--remote-debugging-port=${cdpPort}`], { detached: true, stdio: 'ignore' });
-  child.unref();
+  let pid, launchMethod, binary;
+  if (msix) {
+    const res = launchMsixTradingView({ aumid: msix.aumid, port: cdpPort });
+    pid = res.pid;
+    launchMethod = 'msix';
+    binary = msix.aumid;
+  } else {
+    const child = spawn(tvPath, [`--remote-debugging-port=${cdpPort}`], { detached: true, stdio: 'ignore' });
+    child.unref();
+    pid = child.pid;
+    launchMethod = 'native';
+    binary = tvPath;
+  }
 
   for (let i = 0; i < 15; i++) {
     await new Promise(r => setTimeout(r, 1000));
@@ -236,7 +294,7 @@ export async function launch({ port, kill_existing } = {}) {
       if (ready) {
         const info = JSON.parse(ready);
         return {
-          success: true, platform, binary: tvPath, pid: child.pid,
+          success: true, platform, launch_method: launchMethod, binary, pid,
           cdp_port: cdpPort, cdp_url: `http://localhost:${cdpPort}`,
           browser: info.Browser, user_agent: info['User-Agent'],
         };
@@ -245,7 +303,7 @@ export async function launch({ port, kill_existing } = {}) {
   }
 
   return {
-    success: true, platform, binary: tvPath, pid: child.pid, cdp_port: cdpPort, cdp_ready: false,
+    success: true, platform, launch_method: launchMethod, binary, pid, cdp_port: cdpPort, cdp_ready: false,
     warning: 'TradingView launched but CDP not responding yet. It may still be loading. Try tv_health_check in a few seconds.',
   };
 }
