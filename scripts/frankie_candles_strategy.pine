@@ -124,13 +124,15 @@ swingH = ta.highest(high[1], i_liqLen)
 liqBull = low < swingL and close > swingL   // wicked below, closed above
 liqBear = high > swingH and close < swingH  // wicked above, closed below
 
+atr14 = ta.atr(14)
+
 if i_showLiq and liqBull
-    label.new(bar_index, low - ta.atr(14) * 0.5, "💧 Liq Sweep ▲",
+    label.new(bar_index, low - atr14 * 0.5, "💧 Liq Sweep ▲",
               color=color.new(color.lime, 0), textcolor=color.black,
               style=label.style_label_up, size=size.small)
 
 if i_showLiq and liqBear
-    label.new(bar_index, high + ta.atr(14) * 0.5, "💧 Liq Sweep ▼",
+    label.new(bar_index, high + atr14 * 0.5, "💧 Liq Sweep ▼",
               color=color.new(color.red, 0), textcolor=color.white,
               style=label.style_label_down, size=size.small)
 

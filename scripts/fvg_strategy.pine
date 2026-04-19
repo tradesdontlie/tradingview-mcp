@@ -150,13 +150,15 @@ recentLow  = ta.lowest(low,    i_chochSw)
 chochBull = recentHigh > priorHigh and close > recentHigh * 0.998
 chochBear = recentLow  < priorLow  and close < recentLow  * 1.002
 
+atr14 = ta.atr(14)
+
 if i_showChoch and chochBull
-    label.new(bar_index, low - ta.atr(14) * 0.3, "CHoCH ▲",
+    label.new(bar_index, low - atr14 * 0.3, "CHoCH ▲",
               color=color.new(color.teal, 0), textcolor=color.white,
               style=label.style_label_up, size=size.tiny)
 
 if i_showChoch and chochBear
-    label.new(bar_index, high + ta.atr(14) * 0.3, "CHoCH ▼",
+    label.new(bar_index, high + atr14 * 0.3, "CHoCH ▼",
               color=color.new(color.orange, 0), textcolor=color.white,
               style=label.style_label_down, size=size.tiny)
 
