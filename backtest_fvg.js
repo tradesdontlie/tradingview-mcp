@@ -273,16 +273,24 @@ function scoreSignals(candles) {
   return { bull, bear, fvgBull: fvg.bull, fvgBear: fvg.bear, trendBull: mf.bull, trendBear: mf.bear };
 }
 
+// Pre-compute signal scores for all bars once — reused across all parameter combos
+function precomputeSignals(candles) {
+  const out = new Array(candles.length).fill(null);
+  for (let i = WARMUP; i < candles.length; i++) {
+    out[i] = scoreSignals(candles.slice(0, i + 1));
+  }
+  return out;
+}
+
 // ─── Simulation (same trailing stop logic as Frankie Candles v2) ──────────────
 
-function simulate(candles, minSignals, stopPct, trailActivatePct, trailPct) {
+function simulate(candles, minSignals, stopPct, trailActivatePct, trailPct, sigCache) {
   let position = null;
   const trades = [];
 
   for (let i = WARMUP; i < candles.length; i++) {
-    const slice = candles.slice(0, i + 1);
     const { high, low, close: price } = candles[i];
-    const { bull, bear, fvgBull, fvgBear, trendBull, trendBear } = scoreSignals(slice);
+    const { bull, bear, fvgBull, fvgBear, trendBull, trendBear } = sigCache[i];
 
     if (position) {
       const { direction: dir, entryPrice: ep } = position;
@@ -358,10 +366,14 @@ function simulate(candles, minSignals, stopPct, trailActivatePct, trailPct) {
 }
 
 function bestCombo(candles) {
-  const minSigRange    = [3, 4, 5];
-  const stops          = [0.005, 0.01, 0.015, 0.02, 0.03, 0.05];
-  const trailActivates = [0.005, 0.01, 0.02, 0.03, 0.05, 0.07, 0.10, 0.15];
-  const trailPcts      = [0.005, 0.01, 0.02, 0.03, 0.05, 0.07, 0.10];
+  // Narrowed grid — v2 results showed 0.5% stop dominated; keep it tight for speed
+  const minSigRange    = [2, 3, 4];
+  const stops          = [0.005, 0.01, 0.02];
+  const trailActivates = [0.005, 0.01, 0.02, 0.05];
+  const trailPcts      = [0.005, 0.01, 0.02];
+
+  // Pre-compute signals once for all bars — reused across all 108 param combos
+  const sigCache = precomputeSignals(candles);
 
   let best55  = null;
   let bestAny = null;
@@ -371,7 +383,7 @@ function bestCombo(candles) {
       for (const act of trailActivates) {
         if (act < stop) continue;
         for (const trail of trailPcts) {
-          const r = simulate(candles, ms, stop, act, trail);
+          const r = simulate(candles, ms, stop, act, trail, sigCache);
           if (!r || r.n < 5) continue;
           if (!bestAny || r.pf > bestAny.pf) bestAny = { ms, stop, act, trail, ...r };
           if (r.winRate >= 55) {
