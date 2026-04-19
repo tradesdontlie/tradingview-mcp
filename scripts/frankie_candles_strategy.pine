@@ -1,0 +1,231 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0
+//@version=6
+indicator("Frankie Candles Strategy", shorttitle="FC-Bot", overlay=true, max_bars_back=500, max_lines_count=50, max_boxes_count=100, max_labels_count=100)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// INPUTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+g1 = "Money Flow (EMA + MACD)"
+i_ema50       = input.int(50,  "EMA 50",   group=g1)
+i_ema200      = input.int(200, "EMA 200",  group=g1)
+i_macdLen     = input.int(34,  "MACD Length", group=g1)
+i_macdSig     = input.int(9,   "MACD Signal", group=g1)
+
+g2 = "VWAP"
+i_showVWAP    = input.bool(true, "Show VWAP",    group=g2)
+i_vwapBand    = input.float(2.0, "VWAP Band %",  group=g2)
+
+g3 = "Volume Profile POC"
+i_pocLen      = input.int(100,  "Lookback Bars", group=g3)
+i_showPOC     = input.bool(true, "Show POC Line", group=g3)
+
+g4 = "WaveTrend (VuManChu)"
+i_wtN1        = input.int(10,   "Channel Length", group=g4)
+i_wtN2        = input.int(21,   "Avg Length",     group=g4)
+i_wtOS        = input.int(-53,  "Oversold",       group=g4)
+i_wtOB        = input.int(53,   "Overbought",     group=g4)
+
+g5 = "Liquidity Sweeps"
+i_liqLen      = input.int(10,   "Swing Lookback", group=g5)
+i_showLiq     = input.bool(true, "Show Sweep Markers", group=g5)
+
+g6 = "Fibonacci 0.786 (Golden Pocket)"
+i_fibLen      = input.int(50,   "Swing Lookback", group=g6)
+i_showFib     = input.bool(true, "Show Fib Zone",  group=g6)
+
+g7 = "Confluence"
+i_minSig      = input.int(3,    "Min Signals for Entry", minval=1, maxval=6, group=g7)
+i_showDash    = input.bool(true, "Show Dashboard",         group=g7)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 1. MONEY FLOW — EMA50 vs EMA200 + Impulse MACD
+//    Green money flow = longs only. Red = shorts only. (Frankie's primary filter)
+// ═══════════════════════════════════════════════════════════════════════════════
+ema50  = ta.ema(close, i_ema50)
+ema200 = ta.ema(close, i_ema200)
+
+// Impulse MACD (LazyBear / Credible Crypto style)
+hi2    = ta.ema(ta.ema(high,  i_macdLen), i_macdLen)
+lo2    = ta.ema(ta.ema(low,   i_macdLen), i_macdLen)
+mi2    = ta.ema(ta.ema(hlc3,  i_macdLen), i_macdLen)
+impMD  = mi2 > hi2 ? mi2 - hi2 : mi2 < lo2 ? mi2 - lo2 : 0
+impSig = ta.sma(impMD, i_macdSig)
+impHist = impMD - impSig
+
+mfBull = ema50 > ema200 and impMD > 0 and impHist >= 0
+mfBear = ema50 < ema200 or impMD <= 0 or (impMD > 0 and impHist < 0)
+
+plot(ema50,  "EMA 50",  color=color.new(color.orange, 0), linewidth=1)
+plot(ema200, "EMA 200", color=color.new(color.red,    0), linewidth=2)
+
+// Money flow background
+bgcolor(mfBull ? color.new(color.green, 96) : mfBear ? color.new(color.red, 96) : na)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 2. VWAP — Session-anchored. Discount below = long zone. Premium above = short zone.
+// ═══════════════════════════════════════════════════════════════════════════════
+vwapVal  = ta.vwap(hlc3)
+vwapBandPct = i_vwapBand / 100
+vwapUpper = vwapVal * (1 + vwapBandPct)
+vwapLower = vwapVal * (1 - vwapBandPct)
+
+pVwap = plot(i_showVWAP ? vwapVal : na, "VWAP", color=color.new(color.blue, 0), linewidth=2)
+pVwapU = plot(i_showVWAP ? vwapUpper : na, "VWAP +%", color=color.new(color.blue, 70), linewidth=1, style=plot.style_circles)
+pVwapL = plot(i_showVWAP ? vwapLower : na, "VWAP -%", color=color.new(color.blue, 70), linewidth=1, style=plot.style_circles)
+fill(pVwapU, pVwapL, color=color.new(color.blue, 93))
+
+// Bull = price in discount zone (below VWAP within band %)
+// Bear = price in premium zone (above VWAP within band %)
+vwapBull = close < vwapVal and close >= vwapLower
+vwapBear = close > vwapVal and close <= vwapUpper
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 3. VOLUME PROFILE POC — Highest-volume price in lookback (simplified)
+//    Price near POC = high probability S/R level
+// ═══════════════════════════════════════════════════════════════════════════════
+pocBarOffset = math.abs(ta.highestbars(volume, i_pocLen))
+pocPrice     = close[pocBarOffset]
+
+plot(i_showPOC ? pocPrice : na, "POC", color=color.new(color.purple, 0), linewidth=1, style=plot.style_circles)
+
+pocTolerance = pocPrice * 0.015
+pocBull = close >= pocPrice - pocTolerance and close <= pocPrice + pocTolerance and close >= pocPrice
+pocBear = close >= pocPrice - pocTolerance and close <= pocPrice + pocTolerance and close <= pocPrice
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 4. WAVETREND — VuManChu style oscillator
+//    Cross up from oversold = bullish momentum. Cross down from overbought = bearish.
+// ═══════════════════════════════════════════════════════════════════════════════
+ap   = hlc3
+esa  = ta.ema(ap, i_wtN1)
+d    = ta.ema(math.abs(ap - esa), i_wtN1)
+ci   = (ap - esa) / (0.015 * d)
+tci  = ta.ema(ci, i_wtN2)
+wt1  = tci
+wt2  = ta.sma(wt1, 4)
+
+wtCrossUp   = ta.crossover(wt1,  wt2)
+wtCrossDown = ta.crossunder(wt1, wt2)
+wtBull = wtCrossUp   and wt2 < (i_wtOS + 20)
+wtBear = wtCrossDown and wt2 > (i_wtOB - 20)
+
+// Plot WT signal dots on price chart
+plotshape(wtBull, "WT Buy",  shape.circle, location.belowbar, color.new(color.aqua,  0), size=size.tiny)
+plotshape(wtBear, "WT Sell", shape.circle, location.abovebar, color.new(color.fuchsia, 0), size=size.tiny)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 5. LIQUIDITY SWEEPS — Wick below swing low + close above (bull trap / bear stop hunt)
+//    These are Frankie's highest-probability entry setups.
+// ═══════════════════════════════════════════════════════════════════════════════
+swingL = ta.lowest(low[1],  i_liqLen)
+swingH = ta.highest(high[1], i_liqLen)
+
+liqBull = low < swingL and close > swingL   // wicked below, closed above
+liqBear = high > swingH and close < swingH  // wicked above, closed below
+
+if i_showLiq and liqBull
+    label.new(bar_index, low - ta.atr(14) * 0.5, "💧 Liq Sweep ▲",
+              color=color.new(color.lime, 0), textcolor=color.black,
+              style=label.style_label_up, size=size.small)
+
+if i_showLiq and liqBear
+    label.new(bar_index, high + ta.atr(14) * 0.5, "💧 Liq Sweep ▼",
+              color=color.new(color.red, 0), textcolor=color.white,
+              style=label.style_label_down, size=size.small)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 6. FIBONACCI 0.786 (GOLDEN POCKET) — Key retracement entry zone
+//    Frankie uses this for sniper entries at confluence with VWAP/POC
+// ═══════════════════════════════════════════════════════════════════════════════
+fibHigh = ta.highest(high, i_fibLen)
+fibLow  = ta.lowest(low,  i_fibLen)
+fibRange = fibHigh - fibLow
+
+// 0.786 from low (bull pullback entry) and from high (bear rally entry)
+fib786Bull = fibLow  + fibRange * (1 - 0.786)
+fib786Bear = fibHigh - fibRange * (1 - 0.786)
+
+fibTol  = fibRange * 0.015
+fibBull = close >= fib786Bull - fibTol and close <= fib786Bull + fibTol
+fibBear = close >= fib786Bear - fibTol and close <= fib786Bear + fibTol
+
+// Draw fib zone boxes on last bar
+if i_showFib and barstate.islast
+    box.new(bar_index - i_fibLen, fib786Bull + fibTol, bar_index + 10, fib786Bull - fibTol,
+            bgcolor=color.new(color.green, 85), border_color=color.new(color.green, 40),
+            extend=extend.right)
+    box.new(bar_index - i_fibLen, fib786Bear + fibTol, bar_index + 10, fib786Bear - fibTol,
+            bgcolor=color.new(color.red, 85), border_color=color.new(color.red, 40),
+            extend=extend.right)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 7. CONFLUENCE SCORING — 3-of-6 required (matches bot exactly)
+// ═══════════════════════════════════════════════════════════════════════════════
+bullScore = (mfBull ? 1 : 0) + (vwapBull ? 1 : 0) + (pocBull ? 1 : 0) + (wtBull ? 1 : 0) + (liqBull ? 1 : 0) + (fibBull ? 1 : 0)
+bearScore = (mfBear ? 1 : 0) + (vwapBear ? 1 : 0) + (pocBear ? 1 : 0) + (wtBear ? 1 : 0) + (liqBear ? 1 : 0) + (fibBear ? 1 : 0)
+
+longSig  = bullScore >= i_minSig and bullScore > bearScore
+shortSig = bearScore >= i_minSig and bearScore > bullScore
+
+plotshape(longSig,  "LONG",  shape.triangleup,   location.belowbar,
+          color.new(color.lime, 0), size=size.normal, text="LONG")
+plotshape(shortSig, "SHORT", shape.triangledown,  location.abovebar,
+          color.new(color.red,  0), size=size.normal, text="SHORT")
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 8. DASHBOARD — Mirrors bot safety check output
+// ═══════════════════════════════════════════════════════════════════════════════
+if i_showDash and barstate.islast
+    var table t = table.new(position.top_right, 3, 9,
+                            bgcolor      = color.new(color.black, 72),
+                            border_width = 1,
+                            border_color = color.new(color.gray, 55))
+
+    hBG = color.new(color.navy, 25)
+    table.cell(t, 0, 0, "SIGNAL",       text_color=color.white, text_size=size.small, bgcolor=hBG)
+    table.cell(t, 1, 0, "CONDITION",    text_color=color.white, text_size=size.small, bgcolor=hBG)
+    table.cell(t, 2, 0, "STATUS",       text_color=color.white, text_size=size.small, bgcolor=hBG)
+
+    table.cell(t, 0, 1, "Money Flow",   text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 1, 1, "EMA50>200 + MACD", text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 2, 1, mfBull ? "BULL ▲" : mfBear ? "BEAR ▼" : "NEUT —",
+               text_color=mfBull ? color.lime : mfBear ? color.red : color.gray, text_size=size.tiny)
+
+    table.cell(t, 0, 2, "VWAP Zone",    text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 1, 2, "Discount/Premium", text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 2, 2, vwapBull ? "DISC ▲" : vwapBear ? "PREM ▼" : "NEUT —",
+               text_color=vwapBull ? color.lime : vwapBear ? color.red : color.gray, text_size=size.tiny)
+
+    table.cell(t, 0, 3, "POC Level",    text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 1, 3, "$" + str.tostring(math.round(pocPrice)), text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 2, 3, pocBull ? "SUPP ▲" : pocBear ? "RESI ▼" : "AWAY —",
+               text_color=pocBull ? color.lime : pocBear ? color.red : color.gray, text_size=size.tiny)
+
+    table.cell(t, 0, 4, "WaveTrend",    text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 1, 4, "WT=" + str.tostring(math.round(wt1, 1)), text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 2, 4, wtBull ? "BUY ▲" : wtBear ? "SELL ▼" : "NEUT —",
+               text_color=wtBull ? color.lime : wtBear ? color.red : color.gray, text_size=size.tiny)
+
+    table.cell(t, 0, 5, "Liq. Sweep",   text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 1, 5, "Wick+Reversal", text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 2, 5, liqBull ? "BULL ▲" : liqBear ? "BEAR ▼" : "NONE —",
+               text_color=liqBull ? color.lime : liqBear ? color.red : color.gray, text_size=size.tiny)
+
+    table.cell(t, 0, 6, "Fib 0.786",    text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 1, 6, "Golden Pocket", text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 2, 6, fibBull ? "ZONE ▲" : fibBear ? "ZONE ▼" : "AWAY —",
+               text_color=fibBull ? color.lime : fibBear ? color.red : color.gray, text_size=size.tiny)
+
+    sBG = color.new(color.navy, 20)
+    table.cell(t, 0, 7, "CONFLUENCE",   text_color=color.white, text_size=size.tiny, bgcolor=sBG)
+    table.cell(t, 1, 7, "B:" + str.tostring(bullScore) + " / S:" + str.tostring(bearScore),
+               text_color=bullScore > bearScore ? color.lime : bearScore > bullScore ? color.red : color.gray,
+               text_size=size.tiny, bgcolor=sBG)
+    table.cell(t, 2, 7, longSig ? "★ LONG" : shortSig ? "★ SHORT" : "WAIT",
+               text_color=longSig ? color.lime : shortSig ? color.red : color.gray,
+               text_size=size.tiny, bgcolor=sBG)
+
+    table.cell(t, 0, 8, "RISK",         text_color=color.gray, text_size=size.tiny)
+    table.cell(t, 1, 8, "Max $20 / trade", text_color=color.gray, text_size=size.tiny)
+    table.cell(t, 2, 8, str.tostring(i_minSig) + "+ signals req.", text_color=color.gray, text_size=size.tiny)

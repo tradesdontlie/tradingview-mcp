@@ -1,0 +1,288 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0
+//@version=6
+indicator("Multi-Trader Confluence Strategy", shorttitle="MTCS", overlay=true, max_bars_back=500, max_lines_count=100, max_boxes_count=100, max_labels_count=100)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// INPUTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// DonAlt — Moving Averages
+g1 = "DonAlt — Moving Averages"
+i_showEMA = input.bool(true,  "Show MAs",  group=g1)
+i_ema21   = input.int(21,     "EMA 21",    group=g1)
+i_ema50   = input.int(50,     "EMA 50",    group=g1)
+i_ema200  = input.int(200,    "EMA 200",   group=g1)
+
+// Gareth Soloway — Supertrend
+g2 = "Gareth Soloway — Supertrend"
+i_stFactor = input.float(3.0, "Factor",     group=g2)
+i_stATR    = input.int(10,    "ATR Period", group=g2)
+
+// Scott Melker — Bollinger Bands
+g3 = "Scott Melker — Bollinger Bands"
+i_bbLen  = input.int(20,    "Length", group=g3)
+i_bbMult = input.float(2.0, "StdDev", group=g3)
+
+// WaveTrend (VuManChu Style)
+g4 = "WaveTrend — VuManChu Style"
+i_wtN1 = input.int(10,  "Channel Length", group=g4)
+i_wtN2 = input.int(21,  "Avg Length",     group=g4)
+i_wtOB = input.int(53,  "Overbought",     group=g4)
+i_wtOS = input.int(-53, "Oversold",       group=g4)
+
+// Impulse MACD — Credible Crypto
+g5 = "Impulse MACD — Credible Crypto"
+i_macdLen = input.int(34, "Length",        group=g5)
+i_sigLen  = input.int(9,  "Signal Length", group=g5)
+
+// Frankie Candles — SMC
+g6 = "Frankie Candles — SMC"
+i_showFVG = input.bool(true, "Show Fair Value Gaps",  group=g6)
+i_showOB  = input.bool(true, "Show Order Blocks",     group=g6)
+i_showBOS = input.bool(true, "Show BOS / CHoCH",      group=g6)
+i_swLen   = input.int(5,     "Swing Length",           group=g6)
+
+// Confluence
+g7 = "Confluence"
+i_minSig  = input.int(3,    "Min Signals for Entry", minval=1, maxval=6, group=g7)
+i_showDash = input.bool(true, "Show Dashboard",       group=g7)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 1. DONALT — MOVING AVERAGES
+//    Above 200 EMA = macro bull. 50 crossing 200 = golden/death cross.
+// ═══════════════════════════════════════════════════════════════════════════════
+ema21  = ta.ema(close, i_ema21)
+ema50  = ta.ema(close, i_ema50)
+ema200 = ta.ema(close, i_ema200)
+
+plot(i_showEMA ? ema21  : na, "EMA 21",  color=color.new(color.yellow, 0), linewidth=1)
+plot(i_showEMA ? ema50  : na, "EMA 50",  color=color.new(color.orange, 0), linewidth=1)
+plot(i_showEMA ? ema200 : na, "EMA 200", color=color.new(color.red,    0), linewidth=2)
+
+donaltBull = close > ema200 and ema50 > ema200
+donaltBear = close < ema200 and ema50 < ema200
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 2. GARETH SOLOWAY — SUPERTREND
+//    Green = ride the bull. Red = stand aside or short.
+// ═══════════════════════════════════════════════════════════════════════════════
+[stLine, stDir] = ta.supertrend(i_stFactor, i_stATR)
+stBull = stDir < 0
+stBear = stDir > 0
+
+plot(stLine, "Supertrend", color=stBull ? color.new(color.lime, 0) : color.new(color.red, 0), linewidth=2)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 3. SCOTT MELKER — BOLLINGER BANDS
+//    Price at/outside band = mean-revert opportunity.
+//    Squeeze then release = momentum breakout incoming.
+// ═══════════════════════════════════════════════════════════════════════════════
+bbBasis  = ta.sma(close, i_bbLen)
+bbDev    = i_bbMult * ta.stdev(close, i_bbLen)
+bbUpper  = bbBasis + bbDev
+bbLower  = bbBasis - bbDev
+bbWidth  = (bbUpper - bbLower) / bbBasis
+bbWidthMA = ta.sma(bbWidth, 20)
+squeeze  = bbWidth < bbWidthMA * 0.75
+sqRelease = squeeze[1] and not squeeze
+
+p_bbU = plot(bbUpper, "BB Upper", color=color.new(color.blue, 70))
+p_bbL = plot(bbLower, "BB Lower", color=color.new(color.blue, 70))
+plot(bbBasis, "BB Mid", color=color.new(color.blue, 50), linewidth=1)
+fill(p_bbU, p_bbL, color=color.new(color.blue, 93))
+
+// Squeeze dot on basis line
+plotshape(squeeze, "Squeeze", shape.circle, location.absolute,
+          color=color.new(color.orange, 0), size=size.tiny, offset=0)
+
+melkerBull = close <= bbLower or (sqRelease and close > bbBasis)
+melkerBear = close >= bbUpper or (sqRelease and close < bbBasis)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 4. WAVETREND — VuManChu Style
+//    Cross up from oversold = buy signal. Cross down from overbought = sell.
+// ═══════════════════════════════════════════════════════════════════════════════
+ap  = hlc3
+esa = ta.ema(ap, i_wtN1)
+d   = ta.ema(math.abs(ap - esa), i_wtN1)
+ci  = (ap - esa) / (0.015 * d)
+tci = ta.ema(ci, i_wtN2)
+wt1 = tci
+wt2 = ta.sma(wt1, 4)
+
+wtCrossUp   = ta.crossover(wt1, wt2)
+wtCrossDown = ta.crossunder(wt1, wt2)
+
+wtBull = wtCrossUp   and wt2 < (i_wtOS + 20)
+wtBear = wtCrossDown and wt2 > (i_wtOB - 20)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 5. IMPULSE MACD — Credible Crypto / LazyBear
+//    Positive + rising histogram = bullish momentum. Turning red = warning.
+// ═══════════════════════════════════════════════════════════════════════════════
+hi2   = ta.ema(ta.ema(high,  i_macdLen), i_macdLen)
+lo2   = ta.ema(ta.ema(low,   i_macdLen), i_macdLen)
+mi2   = ta.ema(ta.ema(hlc3,  i_macdLen), i_macdLen)
+impMD = mi2 > hi2 ? mi2 - hi2 : mi2 < lo2 ? mi2 - lo2 : 0
+impSig  = ta.sma(impMD, i_sigLen)
+impHist = impMD - impSig
+
+impBull = impMD > 0 and impHist >= 0
+impBear = impMD <= 0 or (impMD > 0 and impHist < 0)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 6. FRANKIE CANDLES — SMC (BOS, CHoCH, FVG, Order Blocks)
+//    The language of institutional money: liquidity, structure, imbalance.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Swing highs and lows
+swH = ta.pivothigh(high, i_swLen, i_swLen)
+swL = ta.pivotlow(low,  i_swLen, i_swLen)
+
+var float lastSwH = na
+var float lastSwL = na
+
+if not na(swH)
+    lastSwH := swH
+if not na(swL)
+    lastSwL := swL
+
+// Break of Structure
+crossOverSwH  = ta.crossover(close, lastSwH)
+crossUnderSwL = ta.crossunder(close, lastSwL)
+bullBOS = not na(lastSwH) and crossOverSwH
+bearBOS = not na(lastSwL) and crossUnderSwL
+
+// Change of Character — first BOS against prior trend
+var bool inDowntrend = false
+var bool inUptrend   = false
+
+bullCHoCH = bullBOS and inDowntrend
+bearCHoCH = bearBOS and inUptrend
+
+if bearBOS
+    inDowntrend := true
+    inUptrend   := false
+if bullBOS
+    inUptrend   := true
+    inDowntrend := false
+
+// Pre-compute ATR outside conditional blocks
+atr14 = ta.atr(14)
+
+// BOS / CHoCH Labels
+if i_showBOS
+    if bullBOS
+        label.new(bar_index, low - atr14 * 1.2, bullCHoCH ? "CHoCH ▲" : "BOS ▲", color=bullCHoCH ? color.purple : color.green, textcolor=color.white, style=label.style_label_up, size=size.small)
+    if bearBOS
+        label.new(bar_index, high + atr14 * 1.2, bearCHoCH ? "CHoCH ▼" : "BOS ▼", color=bearCHoCH ? color.purple : color.red, textcolor=color.white, style=label.style_label_down, size=size.small)
+
+// Fair Value Gaps — imbalance zones (candle 1 high vs candle 3 low)
+bullFVG = high[2] < low[0]
+bearFVG = low[2]  > high[0]
+
+if i_showFVG
+    if bullFVG
+        box.new(bar_index - 2, low[0], bar_index, high[2], bgcolor=color.new(color.green, 88), border_color=color.new(color.green, 55))
+    if bearFVG
+        box.new(bar_index - 2, high[0], bar_index, low[2], bgcolor=color.new(color.red, 88), border_color=color.new(color.red, 55))
+
+// Order Blocks - last opposite candle before BOS (checks back 3 bars, picks closest)
+obBullIdx = close[1] < open[1] ? 1 : close[2] < open[2] ? 2 : close[3] < open[3] ? 3 : na
+obBearIdx = close[1] > open[1] ? 1 : close[2] > open[2] ? 2 : close[3] > open[3] ? 3 : na
+
+if i_showOB and bullBOS and not na(obBullIdx)
+    box.new(bar_index - obBullIdx, open[obBullIdx], bar_index + 30, close[obBullIdx], bgcolor=color.new(color.green, 80), border_color=color.new(color.lime, 40), extend=extend.right)
+
+if i_showOB and bearBOS and not na(obBearIdx)
+    box.new(bar_index - obBearIdx, close[obBearIdx], bar_index + 30, open[obBearIdx], bgcolor=color.new(color.red, 80), border_color=color.new(color.red, 40), extend=extend.right)
+
+smcBull = bullBOS or bullCHoCH or bullFVG
+smcBear = bearBOS or bearCHoCH or bearFVG
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 7. CONFLUENCE SCORING — Entry when 3+ systems agree
+// ═══════════════════════════════════════════════════════════════════════════════
+bullScore = (donaltBull ? 1 : 0) + (stBull ? 1 : 0) + (melkerBull ? 1 : 0) + (wtBull ? 1 : 0) + (impBull ? 1 : 0) + (smcBull ? 1 : 0)
+
+bearScore = (donaltBear ? 1 : 0) + (stBear ? 1 : 0) + (melkerBear ? 1 : 0) + (wtBear ? 1 : 0) + (impBear ? 1 : 0) + (smcBear ? 1 : 0)
+
+longSig  = bullScore >= i_minSig and bullScore > bearScore
+shortSig = bearScore >= i_minSig and bearScore > bullScore
+
+plotshape(longSig,  "LONG",  shape.triangleup,   location.belowbar,
+          color.new(color.lime, 0), size=size.normal, text="LONG")
+plotshape(shortSig, "SHORT", shape.triangledown,  location.abovebar,
+          color.new(color.red,  0), size=size.normal, text="SHORT")
+
+bgcolor(longSig  ? color.new(color.green, 92) :
+        shortSig ? color.new(color.red,   92) : na)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 8. DASHBOARD — Live system status + confluence score
+// ═══════════════════════════════════════════════════════════════════════════════
+if i_showDash and barstate.islast
+    var table t = table.new(position.top_right, 3, 9,
+                            bgcolor      = color.new(color.black, 72),
+                            border_width = 1,
+                            border_color = color.new(color.gray, 55))
+
+    hBG = color.new(color.navy, 25)
+    table.cell(t, 0, 0, "INDICATOR",  text_color=color.white, text_size=size.small, bgcolor=hBG)
+    table.cell(t, 1, 0, "TRADER",     text_color=color.white, text_size=size.small, bgcolor=hBG)
+    table.cell(t, 2, 0, "SIGNAL",     text_color=color.white, text_size=size.small, bgcolor=hBG)
+
+    // 200 EMA — DonAlt
+    table.cell(t, 0, 1, "200 EMA",    text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 1, 1, "DonAlt",     text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 2, 1, donaltBull ? "BULL ▲" : donaltBear ? "BEAR ▼" : "NEUT —",
+               text_color=donaltBull ? color.lime : donaltBear ? color.red : color.gray,
+               text_size=size.tiny)
+
+    // Supertrend — Gareth Soloway
+    table.cell(t, 0, 2, "Supertrend", text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 1, 2, "G.Soloway",  text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 2, 2, stBull ? "BULL ▲" : "BEAR ▼",
+               text_color=stBull ? color.lime : color.red, text_size=size.tiny)
+
+    // Bollinger Bands — Scott Melker
+    table.cell(t, 0, 3, "Boll.Bands", text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 1, 3, "S.Melker",   text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 2, 3, melkerBull ? "BULL ▲" : melkerBear ? "BEAR ▼" : "NEUT —",
+               text_color=melkerBull ? color.lime : melkerBear ? color.red : color.gray,
+               text_size=size.tiny)
+
+    // WaveTrend — VuManChu
+    table.cell(t, 0, 4, "WaveTrend",  text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 1, 4, "VuManChu",   text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 2, 4, wtBull ? "BUY ▲" : wtBear ? "SELL ▼" : "NEUT —",
+               text_color=wtBull ? color.lime : wtBear ? color.red : color.gray,
+               text_size=size.tiny)
+
+    // Impulse MACD — Credible Crypto
+    table.cell(t, 0, 5, "Imp.MACD",   text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 1, 5, "Cred.Crypto",text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 2, 5, impBull ? "BULL ▲" : "BEAR ▼",
+               text_color=impBull ? color.lime : color.red, text_size=size.tiny)
+
+    // SMC — Frankie Candles
+    table.cell(t, 0, 6, "SMC",        text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 1, 6, "F.Candles",  text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 2, 6, smcBull ? "BULL ▲" : smcBear ? "BEAR ▼" : "NEUT —",
+               text_color=smcBull ? color.lime : smcBear ? color.red : color.gray,
+               text_size=size.tiny)
+
+    // Confluence score
+    sBG = color.new(color.navy, 20)
+    table.cell(t, 0, 7, "CONFLUENCE", text_color=color.white,  text_size=size.tiny, bgcolor=sBG)
+    table.cell(t, 1, 7, "B:" + str.tostring(bullScore) + " / S:" + str.tostring(bearScore),
+               text_color = bullScore > bearScore ? color.lime : bearScore > bullScore ? color.red : color.gray,
+               text_size=size.tiny, bgcolor=sBG)
+    table.cell(t, 2, 7, longSig ? "★ LONG" : shortSig ? "★ SHORT" : "WAIT",
+               text_color = longSig ? color.lime : shortSig ? color.red : color.gray,
+               text_size=size.tiny, bgcolor=sBG)
+
+    // Risk reminder
+    table.cell(t, 0, 8, "RISK",       text_color=color.gray, text_size=size.tiny)
+    table.cell(t, 1, 8, "Max 2% / trade", text_color=color.gray, text_size=size.tiny)
+    table.cell(t, 2, 8, str.tostring(i_minSig) + "+ signals req.", text_color=color.gray, text_size=size.tiny)
