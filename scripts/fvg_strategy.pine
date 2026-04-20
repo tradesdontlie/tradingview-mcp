@@ -1,0 +1,274 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0
+//@version=6
+indicator("ICT FVG + Order Block Strategy", shorttitle="FVG-Bot", overlay=true, max_bars_back=500, max_lines_count=50, max_boxes_count=200, max_labels_count=100)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// INPUTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+g1 = "Money Flow (EMA + MACD)"
+i_ema50      = input.int(50,  "EMA 50",      group=g1)
+i_ema200     = input.int(200, "EMA 200",     group=g1)
+i_macdLen    = input.int(34,  "MACD Length", group=g1)
+i_macdSig    = input.int(9,   "MACD Signal", group=g1)
+
+g2 = "Fair Value Gap"
+i_fvgLb      = input.int(30,   "Lookback Bars",        group=g2)
+i_showFVG    = input.bool(true, "Show FVG Boxes",       group=g2)
+i_showFilled = input.bool(false,"Show Filled FVGs",     group=g2)
+
+g3 = "Order Block"
+i_obLb       = input.int(30,   "Lookback Bars",         group=g3)
+i_showOB     = input.bool(true, "Show Order Block Zones",group=g3)
+
+g4 = "Change of Character"
+i_chochSw    = input.int(10,   "Swing Length",          group=g4)
+i_chochLb    = input.int(25,   "Structure Lookback",    group=g4)
+i_showChoch  = input.bool(true, "Show CHoCH Labels",    group=g4)
+
+g5 = "WaveTrend (VuManChu)"
+i_wtN1       = input.int(10,   "Channel Length",        group=g5)
+i_wtN2       = input.int(21,   "Avg Length",            group=g5)
+i_wtOS       = input.int(-33,  "Oversold Level",        group=g5)
+i_wtOB       = input.int(33,   "Overbought Level",      group=g5)
+
+g6 = "Volume Profile POC"
+i_pocLen     = input.int(100,  "Lookback Bars",         group=g6)
+i_showPOC    = input.bool(true, "Show POC Line",        group=g6)
+
+g7 = "Confluence"
+i_minSig     = input.int(2,    "Min Signals for Entry", minval=1, maxval=7, group=g7)
+i_showDash   = input.bool(true, "Show Dashboard",       group=g7)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 1. MONEY FLOW — EMA50/200 + Impulse MACD (mandatory)
+// ═══════════════════════════════════════════════════════════════════════════════
+ema50  = ta.ema(close, i_ema50)
+ema200 = ta.ema(close, i_ema200)
+
+hi2    = ta.ema(ta.ema(high,  i_macdLen), i_macdLen)
+lo2    = ta.ema(ta.ema(low,   i_macdLen), i_macdLen)
+mi2    = ta.ema(ta.ema(hlc3,  i_macdLen), i_macdLen)
+impMD  = mi2 > hi2 ? mi2 - hi2 : mi2 < lo2 ? mi2 - lo2 : 0
+impSig = ta.sma(impMD, i_macdSig)
+impHist = impMD - impSig
+
+mfBull = ema50 > ema200 and impMD > 0 and impHist >= 0
+mfBear = ema50 < ema200 or  impMD <= 0 or (impMD > 0 and impHist < 0)
+
+plot(ema50,  "EMA 50",  color=color.new(color.orange, 0), linewidth=1)
+plot(ema200, "EMA 200", color=color.new(color.red,    0), linewidth=2)
+bgcolor(mfBull ? color.new(color.green, 96) : mfBear ? color.new(color.red, 96) : na)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 2. FAIR VALUE GAP — 3-candle imbalance (mandatory)
+//    Bullish FVG: high[2] < low[0] → price gap between them (institutional demand)
+//    Bearish FVG: low[2] > high[0] → price gap between them (institutional supply)
+// ═══════════════════════════════════════════════════════════════════════════════
+bullFVGForm = high[2] < low[0]    // bullish FVG created this bar
+bearFVGForm = low[2]  > high[0]   // bearish FVG created this bar
+
+// FVG zones for current bar
+bullFvgLow  = bullFVGForm ? high[2] : na
+bullFvgHigh = bullFVGForm ? low[0]  : na
+bearFvgLow  = bearFVGForm ? high[0] : na
+bearFvgHigh = bearFVGForm ? low[2]  : na
+
+// Draw FVG boxes when they form
+if i_showFVG and bullFVGForm
+    box.new(bar_index - 2, bullFvgHigh, bar_index + i_fvgLb, bullFvgLow,
+            bgcolor=color.new(color.lime, 88), border_color=color.new(color.lime, 50),
+            border_width=1, extend=extend.none)
+
+if i_showFVG and bearFVGForm
+    box.new(bar_index - 2, bearFvgHigh, bar_index + i_fvgLb, bearFvgLow,
+            bgcolor=color.new(color.red, 88), border_color=color.new(color.red, 50),
+            border_width=1, extend=extend.none)
+
+// Check if price is currently inside any recent FVG (for entry signal)
+fvgBull = false
+fvgBear = false
+for offset = 2 to i_fvgLb
+    bfLow  = high[offset + 2]
+    bfHigh = low[offset]
+    if bfHigh > bfLow and close >= bfLow and close <= bfHigh
+        fvgBull := true
+    bbarLow  = high[offset]
+    bbarHigh = low[offset + 2]
+    if bbarHigh > bbarLow and close >= bbarLow and close <= bbarHigh
+        fvgBear := true
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 3. ORDER BLOCK — last opposite candle before the FVG-creating impulse
+//    Bullish OB: last bearish candle before a bullish FVG impulse
+//    Bearish OB: last bullish candle before a bearish FVG impulse
+// ═══════════════════════════════════════════════════════════════════════════════
+var float bullOBLow  = na
+var float bullOBHigh = na
+var float bearOBLow  = na
+var float bearOBHigh = na
+
+// Find OB when FVG forms
+if bullFVGForm
+    // Look back up to 5 bars for last bearish candle
+    for j = 1 to 5
+        if close[j] < open[j]
+            bullOBLow  := low[j]
+            bullOBHigh := high[j]
+            break
+
+if bearFVGForm
+    for j = 1 to 5
+        if close[j] > open[j]
+            bearOBLow  := low[j]
+            bearOBHigh := high[j]
+            break
+
+obBull = not na(bullOBLow) and close >= bullOBLow and close <= bullOBHigh
+obBear = not na(bearOBLow) and close >= bearOBLow and close <= bearOBHigh
+
+if i_showOB and bullFVGForm and not na(bullOBLow)
+    box.new(bar_index - 5, bullOBHigh, bar_index + 3, bullOBLow,
+            bgcolor=color.new(color.teal, 80), border_color=color.new(color.teal, 40),
+            border_width=1, border_style=line.style_dashed)
+
+if i_showOB and bearFVGForm and not na(bearOBLow)
+    box.new(bar_index - 5, bearOBHigh, bar_index + 3, bearOBLow,
+            bgcolor=color.new(color.orange, 80), border_color=color.new(color.orange, 40),
+            border_width=1, border_style=line.style_dashed)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 4. CHANGE OF CHARACTER (CHoCH) — structural shift confirming reversal
+//    Bull CHoCH: recent swing broke above prior swing high
+//    Bear CHoCH: recent swing broke below prior swing low
+// ═══════════════════════════════════════════════════════════════════════════════
+priorHigh  = ta.highest(high,  i_chochLb + i_chochSw)[i_chochSw]
+priorLow   = ta.lowest(low,    i_chochLb + i_chochSw)[i_chochSw]
+recentHigh = ta.highest(high,  i_chochSw)
+recentLow  = ta.lowest(low,    i_chochSw)
+
+chochBull = recentHigh > priorHigh and close > recentHigh * 0.998
+chochBear = recentLow  < priorLow  and close < recentLow  * 1.002
+
+atr14 = ta.atr(14)
+
+if i_showChoch and chochBull
+    label.new(bar_index, low - atr14 * 0.3, "CHoCH ▲",
+              color=color.new(color.teal, 0), textcolor=color.white,
+              style=label.style_label_up, size=size.tiny)
+
+if i_showChoch and chochBear
+    label.new(bar_index, high + atr14 * 0.3, "CHoCH ▼",
+              color=color.new(color.orange, 0), textcolor=color.white,
+              style=label.style_label_down, size=size.tiny)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 5. WAVETREND — VuManChu oscillator (same as Frankie Candles)
+// ═══════════════════════════════════════════════════════════════════════════════
+ap   = hlc3
+esa  = ta.ema(ap, i_wtN1)
+d    = ta.ema(math.abs(ap - esa), i_wtN1)
+ci   = (ap - esa) / (0.015 * d)
+tci  = ta.ema(ci, i_wtN2)
+wt1  = tci
+wt2  = ta.sma(wt1, 4)
+
+wtBull = ta.crossover(wt1, wt2)  and wt2 < (i_wtOS + 20)
+wtBear = ta.crossunder(wt1, wt2) and wt2 > (i_wtOB - 20)
+
+plotshape(wtBull, "WT Buy",  shape.circle, location.belowbar, color.new(color.aqua,    0), size=size.tiny)
+plotshape(wtBear, "WT Sell", shape.circle, location.abovebar, color.new(color.fuchsia, 0), size=size.tiny)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 6. VOLUME SPIKE — above-average volume confirms the FVG impulse is institutional
+// ═══════════════════════════════════════════════════════════════════════════════
+avgVol   = ta.sma(volume, 20)
+volBull  = close > open and volume > avgVol * 1.5
+volBear  = close < open and volume > avgVol * 1.5
+
+barcolor(volBull ? color.new(color.lime, 50) : volBear ? color.new(color.red, 50) : na)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 7. VOLUME PROFILE POC — price near highest-volume level
+// ═══════════════════════════════════════════════════════════════════════════════
+pocBarOffset = math.abs(ta.highestbars(volume, i_pocLen))
+pocPrice     = close[pocBarOffset]
+pocTol       = pocPrice * 0.015
+
+plot(i_showPOC ? pocPrice : na, "POC", color=color.new(color.purple, 0), linewidth=1, style=plot.style_circles)
+
+pocBull = close >= pocPrice - pocTol and close <= pocPrice + pocTol and close >= pocPrice
+pocBear = close >= pocPrice - pocTol and close <= pocPrice + pocTol and close <= pocPrice
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 8. CONFLUENCE SCORING — MoneyFlow + FVG mandatory, ≥2 total
+// ═══════════════════════════════════════════════════════════════════════════════
+bullScore = (mfBull ? 1 : 0) + (fvgBull ? 1 : 0) + (obBull ? 1 : 0) + (chochBull ? 1 : 0) + (wtBull ? 1 : 0) + (volBull ? 1 : 0) + (pocBull ? 1 : 0)
+bearScore = (mfBear ? 1 : 0) + (fvgBear ? 1 : 0) + (obBear ? 1 : 0) + (chochBear ? 1 : 0) + (wtBear ? 1 : 0) + (volBear ? 1 : 0) + (pocBear ? 1 : 0)
+
+longSig  = mfBull and fvgBull and bullScore >= i_minSig and bullScore > bearScore
+shortSig = mfBear and fvgBear and bearScore >= i_minSig and bearScore > bullScore
+
+plotshape(longSig,  "LONG",  shape.triangleup,   location.belowbar, color.new(color.lime, 0), size=size.normal, text="LONG")
+plotshape(shortSig, "SHORT", shape.triangledown,  location.abovebar, color.new(color.red,  0), size=size.normal, text="SHORT")
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 9. DASHBOARD
+// ═══════════════════════════════════════════════════════════════════════════════
+if i_showDash and barstate.islast
+    var table t = table.new(position.top_right, 3, 10,
+                            bgcolor=color.new(color.black, 72), border_width=1,
+                            border_color=color.new(color.gray, 55))
+
+    hBG = color.new(color.navy, 25)
+    table.cell(t, 0, 0, "SIGNAL",         text_color=color.white, text_size=size.small, bgcolor=hBG)
+    table.cell(t, 1, 0, "CONDITION",      text_color=color.white, text_size=size.small, bgcolor=hBG)
+    table.cell(t, 2, 0, "STATUS",         text_color=color.white, text_size=size.small, bgcolor=hBG)
+
+    table.cell(t, 0, 1, "Money Flow",     text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 1, 1, "EMA50>200+MACD", text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 2, 1, mfBull ? "BULL ▲" : mfBear ? "BEAR ▼" : "NEUT —",
+               text_color=mfBull ? color.lime : mfBear ? color.red : color.gray, text_size=size.tiny)
+
+    table.cell(t, 0, 2, "FVG Zone",       text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 1, 2, "Imbalance fill", text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 2, 2, fvgBull ? "BULL ▲" : fvgBear ? "BEAR ▼" : "AWAY —",
+               text_color=fvgBull ? color.lime : fvgBear ? color.red : color.gray, text_size=size.tiny)
+
+    table.cell(t, 0, 3, "Order Block",    text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 1, 3, "OB zone",        text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 2, 3, obBull ? "BULL ▲" : obBear ? "BEAR ▼" : "AWAY —",
+               text_color=obBull ? color.lime : obBear ? color.red : color.gray, text_size=size.tiny)
+
+    table.cell(t, 0, 4, "CHoCH",          text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 1, 4, "Structure break",text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 2, 4, chochBull ? "BULL ▲" : chochBear ? "BEAR ▼" : "NONE —",
+               text_color=chochBull ? color.lime : chochBear ? color.red : color.gray, text_size=size.tiny)
+
+    table.cell(t, 0, 5, "WaveTrend",      text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 1, 5, "WT=" + str.tostring(math.round(wt1, 1)), text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 2, 5, wtBull ? "BUY ▲" : wtBear ? "SELL ▼" : "NEUT —",
+               text_color=wtBull ? color.lime : wtBear ? color.red : color.gray, text_size=size.tiny)
+
+    table.cell(t, 0, 6, "Volume Spike",   text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 1, 6, "1.5× avg vol",   text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 2, 6, volBull ? "BULL ▲" : volBear ? "BEAR ▼" : "NORM —",
+               text_color=volBull ? color.lime : volBear ? color.red : color.gray, text_size=size.tiny)
+
+    table.cell(t, 0, 7, "POC Level",      text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 1, 7, "$" + str.tostring(math.round(pocPrice)), text_color=color.silver, text_size=size.tiny)
+    table.cell(t, 2, 7, pocBull ? "SUPP ▲" : pocBear ? "RESI ▼" : "AWAY —",
+               text_color=pocBull ? color.lime : pocBear ? color.red : color.gray, text_size=size.tiny)
+
+    sBG = color.new(color.navy, 20)
+    table.cell(t, 0, 8, "CONFLUENCE",     text_color=color.white, text_size=size.tiny, bgcolor=sBG)
+    table.cell(t, 1, 8, "B:" + str.tostring(bullScore) + " / S:" + str.tostring(bearScore),
+               text_color=bullScore > bearScore ? color.lime : bearScore > bullScore ? color.red : color.gray,
+               text_size=size.tiny, bgcolor=sBG)
+    table.cell(t, 2, 8, longSig ? "★ LONG" : shortSig ? "★ SHORT" : "WAIT",
+               text_color=longSig ? color.lime : shortSig ? color.red : color.gray,
+               text_size=size.tiny, bgcolor=sBG)
+
+    table.cell(t, 0, 9, "MANDATORY",      text_color=color.gray, text_size=size.tiny)
+    table.cell(t, 1, 9, "MoneyFlow + FVG",text_color=color.gray, text_size=size.tiny)
+    table.cell(t, 2, 9, str.tostring(i_minSig) + "+ signals req.", text_color=color.gray, text_size=size.tiny)

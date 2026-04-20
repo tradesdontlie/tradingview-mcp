@@ -12,6 +12,10 @@ timeout /t 2 /nobreak >nul
 REM Auto-detect TradingView install location
 set "TV_EXE="
 
+REM Check known MSIX path first (WindowsApps dir listing requires admin, but direct path works)
+set "TV_EXE=C:\Program Files\WindowsApps\TradingView.Desktop_3.0.0.7652_x64__n534cwy3pjxzj\TradingView.exe"
+if not exist "%TV_EXE%" set "TV_EXE="
+
 REM Check common install locations
 if exist "%LOCALAPPDATA%\TradingView\TradingView.exe" set "TV_EXE=%LOCALAPPDATA%\TradingView\TradingView.exe"
 if exist "%PROGRAMFILES%\TradingView\TradingView.exe" set "TV_EXE=%PROGRAMFILES%\TradingView\TradingView.exe"

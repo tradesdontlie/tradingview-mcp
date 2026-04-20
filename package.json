@@ -1,29 +1,18 @@
 {
-  "name": "tradingview-mcp",
+  "name": "claude-tradingview-mcp-trading",
   "version": "1.0.0",
-  "description": "MCP bridge for TradingView Desktop via Chrome DevTools Protocol",
+  "description": "Automated trading bot — Claude + TradingView strategy + Phemex execution",
   "type": "module",
-  "main": "src/server.js",
-  "bin": {
-    "tv": "src/cli/index.js"
-  },
-  "exports": {
-    ".": "./src/server.js",
-    "./core": "./src/core/index.js"
-  },
+  "main": "bot.js",
   "scripts": {
-    "start": "node src/server.js",
-    "tv": "node src/cli/index.js",
-    "test": "node --test tests/e2e.test.js tests/pine_analyze.test.js",
-    "test:e2e": "node --test tests/e2e.test.js",
-    "test:unit": "node --test tests/pine_analyze.test.js tests/cli.test.js",
-    "test:cli": "node --test tests/cli.test.js",
-    "test:all": "node --test tests/e2e.test.js tests/pine_analyze.test.js tests/cli.test.js",
-    "test:verbose": "node --test --test-reporter=spec tests/e2e.test.js tests/pine_analyze.test.js",
-    "test:count": "node --test --test-reporter=spec tests/e2e.test.js 2>&1 | tail -5"
+    "start": "node bot.js",
+    "dev": "node bot.js"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.1",
-    "chrome-remote-interface": "^0.33.2"
+    "dotenv": "^16.4.5",
+    "node-fetch": "^3.3.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
