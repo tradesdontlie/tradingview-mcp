@@ -160,21 +160,68 @@ export async function list() {
   return { success: true, alert_count: result?.alerts?.length || 0, source: 'internal_api', alerts: result?.alerts || [], error: result?.error };
 }
 
-export async function deleteAlerts({ delete_all }) {
+/**
+ * Delete one or more alerts via TV's internal REST API
+ *   POST https://pricealerts.tradingview.com/delete_alerts
+ *   Body: {"payload":{"alert_ids":[id1, id2, ...]}}
+ *   Headers: none (custom Content-Type triggers CORS preflight; send as plain string body)
+ *
+ * Accepts:
+ *   - { alert_id: 12345 }       — delete a single alert
+ *   - { alert_ids: [1, 2, 3] }  — delete multiple in one call (TV supports bulk natively)
+ *   - { delete_all: true }      — list() first, then delete every id
+ */
+export async function deleteAlerts({ alert_id, alert_ids, delete_all } = {}) {
+  let ids = [];
+
   if (delete_all) {
-    const result = await evaluate(`
-      (function() {
-        var alertBtn = document.querySelector('[data-name="alerts"]');
-        if (alertBtn) alertBtn.click();
-        var header = document.querySelector('[data-name="alerts"]');
-        if (header) {
-          header.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 100, clientY: 100 }));
-          return { context_menu_opened: true };
-        }
-        return { context_menu_opened: false };
-      })()
-    `);
-    return { success: true, note: 'Alert deletion requires manual confirmation in the context menu.', context_menu_opened: result?.context_menu_opened || false, source: 'dom_fallback' };
+    const listed = await list();
+    ids = (listed?.alerts || []).map(a => a.alert_id).filter(x => x != null);
+    if (ids.length === 0) {
+      return { success: true, deleted_count: 0, note: 'No alerts to delete', source: 'rest_api' };
+    }
+  } else if (Array.isArray(alert_ids) && alert_ids.length > 0) {
+    ids = alert_ids.map(Number).filter(x => !isNaN(x));
+  } else if (alert_id != null) {
+    const n = Number(alert_id);
+    if (isNaN(n)) throw new Error('alert_id must be a number');
+    ids = [n];
+  } else {
+    throw new Error('Pass one of: alert_id (number), alert_ids (array), or delete_all: true');
   }
-  throw new Error('Individual alert deletion not yet supported. Use delete_all: true.');
+
+  const body = JSON.stringify({ payload: { alert_ids: ids } });
+  const escapedBody = body.replace(/[\\`$]/g, '\\$&');
+  const response = await evaluateAsync(`
+    fetch('https://pricealerts.tradingview.com/delete_alerts', {
+      method: 'POST',
+      credentials: 'include',
+      body: \`${escapedBody}\`
+    }).then(function(r) { return r.text().then(function(t) { return { status: r.status, body: t }; }); })
+      .catch(function(e) { return { error: e.message }; })
+  `);
+
+  if (!response || response.error) {
+    return { success: false, error: response?.error || 'no response', attempted_ids: ids, source: 'rest_api' };
+  }
+
+  let parsed = null;
+  try { parsed = JSON.parse(response.body); } catch(e) { /* not JSON */ }
+
+  if (parsed?.s === 'ok') {
+    return {
+      success: true,
+      deleted_count: ids.length,
+      deleted_ids: ids,
+      source: 'rest_api'
+    };
+  }
+
+  return {
+    success: false,
+    error: parsed?.errmsg || parsed?.err?.code || (response.body ? String(response.body).substring(0, 200) : 'unknown'),
+    http_status: response.status,
+    attempted_ids: ids,
+    source: 'rest_api'
+  };
 }
