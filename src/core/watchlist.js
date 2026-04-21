@@ -5,6 +5,25 @@
 import { evaluate, evaluateAsync, getClient } from '../connection.js';
 
 export async function get() {
+  // Activate the watchlist tab first. TV lazy-renders sidebar widgets: when a different
+  // tab (Alerts, Object Tree, etc.) is active, the watchlist widget exists in the DOM
+  // but has empty innerHTML, so scraping returns count:0 even on installs with real data.
+  // Fix: click the "Watchlist, details, and news" tab button if not pressed, then wait for render.
+  const activated = await evaluate(`
+    (function() {
+      var tab = document.querySelector('[aria-label="Watchlist, details, and news"]')
+        || document.querySelector('[data-name="base"][aria-label*="Watchlist"]');
+      if (!tab) return { activated: false, reason: 'tab_not_found' };
+      var wasPressed = tab.getAttribute('aria-pressed') === 'true';
+      if (!wasPressed) tab.click();
+      return { activated: true, was_pressed: wasPressed };
+    })()
+  `);
+  if (activated?.activated && !activated.was_pressed) {
+    // Allow widget to render — TV populates DOM asynchronously after tab switch
+    await new Promise(r => setTimeout(r, 400));
+  }
+
   // Try internal API first — reads from the active watchlist widget
   const symbols = await evaluate(`
     (function() {

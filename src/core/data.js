@@ -386,7 +386,11 @@ export async function getPineLabels({ study_filter, max_labels, verbose } = {}) 
   const raw = await evaluate(buildGraphicsJS('dwglabels', 'labels', filter));
   if (!raw || raw.length === 0) return { success: true, study_count: 0, studies: [] };
 
-  const limit = max_labels || 50;
+  // Default raised from 50 → 500: real indicators (ASTA 3Cs, volume profilers, multi-EMA dashboards)
+  // routinely emit 100+ labels, and a 50-label cap silently drops the earliest ones — which are
+  // often the foundational labels (Fib levels, pivot prices, EMA tags) while keeping dynamic
+  // later-bar signals. Caller can still override with max_labels.
+  const limit = max_labels || 500;
   const studies = raw.map(s => {
     let labels = s.items.map(item => {
       const v = item.raw;
@@ -395,8 +399,9 @@ export async function getPineLabels({ study_filter, max_labels, verbose } = {}) 
       if (verbose) return { id: item.id, text, price, x: v.x, yloc: v.yl, size: v.sz, textColor: v.tci, color: v.ci };
       return { text, price };
     }).filter(l => l.text || l.price != null);
-    if (labels.length > limit) labels = labels.slice(-limit);
-    return { name: s.name, total_labels: s.count, showing: labels.length, labels };
+    const truncated = labels.length > limit;
+    if (truncated) labels = labels.slice(-limit);
+    return { name: s.name, total_labels: s.count, showing: labels.length, truncated, labels };
   });
   return { success: true, study_count: studies.length, studies };
 }
