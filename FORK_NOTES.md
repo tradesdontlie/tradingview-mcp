@@ -16,7 +16,7 @@ The fork is also our permanent escape hatch: when a future TV update breaks some
 
 ## Patches on top of upstream `main`
 
-Commits are listed oldest → newest. All three are on `fixes/draw-api-resolve`.
+Commits are listed oldest → newest. All four are on `fixes/draw-api-resolve`.
 
 ### 1. `285587d` — Drawing API DI (cherry-pick of upstream PR #62, commit `4b13405`)
 
@@ -77,6 +77,33 @@ Body (double-wrapped, no Content-Type header!):
 
 ---
 
+### 4. `9d05087` — `alert_delete` rewritten over TV's REST API (individual + bulk)
+
+**Bug:** Old `alert_delete` only accepted `{delete_all: true}` and even then just opened a context menu for the user to click through manually. Individual-alert deletion threw `"not yet supported"`. Useless for "delete this invalidated alert after the trade closes" or "clean up stale alerts" workflows.
+
+**Diagnostic method:** Same playbook as `alert_create`. Installed `fetch` + `XMLHttpRequest` interceptor via `ui_evaluate`, asked user to right-click-delete one alert in TV's sidebar, captured the outgoing POST. Verified the bare endpoint (no telemetry query params) works by probing live:
+
+```json
+POST https://pricealerts.tradingview.com/delete_alerts
+Body (no Content-Type header):
+{"payload":{"alert_ids":[4524870449]}}
+
+Response: status 200, {"s":"ok","id":"dbus-...","r":null}
+```
+
+**Nice surprise:** `alert_ids` is an array — TV supports **native bulk delete** in one request.
+
+**Fix:** Replaced the DOM dance with a REST call. New tool signature accepts any of:
+- `alert_id: 12345` — single
+- `alert_ids: [1, 2, 3]` — bulk
+- `delete_all: true` — `list()` first, then delete every returned id
+
+Returns `{ success: true, deleted_count: N, deleted_ids: [...] }`.
+
+**Files touched:** `src/core/alerts.js`, `src/tools/alerts.js`.
+
+---
+
 ## Adding more fixes — workflow
 
 The diagnostic playbook lives in `CLAUDE.md` (project root of ASTA ECO4). Summary:
@@ -110,7 +137,7 @@ git rebase upstream/main
 git push origin fixes/draw-api-resolve --force-with-lease
 ```
 
-If upstream merges PR #62, drop our `285587d` commit during rebase (git should auto-detect the duplicate). Our `80a69eb` and `33b578b` should stay separate; they're not upstream.
+If upstream merges PR #62, drop our `285587d` commit during rebase (git should auto-detect the duplicate). Our `80a69eb`, `33b578b`, and `9d05087` should stay separate; they're not upstream.
 
 ## Open upstream-facing work (optional)
 
@@ -119,3 +146,4 @@ Draft issue reports for the two unreported bugs we patched exist in the ASTA ECO
 - `data_get_pine_labels` silently truncates to 50 labels — default cap too low for real indicators
 - `watchlist_get` returns `count: 0` when a different sidebar tab is active — TV lazy-renders hidden widgets
 - `alert_create` DOM automation is stale — REST endpoint `pricealerts.tradingview.com/create_alert` works instead (this one may be especially valuable to the maintainer)
+- `alert_delete` only supports `delete_all`, and even that opens a context menu — REST endpoint `pricealerts.tradingview.com/delete_alerts` supports native bulk delete by ID
