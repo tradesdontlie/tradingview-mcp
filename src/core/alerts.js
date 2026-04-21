@@ -3,73 +3,130 @@
  */
 import { evaluate, evaluateAsync, getClient, safeString } from '../connection.js';
 
+/**
+ * Map user-friendly condition names to TV's internal condition types.
+ * TV uses these under the hood:
+ *   cross       — triggers on any cross (up OR down)
+ *   cross_up    — triggers only when price crosses upward through the level
+ *   cross_down  — triggers only when price crosses downward through the level
+ */
+function normalizeCondition(condition) {
+  if (!condition) return 'cross';
+  const c = String(condition).toLowerCase().trim();
+  if (c === 'cross' || c === 'crossing') return 'cross';
+  if (c === 'greater_than' || c === 'above' || c === 'cross_above' || c === 'cross_up') return 'cross_up';
+  if (c === 'less_than' || c === 'below' || c === 'cross_below' || c === 'cross_down') return 'cross_down';
+  return 'cross'; // permissive fallback
+}
+
 export async function create({ condition, price, message }) {
-  const opened = await evaluate(`
+  if (price == null || isNaN(Number(price))) {
+    return { success: false, error: 'price is required and must be a number', source: 'rest_api' };
+  }
+  const numericPrice = Number(price);
+
+  // Read the active chart's symbol directly from TV's internal API.
+  // Falls back to whatever `chart_get_state` would return.
+  const symbolInfo = await evaluate(`
     (function() {
-      var btn = document.querySelector('[aria-label="Create Alert"]')
-        || document.querySelector('[data-name="alerts"]');
-      if (btn) { btn.click(); return true; }
-      return false;
+      try {
+        var chart = window.TradingViewApi._activeChartWidgetWV.value()._chartWidget;
+        var model = chart.model();
+        var sym = model.mainSeries().symbol();
+        var info = model.mainSeries().symbolInfo ? model.mainSeries().symbolInfo() : null;
+        return {
+          symbol: sym,
+          currency: (info && info.currency_code) || 'USD',
+          resolution: model.mainSeries().properties().interval.value() || '1'
+        };
+      } catch(e) { return { error: e.message }; }
     })()
   `);
 
-  if (!opened) {
-    const client = await getClient();
-    await client.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: 1, key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65 });
-    await client.Input.dispatchKeyEvent({ type: 'keyUp', key: 'a', code: 'KeyA' });
+  if (!symbolInfo || symbolInfo.error || !symbolInfo.symbol) {
+    return { success: false, error: 'Could not read active chart symbol: ' + (symbolInfo?.error || 'unknown'), source: 'rest_api' };
   }
 
-  await new Promise(r => setTimeout(r, 1000));
+  // TV's create_alert endpoint wants `symbol` as a custom marker string:
+  //   "=" + JSON.stringify({ symbol, adjustment, currency-id })
+  const symbolMarker = '=' + JSON.stringify({
+    symbol: symbolInfo.symbol,
+    adjustment: 'dividends',
+    'currency-id': symbolInfo.currency
+  });
 
-  const priceSet = await evaluate(`
-    (function() {
-      var inputs = document.querySelectorAll('[class*="alert"] input[type="text"], [class*="alert"] input[type="number"]');
-      for (var i = 0; i < inputs.length; i++) {
-        var label = inputs[i].closest('[class*="row"]')?.querySelector('[class*="label"]');
-        if (label && /value|price/i.test(label.textContent)) {
-          var nativeSet = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-          nativeSet.call(inputs[i], ${safeString(String(price))});
-          inputs[i].dispatchEvent(new Event('input', { bubbles: true }));
-          inputs[i].dispatchEvent(new Event('change', { bubbles: true }));
-          return true;
-        }
-      }
-      if (inputs.length > 0) {
-        var nativeSet = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-        nativeSet.call(inputs[0], ${safeString(String(price))});
-        inputs[0].dispatchEvent(new Event('input', { bubbles: true }));
-        return true;
-      }
-      return false;
-    })()
+  const defaultMessage = message || `${symbolInfo.symbol.split(':').pop()} ${condition ? String(condition).toLowerCase() : 'crossing'} ${numericPrice}`;
+  const condType = normalizeCondition(condition);
+
+  // Default expiration: 30 days from now, matches TV's UI default
+  const expiration = new Date(Date.now() + 30 * 86400 * 1000).toISOString();
+
+  const payload = {
+    symbol: symbolMarker,
+    resolution: String(symbolInfo.resolution || '1'),
+    message: defaultMessage,
+    sound_file: null,
+    sound_duration: 0,
+    popup: true,
+    expiration,
+    auto_deactivate: true,
+    email: false,
+    sms_over_email: false,
+    mobile_push: true,
+    web_hook: null,
+    name: null,
+    conditions: [{
+      type: condType,
+      frequency: 'on_first_fire',
+      series: [{ type: 'barset' }, { type: 'value', value: numericPrice }],
+      resolution: String(symbolInfo.resolution || '1')
+    }],
+    active: true,
+    ignore_warnings: true
+  };
+
+  // Use evaluateAsync (awaits the fetch promise). NOTE: do NOT set Content-Type.
+  // TV's own create_alert request has no Content-Type header, relying on the browser's
+  // default for string bodies — a custom Content-Type triggers a CORS preflight that the
+  // server rejects, which was the root cause of the DOM-fallback era failures.
+  const body = JSON.stringify({ payload });
+  const escapedBody = body.replace(/[\\`$]/g, '\\$&');
+  const response = await evaluateAsync(`
+    fetch('https://pricealerts.tradingview.com/create_alert', {
+      method: 'POST',
+      credentials: 'include',
+      body: \`${escapedBody}\`
+    }).then(function(r) { return r.text().then(function(t) { return { status: r.status, body: t }; }); })
+      .catch(function(e) { return { error: e.message }; })
   `);
 
-  if (message) {
-    await evaluate(`
-      (function() {
-        var textarea = document.querySelector('[class*="alert"] textarea')
-          || document.querySelector('textarea[placeholder*="message"]');
-        if (textarea) {
-          var nativeSet = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
-          nativeSet.call(textarea, ${JSON.stringify(message)});
-          textarea.dispatchEvent(new Event('input', { bubbles: true }));
-        }
-      })()
-    `);
+  if (!response || response.error) {
+    return { success: false, error: response?.error || 'no response', source: 'rest_api' };
   }
 
-  await new Promise(r => setTimeout(r, 500));
-  const created = await evaluate(`
-    (function() {
-      var btns = document.querySelectorAll('button[data-name="submit"], button');
-      for (var i = 0; i < btns.length; i++) {
-        if (/^create$/i.test(btns[i].textContent.trim())) { btns[i].click(); return true; }
-      }
-      return false;
-    })()
-  `);
+  let parsed = null;
+  try { parsed = JSON.parse(response.body); } catch (e) { /* not JSON */ }
 
-  return { success: !!created, price, condition, message: message || '(none)', price_set: !!priceSet, source: 'dom_fallback' };
+  if (parsed?.s === 'ok' && parsed?.r) {
+    const created = parsed.r;
+    return {
+      success: true,
+      alert_id: created.alert_id || null,
+      symbol: symbolInfo.symbol,
+      price: numericPrice,
+      condition: condType,
+      message: defaultMessage,
+      expiration: created.expiration || expiration,
+      source: 'rest_api'
+    };
+  }
+
+  return {
+    success: false,
+    error: parsed?.errmsg || parsed?.err?.code || response.body?.substring(0, 200) || 'unknown',
+    http_status: response.status,
+    source: 'rest_api'
+  };
 }
 
 export async function list() {
