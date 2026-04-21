@@ -132,20 +132,64 @@ export async function getIndicator({ entity_id }) {
   return { success: true, entity_id, visible: data?.visible, inputs };
 }
 
+// Identify the chart's user strategy source.
+//
+// TV Desktop 3.1.0 exposes overlay strategies with `metaInfo().is_price_study: true`
+// — the old filter `is_price_study === false` misidentifies them. The authoritative
+// marker is `metaInfo().id` starting with `StrategyScript` (e.g.
+// "StrategyScript$USER;<uuid>@tv-scripts"). We prefer that marker and fall back
+// to the legacy filter for older TV builds.
+const FIND_STRATEGY_SRC = `
+  function __findStrategy(sources) {
+    for (var i = 0; i < sources.length; i++) {
+      var s = sources[i];
+      try {
+        var id = s.metaInfo && (s.metaInfo() || {}).id;
+        if (id && /^StrategyScript/.test(String(id))) return s;
+      } catch(e) {}
+    }
+    // Legacy TV fallback
+    for (var j = 0; j < sources.length; j++) {
+      var t = sources[j];
+      try {
+        if (t.metaInfo && t.metaInfo().is_price_study === false &&
+            (t.ordersData || t.reportData || t._reportData)) return t;
+      } catch(e) {}
+    }
+    return null;
+  }
+`;
+
 export async function getStrategyResults() {
   const results = await evaluate(`
     (function() {
       try {
+        ${FIND_STRATEGY_SRC}
         var chart = ${CHART_API}._chartWidget;
         var sources = chart.model().model().dataSources();
-        var strat = null;
-        for (var i = 0; i < sources.length; i++) {
-          var s = sources[i];
-          if (s.metaInfo && s.metaInfo().is_price_study === false && (s.reportData || s.performance)) { strat = s; break; }
-        }
+        var strat = __findStrategy(sources);
         if (!strat) return {metrics: {}, source: 'internal_api', error: 'No strategy found on chart. Add a strategy indicator first.'};
         var metrics = {};
-        if (strat.reportData) {
+        // TV 3.1.0+: _reportData.performance is where metrics actually live.
+        if (strat._reportData && strat._reportData.performance) {
+          var perf1 = strat._reportData.performance;
+          for (var k1 in perf1) {
+            var v1 = perf1[k1];
+            if (v1 === null || v1 === undefined) continue;
+            if (typeof v1 === 'object') {
+              for (var k2 in v1) {
+                var v2 = v1[k2];
+                if (v2 !== null && v2 !== undefined && typeof v2 !== 'object' && typeof v2 !== 'function') {
+                  metrics[k1 + '.' + k2] = v2;
+                }
+              }
+            } else if (typeof v1 !== 'function') {
+              metrics[k1] = v1;
+            }
+          }
+        }
+        // Legacy paths (older TV)
+        if (Object.keys(metrics).length === 0 && strat.reportData) {
           var rd = typeof strat.reportData === 'function' ? strat.reportData() : strat.reportData;
           if (rd && typeof rd === 'object') {
             if (typeof rd.value === 'function') rd = rd.value();
@@ -169,24 +213,56 @@ export async function getTrades({ max_trades } = {}) {
   const trades = await evaluate(`
     (function() {
       try {
+        ${FIND_STRATEGY_SRC}
         var chart = ${CHART_API}._chartWidget;
         var sources = chart.model().model().dataSources();
-        var strat = null;
-        for (var i = 0; i < sources.length; i++) {
-          var s = sources[i];
-          if (s.metaInfo && s.metaInfo().is_price_study === false && (s.ordersData || s.reportData)) { strat = s; break; }
-        }
+        var strat = __findStrategy(sources);
         if (!strat) return {trades: [], source: 'internal_api', error: 'No strategy found on chart.'};
+
+        // TV 3.1.0+: _reportData.trades is the canonical closed-trade-pair list.
+        // Each entry: {e: entry, x: exit, q, tp, cp, rn, dd} with nested {v, p}.
+        if (strat._reportData && Array.isArray(strat._reportData.trades)) {
+          var rtrades = strat._reportData.trades;
+          var flat = [];
+          var cap = Math.min(rtrades.length, ${limit});
+          for (var t = 0; t < cap; t++) {
+            var tr = rtrades[t];
+            if (!tr) continue;
+            var e = tr.e || {}, x = tr.x || {};
+            flat.push({
+              entry_order_id: e.c || null,
+              entry_price: e.p,
+              entry_time_ms: e.tm,
+              entry_type: e.tp,
+              exit_order_id: x.c || null,
+              exit_price: x.p,
+              exit_time_ms: x.tm,
+              exit_type: x.tp,
+              quantity: tr.q,
+              pnl: tr.tp ? tr.tp.v : null,
+              pnl_pct: tr.tp ? tr.tp.p : null,
+              cum_pnl: tr.cp ? tr.cp.v : null,
+              cum_pnl_pct: tr.cp ? tr.cp.p : null,
+              runup: tr.rn ? tr.rn.v : null,
+              runup_pct: tr.rn ? tr.rn.p : null,
+              drawdown: tr.dd ? tr.dd.v : null,
+              drawdown_pct: tr.dd ? tr.dd.p : null
+            });
+          }
+          return {trades: flat, source: 'internal_api', total_trade_count: rtrades.length};
+        }
+
+        // Legacy TV fallback
         var orders = null;
         if (strat.ordersData) { orders = typeof strat.ordersData === 'function' ? strat.ordersData() : strat.ordersData; if (orders && typeof orders.value === 'function') orders = orders.value(); }
         if (!orders || !Array.isArray(orders)) {
           if (strat._orders) orders = strat._orders;
           else if (strat.tradesData) { orders = typeof strat.tradesData === 'function' ? strat.tradesData() : strat.tradesData; if (orders && typeof orders.value === 'function') orders = orders.value(); }
         }
-        if (!orders || !Array.isArray(orders)) return {trades: [], source: 'internal_api', error: 'ordersData() returned non-array.'};
+        if (!orders || !Array.isArray(orders)) return {trades: [], source: 'internal_api', error: 'no trade data (_reportData.trades or ordersData).'};
         var result = [];
-        for (var t = 0; t < Math.min(orders.length, ${limit}); t++) {
-          var o = orders[t];
+        for (var t2 = 0; t2 < Math.min(orders.length, ${limit}); t2++) {
+          var o = orders[t2];
           if (typeof o === 'object' && o !== null) {
             var trade = {};
             var okeys = Object.keys(o);
@@ -198,22 +274,29 @@ export async function getTrades({ max_trades } = {}) {
       } catch(e) { return {trades: [], source: 'internal_api', error: e.message}; }
     })()
   `);
-  return { success: true, trade_count: trades?.trades?.length || 0, source: trades?.source, trades: trades?.trades || [], error: trades?.error };
+  return { success: true, trade_count: trades?.trades?.length || 0, total_trade_count: trades?.total_trade_count, source: trades?.source, trades: trades?.trades || [], error: trades?.error };
 }
 
 export async function getEquity() {
   const equity = await evaluate(`
     (function() {
       try {
+        ${FIND_STRATEGY_SRC}
         var chart = ${CHART_API}._chartWidget;
         var sources = chart.model().model().dataSources();
-        var strat = null;
-        for (var i = 0; i < sources.length; i++) {
-          var s = sources[i];
-          if (s.metaInfo && s.metaInfo().is_price_study === false && (s.reportData || s.performance)) { strat = s; break; }
-        }
+        var strat = __findStrategy(sources);
         if (!strat) return {data: [], source: 'internal_api', error: 'No strategy found on chart.'};
         var data = [];
+        // TV 3.1.0+: _reportData.buyHold holds per-bar equity points
+        if (strat._reportData && Array.isArray(strat._reportData.buyHold)) {
+          var bh = strat._reportData.buyHold;
+          for (var bi = 0; bi < bh.length; bi++) {
+            var bv = bh[bi];
+            if (typeof bv === 'number') data.push({index: bi, value: bv});
+            else if (bv && typeof bv === 'object') data.push(Object.assign({index: bi}, bv));
+          }
+          if (data.length) return {data: data, source: 'internal_api'};
+        }
         if (strat.equityData) {
           var eq = typeof strat.equityData === 'function' ? strat.equityData() : strat.equityData;
           if (eq && typeof eq.value === 'function') eq = eq.value();
