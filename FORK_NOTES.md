@@ -157,6 +157,44 @@ DELETE /api/v1/symbols_list/custom/{id}/?source=web-tvd
 
 ---
 
+### 6. `hotlist_get` — TradingView Hotlists (scanner presets) exposed as MCP tool
+
+**Gap:** Skills had no way to discover market-moving tickers to seed `🌍 02 MASTER` / `🐻 06 BEAR`. We were relying on static hand-curated symbol lists that go stale within a week. TV's own right-rail **Hotlists** widget fetches dynamic scanner presets by category (volume gainers, % change gainers/losers, gap gainers/losers, etc.) with no auth, but nothing in the MCP surface exposed them.
+
+**Discovery:** Installed a `fetch` interceptor via `ui_evaluate` and clicked the Hotlists tab in the TV UI. Captured:
+
+```
+GET https://scanner.tradingview.com/presets/US_{slug}?label-product=right-hotlists
+Response: {
+  totalCount: <int>,           // size of the underlying universe
+  fields:     ["volume"],      // the sort column
+  symbols:    [{s:"NASDAQ:NVDA", f:[<val>]}, ...],  // 20 rows max
+  time:       <ms>
+}
+```
+
+`scanner.tradingview.com` is cross-origin from `www.tradingview.com` but a simple GET with no custom headers needs no preflight. No credentials, no Content-Type — just works.
+
+**9 working slugs** (probed live 2026-04-22):
+
+| Direction | Slug | Sort column |
+|---|---|---|
+| Bull | `volume_gainers` | volume |
+| Bull | `percent_change_gainers` | change |
+| Bear | `percent_change_losers` | change |
+| Bull | `percent_range_gainers` | change_from_open |
+| Bear | `percent_range_losers` | change_from_open |
+| Bull | `gap_gainers` | gap_up_abs |
+| Bear | `gap_losers` | gap_down_abs |
+| Bull | `percent_gap_gainers` | gap_up |
+| Bear | `percent_gap_losers` | gap_down |
+
+**Tool:** `hotlist_get(slug, limit=20)`. Pure REST, no DOM, no auth. New files: `src/core/hotlist.js`, `src/tools/hotlist.js`. Registered in `src/server.js`. Input validated against a whitelist (rejects unknown slugs) and `limit` is capped at 20 (TV page size).
+
+**Why this matters:** Enables `scripts/refresh_master.py` to refresh 🌍 02 MASTER (bull) + 🐻 06 BEAR (bear) nightly from live market activity, then `/watchlist-scan` triages each side. Full autonomy from static lists.
+
+---
+
 ## Adding more fixes — workflow
 
 The diagnostic playbook lives in `CLAUDE.md` (project root of ASTA ECO4). Summary:
