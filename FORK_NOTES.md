@@ -104,6 +104,59 @@ Returns `{ success: true, deleted_count: N, deleted_ids: [...] }`.
 
 ---
 
+### 5. `<TBD>` — Watchlist management extension (6 new REST-backed tools)
+
+**Bug / gap:** Upstream MCP shipped only `watchlist_get` (read) and `watchlist_add` (DOM automation — keyboard-driven, single symbol, no target list selection). Skills like `/watchlist-scan`, `/3cs`, `/watchlist-review` were half-manual because we couldn't programmatically remove symbols, switch between lists, or create/rename/delete watchlists. Blocked full automation of the tiered lists (02 MASTER → 03 FOCUS → 05 STALK → 04 HOT) and any future `watchlist_scan_cron.py` job.
+
+**Diagnostic method:** Same playbook as `alert_create` / `alert_delete`. Installed a broad `fetch` + `XMLHttpRequest` interceptor via `ui_evaluate`, asked the user to manually perform each target action (remove a symbol, switch list, create list, rename list, delete list), and captured the outgoing REST requests.
+
+**Scope:** 6 new MCP tools, all REST-backed (no DOM automation), plus a shared `tvRest()` helper. Wire formats captured on TV Desktop 3.1.0.7818 (2026-04-21):
+
+```
+GET    /api/v1/symbols_list/all/?source=web-tvd
+  -> [{id, type:"custom"|"colored", name, color|null, symbols:[...], active, shared, modified, ...}]
+
+POST   /api/v1/symbols_list/active/{id_or_color}/?source=web-tvd
+  Body: empty
+  -> numeric id for custom lists; color name ("red"/"blue"/"green"/"yellow"/"purple") for colored
+
+POST   /api/v1/symbols_list/custom/{id}/remove/?source=web-tvd
+  Body: ["NYMEX:CL1!"]
+
+POST   /api/v1/symbols_list/custom/?source=web-tvd
+  Body: {"name":"99_mcp_test","symbols":[]}
+  -> returns the new list record including id
+
+POST   /api/v1/symbols_list/custom/{id}/rename/?source=web-tvd
+  Body: {"name":"new name"}
+
+DELETE /api/v1/symbols_list/custom/{id}/?source=web-tvd
+  Body: none
+```
+
+**Critical CORS asymmetry (opposite of alerts.js):** These endpoints live on `www.tradingview.com` — **same-origin** as the chart page, so setting `Content-Type: application/json` is SAFE (no CORS preflight). The `/custom/` create and `/custom/{id}/rename/` endpoints actually REQUIRE it and return `HTTP 415 Unsupported Media Type` otherwise. Contrast: `alerts.js` hits `pricealerts.tradingview.com` which is cross-origin — there the `Content-Type` header triggers a preflight TV rejects. `tvRest()` documents this asymmetry inline so future patches don't re-trip the same mine.
+
+**Destructive-action guard on `watchlist_delete` (added 2026-04-22 after a real incident):** During smoke-test, the AI mis-targeted `watchlist_delete` and destroyed a live 26-symbol working watchlist (`🦏FOCUS`) instead of the throwaway test list. The list was recoverable because its contents were in chat context, but the near-miss demonstrated that `confirm_active` alone is not a sufficient safeguard against wrong-name errors. New design: `watchlist_delete` requires a `confirm_name` parameter that must exactly match the target list's resolved name (case-sensitive, trimmed). Refusal error includes the list's symbol_count so the caller sees what's at stake. Do not remove this guard without a better replacement.
+
+**Tool matrix:**
+
+| Tool | Priority | Method + path | Notes |
+|---|---|---|---|
+| `watchlist_list` | P1 | GET `/all/` | Includes custom+colored; `include_symbols:true` for full arrays |
+| `watchlist_switch` | P0 | POST `/active/{id_or_color}/` | Accepts list name or color; case-insensitive |
+| `watchlist_remove` | P0 | POST `/custom/{id}/remove/` body `["SYM",...]` | Defaults to active list; `from` targets other |
+| `watchlist_create` | P1 | POST `/custom/` body `{name, symbols}` | Returns new id |
+| `watchlist_rename` | P2 | POST `/custom/{id}/rename/` body `{name}` | Refuses colored (built-in) |
+| `watchlist_delete` | P2 | DELETE `/custom/{id}/` | Requires `confirm_name` AND not-active (unless `confirm_active:true`); refuses colored |
+
+**Smoke-test** (8 cases, live against TV 3.1.0.7818, 2026-04-21): all 8 pass including three refusal paths — delete-while-active (soft-refuse), delete-colored (soft-refuse), delete-without-confirm-name (hard-refuse). Guard verification on `watchlist_delete`: 3/3 pass (empty confirm → refuse, wrong-name confirm → refuse, matching confirm → succeed).
+
+**Files touched:** `src/core/watchlist.js` (extended), `src/tools/watchlist.js` (6 new tool registrations).
+
+**Spec:** `ASTA ECO4/system-design/MCP_WATCHLIST_MGMT_SPEC.md`.
+
+---
+
 ## Adding more fixes — workflow
 
 The diagnostic playbook lives in `CLAUDE.md` (project root of ASTA ECO4). Summary:
