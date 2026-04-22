@@ -104,7 +104,7 @@ Returns `{ success: true, deleted_count: N, deleted_ids: [...] }`.
 
 ---
 
-### 5. `<TBD>` — Watchlist management extension (6 new REST-backed tools)
+### 5. `f475946` — Watchlist management extension (6 new REST-backed tools)
 
 **Bug / gap:** Upstream MCP shipped only `watchlist_get` (read) and `watchlist_add` (DOM automation — keyboard-driven, single symbol, no target list selection). Skills like `/watchlist-scan`, `/3cs`, `/watchlist-review` were half-manual because we couldn't programmatically remove symbols, switch between lists, or create/rename/delete watchlists. Blocked full automation of the tiered lists (02 MASTER → 03 FOCUS → 05 STALK → 04 HOT) and any future `watchlist_scan_cron.py` job.
 
