@@ -140,14 +140,21 @@ export async function layoutSwitch({ name }) {
   `);
   if (!result?.success) throw new Error(result?.error || 'Unknown error switching layout');
 
-  // Handle "unsaved changes" confirmation dialog
+  // Handle "unsaved changes" confirmation dialog (multilingual)
   await new Promise(r => setTimeout(r, 500));
   const dismissed = await evaluate(`
     (function() {
+      // Match the "proceed / discard changes" button across locales.
+      // EN: "Open anyway", "Don't save", "Discard"
+      // PT: "Abrir mesmo assim", "Descartar", "Não salvar"
+      // ES: "Abrir de todos modos", "Descartar", "No guardar"
+      // FR: "Ouvrir quand même", "Ne pas enregistrer", "Abandonner"
+      // DE: "Trotzdem öffnen", "Nicht speichern", "Verwerfen"
+      var rx = /open anyway|don'?t save|discard|abrir mesmo|descartar|não salvar|abrir de todos|no guardar|ouvrir quand|ne pas enregistrer|abandonner|trotzdem öffnen|nicht speichern|verwerfen/i;
       var btns = document.querySelectorAll('button');
       for (var i = 0; i < btns.length; i++) {
         var text = btns[i].textContent.trim();
-        if (/open anyway|don't save|discard/i.test(text)) {
+        if (rx.test(text)) {
           btns[i].click();
           return true;
         }
