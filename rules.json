@@ -1,0 +1,19 @@
+{
+  "watchlist": {
+    "majors": ["BINANCE:BTCUSDT", "BINANCE:ETHUSDT", "BINANCE:SOLUSDT"],
+    "alts": ["BINANCE:LINKUSDT", "BINANCE:AVAXUSDT", "BINANCE:SUIUSDT"],
+    "macro": ["CRYPTOCAP:TOTAL", "CRYPTOCAP:TOTAL3", "CRYPTOCAP:BTC.D"]
+  },
+  "timeframes_to_check": ["1W", "1D", "4H"],
+  "bias_criteria": {
+    "bullish": "Price above 50D EMA, RSI on daily between 45 and 70, higher highs and higher lows on 4H",
+    "bearish": "Price below 50D EMA, RSI on daily below 45, lower highs and lower lows on 4H",
+    "neutral": "Price chopping around 50D EMA, RSI between 40 and 60, no clear structure"
+  },
+  "risk_rules": {
+    "max_risk_per_trade": "1% of portfolio",
+    "min_rr_ratio": 2,
+    "no_trades_during": ["major US CPI", "FOMC", "weekend thin liquidity"]
+  },
+  "indicators_i_care_about": ["RSI (14)", "MACD (12, 26, 9)", "50 EMA", "200 EMA", "Volume"]
+}
