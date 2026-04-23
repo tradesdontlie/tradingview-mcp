@@ -6,8 +6,40 @@
 import { evaluate, evaluateAsync, getClient } from '../connection.js';
 
 // ── Monaco finder (injected into TV page) ──
+//
+// Resolves TV's Pine Editor Monaco instance. Two paths:
+//
+//   1. FAST PATH: `window.monaco.editor.getEditors()` — direct Monaco API,
+//      filtered to the editor whose container sits under `.pine-editor-monaco`.
+//      Works whenever TV exposes the global `monaco` namespace (most builds
+//      since TV Desktop 3.x). No React-fiber traversal; robust under
+//      transitional fiber states (mid-render, post-`setValue`, post-`pine_new`).
+//
+//   2. FALLBACK: React fiber walk — walks from `.monaco-editor.pine-editor-monaco`
+//      up the DOM looking for a `__reactFiber$` key, then walks the fiber tree
+//      for `memoizedProps.value.monacoEnv`. Original behaviour. Used when the
+//      fast path is unavailable (older TV builds, or `window.monaco` not exposed).
+//
+// Returns `{ editor, env }` where `env.editor.getEditors()` + any Monaco-level
+// operations remain available. Callers only read `.editor` so both paths are
+// structurally compatible.
 const FIND_MONACO = `
   (function findMonacoEditor() {
+    // Fast path: direct Monaco API
+    try {
+      if (window.monaco && window.monaco.editor && typeof window.monaco.editor.getEditors === 'function') {
+        var allEditors = window.monaco.editor.getEditors();
+        for (var j = 0; j < allEditors.length; j++) {
+          var ed = allEditors[j];
+          var node = typeof ed.getContainerDomNode === 'function' ? ed.getContainerDomNode() : null;
+          if (node && node.closest && node.closest('.pine-editor-monaco')) {
+            return { editor: ed, env: { editor: window.monaco.editor } };
+          }
+        }
+      }
+    } catch (e) { /* fall through to fiber walk */ }
+
+    // Fallback: React fiber walk
     var container = document.querySelector('.monaco-editor.pine-editor-monaco');
     if (!container) return null;
     var el = container;
@@ -35,9 +67,30 @@ const FIND_MONACO = `
   })()
 `;
 
+// Pine Editor panel-open trigger. Idempotent — safe to re-invoke during
+// the poll loop in `ensurePineEditorOpen` when the panel self-closes
+// between calls (observed on TV 3.1 after `pine_new` or failed setValue).
+const OPEN_PINE_PANEL = `
+  (function() {
+    var bwb = window.TradingView && window.TradingView.bottomWidgetBar;
+    if (bwb) {
+      if (typeof bwb.activateScriptEditorTab === 'function') { bwb.activateScriptEditorTab(); return 'activateScriptEditorTab'; }
+      if (typeof bwb.showWidget === 'function') { bwb.showWidget('pine-editor'); return 'showWidget'; }
+    }
+    var btn = document.querySelector('[aria-label="Pine"]')
+      || document.querySelector('[data-name="pine-dialog-button"]');
+    if (btn) { btn.click(); return 'button-click'; }
+    return null;
+  })()
+`;
+
 /**
  * Opens the Pine Editor panel and waits for Monaco to become available.
  * Returns true if editor is accessible, false on timeout.
+ *
+ * Polls for up to ~10s. Re-invokes the panel-open trigger every 2s during
+ * the poll, to recover from transitional states where the panel auto-closes
+ * or Monaco hasn't yet settled.
  */
 export async function ensurePineEditorOpen() {
   const already = await evaluate(`
@@ -48,27 +101,17 @@ export async function ensurePineEditorOpen() {
   `);
   if (already) return true;
 
-  await evaluate(`
-    (function() {
-      var bwb = window.TradingView && window.TradingView.bottomWidgetBar;
-      if (!bwb) return;
-      if (typeof bwb.activateScriptEditorTab === 'function') bwb.activateScriptEditorTab();
-      else if (typeof bwb.showWidget === 'function') bwb.showWidget('pine-editor');
-    })()
-  `);
-
-  await evaluate(`
-    (function() {
-      var btn = document.querySelector('[aria-label="Pine"]')
-        || document.querySelector('[data-name="pine-dialog-button"]');
-      if (btn) btn.click();
-    })()
-  `);
+  await evaluate(OPEN_PINE_PANEL);
 
   for (let i = 0; i < 50; i++) {
     await new Promise(r => setTimeout(r, 200));
     const ready = await evaluate(`(function() { return ${FIND_MONACO} !== null; })()`);
     if (ready) return true;
+    // Re-invoke the panel-open trigger every 2s — idempotent, no-op if
+    // panel is already open, recovers if the panel self-closed.
+    if (i > 0 && i % 10 === 0) {
+      await evaluate(OPEN_PINE_PANEL);
+    }
   }
   return false;
 }
