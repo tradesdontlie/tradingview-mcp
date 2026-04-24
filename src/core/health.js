@@ -197,6 +197,30 @@ export async function launch({ port, kill_existing } = {}) {
     } catch { /* ignore */ }
   }
 
+  // Windows Microsoft Store version: lives in a versioned WindowsApps folder
+  // e.g. C:\Program Files\WindowsApps\TradingView.Desktop_2.x.x_x64__n534cwy3pjxzj\TradingView.exe
+  if (!tvPath && platform === 'win32') {
+    try {
+      const found = execSync(
+        'powershell -NoProfile -Command "Get-Process TradingView -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Path"',
+        { timeout: 5000 }
+      ).toString().trim();
+      if (found && existsSync(found)) tvPath = found;
+    } catch { /* ignore */ }
+
+    if (!tvPath) {
+      try {
+        // existsSync can't verify WindowsApps paths without admin rights,
+        // so we trust the AppxPackage query result directly
+        const found = execSync(
+          'powershell -NoProfile -Command "(Get-AppxPackage -Name TradingView.Desktop -ErrorAction SilentlyContinue).InstallLocation"',
+          { timeout: 5000 }
+        ).toString().trim();
+        if (found) tvPath = `${found}\\TradingView.exe`;
+      } catch { /* ignore */ }
+    }
+  }
+
   if (!tvPath && platform === 'darwin') {
     try {
       const found = execSync('mdfind "kMDItemFSName == TradingView.app" | head -1', { timeout: 5000 }).toString().trim();
