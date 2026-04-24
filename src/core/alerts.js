@@ -19,6 +19,44 @@ function normalizeCondition(condition) {
   return 'cross'; // permissive fallback
 }
 
+/**
+ * T31 — Alert message / condition price-parity validator.
+ *
+ * If an alert `message` cites one or more prices (as $-prefixed tokens), at
+ * least one must match the alert's `condition.value` within 0.5% — otherwise
+ * the alert is a schema-drift bug: the user reads the message on their phone
+ * assuming one level, but the actual trigger is something else. Two such
+ * drifts were observed on 2026-04-22 / 23 (TSCO alert 4532985422 msg "$43.20"
+ * / cross_up 54.80; RKLB 4535762585 msg "$78.60" / cross_down 84.61).
+ *
+ * Rules:
+ *   - Message with no $-prefixed numeric tokens → pass (not every alert cites
+ *     a price, e.g., "AMZN bull setup firing").
+ *   - Any cited price within 0.5% of numericPrice → pass. Other numbers
+ *     (SL / T1 / T2 context) may differ from condition.value without failing.
+ *   - Otherwise → refuse with cited-prices list + actual condition value.
+ *
+ * Tolerance 0.5% allows cosmetic rounding ($390 vs $390.01) without masking
+ * real drift ($43.20 vs 54.80 = 27% gap, far beyond tolerance).
+ */
+function validateMessageConditionParity(message, numericPrice) {
+  if (!message || typeof message !== 'string') return { ok: true };
+  if (!isFinite(numericPrice) || numericPrice <= 0) return { ok: true };
+  const matches = [...message.matchAll(/\$(\d+(?:\.\d+)?)/g)];
+  if (matches.length === 0) return { ok: true };
+  const tolerance = 0.005;
+  const cited = matches.map(m => Number(m[1])).filter(n => isFinite(n) && n > 0);
+  if (cited.length === 0) return { ok: true };
+  const match = cited.find(p => Math.abs(p - numericPrice) / numericPrice <= tolerance);
+  if (match !== undefined) return { ok: true };
+  return {
+    ok: false,
+    reason: `message cites [${cited.map(p => '$' + p).join(', ')}], none within 0.5% of condition.value $${numericPrice}`,
+    cited,
+    condition_value: numericPrice,
+  };
+}
+
 export async function create({ condition, price, message }) {
   if (price == null || isNaN(Number(price))) {
     return { success: false, error: 'price is required and must be a number', source: 'rest_api' };
@@ -57,6 +95,20 @@ export async function create({ condition, price, message }) {
 
   const defaultMessage = message || `${symbolInfo.symbol.split(':').pop()} ${condition ? String(condition).toLowerCase() : 'crossing'} ${numericPrice}`;
   const condType = normalizeCondition(condition);
+
+  // T31 — refuse the create if the message cites a price that disagrees with the condition value.
+  // Prevents the "phone alert says $X, actual trigger is $Y" drift (observed twice in Session 18).
+  const parity = validateMessageConditionParity(defaultMessage, numericPrice);
+  if (!parity.ok) {
+    return {
+      success: false,
+      error: 'message-condition price mismatch — ' + parity.reason,
+      cited_prices: parity.cited,
+      condition_value: parity.condition_value,
+      hint: 'Align the price in the `message` field to match the `price` arg, or remove price tokens from the message.',
+      source: 'rest_api_prechecked',
+    };
+  }
 
   // Default expiration: 30 days from now, matches TV's UI default
   const expiration = new Date(Date.now() + 30 * 86400 * 1000).toISOString();
