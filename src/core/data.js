@@ -301,6 +301,93 @@ async function getQuoteViaScanner(symbol) {
   };
 }
 
+// Enrich a batch of symbols with price + liquidity + market-cap data via the
+// same scanner REST endpoint getQuoteViaScanner uses, in ONE round-trip.
+// Used by /refresh-movers (T26 — quality filter) to drop sub-$N price,
+// thin-volume, or micro-cap tickers BEFORE they reach 3Cs triage. Keeps
+// us from wasting 40+ Strategist calls on penny pumps.
+//
+// Input: { symbols: ["NASDAQ:AAPL", "NYSE:IBM", ...] }
+// Output: {
+//   success: true,
+//   count: N,                    // how many symbols were returned
+//   requested: M,                // how many were asked for
+//   missing: [...],              // symbols the endpoint didn't return
+//   enriched: {                  // keyed by upper-cased input symbol
+//     "NASDAQ:AAPL": { symbol, close, avg_vol_30d, market_cap, description }
+//   },
+//   source: "scanner_rest"
+// }
+//
+// Endpoint: POST https://scanner.tradingview.com/america/scan (cross-origin,
+// string body, NO Content-Type — same CORS rule as getQuoteViaScanner).
+async function enrichSymbols({ symbols } = {}) {
+  const tickers = Array.isArray(symbols) ? symbols.map(s => String(s).trim()).filter(Boolean) : [];
+  if (tickers.length === 0) {
+    return { success: false, error: 'scanner_enrich: symbols[] required (non-empty array)' };
+  }
+  if (tickers.length > 500) {
+    return { success: false, error: `scanner_enrich: too many symbols (${tickers.length}); cap is 500 per call` };
+  }
+  const body = JSON.stringify({
+    symbols: { tickers },
+    columns: ['close', 'average_volume_30d_calc', 'market_cap_basic', 'description'],
+  });
+  const escapedBody = body.replace(/[\\`$]/g, '\\$&');
+  const expr = `
+    fetch('https://scanner.tradingview.com/america/scan', {
+      method: 'POST',
+      body: \`${escapedBody}\`
+    })
+      .then(function(r) {
+        return r.text().then(function(t) {
+          var parsed = null;
+          try { parsed = t ? JSON.parse(t) : null; } catch(e) {}
+          return { status: r.status, ok: r.ok, body: t, json: parsed };
+        });
+      })
+      .catch(function(e) { return { error: e.message }; })
+  `;
+  const resp = await evaluateAsync(expr);
+  if (!resp || resp.error) {
+    return { success: false, error: `scanner_enrich fetch failed: ${resp?.error || 'no response'}` };
+  }
+  if (!resp.ok) {
+    return {
+      success: false,
+      error: `scanner_enrich HTTP ${resp.status}: ${String(resp.body || '').slice(0, 200)}`,
+    };
+  }
+  const rows = Array.isArray(resp.json?.data) ? resp.json.data : [];
+  const enriched = {};
+  const returnedUpper = new Set();
+  for (const row of rows) {
+    if (!row || !Array.isArray(row.d)) continue;
+    const [close, avg_vol_30d, market_cap, description] = row.d;
+    const key = String(row.s || '').toUpperCase();
+    if (!key) continue;
+    returnedUpper.add(key);
+    enriched[key] = {
+      symbol: row.s,
+      close: typeof close === 'number' ? close : null,
+      avg_vol_30d: typeof avg_vol_30d === 'number' ? avg_vol_30d : null,
+      market_cap: typeof market_cap === 'number' ? market_cap : null,
+      description: description || '',
+    };
+  }
+  const missing = tickers.filter(t => !returnedUpper.has(String(t).toUpperCase()));
+  return {
+    success: true,
+    count: Object.keys(enriched).length,
+    requested: tickers.length,
+    missing,
+    enriched,
+    source: 'scanner_rest',
+  };
+}
+
+export { enrichSymbols };
+
 export async function getQuote({ symbol } = {}) {
   // T35: if caller requested a specific symbol, route through REST unless it
   // matches the active chart. The active-chart path reads bars/symbolExt for

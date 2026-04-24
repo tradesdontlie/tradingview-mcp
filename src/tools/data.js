@@ -47,6 +47,13 @@ export function registerDataTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message, hint: 'Open the DOM panel in TradingView before using this tool.' }, true); }
   });
 
+  server.tool('scanner_enrich', 'Batch-enrich symbols with price + 30d avg volume + market cap + description via the TradingView scanner REST endpoint (T26 quality filter). One cross-origin POST returns data for up to 500 symbols. Used by /refresh-movers to drop sub-$N price, thin-volume, micro-cap tickers BEFORE they reach 3Cs triage. Output.enriched is keyed by UPPER-cased symbol; output.missing lists requested symbols the endpoint did not return (typically delisted or non-US).', {
+    symbols: z.array(z.string()).describe('Array of fully-qualified symbols (e.g., ["NASDAQ:AAPL","NYSE:IBM"]). Max 500 per call.'),
+  }, async ({ symbols }) => {
+    try { return jsonResult(await core.enrichSymbols({ symbols })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
   server.tool('data_get_pine_lines', 'Read horizontal price levels drawn by Pine Script indicators (line.new). Returns deduplicated price levels per study. Use study_filter to target a specific indicator.', {
     study_filter: z.string().optional().describe('Substring to match study name (e.g., "Profiler", "NY Levels"). Omit for all.'),
     verbose: z.coerce.boolean().optional().describe('Return raw line data with IDs, coordinates, colors (default false — returns only unique price levels)'),

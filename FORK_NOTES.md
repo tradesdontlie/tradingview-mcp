@@ -252,6 +252,37 @@ Exactly the mirror of `/remove/`: same same-origin endpoint, same numeric-id tar
 
 ---
 
+## §9 — `scanner_enrich`: batch price/volume/market-cap enrichment (T26, 2026-04-24)
+
+**Why:** `/refresh-movers` populates 🐂 02 BULL + 🐻 06 BEAR from the raw TV hotlist presets. Hotlists are great at finding *movers* but terrible at finding *tradeable* movers — today's 9-hotlist scan surfaced LIDR ($1.40), SMX (<$1), OIO ($1), TRUG, WNW, ZTG, SIDU — pump/penny tickers that ASTA quality gates will never allow a trade on. Triaging them with `/find-setups` burns ~40 Claude calls per sweep with a foregone-conclusion SKIP verdict. User directive (Session 20): "we are not going to look at anything under $10 and we need a certain amount of volume." Filed as T26 in TASKS.md.
+
+**Chosen path:** Enrich every unique candidate symbol in ONE cross-origin POST to `scanner.tradingview.com/america/scan` — the same endpoint T35 fixed `quote_get` to route through, so we already know the CORS rules (plain-string body, no `Content-Type`). The scanner returns any columns you ask for; for T26 we request `close` + `average_volume_30d_calc` + `market_cap_basic` + `description`. Python-side filter then drops anything below `price $10 / avg_vol 1M / mcap $1B` BEFORE the vote-rank dedup — a 4-vote pump loses to a 1-vote real name.
+
+**Wire format** (mirror of T35's `getQuoteViaScanner`):
+```
+POST https://scanner.tradingview.com/america/scan
+Body (plain-string, no Content-Type):
+  {"symbols":{"tickers":["NASDAQ:AAPL","NASDAQ:SMX",...]},
+   "columns":["close","average_volume_30d_calc","market_cap_basic","description"]}
+Response: {"data":[{"s":"NASDAQ:AAPL","d":[180.5, 51000000, 2.8e12, "Apple Inc."]}, ...]}
+```
+
+**Fix:** New `enrichSymbols({ symbols })` in `src/core/data.js` — cloned structurally from `getQuoteViaScanner` (T35) but with a batched request body and a keyed-by-upper-symbol output shape. New `scanner_enrich` tool registered in `src/tools/data.js` with `symbols[]` param (z.array). Cap 500 symbols per call. Returns `{ success, count, requested, missing[], enriched{SYMBOL:{close,avg_vol_30d,market_cap,description}}, source:"scanner_rest" }`. Non-US / OTC / delisted tickers end up in `missing[]` — skill can surface them without treating as drops.
+
+**Tool matrix delta:**
+
+| Tool | Method + path | Notes |
+|---|---|---|
+| `scanner_enrich` (new) | POST `scanner.tradingview.com/america/scan` body `{symbols:{tickers:[…]},columns:[…]}` | Cross-origin, no `Content-Type`. Up to 500 per call. Powers T26 pre-3Cs quality gate. |
+
+**Files touched:** `src/core/data.js` (+94 lines for `enrichSymbols` + export), `src/tools/data.js` (+7 lines for tool registration).
+
+**Node-check:** passes on both files. **Live smoke:** deferred to post-restart (requires Claude Code restart to reload MCP process and register `scanner_enrich`).
+
+**Python-side companion:** `scripts/refresh_movers.py` gained an optional `enriched` input key, `MIN_PRICE=10.0 / MIN_AVG_VOL_30D=1M / MIN_MARKET_CAP=1B` constants, pre-dedup filter, and output fields `filter{thresholds,dropped,dropped_count,no_enrichment_data}` + `warnings[]`. 26/26 unit tests pass (15 existing back-compat + 11 new T26 cases covering: no-enrichment back-compat, each threshold, multi-failure, pre-dedup ordering, case-insensitive keys, exclude-takes-precedence, under-cap warning, full-cap clean).
+
+---
+
 ## Adding more fixes — workflow
 
 The diagnostic playbook lives in `CLAUDE.md` (project root of ASTA ECO4). Summary:
