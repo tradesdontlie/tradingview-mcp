@@ -195,6 +195,34 @@ Response: {
 
 ---
 
+### 7. `aed8ad2` — `quote_get` symbol-param bug (cross-symbol routes via scanner REST)
+
+**Bug:** `quote_get({symbol:X})` read bars/symbolExt from the **active chart** regardless of the requested symbol, then pasted the requested symbol into the response envelope. Caller got X's name with some-other-ticker's OHLC. Silent wrong-ticker pricing — worst affected `/decay-check`, which would mis-classify every open invalidation rule using one ticker's price across all entries.
+
+**Live-caught 2026-04-23** mid-pipeline. Repro: load `BATS:INTU`, call `quote_get(symbol="NASDAQ:TSCO")` — returned INTU's $383 close with `symbol:"NASDAQ:TSCO"` and `description:"Intuit Inc."`. Same result for any symbol passed.
+
+**Root cause:** `src/core/data.js::getQuote()` set `sym = request_symbol || api.symbol()` and placed it in the envelope, but then read `bars = ${BARS_PATH}` (active chart's main series) and `ext = api.symbolExt()` (active chart's metadata). The `sym` variable was cosmetic; the data always came from the active chart widget.
+
+**Diagnostic method:** Grep for the tool name → read the body of `getQuote()` → contradiction visible in one pass (envelope-field set from input, data-fields read from active chart). Live-probed the fix target by stashing a fetch result on `window.__t35_probe` and polling — confirmed the scanner endpoint wire format before writing the patch.
+
+**Wire format** (probed live):
+
+```
+POST https://scanner.tradingview.com/america/scan
+Body: {"symbols":{"tickers":["NASDAQ:TSCO","NASDAQ:AAPL","NASDAQ:NVDA"]},
+       "columns":["close","open","high","low","volume","description","exchange","type"]}
+No Content-Type header (cross-origin — same CORS gotcha as alerts.js).
+Response: {"totalCount":3,"data":[{"s":"NASDAQ:TSCO","d":[38.17,38.98,38.98,38.04,11360613,"Tractor Supply Company","NASDAQ","stock"]}, ...]}
+```
+
+**Fix:** New `getQuoteViaScanner(symbol)` helper hits the scanner endpoint. `getQuote()` compares the requested symbol (uppercased/trimmed) against `api.symbol()`. If they match or `symbol` is omitted → active-chart path (keeps the bid/ask DOM scraping). If they differ → scanner path. Response adds `source: "scanner_rest" | "active_chart"` for debugging.
+
+**Files touched:** `src/core/data.js` (+84 lines). Tool signature unchanged — no `src/tools/data.js` change needed.
+
+**Node-check:** passes. **Live smoke:** deferred to next session (requires Claude Code restart to reload MCP process).
+
+---
+
 ## Adding more fixes — workflow
 
 The diagnostic playbook lives in `CLAUDE.md` (project root of ASTA ECO4). Summary:
