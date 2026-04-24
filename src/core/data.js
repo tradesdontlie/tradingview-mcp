@@ -242,7 +242,90 @@ export async function getEquity() {
   return { success: true, data_points: equity?.data?.length || 0, source: equity?.source, data: equity?.data || [], equity_summary: equity?.equity_summary, note: equity?.note, error: equity?.error };
 }
 
+// Fetch a quote via the public scanner REST endpoint. Used when the caller
+// asks for a symbol that isn't the active chart — reading bars/symbolExt in
+// that case would return the WRONG ticker's data with the requested symbol
+// pasted into the envelope. (T35 — live-caught 2026-04-23.)
+//
+// Endpoint: POST https://scanner.tradingview.com/america/scan (cross-origin).
+// Per CLAUDE.md CORS gotcha: send JSON as a plain-string body with NO
+// Content-Type header — TV rejects the preflight otherwise.
+async function getQuoteViaScanner(symbol) {
+  const ticker = String(symbol).trim();
+  const body = JSON.stringify({
+    symbols: { tickers: [ticker] },
+    columns: ['close', 'open', 'high', 'low', 'volume', 'description', 'exchange', 'type'],
+  });
+  const escapedBody = body.replace(/[\\`$]/g, '\\$&');
+  const expr = `
+    fetch('https://scanner.tradingview.com/america/scan', {
+      method: 'POST',
+      body: \`${escapedBody}\`
+    })
+      .then(function(r) {
+        return r.text().then(function(t) {
+          var parsed = null;
+          try { parsed = t ? JSON.parse(t) : null; } catch(e) {}
+          return { status: r.status, ok: r.ok, body: t, json: parsed };
+        });
+      })
+      .catch(function(e) { return { error: e.message }; })
+  `;
+  const resp = await evaluateAsync(expr);
+  if (!resp || resp.error) {
+    throw new Error(`quote_get scanner fetch failed: ${resp?.error || 'no response'}`);
+  }
+  if (!resp.ok) {
+    throw new Error(`quote_get scanner HTTP ${resp.status}: ${String(resp.body || '').slice(0, 200)}`);
+  }
+  const rows = resp.json?.data;
+  if (!Array.isArray(rows) || rows.length === 0 || !Array.isArray(rows[0]?.d)) {
+    throw new Error(
+      `quote_get: no scanner data for "${ticker}". Use a fully-qualified symbol like "NASDAQ:TSCO".`
+    );
+  }
+  const [close, open, high, low, volume, description, exchange, type] = rows[0].d;
+  return {
+    success: true,
+    symbol: rows[0].s || ticker,
+    open,
+    high,
+    low,
+    close,
+    last: close,
+    volume: volume || 0,
+    description: description || '',
+    exchange: exchange || '',
+    type: type || '',
+    source: 'scanner_rest',
+  };
+}
+
 export async function getQuote({ symbol } = {}) {
+  // T35: if caller requested a specific symbol, route through REST unless it
+  // matches the active chart. The active-chart path reads bars/symbolExt for
+  // whatever's loaded, which returns the wrong ticker's data when the caller
+  // passes a different symbol. Bid/ask DOM scraping only works for the active
+  // chart anyway, so there's nothing to lose by routing non-active reads
+  // through the scanner endpoint.
+  if (symbol) {
+    const activeSym = await evaluate(`
+      (function() {
+        try {
+          var api = ${CHART_API};
+          var s = '';
+          try { s = api.symbol() || ''; } catch(e) {}
+          if (!s) { try { s = (api.symbolExt() || {}).symbol || ''; } catch(e) {} }
+          return s;
+        } catch(e) { return ''; }
+      })()
+    `);
+    const active = String(activeSym || '').toUpperCase().trim();
+    const requested = String(symbol).toUpperCase().trim();
+    if (requested && requested !== active) {
+      return await getQuoteViaScanner(symbol);
+    }
+  }
   const data = await evaluate(`
     (function() {
       var api = ${CHART_API};
@@ -274,7 +357,7 @@ export async function getQuote({ symbol } = {}) {
     })()
   `);
   if (!data || (!data.last && !data.close)) throw new Error('Could not retrieve quote. The chart may still be loading.');
-  return { success: true, ...data };
+  return { success: true, ...data, source: 'active_chart' };
 }
 
 export async function getDepth() {
