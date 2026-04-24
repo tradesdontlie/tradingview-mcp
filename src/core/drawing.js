@@ -40,8 +40,15 @@ export async function drawShape({ shape, point, point2, overrides: overridesRaw,
   await new Promise(r => setTimeout(r, 200));
   const after = await evaluate(`${apiPath}.getAllShapes().map(function(s) { return s.id; })`);
   const newId = (after || []).find(id => !(before || []).includes(id)) || null;
-  const result = { entity_id: newId };
-  return { success: true, shape, entity_id: result?.entity_id };
+  if (newId === null) {
+    return {
+      success: false,
+      shape,
+      entity_id: null,
+      error: `createShape returned no new entity. Common causes: invalid shape name "${shape}" rejected silently by TradingView; or point coordinates outside the chart's loaded range.`,
+    };
+  }
+  return { success: true, shape, entity_id: newId };
 }
 
 export async function listDrawings({ _deps } = {}) {
