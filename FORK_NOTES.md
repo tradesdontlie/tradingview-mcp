@@ -219,7 +219,36 @@ Response: {"totalCount":3,"data":[{"s":"NASDAQ:TSCO","d":[38.17,38.98,38.98,38.0
 
 **Files touched:** `src/core/data.js` (+84 lines). Tool signature unchanged — no `src/tools/data.js` change needed.
 
-**Node-check:** passes. **Live smoke:** deferred to next session (requires Claude Code restart to reload MCP process).
+**Node-check:** passes. **Live smoke:** 3/3 green post-restart 2026-04-23. On `BATS:INTU`: `quote_get(symbol="NASDAQ:TSCO")` → "Tractor Supply Company" close $38.17 `source:"scanner_rest"`; `quote_get(symbol="NASDAQ:AAPL")` → "Apple Inc." close $273.43 `source:"scanner_rest"`; `quote_get()` no-arg → INTU $383.30 `source:"active_chart"`. Cross-symbol envelope mismatch resolved.
+
+---
+
+### 8. `watchlist_insert` — REST-safe targeted-add (replaces DOM `watchlist_add` for race-free inserts)
+
+**Gap:** The upstream `watchlist_add` types into the sidebar search box via CDP keyboard events, so adds always land on whichever list is **visibly open** in the UI, not whatever `watchlist_switch(name=X)` flagged active via REST. Any user click on a different sidebar tab during a skill run routed adds to the wrong list. The original workaround — `watchlist_delete` + `watchlist_create(symbols=[...])` — is race-free but assigns the recreated list a **new id**, which in TV drops it out of the user's pin/favorite sidebar order. Observed live (Session 20, 2026-04-24): repeated pin-order breakage on `/refresh-movers` runs forced the user to re-pin watchlists every session.
+
+**Diagnostic method:** Same interceptor playbook as `alert_create` / `alert_delete` / watchlist-mgmt. Installed `fetch` + `XMLHttpRequest` interceptor via `ui_evaluate` stashing requests on `window.__t37_capture`, switched the UI to the empty `🐂 02 BULL` list via `watchlist_switch`, asked the user to manually add `NASDAQ:AAPL` via the sidebar "+" button, then polled the capture. Captured wire format on TV Desktop 3.1.0.7818:
+
+```
+POST https://www.tradingview.com/api/v1/symbols_list/custom/{id}/append/?source=web-tvd
+Content-Type: application/json
+Body: ["NASDAQ:AAPL"]
+Response: HTTP 200 (empty body)
+```
+
+Exactly the mirror of `/remove/`: same same-origin endpoint, same numeric-id targeting, same array body. `Content-Type: application/json` is required (consistent with the other `/symbols_list/` mutations) and the existing `tvRest()` helper sets it automatically for bodied requests.
+
+**Fix:** New `appendSymbols({ symbol, symbols, to })` in `src/core/watchlist.js` — cloned from `removeSymbol()` with `/remove/` → `/append/` and the response key renamed. New `watchlist_insert` tool registered in `src/tools/watchlist.js` with `symbol` / `symbols` / `to` params (same signature shape as `watchlist_remove`). DOM `watchlist_add` kept in place for backward compatibility but skills should switch to `watchlist_insert`.
+
+**Tool matrix delta:**
+
+| Tool | Method + path | Notes |
+|---|---|---|
+| `watchlist_insert` (new) | POST `/custom/{id}/append/` body `["SYM",...]` | Race-free mirror of `watchlist_remove`; defaults to active list; `to` targets other |
+
+**Files touched:** `src/core/watchlist.js` (+62 lines), `src/tools/watchlist.js` (+14 lines).
+
+**Node-check:** passes on both files. **Live smoke:** deferred to post-restart (requires Claude Code restart to reload MCP process and register `watchlist_insert`).
 
 ---
 

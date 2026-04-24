@@ -66,6 +66,20 @@ export function registerWatchlistTools(server) {
   );
 
   server.tool(
+    'watchlist_insert',
+    'Add one or more symbols to a watchlist via TV REST. Race-free alternative to the DOM-based `watchlist_add` — targets the list by numeric id instead of typing into the sidebar search box, so adds always land on the requested list regardless of which tab the user has open in the UI. Defaults to the active list; pass `to` to target a specific list by name. Works with both custom and colored lists.',
+    {
+      symbol: z.string().optional().describe('Single symbol to add (e.g., "NASDAQ:AAPL" or "AAPL").'),
+      symbols: z.array(z.string()).optional().describe('Array of symbols to add in one call. Takes precedence over `symbol`.'),
+      to: z.string().optional().describe('Target watchlist name (optional — defaults to the currently-active watchlist).'),
+    },
+    async ({ symbol, symbols, to }) => {
+      try { return jsonResult(await core.appendSymbols({ symbol, symbols, to })); }
+      catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+    }
+  );
+
+  server.tool(
     'watchlist_create',
     'Create a new custom watchlist with an optional starting set of symbols. Returns the new list id and name.',
     {

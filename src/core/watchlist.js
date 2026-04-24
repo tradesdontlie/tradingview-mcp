@@ -196,6 +196,62 @@ export async function removeSymbol({ symbol, symbols, from } = {}) {
 }
 
 /**
+ * Append one or more symbols to a watchlist (REST — race-free, targets by id).
+ *   POST /api/v1/symbols_list/custom/{id}/append/?source=web-tvd   body ["SYM",...]
+ *
+ * Wire format captured 2026-04-24 on TV Desktop 3.1.0.7818 by manually adding
+ * NASDAQ:AAPL via the sidebar "+" button with a fetch interceptor installed.
+ * Mirror of /remove/ — same targeting semantics, same body shape. Same-origin
+ * so Content-Type: application/json is required (and safe); `tvRest()` sets it
+ * automatically on bodied requests.
+ *
+ * Why this exists: the upstream DOM `add()` tool types into the sidebar search
+ * box and hits whichever list is visibly open — races with user UI actions.
+ * This tool targets the list by numeric id via the same REST endpoint TV's own
+ * client uses, so adds always land on the requested list regardless of which
+ * tab the user has open.
+ *
+ * `to` defaults to the currently-active watchlist; skills should always pass
+ * the list name explicitly to avoid ambient state surprises.
+ */
+export async function appendSymbols({ symbol, symbols, to } = {}) {
+  let toAppend = [];
+  if (Array.isArray(symbols) && symbols.length > 0) {
+    toAppend = symbols.map(s => String(s)).filter(Boolean);
+  } else if (symbol) {
+    toAppend = [String(symbol)];
+  } else {
+    throw new Error('Pass `symbol` (string) or `symbols` (array of strings).');
+  }
+
+  const all = await listAll();
+  if (!all.success) return { success: false, error: all.error, source: 'rest_api' };
+  let target;
+  if (to) {
+    target = await resolveList(to, all.lists);
+  } else {
+    target = all.lists.find(l => l.active);
+    if (!target) return { success: false, error: 'No active watchlist found and `to` not provided', source: 'rest_api' };
+  }
+
+  const resp = await tvRest(`/api/v1/symbols_list/custom/${target.id}/append/?source=web-tvd`, {
+    method: 'POST',
+    body: toAppend,
+  });
+  if (!resp || resp.error) return { success: false, error: resp?.error || 'no response', source: 'rest_api' };
+  if (!resp.ok) return { success: false, error: `HTTP ${resp.status}: ${String(resp.body).slice(0, 200)}`, http_status: resp.status, source: 'rest_api' };
+
+  return {
+    success: true,
+    list_name: target.name || target.color || `#${target.id}`,
+    list_id: target.id,
+    appended_symbols: toAppend,
+    appended_count: toAppend.length,
+    source: 'rest_api',
+  };
+}
+
+/**
  * Create a new custom watchlist.
  *   POST /api/v1/symbols_list/custom/?source=web-tvd   body {"name":"...","symbols":[...]}
  *
