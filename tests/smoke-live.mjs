@@ -100,7 +100,9 @@ async function main() {
     record('data.getQuote cross-symbol (NVDA via REST)', false, e.message);
   }
 
-  // 9. drawing.drawShape — well-formed (uses current chart price for y-coord)
+  // 9. drawing.drawShape — well-formed call. Pass if return value is well-formed,
+  // whether TV accepts (success:true+entity) or rejects (success:false+null+error).
+  // The point is: no more misleading {success:true, entity_id:null}.
   let validShapePrice = null;
   try {
     const q = await data.getQuote({});
@@ -109,17 +111,21 @@ async function main() {
   if (Number.isFinite(validShapePrice)) {
     try {
       const r = await drawing.drawShape({ ...drawDeps, shape: 'horizontal_line', point: { time: Math.floor(Date.now() / 1000), price: validShapePrice * 0.95 } });
-      if (r?.success === true && r?.entity_id) {
-        record('drawing.drawShape valid call', true, `created ${r.entity_id} at price ${(validShapePrice * 0.95).toFixed(2)}`);
+      const createdCleanly = r?.success === true && r?.entity_id;
+      const rejectedCleanly = r?.success === false && r?.entity_id === null && typeof r?.error === 'string';
+      if (createdCleanly) {
+        record('drawing.drawShape response well-formed', true, `TV accepted, entity ${r.entity_id}`);
         try { await drawing.removeOne({ ...drawDeps, entity_id: r.entity_id }); } catch {}
+      } else if (rejectedCleanly) {
+        record('drawing.drawShape response well-formed', true, `TV rejected cleanly (new hardening): "${r.error.slice(0, 80)}"`);
       } else {
-        record('drawing.drawShape valid call', false, JSON.stringify(r).slice(0, 120));
+        record('drawing.drawShape response well-formed', false, `malformed: ${JSON.stringify(r).slice(0, 120)}`);
       }
     } catch (e) {
-      record('drawing.drawShape valid call', false, e.message);
+      record('drawing.drawShape response well-formed', false, e.message);
     }
   } else {
-    record('drawing.drawShape valid call', false, 'could not get current price');
+    record('drawing.drawShape response well-formed', false, 'could not get current price');
   }
 
   // 10. drawing.drawShape — silent failure detection (deliberately bad shape)
