@@ -150,7 +150,8 @@ export async function layoutSwitch({ name }) {
       // ES: "Abrir de todos modos", "Descartar", "No guardar"
       // FR: "Ouvrir quand même", "Ne pas enregistrer", "Abandonner"
       // DE: "Trotzdem öffnen", "Nicht speichern", "Verwerfen"
-      var rx = /open anyway|don'?t save|discard|abrir mesmo|descartar|não salvar|abrir de todos|no guardar|ouvrir quand|ne pas enregistrer|abandonner|trotzdem öffnen|nicht speichern|verwerfen/i;
+      // VI: "Vẫn mở", "Không lưu", "Bỏ qua"
+      var rx = /open anyway|don'?t save|discard|abrir mesmo|descartar|não salvar|abrir de todos|no guardar|ouvrir quand|ne pas enregistrer|abandonner|trotzdem öffnen|nicht speichern|verwerfen|vẫn mở|không lưu|bỏ qua/i;
       var btns = document.querySelectorAll('button');
       for (var i = 0; i < btns.length; i++) {
         var text = btns[i].textContent.trim();
