@@ -35,8 +35,8 @@ export function registerDataTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('quote_get', 'Get real-time quote data for a symbol (price, OHLC, volume)', {
-    symbol: z.string().optional().describe('Symbol to quote (blank = current chart symbol)'),
+  server.tool('quote_get', 'Get real-time quote data for a symbol (price, OHLC, volume). If symbol is provided and differs from the current chart, the chart is briefly switched to fetch the quote and then restored — adds ~1-2s and serializes parallel calls.', {
+    symbol: z.string().optional().describe('Symbol to quote (blank = current chart symbol). Non-blank values cause a chart switch + restore.'),
   }, async ({ symbol }) => {
     try { return jsonResult(await core.getQuote({ symbol })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
