@@ -14,7 +14,9 @@
   "scripts": {
     "start": "node src/server.js",
     "tv": "node src/cli/index.js",
+    "check:syntax": "find src tests -name '*.js' -print0 | xargs -0 -n1 node --check",
     "test": "node --test tests/e2e.test.js tests/pine_analyze.test.js",
+    "test:offline": "SKIP_NETWORK_TESTS=1 node --test tests/pine_analyze.test.js tests/sanitization.test.js",
     "test:e2e": "node --test tests/e2e.test.js",
     "test:unit": "node --test tests/pine_analyze.test.js tests/cli.test.js",
     "test:cli": "node --test tests/cli.test.js",

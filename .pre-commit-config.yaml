@@ -1,0 +1,24 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-json
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+
+  - repo: local
+    hooks:
+      - id: node-syntax-check
+        name: node syntax check
+        entry: npm run check:syntax
+        language: system
+        pass_filenames: false
+        files: \.js$
+
+      - id: npm-offline-tests
+        name: npm offline tests
+        entry: npm run test:offline
+        language: system
+        pass_filenames: false
+        files: ^(src|tests)/.*\.js$|^package(-lock)?\.json$
