@@ -8,6 +8,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
+const describeNetwork = process.env.SKIP_NETWORK_TESTS === '1' ? describe.skip : describe;
+
 // Extracted analyze function matching the tool's logic
 function analyze(source) {
   const lines = source.split('\n');
@@ -240,7 +242,7 @@ strategy.entry("Long", strategy.long)`);
   });
 });
 
-describe('pine_check — server compile', () => {
+describeNetwork('pine_check — server compile', () => {
   it('should compile valid Pine Script via TradingView API', async () => {
     const source = `//@version=6
 indicator("API Test", overlay=true)
