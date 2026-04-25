@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BTC/USD Live Status</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="background-effects">
+        <div class="glow-orb orb-1"></div>
+        <div class="glow-orb orb-2"></div>
+    </div>
+
+    <main class="dashboard">
+        <header>
+            <h1>Bitcoin Tracker</h1>
+            <p class="subtitle">Live from TradingView MCP</p>
+        </header>
+
+        <div id="error-container" class="glass-panel hidden error-panel">
+            <h3>Connection Error</h3>
+            <p id="error-message">Failed to connect.</p>
+            <button id="retry-btn" class="btn">Retry</button>
+        </div>
+
+        <div id="loading-container" class="loading-state">
+            <div class="spinner"></div>
+            <p>Fetching latest data from TradingView...</p>
+        </div>
+
+        <div id="data-container" class="hidden fade-in">
+            <div class="price-header glass-panel">
+                <div class="symbol-info">
+                    <img src="https://cryptologos.cc/logos/bitcoin-btc-logo.svg?v=025" alt="BTC" class="btc-logo">
+                    <h2>BTC / USD</h2>
+                </div>
+                <div class="price-display">
+                    <span class="currency">$</span>
+                    <span id="current-price" class="price">--</span>
+                </div>
+                <div id="price-change" class="change-badge">--%</div>
+            </div>
+
+            <div class="metrics-grid">
+                <div class="metric-card glass-panel">
+                    <span class="label">24h High</span>
+                    <span id="high-price" class="value">--</span>
+                </div>
+                <div class="metric-card glass-panel">
+                    <span class="label">24h Low</span>
+                    <span id="low-price" class="value">--</span>
+                </div>
+                <div class="metric-card glass-panel">
+                    <span class="label">Volume</span>
+                    <span id="volume" class="value">--</span>
+                </div>
+                <div class="metric-card glass-panel">
+                    <span class="label">Status</span>
+                    <span class="value status-live">Live</span>
+                </div>
+            </div>
+
+            <div class="ohlcv-summary glass-panel">
+                <h3>Market Summary</h3>
+                <div id="summary-content" class="summary-content">
+                    Loading summary...
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="app.js"></script>
+</body>
+</html>

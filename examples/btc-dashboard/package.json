@@ -1,0 +1,13 @@
+{
+  "name": "btc-dashboard",
+  "version": "1.0.0",
+  "description": "BTC/USD Dashboard using tradingview-mcp",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.22.1"
+  }
+}
