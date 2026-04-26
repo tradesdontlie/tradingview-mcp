@@ -242,6 +242,185 @@ export async function check({ source }) {
   };
 }
 
+/**
+ * Save Pine Script source directly to a saved script via TradingView's REST
+ * API — no Monaco, no editor pane, no DOM activation, no polling.
+ *
+ * T74 (2026-04-26): replaces the Monaco-based `setSource + save` pair.  The
+ * old flow required Monaco to be mounted, which TV lazy-mounts only when
+ * the Pine Editor pane is visibly expanded — different layouts (bottom-bar
+ * vs side-dock) had different mount behaviors and the discovery was slow
+ * (≤10s polling).  This REST call is sub-second, layout-agnostic, and
+ * survives TV UI updates.
+ *
+ * Wire format (captured live via fetch interceptor on TV Desktop 3.1.0.7818
+ * by manually pressing Ctrl+S in the side-docked Pine Editor):
+ *
+ *   POST https://pine-facade.tradingview.com/pine-facade/save/next/USER;{id}
+ *        ?allow_create_new=false&name={url-encoded-name}
+ *   Content-Type: application/x-www-form-urlencoded
+ *   Body: source=<...>
+ *   Response: {"success":true, "result":{"IL":"<encrypted-blob>"}}
+ *
+ * The `IL` field is TradingView's signed/encrypted form of the source
+ * (used by chart-side verification).  We don't need to inspect it.
+ *
+ * Caller passes either `id` (preferred — from `pine_list_scripts`) or
+ * `name` (looked up via the same pine-facade list endpoint that
+ * `openScript` already uses).  After save, calling `chart_manage_indicator`
+ * with remove + re-add will pick up the new cloud version on the chart.
+ */
+export async function saveSource({ id, name, source }) {
+  if (!source || typeof source !== 'string') {
+    throw new Error('saveSource requires a non-empty `source` string.');
+  }
+
+  // Resolve id from name if needed (mirrors openScript's lookup logic).
+  let resolvedId = id;
+  let resolvedName = name;
+  if (!resolvedId) {
+    if (!name) throw new Error('saveSource requires either `id` or `name`.');
+    const listResp = await fetch(
+      'https://pine-facade.tradingview.com/pine-facade/list/?filter=saved',
+      { credentials: 'include' }
+    );
+    if (!listResp.ok) throw new Error(`pine-facade list returned ${listResp.status}`);
+    const scripts = await listResp.json();
+    if (!Array.isArray(scripts)) throw new Error('pine-facade list returned unexpected data');
+    const target = name.toLowerCase();
+    let match = null;
+    for (const s of scripts) {
+      const sn = (s.scriptName || '').toLowerCase();
+      const st = (s.scriptTitle || '').toLowerCase();
+      if (sn === target || st === target) { match = s; break; }
+    }
+    if (!match) {
+      for (const s of scripts) {
+        const sn = (s.scriptName || '').toLowerCase();
+        const st = (s.scriptTitle || '').toLowerCase();
+        if (sn.indexOf(target) !== -1 || st.indexOf(target) !== -1) { match = s; break; }
+      }
+    }
+    if (!match) throw new Error(`Script "${name}" not found. Use pine_list_scripts to see available scripts.`);
+    resolvedId = match.scriptIdPart;
+    resolvedName = match.scriptName || match.scriptTitle;
+  }
+
+  if (!resolvedName) {
+    // Fall back: use id as the display name.  TV requires the `name=` query param;
+    // it's the saved-script display name, not strictly the id, but the endpoint
+    // tolerates either.  Best-effort look-up from list otherwise.
+    resolvedName = resolvedId;
+  }
+
+  const url = `https://pine-facade.tradingview.com/pine-facade/save/next/USER%3B${resolvedId}` +
+    `?allow_create_new=false&name=${encodeURIComponent(resolvedName)}`;
+
+  const formData = new URLSearchParams();
+  formData.append('source', source);
+
+  const response = await fetch(url, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Accept': 'application/json',
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Referer': 'https://www.tradingview.com/',
+    },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    throw new Error(`pine-facade save returned ${response.status}: ${response.statusText}`);
+  }
+
+  const result = await response.json();
+  if (result?.success !== true) {
+    throw new Error(`pine-facade save responded success=false: ${JSON.stringify(result).substring(0, 300)}`);
+  }
+
+  return {
+    success: true,
+    id: resolvedId,
+    name: resolvedName,
+    source_lines: source.split('\n').length,
+    source_chars: source.length,
+    has_il_blob: !!(result.result && result.result.IL),
+    note: 'Saved to TradingView cloud via pine-facade REST. Run chart_manage_indicator(remove + re-add) on the chart to pick up the new version.',
+    raw_url: 'pine-facade/save/next',
+  };
+}
+
+/**
+ * Read Pine Script source directly from a saved script via REST — no Monaco
+ * required.  Uses the same pine-facade endpoints `openScript` already
+ * relies on internally.
+ *
+ * T74 (2026-04-26): companion to `saveSource`, replacing the Monaco-based
+ * `getSource()` for the round-trip case.  Caller passes `id` (preferred)
+ * or `name`.
+ */
+export async function getSourceByREST({ id, name, version }) {
+  let resolvedId = id;
+  let resolvedName = name;
+  let resolvedVersion = version;
+
+  if (!resolvedId || !resolvedVersion) {
+    const listResp = await fetch(
+      'https://pine-facade.tradingview.com/pine-facade/list/?filter=saved',
+      { credentials: 'include' }
+    );
+    if (!listResp.ok) throw new Error(`pine-facade list returned ${listResp.status}`);
+    const scripts = await listResp.json();
+    if (!Array.isArray(scripts)) throw new Error('pine-facade list returned unexpected data');
+
+    let match = null;
+    if (resolvedId) {
+      for (const s of scripts) {
+        if (s.scriptIdPart === resolvedId) { match = s; break; }
+      }
+      if (!match) throw new Error(`Script with id "${resolvedId}" not found in pine-facade list.`);
+    } else {
+      if (!name) throw new Error('getSourceByREST requires either `id` or `name`.');
+      const target = name.toLowerCase();
+      for (const s of scripts) {
+        const sn = (s.scriptName || '').toLowerCase();
+        const st = (s.scriptTitle || '').toLowerCase();
+        if (sn === target || st === target) { match = s; break; }
+      }
+      if (!match) {
+        for (const s of scripts) {
+          const sn = (s.scriptName || '').toLowerCase();
+          const st = (s.scriptTitle || '').toLowerCase();
+          if (sn.indexOf(target) !== -1 || st.indexOf(target) !== -1) { match = s; break; }
+        }
+      }
+      if (!match) throw new Error(`Script "${name}" not found. Use pine_list_scripts to see available scripts.`);
+    }
+
+    resolvedId = match.scriptIdPart;
+    resolvedName = match.scriptName || match.scriptTitle;
+    resolvedVersion = resolvedVersion || match.version || 1;
+  }
+
+  const url = `https://pine-facade.tradingview.com/pine-facade/get/${resolvedId}/${resolvedVersion}`;
+  const resp = await fetch(url, { credentials: 'include' });
+  if (!resp.ok) throw new Error(`pine-facade get returned ${resp.status}`);
+  const data = await resp.json();
+  const source = data?.source || '';
+  if (!source) throw new Error('Script source returned empty.');
+
+  return {
+    success: true,
+    id: resolvedId,
+    name: resolvedName,
+    version: resolvedVersion,
+    source,
+    line_count: source.split('\n').length,
+    char_count: source.length,
+  };
+}
+
 // ── Functions requiring TradingView connection ──
 
 export async function getSource() {

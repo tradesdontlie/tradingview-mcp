@@ -242,7 +242,177 @@ export async function getEquity() {
   return { success: true, data_points: equity?.data?.length || 0, source: equity?.source, data: equity?.data || [], equity_summary: equity?.equity_summary, note: equity?.note, error: equity?.error };
 }
 
+// Fetch a quote via the public scanner REST endpoint. Used when the caller
+// asks for a symbol that isn't the active chart — reading bars/symbolExt in
+// that case would return the WRONG ticker's data with the requested symbol
+// pasted into the envelope. (T35 — live-caught 2026-04-23.)
+//
+// Endpoint: POST https://scanner.tradingview.com/america/scan (cross-origin).
+// Per CLAUDE.md CORS gotcha: send JSON as a plain-string body with NO
+// Content-Type header — TV rejects the preflight otherwise.
+async function getQuoteViaScanner(symbol) {
+  const ticker = String(symbol).trim();
+  const body = JSON.stringify({
+    symbols: { tickers: [ticker] },
+    columns: ['close', 'open', 'high', 'low', 'volume', 'description', 'exchange', 'type'],
+  });
+  const escapedBody = body.replace(/[\\`$]/g, '\\$&');
+  const expr = `
+    fetch('https://scanner.tradingview.com/america/scan', {
+      method: 'POST',
+      body: \`${escapedBody}\`
+    })
+      .then(function(r) {
+        return r.text().then(function(t) {
+          var parsed = null;
+          try { parsed = t ? JSON.parse(t) : null; } catch(e) {}
+          return { status: r.status, ok: r.ok, body: t, json: parsed };
+        });
+      })
+      .catch(function(e) { return { error: e.message }; })
+  `;
+  const resp = await evaluateAsync(expr);
+  if (!resp || resp.error) {
+    throw new Error(`quote_get scanner fetch failed: ${resp?.error || 'no response'}`);
+  }
+  if (!resp.ok) {
+    throw new Error(`quote_get scanner HTTP ${resp.status}: ${String(resp.body || '').slice(0, 200)}`);
+  }
+  const rows = resp.json?.data;
+  if (!Array.isArray(rows) || rows.length === 0 || !Array.isArray(rows[0]?.d)) {
+    throw new Error(
+      `quote_get: no scanner data for "${ticker}". Use a fully-qualified symbol like "NASDAQ:TSCO".`
+    );
+  }
+  const [close, open, high, low, volume, description, exchange, type] = rows[0].d;
+  return {
+    success: true,
+    symbol: rows[0].s || ticker,
+    open,
+    high,
+    low,
+    close,
+    last: close,
+    volume: volume || 0,
+    description: description || '',
+    exchange: exchange || '',
+    type: type || '',
+    source: 'scanner_rest',
+  };
+}
+
+// Enrich a batch of symbols with price + liquidity + market-cap data via the
+// same scanner REST endpoint getQuoteViaScanner uses, in ONE round-trip.
+// Used by /refresh-movers (T26 — quality filter) to drop sub-$N price,
+// thin-volume, or micro-cap tickers BEFORE they reach 3Cs triage. Keeps
+// us from wasting 40+ Strategist calls on penny pumps.
+//
+// Input: { symbols: ["NASDAQ:AAPL", "NYSE:IBM", ...] }
+// Output: {
+//   success: true,
+//   count: N,                    // how many symbols were returned
+//   requested: M,                // how many were asked for
+//   missing: [...],              // symbols the endpoint didn't return
+//   enriched: {                  // keyed by upper-cased input symbol
+//     "NASDAQ:AAPL": { symbol, close, avg_vol_30d, market_cap, description }
+//   },
+//   source: "scanner_rest"
+// }
+//
+// Endpoint: POST https://scanner.tradingview.com/america/scan (cross-origin,
+// string body, NO Content-Type — same CORS rule as getQuoteViaScanner).
+async function enrichSymbols({ symbols } = {}) {
+  const tickers = Array.isArray(symbols) ? symbols.map(s => String(s).trim()).filter(Boolean) : [];
+  if (tickers.length === 0) {
+    return { success: false, error: 'scanner_enrich: symbols[] required (non-empty array)' };
+  }
+  if (tickers.length > 500) {
+    return { success: false, error: `scanner_enrich: too many symbols (${tickers.length}); cap is 500 per call` };
+  }
+  const body = JSON.stringify({
+    symbols: { tickers },
+    columns: ['close', 'average_volume_30d_calc', 'market_cap_basic', 'description'],
+  });
+  const escapedBody = body.replace(/[\\`$]/g, '\\$&');
+  const expr = `
+    fetch('https://scanner.tradingview.com/america/scan', {
+      method: 'POST',
+      body: \`${escapedBody}\`
+    })
+      .then(function(r) {
+        return r.text().then(function(t) {
+          var parsed = null;
+          try { parsed = t ? JSON.parse(t) : null; } catch(e) {}
+          return { status: r.status, ok: r.ok, body: t, json: parsed };
+        });
+      })
+      .catch(function(e) { return { error: e.message }; })
+  `;
+  const resp = await evaluateAsync(expr);
+  if (!resp || resp.error) {
+    return { success: false, error: `scanner_enrich fetch failed: ${resp?.error || 'no response'}` };
+  }
+  if (!resp.ok) {
+    return {
+      success: false,
+      error: `scanner_enrich HTTP ${resp.status}: ${String(resp.body || '').slice(0, 200)}`,
+    };
+  }
+  const rows = Array.isArray(resp.json?.data) ? resp.json.data : [];
+  const enriched = {};
+  const returnedUpper = new Set();
+  for (const row of rows) {
+    if (!row || !Array.isArray(row.d)) continue;
+    const [close, avg_vol_30d, market_cap, description] = row.d;
+    const key = String(row.s || '').toUpperCase();
+    if (!key) continue;
+    returnedUpper.add(key);
+    enriched[key] = {
+      symbol: row.s,
+      close: typeof close === 'number' ? close : null,
+      avg_vol_30d: typeof avg_vol_30d === 'number' ? avg_vol_30d : null,
+      market_cap: typeof market_cap === 'number' ? market_cap : null,
+      description: description || '',
+    };
+  }
+  const missing = tickers.filter(t => !returnedUpper.has(String(t).toUpperCase()));
+  return {
+    success: true,
+    count: Object.keys(enriched).length,
+    requested: tickers.length,
+    missing,
+    enriched,
+    source: 'scanner_rest',
+  };
+}
+
+export { enrichSymbols };
+
 export async function getQuote({ symbol } = {}) {
+  // T35: if caller requested a specific symbol, route through REST unless it
+  // matches the active chart. The active-chart path reads bars/symbolExt for
+  // whatever's loaded, which returns the wrong ticker's data when the caller
+  // passes a different symbol. Bid/ask DOM scraping only works for the active
+  // chart anyway, so there's nothing to lose by routing non-active reads
+  // through the scanner endpoint.
+  if (symbol) {
+    const activeSym = await evaluate(`
+      (function() {
+        try {
+          var api = ${CHART_API};
+          var s = '';
+          try { s = api.symbol() || ''; } catch(e) {}
+          if (!s) { try { s = (api.symbolExt() || {}).symbol || ''; } catch(e) {} }
+          return s;
+        } catch(e) { return ''; }
+      })()
+    `);
+    const active = String(activeSym || '').toUpperCase().trim();
+    const requested = String(symbol).toUpperCase().trim();
+    if (requested && requested !== active) {
+      return await getQuoteViaScanner(symbol);
+    }
+  }
   const data = await evaluate(`
     (function() {
       var api = ${CHART_API};
@@ -274,7 +444,7 @@ export async function getQuote({ symbol } = {}) {
     })()
   `);
   if (!data || (!data.last && !data.close)) throw new Error('Could not retrieve quote. The chart may still be loading.');
-  return { success: true, ...data };
+  return { success: true, ...data, source: 'active_chart' };
 }
 
 export async function getDepth() {
@@ -386,7 +556,11 @@ export async function getPineLabels({ study_filter, max_labels, verbose } = {}) 
   const raw = await evaluate(buildGraphicsJS('dwglabels', 'labels', filter));
   if (!raw || raw.length === 0) return { success: true, study_count: 0, studies: [] };
 
-  const limit = max_labels || 50;
+  // Default raised from 50 → 500: real indicators (ASTA 3Cs, volume profilers, multi-EMA dashboards)
+  // routinely emit 100+ labels, and a 50-label cap silently drops the earliest ones — which are
+  // often the foundational labels (Fib levels, pivot prices, EMA tags) while keeping dynamic
+  // later-bar signals. Caller can still override with max_labels.
+  const limit = max_labels || 500;
   const studies = raw.map(s => {
     let labels = s.items.map(item => {
       const v = item.raw;
@@ -395,8 +569,9 @@ export async function getPineLabels({ study_filter, max_labels, verbose } = {}) 
       if (verbose) return { id: item.id, text, price, x: v.x, yloc: v.yl, size: v.sz, textColor: v.tci, color: v.ci };
       return { text, price };
     }).filter(l => l.text || l.price != null);
-    if (labels.length > limit) labels = labels.slice(-limit);
-    return { name: s.name, total_labels: s.count, showing: labels.length, labels };
+    const truncated = labels.length > limit;
+    if (truncated) labels = labels.slice(-limit);
+    return { name: s.name, total_labels: s.count, showing: labels.length, truncated, labels };
   });
   return { success: true, study_count: studies.length, studies };
 }
