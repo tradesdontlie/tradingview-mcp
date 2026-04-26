@@ -2,8 +2,14 @@ import CDP from 'chrome-remote-interface';
 
 let client = null;
 let targetInfo = null;
-const CDP_HOST = 'localhost';
-const CDP_PORT = 9222;
+
+// CDP transport — the TradingView MCP runs on the same machine as TV Desktop,
+// so localhost is intentional. Port 9222 is Chrome DevTools Protocol's default;
+// `tv_launch` passes `--remote-debugging-port=9222` to TV's Electron binary.
+// Single source of truth: re-imported from src/core/tab.js (and anywhere else
+// that needs to talk to the CDP HTTP endpoint directly).
+export const CDP_HOST = 'localhost';
+export const CDP_PORT = 9222;
 const MAX_RETRIES = 5;
 const BASE_DELAY = 500;
 
@@ -45,6 +51,24 @@ export function requireFinite(value, name) {
   const n = Number(value);
   if (!Number.isFinite(n)) throw new Error(`${name} must be a finite number, got: ${value}`);
   return n;
+}
+
+/**
+ * Escape a string for embedding as the body inside a backtick-delimited template
+ * literal that will be transmitted to the remote page context for evaluation.
+ *
+ * Specifically: protects \, `, and $ in the string from being interpreted as
+ * escape sequences or template-literal interpolation markers in the wrapping
+ * template that the remote JS engine will compile.
+ *
+ * Use whenever you build something like:
+ *   evaluateAsync(`fetch('...', { body: \`${safeBacktickBody(s)}\` })`)
+ *
+ * Single source of truth — replaces ad-hoc `s.replace(/[\\`$]/g, '\\$&')` inlines
+ * across alerts.js / data.js / hotlist.js.
+ */
+export function safeBacktickBody(s) {
+  return String(s).replace(/[\\`$]/g, '\\$&');
 }
 
 export async function getClient() {

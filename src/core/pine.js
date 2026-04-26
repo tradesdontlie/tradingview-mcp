@@ -5,9 +5,53 @@
  */
 import { evaluate, evaluateAsync, getClient } from '../connection.js';
 
+// ── Pine Facade endpoints ──
+//
+// Single source of truth for the cross-origin REST surface TV exposes for
+// Pine Script management. Same host as the MCP's other REST hits but a
+// distinct path family — the `pine-facade` subdomain handles compile,
+// list-saved, and source-fetch operations for the user's saved Pine scripts.
+const PINE_FACADE_BASE = 'https://pine-facade.tradingview.com/pine-facade';
+const PINE_FACADE_LIST_SAVED_URL = `${PINE_FACADE_BASE}/list/?filter=saved`;
+const PINE_FACADE_TRANSLATE_URL = `${PINE_FACADE_BASE}/translate_light?user_name=Guest&pine_id=00000000-0000-0000-0000-000000000000`;
+// Per-call get URL is built inside the page-context evaluateAsync — see open()
+// — by interpolating `${PINE_FACADE_BASE}/get/` and the {id}/{ver} suffix.
+
 // ── Monaco finder (injected into TV page) ──
+//
+// Resolves TV's Pine Editor Monaco instance. Two paths:
+//
+//   1. FAST PATH: `window.monaco.editor.getEditors()` — direct Monaco API,
+//      filtered to the editor whose container sits under `.pine-editor-monaco`.
+//      Works whenever TV exposes the global `monaco` namespace (most builds
+//      since TV Desktop 3.x). No React-fiber traversal; robust under
+//      transitional fiber states (mid-render, post-`setValue`, post-`pine_new`).
+//
+//   2. FALLBACK: React fiber walk — walks from `.monaco-editor.pine-editor-monaco`
+//      up the DOM looking for a `__reactFiber$` key, then walks the fiber tree
+//      for `memoizedProps.value.monacoEnv`. Original behaviour. Used when the
+//      fast path is unavailable (older TV builds, or `window.monaco` not exposed).
+//
+// Returns `{ editor, env }` where `env.editor.getEditors()` + any Monaco-level
+// operations remain available. Callers only read `.editor` so both paths are
+// structurally compatible.
 const FIND_MONACO = `
   (function findMonacoEditor() {
+    // Fast path: direct Monaco API
+    try {
+      if (window.monaco && window.monaco.editor && typeof window.monaco.editor.getEditors === 'function') {
+        var allEditors = window.monaco.editor.getEditors();
+        for (var j = 0; j < allEditors.length; j++) {
+          var ed = allEditors[j];
+          var node = typeof ed.getContainerDomNode === 'function' ? ed.getContainerDomNode() : null;
+          if (node && node.closest && node.closest('.pine-editor-monaco')) {
+            return { editor: ed, env: { editor: window.monaco.editor } };
+          }
+        }
+      }
+    } catch (e) { /* fall through to fiber walk */ }
+
+    // Fallback: React fiber walk
     var container = document.querySelector('.monaco-editor.pine-editor-monaco');
     if (!container) return null;
     var el = container;
@@ -35,9 +79,30 @@ const FIND_MONACO = `
   })()
 `;
 
+// Pine Editor panel-open trigger. Idempotent — safe to re-invoke during
+// the poll loop in `ensurePineEditorOpen` when the panel self-closes
+// between calls (observed on TV 3.1 after `pine_new` or failed setValue).
+const OPEN_PINE_PANEL = `
+  (function() {
+    var bwb = window.TradingView && window.TradingView.bottomWidgetBar;
+    if (bwb) {
+      if (typeof bwb.activateScriptEditorTab === 'function') { bwb.activateScriptEditorTab(); return 'activateScriptEditorTab'; }
+      if (typeof bwb.showWidget === 'function') { bwb.showWidget('pine-editor'); return 'showWidget'; }
+    }
+    var btn = document.querySelector('[aria-label="Pine"]')
+      || document.querySelector('[data-name="pine-dialog-button"]');
+    if (btn) { btn.click(); return 'button-click'; }
+    return null;
+  })()
+`;
+
 /**
  * Opens the Pine Editor panel and waits for Monaco to become available.
  * Returns true if editor is accessible, false on timeout.
+ *
+ * Polls for up to ~10s. Re-invokes the panel-open trigger every 2s during
+ * the poll, to recover from transitional states where the panel auto-closes
+ * or Monaco hasn't yet settled.
  */
 export async function ensurePineEditorOpen() {
   const already = await evaluate(`
@@ -48,27 +113,17 @@ export async function ensurePineEditorOpen() {
   `);
   if (already) return true;
 
-  await evaluate(`
-    (function() {
-      var bwb = window.TradingView && window.TradingView.bottomWidgetBar;
-      if (!bwb) return;
-      if (typeof bwb.activateScriptEditorTab === 'function') bwb.activateScriptEditorTab();
-      else if (typeof bwb.showWidget === 'function') bwb.showWidget('pine-editor');
-    })()
-  `);
-
-  await evaluate(`
-    (function() {
-      var btn = document.querySelector('[aria-label="Pine"]')
-        || document.querySelector('[data-name="pine-dialog-button"]');
-      if (btn) btn.click();
-    })()
-  `);
+  await evaluate(OPEN_PINE_PANEL);
 
   for (let i = 0; i < 50; i++) {
     await new Promise(r => setTimeout(r, 200));
     const ready = await evaluate(`(function() { return ${FIND_MONACO} !== null; })()`);
     if (ready) return true;
+    // Re-invoke the panel-open trigger every 2s — idempotent, no-op if
+    // panel is already open, recovers if the panel self-closed.
+    if (i > 0 && i % 10 === 0) {
+      await evaluate(OPEN_PINE_PANEL);
+    }
   }
   return false;
 }
@@ -188,7 +243,7 @@ export async function check({ source }) {
   formData.append('source', source);
 
   const response = await fetch(
-    'https://pine-facade.tradingview.com/pine-facade/translate_light?user_name=Guest&pine_id=00000000-0000-0000-0000-000000000000',
+    PINE_FACADE_TRANSLATE_URL,
     {
       method: 'POST',
       headers: {
@@ -289,21 +344,26 @@ export async function compile() {
     (function() {
       var btns = document.querySelectorAll('button');
       var fallback = null;
+      var fallbackLabel = null;
       var saveBtn = null;
       for (var i = 0; i < btns.length; i++) {
         var text = btns[i].textContent.trim();
-        if (/save and add to chart/i.test(text)) {
+        // TV's Pine editor buttons are icon-only; the label lives in the title attr.
+        var title = btns[i].getAttribute('title') || '';
+        var label = text || title;
+        if (/save and add to chart/i.test(label)) {
           btns[i].click();
           return 'Save and add to chart';
         }
-        if (!fallback && /^(Add to chart|Update on chart)/i.test(text)) {
+        if (!fallback && /^(Add to chart|Update on chart)$/i.test(label)) {
           fallback = btns[i];
+          fallbackLabel = label;
         }
         if (!saveBtn && btns[i].className.indexOf('saveButton') !== -1 && btns[i].offsetParent !== null) {
           saveBtn = btns[i];
         }
       }
-      if (fallback) { fallback.click(); return fallback.textContent.trim(); }
+      if (fallback) { fallback.click(); return fallbackLabel; }
       if (saveBtn) { saveBtn.click(); return 'Pine Save'; }
       return null;
     })()
@@ -448,12 +508,15 @@ export async function smartCompile() {
       var saveBtn = null;
       for (var i = 0; i < btns.length; i++) {
         var text = btns[i].textContent.trim();
-        if (/save and add to chart/i.test(text)) {
+        // TV's Pine editor buttons are icon-only; the label lives in the title attr.
+        var title = btns[i].getAttribute('title') || '';
+        var label = text || title;
+        if (/save and add to chart/i.test(label)) {
           btns[i].click();
           return 'Save and add to chart';
         }
-        if (!addBtn && /^add to chart$/i.test(text)) addBtn = btns[i];
-        if (!updateBtn && /^update on chart$/i.test(text)) updateBtn = btns[i];
+        if (!addBtn && /^add to chart$/i.test(label)) addBtn = btns[i];
+        if (!updateBtn && /^update on chart$/i.test(label)) updateBtn = btns[i];
         if (!saveBtn && btns[i].className.indexOf('saveButton') !== -1 && btns[i].offsetParent !== null) saveBtn = btns[i];
       }
       if (addBtn) { addBtn.click(); return 'Add to chart'; }
@@ -543,7 +606,9 @@ export async function openScript({ name }) {
   const result = await evaluateAsync(`
     (function() {
       var target = ${escapedName};
-      return fetch('https://pine-facade.tradingview.com/pine-facade/list/?filter=saved', { credentials: 'include' })
+      var listUrl = ${JSON.stringify(PINE_FACADE_LIST_SAVED_URL)};
+      var getUrlBase = ${JSON.stringify(PINE_FACADE_BASE + '/get/')};
+      return fetch(listUrl, { credentials: 'include' })
         .then(function(r) { return r.json(); })
         .then(function(scripts) {
           if (!Array.isArray(scripts)) return {error: 'pine-facade returned unexpected data'};
@@ -564,7 +629,7 @@ export async function openScript({ name }) {
 
           var id = match.scriptIdPart;
           var ver = match.version || 1;
-          return fetch('https://pine-facade.tradingview.com/pine-facade/get/' + id + '/' + ver, { credentials: 'include' })
+          return fetch(getUrlBase + id + '/' + ver, { credentials: 'include' })
             .then(function(r2) { return r2.json(); })
             .then(function(data) {
               var source = data.source || '';
@@ -590,7 +655,7 @@ export async function openScript({ name }) {
 
 export async function listScripts() {
   const scripts = await evaluateAsync(`
-    fetch('https://pine-facade.tradingview.com/pine-facade/list/?filter=saved', { credentials: 'include' })
+    fetch(${JSON.stringify(PINE_FACADE_LIST_SAVED_URL)}, { credentials: 'include' })
       .then(function(r) { return r.json(); })
       .then(function(data) {
         if (!Array.isArray(data)) return {scripts: [], error: 'Unexpected response from pine-facade'};
