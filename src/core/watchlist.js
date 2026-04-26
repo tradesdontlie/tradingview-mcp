@@ -20,6 +20,99 @@
 import { evaluate, evaluateAsync, getClient } from '../connection.js';
 
 /**
+ * Sync TV's in-memory custom-lists Redux store after a successful REST mutation.
+ *
+ * Why this exists: TV's watchlist sidebar reads from a Redux store
+ * (`SymbolListService.store.customLists.lists.byId[listId].symbols`). When the
+ * user mutates via the UI, TV's click handlers do BOTH the REST POST and a
+ * local store dispatch, so the sidebar re-renders instantly. Our REST tools
+ * only did the POST — the sidebar stayed stale until the user manually
+ * clicked the list to force a re-fetch. T74 follow-up (2026-04-26) closes
+ * that gap by mirroring the dispatch.
+ *
+ * Slice action types (chunk 114 mod 230211, slice name "custom-lists"):
+ *   custom-lists/insert  → add symbols    payload: { id, symbols, actionTimestamp }
+ *   custom-lists/exclude → remove symbols payload: { id, symbols, actionTimestamp }
+ *   custom-lists/create  → new list       payload: { id, name, symbols, persistedState, actionTimestamp }
+ *   custom-lists/remove  → delete list    payload: { id }
+ *   custom-lists/rename  → rename list    payload: { id, name, actionTimestamp }
+ * Note: `remove` deletes the WHOLE list (use `exclude` for "remove these
+ * symbols from this list"). The reducer ignores actions where the list's
+ * `lastChangeTimestamp >= actionTimestamp`, so callers MUST pass a fresh
+ * `actionTimestamp: Date.now()` to win.
+ *
+ * Resolves the SymbolListService via the module-level service-locator
+ * (chunk 20/257/341/382 mod 138654, exports `{service, hasService, ...}`).
+ * Falls back gracefully if TV's structure shifts — REST already succeeded
+ * server-side, so a failed sync just means the user has to click the list
+ * once (legacy behavior).
+ */
+async function syncCustomListsStore(actionType, payload) {
+  const escType = JSON.stringify(actionType);
+  const escPayload = JSON.stringify(payload);
+  const expr = `
+    (function() {
+      try {
+        // Capture __webpack_require__ once, cache on window. The push trick
+        // works because webpack's runtime invokes the entry callback with
+        // __webpack_require__ — same pattern Sentry et al. use for poking.
+        if (!window.__tv_mcp_req && Array.isArray(window.webpackChunktradingview)) {
+          var probeId = '__tv_mcp_probe_' + Date.now() + '_' + Math.floor(Math.random() * 1e6) + '__';
+          window.webpackChunktradingview.push([[probeId], {}, function(r) { window.__tv_mcp_req = r; }]);
+        }
+        var req = window.__tv_mcp_req;
+        if (!req) return { ui_synced: false, reason: 'webpack require not available' };
+
+        // Resolve the service locator. Module id 138654 is stable across the
+        // TV builds we've seen (3.0.0.7652 + 3.1.0.7818); if a future build
+        // shifts ids, scan the require cache for any module exporting the
+        // service-locator surface.
+        var locator = window.__tv_mcp_locator;
+        if (!locator) {
+          try {
+            var direct = req(138654);
+            if (direct && direct.service && direct.hasService && direct.registerService) locator = direct;
+          } catch(e) {}
+          if (!locator) {
+            var cache = req.cache || req.c || null;
+            if (cache) {
+              for (var k in cache) {
+                var entry = cache[k];
+                var ex = entry && entry.exports;
+                if (ex && ex.service && ex.hasService && ex.registerService && ex.unregisterService) {
+                  locator = ex;
+                  break;
+                }
+              }
+            }
+          }
+          if (locator) window.__tv_mcp_locator = locator;
+        }
+        if (!locator) return { ui_synced: false, reason: 'service locator not found in webpack cache' };
+
+        // SymbolListService is registered with id { id: 'SymbolListService' }.
+        var SLS_ID = { id: 'SymbolListService' };
+        if (!locator.hasService(SLS_ID)) return { ui_synced: false, reason: 'SymbolListService not registered (sidebar not initialized?)' };
+        var svc = locator.service(SLS_ID);
+        if (!svc || !svc.store || typeof svc.store.dispatch !== 'function') {
+          return { ui_synced: false, reason: 'SymbolListService has no usable store' };
+        }
+        svc.store.dispatch({ type: ${escType}, payload: ${escPayload} });
+        return { ui_synced: true };
+      } catch (e) {
+        return { ui_synced: false, reason: 'dispatch threw: ' + (e && e.message || String(e)) };
+      }
+    })()
+  `;
+  try {
+    const result = await evaluateAsync(expr);
+    return result || { ui_synced: false, reason: 'evaluateAsync returned null' };
+  } catch (e) {
+    return { ui_synced: false, reason: 'evaluateAsync threw: ' + (e && e.message || String(e)) };
+  }
+}
+
+/**
  * Fire a TV REST request in the page context and parse the response.
  * Uses `fetch` with `credentials:'include'` (session cookies) and NO custom
  * Content-Type — TV rejects the CORS preflight otherwise.
@@ -185,12 +278,23 @@ export async function removeSymbol({ symbol, symbols, from } = {}) {
   if (!resp || resp.error) return { success: false, error: resp?.error || 'no response', source: 'rest_api' };
   if (!resp.ok) return { success: false, error: `HTTP ${resp.status}: ${String(resp.body).slice(0, 200)}`, http_status: resp.status, source: 'rest_api' };
 
+  // Mirror the mutation into TV's in-memory Redux store so the sidebar
+  // re-renders without a manual click. Use `exclude` (NOT `remove` —
+  // that's the "delete the whole list" action, not "remove these symbols").
+  const sync = await syncCustomListsStore('custom-lists/exclude', {
+    id: target.id,
+    symbols: toRemove,
+    actionTimestamp: Date.now(),
+  });
+
   return {
     success: true,
     list_name: target.name || target.color || `#${target.id}`,
     list_id: target.id,
     removed_symbols: toRemove,
     removed_count: toRemove.length,
+    ui_synced: sync.ui_synced,
+    ui_sync_reason: sync.ui_synced ? undefined : sync.reason,
     source: 'rest_api',
   };
 }
@@ -241,12 +345,22 @@ export async function appendSymbols({ symbol, symbols, to } = {}) {
   if (!resp || resp.error) return { success: false, error: resp?.error || 'no response', source: 'rest_api' };
   if (!resp.ok) return { success: false, error: `HTTP ${resp.status}: ${String(resp.body).slice(0, 200)}`, http_status: resp.status, source: 'rest_api' };
 
+  // Mirror the mutation into TV's Redux store so the sidebar re-renders
+  // without a manual click on the list.
+  const sync = await syncCustomListsStore('custom-lists/insert', {
+    id: target.id,
+    symbols: toAppend,
+    actionTimestamp: Date.now(),
+  });
+
   return {
     success: true,
     list_name: target.name || target.color || `#${target.id}`,
     list_id: target.id,
     appended_symbols: toAppend,
     appended_count: toAppend.length,
+    ui_synced: sync.ui_synced,
+    ui_sync_reason: sync.ui_synced ? undefined : sync.reason,
     source: 'rest_api',
   };
 }
@@ -271,11 +385,23 @@ export async function create({ name, symbols = [] } = {}) {
   if (!resp.ok) return { success: false, error: `HTTP ${resp.status}: ${String(resp.body).slice(0, 200)}`, http_status: resp.status, source: 'rest_api' };
 
   const created = resp.json || {};
+  // Mirror the new list into TV's Redux store so the sidebar tab pops in
+  // without a manual reload. Uses `create` action which initializes the
+  // byId entry; symbols pre-population covered by the same payload.
+  const sync = await syncCustomListsStore('custom-lists/create', {
+    id: created.id,
+    name: created.name || trimmed,
+    symbols: Array.isArray(created.symbols) ? created.symbols.slice() : body.symbols.slice(),
+    persistedState: null,
+    actionTimestamp: Date.now(),
+  });
   return {
     success: true,
     id: created.id,
     name: created.name || trimmed,
     symbol_count: Array.isArray(created.symbols) ? created.symbols.length : body.symbols.length,
+    ui_synced: sync.ui_synced,
+    ui_sync_reason: sync.ui_synced ? undefined : sync.reason,
     source: 'rest_api',
   };
 }
@@ -308,11 +434,20 @@ export async function rename({ current_name, new_name } = {}) {
   if (!resp || resp.error) return { success: false, error: resp?.error || 'no response', source: 'rest_api' };
   if (!resp.ok) return { success: false, error: `HTTP ${resp.status}: ${String(resp.body).slice(0, 200)}`, http_status: resp.status, source: 'rest_api' };
 
+  // Mirror rename into TV's Redux store so the tab title updates instantly.
+  const sync = await syncCustomListsStore('custom-lists/rename', {
+    id: record.id,
+    name: trimmed,
+    actionTimestamp: Date.now(),
+  });
+
   return {
     success: true,
     id: record.id,
     old_name: record.name,
     new_name: trimmed,
+    ui_synced: sync.ui_synced,
+    ui_sync_reason: sync.ui_synced ? undefined : sync.reason,
     source: 'rest_api',
   };
 }
@@ -376,11 +511,19 @@ export async function deleteList({ name, confirm_name, confirm_active = false } 
   if (!resp || resp.error) return { success: false, error: resp?.error || 'no response', source: 'rest_api' };
   if (!resp.ok) return { success: false, error: `HTTP ${resp.status}: ${String(resp.body).slice(0, 200)}`, http_status: resp.status, source: 'rest_api' };
 
+  // Mirror delete into TV's Redux store. The slice action `remove` deletes
+  // the WHOLE list (vs `exclude` which only removes symbols from a list).
+  const sync = await syncCustomListsStore('custom-lists/remove', {
+    id: record.id,
+  });
+
   return {
     success: true,
     deleted_name: record.name,
     deleted_id: record.id,
     deleted_symbol_count: Array.isArray(record.symbols) ? record.symbols.length : null,
+    ui_synced: sync.ui_synced,
+    ui_sync_reason: sync.ui_synced ? undefined : sync.reason,
     source: 'rest_api',
   };
 }
