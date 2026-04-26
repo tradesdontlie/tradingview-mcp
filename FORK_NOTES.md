@@ -332,7 +332,14 @@ The Monaco-based tools (`pine_set_source`, `pine_get_source`, `pine_compile`, `p
 
 **Files touched:** `src/core/pine.js` (+135 lines for `saveSource` + `getSourceByREST`), `src/tools/pine.js` (+18 lines for two tool registrations).
 
-**Node-check:** passes on both files. **Live smoke:** deferred to post-restart (requires Claude Code restart to reload MCP process and register the two new tools). Smoke matrix: round-trip on `asta_3cs_dashboard.pine` (~30KB / 856 lines) AND `asta_patterns.pine` (~50KB / 1200 lines — largest script in our indicator set).
+**Follow-up patch — 771fa38 (2026-04-26):** Live smoke on the original `1e9ef2b` exposed two bugs that blocked round-trip. Both fixed in `771fa38`:
+
+1. **Cookie scope.** The functions called node-side `fetch()` against `pine-facade.tradingview.com`, which has no TradingView session cookie. pine-facade therefore returned an anonymous (empty) saved-scripts list and id/name lookup always failed with "Script ... not found in pine-facade list." Fix: route the entire fetch chain (list + get/save) through `evaluateAsync` so it runs in the live TV page context with `credentials: 'include'`. Same pattern that `openScript` and `listScripts` already use.
+2. **Double `USER;` prefix on save URL.** `scriptIdPart` from pine-facade already contains the `USER;` prefix verbatim, but the original code prepended a hardcoded `USER%3B` before the resolved id, producing `/save/next/USER;USER;{hex}`. TV is tolerant in practice (both forms hit the same script), but the canonical form is single-prefix. Fix: drop the hardcoded prefix; just `encodeURIComponent(scriptId)`.
+
+Both bugs were diagnosed in-page via `ui_evaluate`: confirmed `scriptIdPart` shape from the live `/pine-facade/list/` response, then identity-wrote the dashboard's own source back via the single-prefix URL form (status 200, `{success:true, result:{IL:"..."}}`, version bumped 48.0→49.0). `node --check` passes after the patch.
+
+**Live smoke:** deferred to next Claude Code restart so the patched MCP server reloads. Smoke matrix: round-trip on `asta_3cs_dashboard.pine` (~30KB / 856 lines) AND `asta_patterns.pine` (~50KB / 1200 lines — largest script in our indicator set).
 
 ---
 
