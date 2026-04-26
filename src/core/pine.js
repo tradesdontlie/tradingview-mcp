@@ -274,78 +274,101 @@ export async function saveSource({ id, name, source }) {
   if (!source || typeof source !== 'string') {
     throw new Error('saveSource requires a non-empty `source` string.');
   }
+  if (!id && !name) {
+    throw new Error('saveSource requires either `id` or `name`.');
+  }
 
-  // Resolve id from name if needed (mirrors openScript's lookup logic).
-  let resolvedId = id;
-  let resolvedName = name;
-  if (!resolvedId) {
-    if (!name) throw new Error('saveSource requires either `id` or `name`.');
-    const listResp = await fetch(
-      'https://pine-facade.tradingview.com/pine-facade/list/?filter=saved',
-      { credentials: 'include' }
-    );
-    if (!listResp.ok) throw new Error(`pine-facade list returned ${listResp.status}`);
-    const scripts = await listResp.json();
-    if (!Array.isArray(scripts)) throw new Error('pine-facade list returned unexpected data');
-    const target = name.toLowerCase();
-    let match = null;
-    for (const s of scripts) {
-      const sn = (s.scriptName || '').toLowerCase();
-      const st = (s.scriptTitle || '').toLowerCase();
-      if (sn === target || st === target) { match = s; break; }
-    }
-    if (!match) {
-      for (const s of scripts) {
-        const sn = (s.scriptName || '').toLowerCase();
-        const st = (s.scriptTitle || '').toLowerCase();
-        if (sn.indexOf(target) !== -1 || st.indexOf(target) !== -1) { match = s; break; }
+  // All fetches must run in the TV page context — pine-facade requires the
+  // user's session cookie, which only exists in the browser, not in this
+  // Node process.  We mirror the pattern used by openScript / listScripts.
+  // Note: scriptIdPart from pine-facade already contains the "USER;" prefix,
+  // so the save URL takes the id as-is (no extra "USER;" concatenation).
+  const escId = JSON.stringify(id || '');
+  const escName = JSON.stringify(name || '');
+  const escSource = JSON.stringify(source);
+
+  const result = await evaluateAsync(`
+    (function() {
+      var providedId = ${escId};
+      var providedName = ${escName};
+      var src = ${escSource};
+
+      function doSave(scriptId, displayName) {
+        var dn = displayName || scriptId;
+        var url = 'https://pine-facade.tradingview.com/pine-facade/save/next/' +
+          encodeURIComponent(scriptId) +
+          '?allow_create_new=false&name=' + encodeURIComponent(dn);
+        var body = new URLSearchParams();
+        body.append('source', src);
+        return fetch(url, {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Referer': 'https://www.tradingview.com/'
+          },
+          body: body
+        }).then(function(r) {
+          return r.text().then(function(text) {
+            if (!r.ok) return { error: 'pine-facade save returned ' + r.status + ': ' + text.substring(0, 300) };
+            try {
+              var data = JSON.parse(text);
+              if (data && data.success === true) {
+                return { success: true, id: scriptId, name: dn, has_il_blob: !!(data.result && data.result.IL) };
+              }
+              return { error: 'pine-facade save responded success=false: ' + text.substring(0, 300) };
+            } catch (parseErr) {
+              return { error: 'pine-facade save returned non-JSON: ' + text.substring(0, 300) };
+            }
+          });
+        });
       }
-    }
-    if (!match) throw new Error(`Script "${name}" not found. Use pine_list_scripts to see available scripts.`);
-    resolvedId = match.scriptIdPart;
-    resolvedName = match.scriptName || match.scriptTitle;
-  }
 
-  if (!resolvedName) {
-    // Fall back: use id as the display name.  TV requires the `name=` query param;
-    // it's the saved-script display name, not strictly the id, but the endpoint
-    // tolerates either.  Best-effort look-up from list otherwise.
-    resolvedName = resolvedId;
-  }
+      if (providedId) {
+        return doSave(providedId, providedName);
+      }
 
-  const url = `https://pine-facade.tradingview.com/pine-facade/save/next/USER%3B${resolvedId}` +
-    `?allow_create_new=false&name=${encodeURIComponent(resolvedName)}`;
+      var target = providedName.toLowerCase();
+      return fetch('https://pine-facade.tradingview.com/pine-facade/list/?filter=saved', { credentials: 'include' })
+        .then(function(r) {
+          if (!r.ok) return { error: 'pine-facade list returned ' + r.status };
+          return r.json();
+        })
+        .then(function(scripts) {
+          if (scripts && scripts.error) return scripts;
+          if (!Array.isArray(scripts)) return { error: 'pine-facade list returned unexpected data' };
+          var match = null;
+          for (var i = 0; i < scripts.length; i++) {
+            var sn = (scripts[i].scriptName || '').toLowerCase();
+            var st = (scripts[i].scriptTitle || '').toLowerCase();
+            if (sn === target || st === target) { match = scripts[i]; break; }
+          }
+          if (!match) {
+            for (var j = 0; j < scripts.length; j++) {
+              var sn2 = (scripts[j].scriptName || '').toLowerCase();
+              var st2 = (scripts[j].scriptTitle || '').toLowerCase();
+              if (sn2.indexOf(target) !== -1 || st2.indexOf(target) !== -1) { match = scripts[j]; break; }
+            }
+          }
+          if (!match) return { error: 'Script "' + providedName + '" not found. Use pine_list_scripts to see available scripts.' };
+          return doSave(match.scriptIdPart, match.scriptName || match.scriptTitle);
+        })
+        .catch(function(e) { return { error: e.message }; });
+    })()
+  `);
 
-  const formData = new URLSearchParams();
-  formData.append('source', source);
-
-  const response = await fetch(url, {
-    method: 'POST',
-    credentials: 'include',
-    headers: {
-      'Accept': 'application/json',
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'Referer': 'https://www.tradingview.com/',
-    },
-    body: formData,
-  });
-
-  if (!response.ok) {
-    throw new Error(`pine-facade save returned ${response.status}: ${response.statusText}`);
-  }
-
-  const result = await response.json();
-  if (result?.success !== true) {
-    throw new Error(`pine-facade save responded success=false: ${JSON.stringify(result).substring(0, 300)}`);
+  if (!result || result.error) {
+    throw new Error((result && result.error) || 'pine_save_source returned no result');
   }
 
   return {
     success: true,
-    id: resolvedId,
-    name: resolvedName,
+    id: result.id,
+    name: result.name,
     source_lines: source.split('\n').length,
     source_chars: source.length,
-    has_il_blob: !!(result.result && result.result.IL),
+    has_il_blob: !!result.has_il_blob,
     note: 'Saved to TradingView cloud via pine-facade REST. Run chart_manage_indicator(remove + re-add) on the chart to pick up the new version.',
     raw_url: 'pine-facade/save/next',
   };
@@ -361,63 +384,90 @@ export async function saveSource({ id, name, source }) {
  * or `name`.
  */
 export async function getSourceByREST({ id, name, version }) {
-  let resolvedId = id;
-  let resolvedName = name;
-  let resolvedVersion = version;
-
-  if (!resolvedId || !resolvedVersion) {
-    const listResp = await fetch(
-      'https://pine-facade.tradingview.com/pine-facade/list/?filter=saved',
-      { credentials: 'include' }
-    );
-    if (!listResp.ok) throw new Error(`pine-facade list returned ${listResp.status}`);
-    const scripts = await listResp.json();
-    if (!Array.isArray(scripts)) throw new Error('pine-facade list returned unexpected data');
-
-    let match = null;
-    if (resolvedId) {
-      for (const s of scripts) {
-        if (s.scriptIdPart === resolvedId) { match = s; break; }
-      }
-      if (!match) throw new Error(`Script with id "${resolvedId}" not found in pine-facade list.`);
-    } else {
-      if (!name) throw new Error('getSourceByREST requires either `id` or `name`.');
-      const target = name.toLowerCase();
-      for (const s of scripts) {
-        const sn = (s.scriptName || '').toLowerCase();
-        const st = (s.scriptTitle || '').toLowerCase();
-        if (sn === target || st === target) { match = s; break; }
-      }
-      if (!match) {
-        for (const s of scripts) {
-          const sn = (s.scriptName || '').toLowerCase();
-          const st = (s.scriptTitle || '').toLowerCase();
-          if (sn.indexOf(target) !== -1 || st.indexOf(target) !== -1) { match = s; break; }
-        }
-      }
-      if (!match) throw new Error(`Script "${name}" not found. Use pine_list_scripts to see available scripts.`);
-    }
-
-    resolvedId = match.scriptIdPart;
-    resolvedName = match.scriptName || match.scriptTitle;
-    resolvedVersion = resolvedVersion || match.version || 1;
+  if (!id && !name) {
+    throw new Error('getSourceByREST requires either `id` or `name`.');
   }
 
-  const url = `https://pine-facade.tradingview.com/pine-facade/get/${resolvedId}/${resolvedVersion}`;
-  const resp = await fetch(url, { credentials: 'include' });
-  if (!resp.ok) throw new Error(`pine-facade get returned ${resp.status}`);
-  const data = await resp.json();
-  const source = data?.source || '';
-  if (!source) throw new Error('Script source returned empty.');
+  // All fetches must run in the TV page context — same reason as saveSource.
+  const escId = JSON.stringify(id || '');
+  const escName = JSON.stringify((name || '').toLowerCase());
+  const escVersion = JSON.stringify(version != null ? String(version) : '');
+
+  const result = await evaluateAsync(`
+    (function() {
+      var providedId = ${escId};
+      var targetName = ${escName};
+      var providedVersion = ${escVersion};
+
+      function fetchSource(scriptId, scriptVer, displayName) {
+        var ver = scriptVer || '1';
+        var url = 'https://pine-facade.tradingview.com/pine-facade/get/' +
+          encodeURIComponent(scriptId) + '/' + encodeURIComponent(ver);
+        return fetch(url, { credentials: 'include' })
+          .then(function(r) {
+            if (!r.ok) return { error: 'pine-facade get returned ' + r.status };
+            return r.json();
+          })
+          .then(function(data) {
+            if (data && data.error) return data;
+            var source = (data && data.source) || '';
+            if (!source) return { error: 'Script source returned empty.' };
+            return { success: true, id: scriptId, name: displayName, version: ver, source: source };
+          });
+      }
+
+      if (providedId && providedVersion) {
+        return fetchSource(providedId, providedVersion, providedId);
+      }
+
+      return fetch('https://pine-facade.tradingview.com/pine-facade/list/?filter=saved', { credentials: 'include' })
+        .then(function(r) {
+          if (!r.ok) return { error: 'pine-facade list returned ' + r.status };
+          return r.json();
+        })
+        .then(function(scripts) {
+          if (scripts && scripts.error) return scripts;
+          if (!Array.isArray(scripts)) return { error: 'pine-facade list returned unexpected data' };
+          var match = null;
+          if (providedId) {
+            for (var i = 0; i < scripts.length; i++) {
+              if (scripts[i].scriptIdPart === providedId) { match = scripts[i]; break; }
+            }
+            if (!match) return { error: 'Script with id "' + providedId + '" not found in pine-facade list.' };
+          } else {
+            for (var j = 0; j < scripts.length; j++) {
+              var sn = (scripts[j].scriptName || '').toLowerCase();
+              var st = (scripts[j].scriptTitle || '').toLowerCase();
+              if (sn === targetName || st === targetName) { match = scripts[j]; break; }
+            }
+            if (!match) {
+              for (var k = 0; k < scripts.length; k++) {
+                var sn2 = (scripts[k].scriptName || '').toLowerCase();
+                var st2 = (scripts[k].scriptTitle || '').toLowerCase();
+                if (sn2.indexOf(targetName) !== -1 || st2.indexOf(targetName) !== -1) { match = scripts[k]; break; }
+              }
+            }
+            if (!match) return { error: 'Script not found. Use pine_list_scripts to see available scripts.' };
+          }
+          var resolvedVer = providedVersion || match.version || '1';
+          return fetchSource(match.scriptIdPart, resolvedVer, match.scriptName || match.scriptTitle);
+        })
+        .catch(function(e) { return { error: e.message }; });
+    })()
+  `);
+
+  if (!result || result.error) {
+    throw new Error((result && result.error) || 'pine_get_source_rest returned no result');
+  }
 
   return {
     success: true,
-    id: resolvedId,
-    name: resolvedName,
-    version: resolvedVersion,
-    source,
-    line_count: source.split('\n').length,
-    char_count: source.length,
+    id: result.id,
+    name: result.name,
+    version: result.version,
+    source: result.source,
+    line_count: result.source.split('\n').length,
+    char_count: result.source.length,
   };
 }
 
