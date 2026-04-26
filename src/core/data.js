@@ -490,12 +490,33 @@ export async function getDepth() {
   return { success: true, bid_levels: data.bids?.length || 0, ask_levels: data.asks?.length || 0, spread: data.spread, bids: data.bids || [], asks: data.asks || [], raw_values: data.raw_values, note: data.note };
 }
 
+// Marker TV uses for "no current value at the data window position" —
+// happens when the cursor is outside the indicator's loaded range, when the
+// indicator hasn't computed for the current bar yet, or (most often) when the
+// indicator is broken. We strip these from the `values` map but preserve the
+// study record itself with `has_values:false` so callers can tell the
+// indicator exists but isn't reporting — instead of seeing it silently
+// disappear from the output.
+const TV_EMPTY_VALUE = '∅';
+
+// Built-in calendar/event studies that TV always loads on price charts but
+// that have no numeric reading. Excluding them keeps `studies[]` focused on
+// what callers actually care about (RSI, MACD, EMA, custom indicators).
+const NON_NUMERIC_STUDY_IDS = new Set([
+  'Dividends@tv-basicstudies',
+  'Splits@tv-basicstudies',
+  'Earnings@tv-basicstudies',
+  'BarSetContinuousRollDates@tv-corestudies',
+]);
+
 export async function getStudyValues() {
   const data = await evaluate(`
     (function() {
       var chart = window.TradingViewApi._activeChartWidgetWV.value()._chartWidget;
       var model = chart.model();
       var sources = model.model().dataSources();
+      var skip = ${JSON.stringify(Array.from(NON_NUMERIC_STUDY_IDS))};
+      var emptyMarker = ${JSON.stringify(TV_EMPTY_VALUE)};
       var results = [];
       for (var si = 0; si < sources.length; si++) {
         var s = sources[si];
@@ -503,8 +524,10 @@ export async function getStudyValues() {
         try {
           var meta = s.metaInfo();
           var name = meta.description || meta.shortDescription || '';
-          if (!name) continue;
+          var id = meta.id || '';
+          if (!name || skip.indexOf(id) !== -1) continue;
           var values = {};
+          var emptyTitles = [];
           try {
             var dwv = s.dataWindowView();
             if (dwv) {
@@ -512,18 +535,38 @@ export async function getStudyValues() {
               if (items) {
                 for (var i = 0; i < items.length; i++) {
                   var item = items[i];
-                  if (item._value && item._value !== '∅' && item._title) values[item._title] = item._value;
+                  if (!item._title) continue;
+                  if (item._value && item._value !== emptyMarker) {
+                    values[item._title] = item._value;
+                  } else {
+                    emptyTitles.push(item._title);
+                  }
                 }
               }
             }
           } catch(e) {}
-          if (Object.keys(values).length > 0) results.push({ name: name, values: values });
+          var hasValues = Object.keys(values).length > 0;
+          results.push({
+            name: name,
+            id: id,
+            visible: typeof s.isVisible === 'function' ? s.isVisible() : true,
+            has_values: hasValues,
+            values: values,
+            empty_titles: hasValues ? [] : emptyTitles,
+          });
         } catch(e) {}
       }
       return results;
     })()
   `);
-  return { success: true, study_count: data?.length || 0, studies: data || [] };
+  const studies = data || [];
+  const reporting = studies.filter(s => s.has_values).length;
+  return {
+    success: true,
+    study_count: studies.length,
+    studies_with_values: reporting,
+    studies,
+  };
 }
 
 export async function getPineLines({ study_filter, verbose } = {}) {
@@ -589,7 +632,7 @@ export async function getPineTables({ study_filter } = {}) {
       if (!tables[tid][v.row]) tables[tid][v.row] = {};
       tables[tid][v.row][v.col] = v.t || '';
     }
-    const tableList = Object.entries(tables).map(([tid, rows]) => {
+    const tableList = Object.values(tables).map((rows) => {
       const rowNums = Object.keys(rows).map(Number).sort((a, b) => a - b);
       const formatted = rowNums.map(rn => {
         const cols = rows[rn];

@@ -1,7 +1,7 @@
 /**
  * Core alert logic.
  */
-import { evaluate, evaluateAsync, getClient, safeString, safeBacktickBody } from '../connection.js';
+import { evaluate, evaluateAsync, safeBacktickBody } from '../connection.js';
 
 /**
  * Default alert expiration window. Matches TradingView's UI default. Callers
@@ -13,6 +13,7 @@ import { evaluate, evaluateAsync, getClient, safeString, safeBacktickBody } from
  */
 export const DEFAULT_EXPIRATION_DAYS = 30;
 export const MAX_EXPIRATION_DAYS = 60;
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /**
  * Map user-friendly condition names to TV's internal condition types.
@@ -124,7 +125,7 @@ export async function create({ condition, price, message, expiration_days }) {
   const days = Number.isFinite(Number(expiration_days)) && Number(expiration_days) > 0
     ? Math.min(Math.floor(Number(expiration_days)), MAX_EXPIRATION_DAYS)
     : DEFAULT_EXPIRATION_DAYS;
-  const expiration = new Date(Date.now() + days * 86400 * 1000).toISOString();
+  const expiration = new Date(Date.now() + days * MS_PER_DAY).toISOString();
 
   const payload = {
     symbol: symbolMarker,

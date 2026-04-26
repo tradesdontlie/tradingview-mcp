@@ -5,6 +5,18 @@
  */
 import { evaluate, evaluateAsync, getClient } from '../connection.js';
 
+// ── Pine Facade endpoints ──
+//
+// Single source of truth for the cross-origin REST surface TV exposes for
+// Pine Script management. Same host as the MCP's other REST hits but a
+// distinct path family — the `pine-facade` subdomain handles compile,
+// list-saved, and source-fetch operations for the user's saved Pine scripts.
+const PINE_FACADE_BASE = 'https://pine-facade.tradingview.com/pine-facade';
+const PINE_FACADE_LIST_SAVED_URL = `${PINE_FACADE_BASE}/list/?filter=saved`;
+const PINE_FACADE_TRANSLATE_URL = `${PINE_FACADE_BASE}/translate_light?user_name=Guest&pine_id=00000000-0000-0000-0000-000000000000`;
+// Per-call get URL is built inside the page-context evaluateAsync — see open()
+// — by interpolating `${PINE_FACADE_BASE}/get/` and the {id}/{ver} suffix.
+
 // ── Monaco finder (injected into TV page) ──
 //
 // Resolves TV's Pine Editor Monaco instance. Two paths:
@@ -231,7 +243,7 @@ export async function check({ source }) {
   formData.append('source', source);
 
   const response = await fetch(
-    'https://pine-facade.tradingview.com/pine-facade/translate_light?user_name=Guest&pine_id=00000000-0000-0000-0000-000000000000',
+    PINE_FACADE_TRANSLATE_URL,
     {
       method: 'POST',
       headers: {
@@ -594,7 +606,9 @@ export async function openScript({ name }) {
   const result = await evaluateAsync(`
     (function() {
       var target = ${escapedName};
-      return fetch('https://pine-facade.tradingview.com/pine-facade/list/?filter=saved', { credentials: 'include' })
+      var listUrl = ${JSON.stringify(PINE_FACADE_LIST_SAVED_URL)};
+      var getUrlBase = ${JSON.stringify(PINE_FACADE_BASE + '/get/')};
+      return fetch(listUrl, { credentials: 'include' })
         .then(function(r) { return r.json(); })
         .then(function(scripts) {
           if (!Array.isArray(scripts)) return {error: 'pine-facade returned unexpected data'};
@@ -615,7 +629,7 @@ export async function openScript({ name }) {
 
           var id = match.scriptIdPart;
           var ver = match.version || 1;
-          return fetch('https://pine-facade.tradingview.com/pine-facade/get/' + id + '/' + ver, { credentials: 'include' })
+          return fetch(getUrlBase + id + '/' + ver, { credentials: 'include' })
             .then(function(r2) { return r2.json(); })
             .then(function(data) {
               var source = data.source || '';
@@ -641,7 +655,7 @@ export async function openScript({ name }) {
 
 export async function listScripts() {
   const scripts = await evaluateAsync(`
-    fetch('https://pine-facade.tradingview.com/pine-facade/list/?filter=saved', { credentials: 'include' })
+    fetch(${JSON.stringify(PINE_FACADE_LIST_SAVED_URL)}, { credentials: 'include' })
       .then(function(r) { return r.json(); })
       .then(function(data) {
         if (!Array.isArray(data)) return {scripts: [], error: 'Unexpected response from pine-facade'};

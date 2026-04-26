@@ -2,8 +2,14 @@ import CDP from 'chrome-remote-interface';
 
 let client = null;
 let targetInfo = null;
-const CDP_HOST = 'localhost';
-const CDP_PORT = 9222;
+
+// CDP transport — the TradingView MCP runs on the same machine as TV Desktop,
+// so localhost is intentional. Port 9222 is Chrome DevTools Protocol's default;
+// `tv_launch` passes `--remote-debugging-port=9222` to TV's Electron binary.
+// Single source of truth: re-imported from src/core/tab.js (and anywhere else
+// that needs to talk to the CDP HTTP endpoint directly).
+export const CDP_HOST = 'localhost';
+export const CDP_PORT = 9222;
 const MAX_RETRIES = 5;
 const BASE_DELAY = 500;
 
