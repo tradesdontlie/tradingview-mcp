@@ -60,7 +60,7 @@ Gives your AI assistant eyes and hands on your own chart:
 - **Chart navigation** — change symbols, timeframes, zoom to dates, add/remove indicators
 - **Visual analysis** — read your chart's indicator values, price levels, and annotations
 - **Draw on charts** — trend lines, horizontal lines, rectangles, text annotations
-- **Manage alerts** — create, list, and delete price alerts
+- **Manage alerts** — create, list, and delete price alerts; create Pine `alertcondition()` (indicator) alerts that POST to a webhook URL on signal fire
 - **Replay practice** — step through historical bars, practice entries/exits
 - **Screenshots** — capture chart state for AI visual analysis
 - **Multi-pane layouts** — set up 2x2, 3x1, etc. grids with different symbols per pane
@@ -302,6 +302,7 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 | `draw_shape` | Draw horizontal_line, trend_line, rectangle, text |
 | `draw_list` / `draw_remove_one` / `draw_clear` | Manage drawings |
 | `alert_create` / `alert_list` / `alert_delete` | Manage price alerts |
+| `alert_create_indicator` | Create alerts that fire on Pine `alertcondition()` signals (strategy BUY/SELL → webhook) |
 | `capture_screenshot` | Screenshot (regions: full, chart, strategy_tester) |
 | `batch_run` | Run action across multiple symbols/timeframes |
 | `watchlist_get` / `watchlist_add` | Read/modify watchlist |
