@@ -9,7 +9,7 @@
 - `upstream` → `https://github.com/tradesdontlie/tradingview-mcp.git`
 
 **Test status:**
-- Unit tests: **136/136 pass** (sanitization 68 + pine_analyze 16 + cli 13 + replay 39)
+- Unit tests: **156/156 pass** (sanitization 88 + pine_analyze 16 + cli 13 + replay 39)
 - Live smoke tests: **10/10 effective pass** (`tests/smoke-live.mjs` against running TV Desktop)
 - E2E suite: skipped during integration to avoid disrupting active chart state
 
@@ -28,7 +28,7 @@ Rather than wait for a sequence of upstream merges, we're consolidating the high
 
 ## Patches on top of upstream `main` (4795784)
 
-Listed oldest → newest. **16 commits.**
+Listed oldest → newest. **18 commits** (16 cherry-picks/originals + 2 review-driven refactors).
 
 ### 1. `4841d57` — DI restore in 7 core functions (drawing.js + chart.js)
 
@@ -176,6 +176,30 @@ Currently 10 checks: alerts × 3, watchlist, hotlist × 2, quote × 2, drawing �
 ### 16. `dac082f` — Smoke harness drawing assertion resilient to TV chart state (our work)
 
 The drawing assertion in `tests/smoke-live.mjs` was strict about coordinate ranges and shape persistence, but on certain timeframes / chart state combinations TradingView legitimately rejects shapes whose points fall outside the loaded bar range — and the new `entity_id: null` detection (commit `6fe98a6`) correctly surfaces this as `success: false`. The smoke test now accepts both `success: true` (drawing created and removed cleanly) and `success: false` with the expected `createShape returned no new entity` error pattern, since both are correct behaviors depending on chart state. Prevents flaky smoke runs without weakening the drawing-tools coverage itself.
+
+---
+
+### 17. `41d9b85` — `safeBacktickBody` + scanner-country dispatch + `expiration_days` (our work, post-review)
+
+Driven by self-review against the user's principles (no hardcoding, single source of truth, one function = one purpose):
+
+- **`safeBacktickBody(s)` in `connection.js`** — replaces 5 inline copies of `s.replace(/[\\`$]/g, '\\$&')` across alerts.js / data.js / hotlist.js / watchlist.js. Single helper for escaping a string for embedding inside a remote backtick template literal.
+- **`src/core/scanner.js`** — single source of truth for `scanner.tradingview.com` endpoints. `exchangeToScannerCountry()` maps `NASDAQ`/`NYSE`/`LSE`/`XETR`/`OANDA`/`BINANCE`/etc. to country segments; `scannerScanUrl()` and `scannerPresetUrl()` build URLs. Replaces the hardcoded `america/scan` in `data.getQuoteViaScanner` so cross-exchange quotes (LSE:VOD, XETR:SAP, OANDA:XAUUSD, BINANCE:BTCUSDT) route to the right region.
+- **`expiration_days` parameter on `alert_create`** — the 30-day default is now an exported constant `DEFAULT_EXPIRATION_DAYS`, capped by `MAX_EXPIRATION_DAYS=60`. Schema description string is built from the constants; no duplication.
+- **Audit test** — bans inline `.replace(/[\\`$]/g, …)` patterns. Single source of truth (the helper) enforced at test time.
+
+---
+
+### 18. `a25efc2` — Kill 6 hardcoded values + dead code; surface silent study drops (our work, audit-driven)
+
+Driven by a self-dispatched broad-codebase audit. Six fixes:
+
+- **`data.js getStudyValues` — silent study drops.** Studies whose data-window items were all `∅` (e.g. RSI on TV 3.1.0 AAPL 1D, where the indicator script returns 9 items all marked empty) were filtered out of the output entirely. Caller saw `study_count: 2` for a 3-indicator chart with zero signal that anything was missing. Now: every study is returned with `has_values: bool` + `empty_titles: []` so the caller can distinguish "indicator absent" from "indicator present but not reporting". Plus a `NON_NUMERIC_STUDY_IDS` skip-list for TV's always-loaded calendar studies (Dividends/Splits/Earnings/Roll) that pollute the output.
+- **`MS_PER_DAY` constant** in alerts.js — replaces inline `days * 86400 * 1000`. The seconds-per-day magic number is gone.
+- **Unused-import cleanup** in alerts.js (`getClient`, `safeString`) and tab.js (`evaluate`).
+- **`tid` shadow fix** in data.js getPineTables — outer loop's `tid` was used; inner closure's destructured `tid` wasn't. Switched to `Object.values(tables).map(rows => …)`.
+- **`pine.js` URL constants** — extracted `PINE_FACADE_BASE` / `PINE_FACADE_LIST_SAVED_URL` / `PINE_FACADE_TRANSLATE_URL` at module top. The list-saved endpoint was duplicated 3× across translate / open / listScripts.
+- **`CDP_HOST` / `CDP_PORT` single source** — both connection.js and tab.js privately defined them with the same values. Now exported from connection.js, re-imported in tab.js.
 
 ---
 
