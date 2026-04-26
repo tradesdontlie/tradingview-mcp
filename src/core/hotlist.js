@@ -22,7 +22,8 @@
  *
  * No auth required. Rate limit is generous but not unlimited — be polite.
  */
-import { evaluateAsync } from '../connection.js';
+import { evaluateAsync, safeBacktickBody } from '../connection.js';
+import { scannerPresetUrl } from './scanner.js';
 
 const ALLOWED_SLUGS = new Set([
   'volume_gainers',
@@ -51,7 +52,10 @@ export async function getHotlist({ slug, limit = 20 } = {}) {
     };
   }
   const cap = Math.max(1, Math.min(20, Number.isFinite(limit) ? Math.floor(limit) : 20));
-  const url = `https://scanner.tradingview.com/presets/US_${s}?label-product=right-hotlists`;
+  // Defense-in-depth: slug is already whitelisted, but the URL is interpolated
+  // into a remote backtick template — escape so a future whitelist change can't
+  // turn into an injection vector.
+  const url = scannerPresetUrl(safeBacktickBody(s));
 
   const expr = `
     fetch(\`${url}\`, { method: 'GET' })

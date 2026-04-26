@@ -1,7 +1,8 @@
 /**
  * Core data access logic.
  */
-import { evaluate, evaluateAsync, KNOWN_PATHS, safeString } from '../connection.js';
+import { evaluate, evaluateAsync, KNOWN_PATHS, safeString, safeBacktickBody } from '../connection.js';
+import { scannerScanUrl } from './scanner.js';
 
 const MAX_OHLCV_BARS = 500;
 const MAX_TRADES = 20;
@@ -330,7 +331,8 @@ export async function getEquity() {
 // that case would return the WRONG ticker's data with the requested symbol
 // pasted into the envelope. (T35 — live-caught 2026-04-23.)
 //
-// Endpoint: POST https://scanner.tradingview.com/america/scan (cross-origin).
+// Endpoint: POST https://scanner.tradingview.com/<country>/scan, where
+// <country> is dispatched from the symbol's exchange prefix via scanner.js.
 // Per CLAUDE.md CORS gotcha: send JSON as a plain-string body with NO
 // Content-Type header — TV rejects the preflight otherwise.
 async function getQuoteViaScanner(symbol) {
@@ -339,9 +341,10 @@ async function getQuoteViaScanner(symbol) {
     symbols: { tickers: [ticker] },
     columns: ['close', 'open', 'high', 'low', 'volume', 'description', 'exchange', 'type'],
   });
-  const escapedBody = body.replace(/[\\`$]/g, '\\$&');
+  const escapedBody = safeBacktickBody(body);
+  const url = scannerScanUrl(ticker);
   const expr = `
-    fetch('https://scanner.tradingview.com/america/scan', {
+    fetch('${url}', {
       method: 'POST',
       body: \`${escapedBody}\`
     })

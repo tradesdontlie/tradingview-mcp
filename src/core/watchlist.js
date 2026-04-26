@@ -17,7 +17,7 @@
  *   DELETE /api/v1/symbols_list/custom/{id}/?source=web-tvd
  *   GET    /api/v1/symbols_list/all/?source=web-tvd                returns [{id,type,name,color,symbols,active,...}]
  */
-import { evaluate, evaluateAsync, getClient } from '../connection.js';
+import { evaluate, evaluateAsync, getClient, safeBacktickBody } from '../connection.js';
 
 /**
  * Fire a TV REST request in the page context and parse the response.
@@ -27,9 +27,10 @@ import { evaluate, evaluateAsync, getClient } from '../connection.js';
 async function tvRest(path, { method = 'GET', body = null } = {}) {
   const hasBody = body != null;
   const bodyJson = hasBody ? (typeof body === 'string' ? body : JSON.stringify(body)) : null;
-  // Escape for template-literal injection into the evaluated JS
-  const escapedBody = hasBody ? bodyJson.replace(/[\\`$]/g, '\\$&') : '';
-  const escapedPath = String(path).replace(/[\\`$]/g, '\\$&');
+  // Escape for template-literal injection into the evaluated JS — single
+  // source of truth lives in connection.js as safeBacktickBody().
+  const escapedBody = hasBody ? safeBacktickBody(bodyJson) : '';
+  const escapedPath = safeBacktickBody(path);
 
   // NOTE: These watchlist endpoints live on www.tradingview.com (same-origin as
   // the chart page) so setting Content-Type:application/json is SAFE — no CORS

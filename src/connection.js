@@ -47,6 +47,24 @@ export function requireFinite(value, name) {
   return n;
 }
 
+/**
+ * Escape a string for embedding as the body inside a backtick-delimited template
+ * literal that will be transmitted to the remote page context for evaluation.
+ *
+ * Specifically: protects \, `, and $ in the string from being interpreted as
+ * escape sequences or template-literal interpolation markers in the wrapping
+ * template that the remote JS engine will compile.
+ *
+ * Use whenever you build something like:
+ *   evaluateAsync(`fetch('...', { body: \`${safeBacktickBody(s)}\` })`)
+ *
+ * Single source of truth — replaces ad-hoc `s.replace(/[\\`$]/g, '\\$&')` inlines
+ * across alerts.js / data.js / hotlist.js.
+ */
+export function safeBacktickBody(s) {
+  return String(s).replace(/[\\`$]/g, '\\$&');
+}
+
 export async function getClient() {
   if (client) {
     try {

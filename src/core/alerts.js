@@ -1,7 +1,18 @@
 /**
  * Core alert logic.
  */
-import { evaluate, evaluateAsync, getClient, safeString } from '../connection.js';
+import { evaluate, evaluateAsync, getClient, safeString, safeBacktickBody } from '../connection.js';
+
+/**
+ * Default alert expiration window. Matches TradingView's UI default. Callers
+ * can override via the `expiration_days` argument on `create()` — useful for
+ * weekly/monthly setups where 30 days isn't enough.
+ *
+ * Source of truth — referenced by both the schema description in
+ * src/tools/alerts.js and the `create()` function below.
+ */
+export const DEFAULT_EXPIRATION_DAYS = 30;
+export const MAX_EXPIRATION_DAYS = 60;
 
 /**
  * Map user-friendly condition names to TV's internal condition types.
@@ -57,7 +68,7 @@ function validateMessageConditionParity(message, numericPrice) {
   };
 }
 
-export async function create({ condition, price, message }) {
+export async function create({ condition, price, message, expiration_days }) {
   if (price == null || isNaN(Number(price))) {
     return { success: false, error: 'price is required and must be a number', source: 'rest_api' };
   }
@@ -110,8 +121,10 @@ export async function create({ condition, price, message }) {
     };
   }
 
-  // Default expiration: 30 days from now, matches TV's UI default
-  const expiration = new Date(Date.now() + 30 * 86400 * 1000).toISOString();
+  const days = Number.isFinite(Number(expiration_days)) && Number(expiration_days) > 0
+    ? Math.min(Math.floor(Number(expiration_days)), MAX_EXPIRATION_DAYS)
+    : DEFAULT_EXPIRATION_DAYS;
+  const expiration = new Date(Date.now() + days * 86400 * 1000).toISOString();
 
   const payload = {
     symbol: symbolMarker,
@@ -142,7 +155,7 @@ export async function create({ condition, price, message }) {
   // default for string bodies — a custom Content-Type triggers a CORS preflight that the
   // server rejects, which was the root cause of the DOM-fallback era failures.
   const body = JSON.stringify({ payload });
-  const escapedBody = body.replace(/[\\`$]/g, '\\$&');
+  const escapedBody = safeBacktickBody(body);
   const response = await evaluateAsync(`
     fetch('https://pricealerts.tradingview.com/create_alert', {
       method: 'POST',
@@ -243,7 +256,7 @@ export async function deleteAlerts({ alert_id, alert_ids, delete_all } = {}) {
   }
 
   const body = JSON.stringify({ payload: { alert_ids: ids } });
-  const escapedBody = body.replace(/[\\`$]/g, '\\$&');
+  const escapedBody = safeBacktickBody(body);
   const response = await evaluateAsync(`
     fetch('https://pricealerts.tradingview.com/delete_alerts', {
       method: 'POST',

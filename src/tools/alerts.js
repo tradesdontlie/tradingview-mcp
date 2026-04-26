@@ -1,14 +1,16 @@
 import { z } from 'zod';
 import { jsonResult } from './_format.js';
 import * as core from '../core/alerts.js';
+import { DEFAULT_EXPIRATION_DAYS, MAX_EXPIRATION_DAYS } from '../core/alerts.js';
 
 export function registerAlertTools(server) {
   server.tool('alert_create', 'Create a price alert on the active chart symbol via TradingView\'s internal REST API (pricealerts.tradingview.com/create_alert). No UI dialog involved — fires and forgets. Returns alert_id on success.', {
     condition: z.string().describe('Alert condition: "crossing" (default, any direction), "greater_than"/"above"/"cross_up", or "less_than"/"below"/"cross_down"'),
     price: z.coerce.number().describe('Price level for the alert'),
     message: z.string().optional().describe('Alert message (auto-generated from symbol + condition + price if omitted)'),
-  }, async ({ condition, price, message }) => {
-    try { return jsonResult(await core.create({ condition, price, message })); }
+    expiration_days: z.coerce.number().int().min(1).max(MAX_EXPIRATION_DAYS).optional().describe(`Days until the alert auto-expires (default ${DEFAULT_EXPIRATION_DAYS}, capped at ${MAX_EXPIRATION_DAYS}). Use a higher value for weekly/monthly setups; the default matches TV's UI default.`),
+  }, async ({ condition, price, message, expiration_days }) => {
+    try { return jsonResult(await core.create({ condition, price, message, expiration_days })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
