@@ -2,8 +2,48 @@
  * Core health/discovery/launch logic.
  */
 import { getClient, getTargetInfo, evaluate } from '../connection.js';
-import { existsSync } from 'fs';
+import { existsSync, mkdirSync } from 'fs';
 import { execSync, spawn } from 'child_process';
+import { tmpdir } from 'os';
+import { join } from 'path';
+
+// Locate an MSIX/Store TradingView install on Windows and return its AUMID.
+// Returns { aumid, installLocation } or null.
+function findWindowsMsixInstall() {
+  if (process.platform !== 'win32') return null;
+  try {
+    const ps = `Get-AppxPackage -Name 'TradingView*' | Select-Object -First 1 PackageFamilyName, InstallLocation | ConvertTo-Json -Compress`;
+    const out = execSync(`powershell -NoProfile -ExecutionPolicy Bypass -Command "${ps}"`, { timeout: 8000 }).toString().trim();
+    if (!out) return null;
+    const pkg = JSON.parse(out);
+    if (!pkg || !pkg.PackageFamilyName || !pkg.InstallLocation) return null;
+    const manifestRead = `[xml]$m = Get-Content -LiteralPath '${pkg.InstallLocation.replace(/'/g, "''")}\\AppxManifest.xml'; $m.Package.Applications.Application.Id`;
+    const appId = execSync(`powershell -NoProfile -ExecutionPolicy Bypass -Command "${manifestRead}"`, { timeout: 5000 }).toString().trim();
+    if (!appId) return null;
+    return { aumid: `${pkg.PackageFamilyName}!${appId}`, installLocation: pkg.InstallLocation };
+  } catch {
+    return null;
+  }
+}
+
+// Launch an MSIX-packaged app with CLI args by creating a .lnk shortcut whose
+// TargetPath is shell:AppsFolder\<AUMID> and Arguments carries the flags. This
+// is the only reliable way to pass args through the MSIX activation manager.
+function launchMsixWithArgs(aumid, args, port) {
+  const dir = join(tmpdir(), 'tradingview-mcp');
+  mkdirSync(dir, { recursive: true });
+  const lnk = join(dir, `tv_debug_${port}.lnk`);
+  const psScript = `
+    $ws = New-Object -ComObject WScript.Shell
+    $sc = $ws.CreateShortcut('${lnk.replace(/'/g, "''")}')
+    $sc.TargetPath = 'shell:AppsFolder\\${aumid}'
+    $sc.Arguments = '${args.join(' ').replace(/'/g, "''")}'
+    $sc.Save()
+    Start-Process -FilePath '${lnk.replace(/'/g, "''")}'
+  `.trim().replace(/\n\s*/g, '; ');
+  execSync(`powershell -NoProfile -ExecutionPolicy Bypass -Command "${psScript}"`, { timeout: 10000 });
+  return lnk;
+}
 
 export async function healthCheck() {
   await getClient();
@@ -207,7 +247,13 @@ export async function launch({ port, kill_existing } = {}) {
     } catch { /* ignore */ }
   }
 
-  if (!tvPath) {
+  // Windows: fall back to MSIX/Store install if no classic .exe found.
+  let msix = null;
+  if (!tvPath && platform === 'win32') {
+    msix = findWindowsMsixInstall();
+  }
+
+  if (!tvPath && !msix) {
     throw new Error(`TradingView not found on ${platform}. Searched: ${candidates.join(', ')}. Launch manually with: /path/to/TradingView --remote-debugging-port=${cdpPort}`);
   }
 
@@ -219,15 +265,23 @@ export async function launch({ port, kill_existing } = {}) {
     } catch { /* may not be running */ }
   }
 
-  const child = spawn(tvPath, [`--remote-debugging-port=${cdpPort}`], { detached: true, stdio: 'ignore' });
-  child.unref();
+  let child = null;
+  let launchedVia = null;
+  if (tvPath) {
+    child = spawn(tvPath, [`--remote-debugging-port=${cdpPort}`], { detached: true, stdio: 'ignore' });
+    child.unref();
+    launchedVia = tvPath;
+  } else {
+    launchMsixWithArgs(msix.aumid, [`--remote-debugging-port=${cdpPort}`], cdpPort);
+    launchedVia = `msix:${msix.aumid}`;
+  }
 
   for (let i = 0; i < 15; i++) {
     await new Promise(r => setTimeout(r, 1000));
     try {
       const http = await import('http');
       const ready = await new Promise((resolve) => {
-        http.get(`http://localhost:${cdpPort}/json/version`, (res) => {
+        http.get(`http://127.0.0.1:${cdpPort}/json/version`, (res) => {
           let data = '';
           res.on('data', (chunk) => data += chunk);
           res.on('end', () => resolve(data));
@@ -236,8 +290,8 @@ export async function launch({ port, kill_existing } = {}) {
       if (ready) {
         const info = JSON.parse(ready);
         return {
-          success: true, platform, binary: tvPath, pid: child.pid,
-          cdp_port: cdpPort, cdp_url: `http://localhost:${cdpPort}`,
+          success: true, platform, binary: launchedVia, pid: child ? child.pid : null,
+          cdp_port: cdpPort, cdp_url: `http://127.0.0.1:${cdpPort}`,
           browser: info.Browser, user_agent: info['User-Agent'],
         };
       }
@@ -245,7 +299,7 @@ export async function launch({ port, kill_existing } = {}) {
   }
 
   return {
-    success: true, platform, binary: tvPath, pid: child.pid, cdp_port: cdpPort, cdp_ready: false,
+    success: true, platform, binary: launchedVia, pid: child ? child.pid : null, cdp_port: cdpPort, cdp_ready: false,
     warning: 'TradingView launched but CDP not responding yet. It may still be loading. Try tv_health_check in a few seconds.',
   };
 }
