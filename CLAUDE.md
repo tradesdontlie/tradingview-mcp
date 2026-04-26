@@ -127,3 +127,21 @@ Claude Code ←→ MCP Server (stdio) ←→ CDP (localhost:9222) ←→ Trading
 ```
 
 Pine graphics path: `study._graphics._primitivesCollection.dwglines.get('lines').get(false)._primitivesDataById`
+
+## Installation Notes
+
+### Microsoft Store version is NOT supported
+
+The TradingView Desktop build distributed through the **Microsoft Store** (package `TradingView.Desktop_n534cwy3pjxzj`) cannot be controlled by this MCP server. The Store version runs in a UWP/MSIX sandbox that:
+
+- Ignores command-line arguments like `--remote-debugging-port=9222` whether launched via `Invoke-CommandInDesktopPackage`, `shell:AppsFolder\...!AppId` activation, or direct exe invocation.
+- Does not propagate environment variables like `ELECTRON_REMOTE_DEBUGGING_PORT` from the launching shell into the sandboxed child process.
+- Restricts read access to the `C:\Program Files\WindowsApps\TradingView.Desktop_*` install folder, blocking direct exe launch with custom args.
+
+The result: CDP port 9222 never opens, and `tv_health_check` / every other tool fails with `CDP connection failed`.
+
+**Fix:** uninstall the Store version and install the standalone Desktop build from <https://www.tradingview.com/desktop/>. The standalone build is a regular Win32 Electron app that honors `--remote-debugging-port`, so `tv_launch` works out of the box. On Windows, `tv_launch` looks for the exe in:
+
+- `%LOCALAPPDATA%\TradingView\TradingView.exe`
+- `C:\Program Files\TradingView\TradingView.exe`
+- `C:\Program Files (x86)\TradingView\TradingView.exe`
