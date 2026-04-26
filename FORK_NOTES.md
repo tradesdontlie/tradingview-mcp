@@ -283,6 +283,59 @@ Response: {"data":[{"s":"NASDAQ:AAPL","d":[180.5, 51000000, 2.8e12, "Apple Inc."
 
 ---
 
+## §10 — `pine_save_source` + `pine_get_source_rest`: Pine round-trip via REST (T74, 2026-04-26)
+
+**Why:** The Monaco-based `pine_set_source` / `pine_get_source` / `pine_save` toolchain has been a recurring blocker — diagnosed root cause during T74 was that TV lazy-mounts Monaco only when the Pine Editor pane is **visibly expanded**, and the existing `ensurePineEditorOpen` only knew how to expand the **bottom widget bar**. User's actual layout is the **side-docked Pine Editor** (data-uri ends in `editorType=dialog`) — a completely different surface that `bwb.setMode()` doesn't reach. Patching `ensurePineEditorOpen` to handle every layout would have been whack-a-mole + still slow (≤10s polling per `pine_set_source`). User explicitly requested a rethink: "lets find a better solution."
+
+**Pivot:** TradingView's Pine UI itself talks to a REST API (`pine-facade.tradingview.com`). The fork already used pine-facade for `pine_list_scripts` (GET `/list/`), `pine_open` (GET `/get/{id}/{ver}`), and `pine_check` (POST `/translate_light` for server-side compilation). The missing piece was the SAVE endpoint — captured live during T74:
+
+```
+POST https://pine-facade.tradingview.com/pine-facade/save/next/USER%3B{id}
+     ?allow_create_new=false&name={url-encoded-name}
+Content-Type: application/x-www-form-urlencoded
+Body: source=<full Pine source>
+Response: {"success":true, "result":{"IL":"<encrypted-blob>"}}
+```
+
+Same auth profile as the existing pine-facade calls — cookie auth via `credentials: 'include'`, no CSRF token, no session header. The `IL` field is TV's signed/encrypted form of the source (used by chart-side verification); we don't inspect it.
+
+**Diagnostic method:** Same fetch+XHR interceptor playbook as `alert_create` / `alert_delete` / `watchlist_insert` / `scanner_enrich`. Installed interceptor on `pine-facade.tradingview.com` + `tradingview.com` POST/PUT/PATCH/DELETE traffic via `ui_evaluate`, stashed captures on `window.__T74_save_capture`, asked user to make a tiny edit in the side-docked Pine Editor and Ctrl+S, polled the capture. TV's UI made 3 calls during a save: (1) `/parse_title` (extract title from source — we skip this; we already know the title), (2) `/save/next/USER;{id}` (the real save — the captured payload), (3) `telemetry/pine/report` (analytics — we skip).
+
+**Fix:**
+- New `saveSource({ id, name, source })` in `src/core/pine.js` (~80 lines). Resolves `id` from `name` via the same pine-facade `/list/` lookup that `openScript` uses. POSTs URL-encoded form data to `/save/next/USER;{id}` with `credentials: 'include'`. Returns `{success, id, name, source_lines, source_chars, has_il_blob}`.
+- New `getSourceByREST({ id, name, version })` in `src/core/pine.js` (~50 lines). Mirrors `saveSource`'s id-resolution; GETs from `/get/{id}/{ver}`. Replaces the Monaco-based `getSource()` for the round-trip case. Returns `{success, id, name, version, source, line_count, char_count}`.
+- Registered as new MCP tools `pine_save_source` and `pine_get_source_rest` in `src/tools/pine.js` (~26 lines). Both accept either `id` (preferred) or `name`. Tool descriptions explicitly note "no Monaco editor required" so callers know they can use these regardless of editor pane layout.
+
+**Workflow change for skills + RULEBOOK:**
+
+Old (Monaco-driven, fragile, slow):
+```
+pine_open → pine_set_source → pine_smart_compile → pine_save → pine_list_scripts (verify)
+```
+
+New (REST, layout-agnostic, sub-second):
+```
+pine_check (server-side compile, optional gate)
+→ pine_save_source (single REST call)
+→ chart_manage_indicator (remove + re-add to pick up new version on chart)
+→ data_get_pine_tables (verify)
+```
+
+The Monaco-based tools (`pine_set_source`, `pine_get_source`, `pine_compile`, `pine_get_errors`, `pine_save`, `pine_get_console`, `pine_smart_compile`) are kept in place for callers that genuinely want them, but skills should default to the REST path going forward.
+
+**Tool matrix delta:**
+
+| Tool | Method + path | Notes |
+|---|---|---|
+| `pine_save_source` (new) | POST `/pine-facade/save/next/USER;{id}` body `source=<...>` | Layout-agnostic; no Monaco; sub-second. Replaces `pine_set_source` + `pine_save`. |
+| `pine_get_source_rest` (new) | GET `/pine-facade/get/{id}/{ver}` | Replaces Monaco-based `pine_get_source`. |
+
+**Files touched:** `src/core/pine.js` (+135 lines for `saveSource` + `getSourceByREST`), `src/tools/pine.js` (+18 lines for two tool registrations).
+
+**Node-check:** passes on both files. **Live smoke:** deferred to post-restart (requires Claude Code restart to reload MCP process and register the two new tools). Smoke matrix: round-trip on `asta_3cs_dashboard.pine` (~30KB / 856 lines) AND `asta_patterns.pine` (~50KB / 1200 lines — largest script in our indicator set).
+
+---
+
 ## Adding more fixes — workflow
 
 The diagnostic playbook lives in `CLAUDE.md` (project root of ASTA ECO4). Summary:

@@ -72,4 +72,22 @@ export function registerPineTools(server) {
     try { return jsonResult(await core.check({ source })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
+
+  server.tool('pine_save_source', 'Save Pine Script source directly to a saved cloud script via TradingView\'s pine-facade REST endpoint. No Monaco editor required — works regardless of editor pane layout (bottom bar / side dock / dialog). Sub-second. Pass `id` (preferred, from pine_list_scripts) or `name` (case-insensitive match). After saving, run `chart_manage_indicator` (remove + re-add) on the chart so the live chart picks up the new cloud version.', {
+    source: z.string().describe('Pine Script source code to save'),
+    id: z.string().optional().describe('Saved-script id (e.g. "d101351d0e8a4c63bbb74d2676077538"). Get from pine_list_scripts. Preferred over `name` since it bypasses a list-and-search step.'),
+    name: z.string().optional().describe('Saved-script display name (case-insensitive match). Used when id is not provided.'),
+  }, async ({ source, id, name }) => {
+    try { return jsonResult(await core.saveSource({ id, name, source })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('pine_get_source_rest', 'Read Pine Script source from a saved cloud script via TradingView\'s pine-facade REST endpoint. No Monaco editor required. Pass `id` (preferred) or `name` (case-insensitive match). Optional `version` (defaults to the current saved version).', {
+    id: z.string().optional().describe('Saved-script id. Get from pine_list_scripts.'),
+    name: z.string().optional().describe('Saved-script display name (case-insensitive match). Used when id is not provided.'),
+    version: z.union([z.string(), z.number()]).optional().describe('Specific version to fetch. Defaults to current.'),
+  }, async ({ id, name, version }) => {
+    try { return jsonResult(await core.getSourceByREST({ id, name, version })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
 }
