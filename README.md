@@ -2,6 +2,20 @@
 
 Personal AI assistant for your TradingView Desktop charts. Connects Claude Code to your locally running TradingView app via Chrome DevTools Protocol for AI-assisted chart analysis, Pine Script development, and workflow automation.
 
+> [!NOTE]
+> **This is a personal fork** (`lnv-louis/tradingview-mcp`) of upstream `tradesdontlie/tradingview-mcp`. The `fixes/integration` branch bundles 16 commits of high-value fixes not yet merged upstream:
+> - `alert_create` / `alert_delete` rewritten over TV's REST API (no more broken DOM selectors)
+> - 6 new watchlist-management tools + `hotlist_get` (TV scanner presets)
+> - `pine_labels` cap raise + `watchlist_get` lazy-render fix
+> - TV Desktop 3.1.0 strategy-scraper compatibility
+> - `layout_switch` i18n (PT / ES / FR / DE / **Vietnamese**)
+> - `draw_shape` Zod enum + silent-failure detection
+> - DI-regression restore in 7 functions (drawing + chart)
+>
+> See [FORK_NOTES.md](FORK_NOTES.md) for the full inventory. Tests: **136/136 unit + 10/10 live smoke passing** (`tests/smoke-live.mjs`).
+>
+> Works end-to-end with the consolidated **`tradingview`** Claude Code skill at `~/.claude/skills/tradingview/` — one skill with a decision tree routing to 5 internal workflows (chart analysis, multi-symbol scan, Pine Script, replay, strategy report), replacing 5 previously-separate skills.
+
 > [!WARNING]
 > **This tool is not affiliated with, endorsed by, or associated with TradingView Inc.** It interacts with your locally running TradingView Desktop application via Chrome DevTools Protocol. Review the [Disclaimer](#disclaimer) before use.
 
