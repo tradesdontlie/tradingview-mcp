@@ -3,18 +3,24 @@
 Personal AI assistant for your TradingView Desktop charts. Connects Claude Code to your locally running TradingView app via Chrome DevTools Protocol for AI-assisted chart analysis, Pine Script development, and workflow automation.
 
 > [!NOTE]
-> **This is a personal fork** (`lnv-louis/tradingview-mcp`) of upstream `tradesdontlie/tradingview-mcp`. The `fixes/integration` branch bundles 16 commits of high-value fixes not yet merged upstream:
-> - `alert_create` / `alert_delete` rewritten over TV's REST API (no more broken DOM selectors)
+> **This is a personal fork** (`lnv-louis/tradingview-mcp`) of upstream `tradesdontlie/tradingview-mcp`. `main` bundles 17 commits of high-value fixes not yet merged upstream and is the branch that the upstream PR ([#107](https://github.com/tradesdontlie/tradingview-mcp/pull/107)) is sourced from:
+> - `alert_create` / `alert_delete` rewritten over TV's REST API (no more broken DOM selectors); `alert_create` accepts an `expiration_days` parameter
 > - 6 new watchlist-management tools + `hotlist_get` (TV scanner presets)
 > - `pine_labels` cap raise + `watchlist_get` lazy-render fix
 > - TV Desktop 3.1.0 strategy-scraper compatibility
 > - `layout_switch` i18n (PT / ES / FR / DE / **Vietnamese**)
 > - `draw_shape` Zod enum + silent-failure detection
 > - DI-regression restore in 7 functions (drawing + chart)
+> - `quote_get` cross-symbol routes through `scanner.tradingview.com/<country>/scan` — works for `LSE:VOD`, `XETR:SAP`, `OANDA:XAUUSD`, `BINANCE:BTCUSDT`, etc., not just US tickers
+> - Single source of truth for backtick-template escaping (`safeBacktickBody`) — no more inline `replace(/[\\`$]/g, …)` copies
 >
-> See [FORK_NOTES.md](FORK_NOTES.md) for the full inventory. Tests: **136/136 unit + 10/10 live smoke passing** (`tests/smoke-live.mjs`).
+> See [FORK_NOTES.md](FORK_NOTES.md) for the full inventory. Tests: **156/156 unit + 10/10 live smoke passing** (`tests/smoke-live.mjs`).
 >
-> Works end-to-end with the consolidated **`tradingview`** Claude Code skill at `~/.claude/skills/tradingview/` — one skill with a decision tree routing to 5 internal workflows (chart analysis, multi-symbol scan, Pine Script, replay, strategy report), replacing 5 previously-separate skills.
+> Works end-to-end with two locale-split Claude Code skills:
+> - **`tradingview`** at `~/.claude/skills/tradingview/` — English-language chart analysis, multi-symbol scan, Pine Script, replay, strategy report
+> - **`tradingview-vietnam`** at `~/.claude/skills/tradingview-vietnam/` — same workflows, Vietnamese-language communication for `vn.tradingview.com` users
+>
+> Both wrap the same MCP tools and use the same A–E workflow structure; the description-level locale split keeps each language's communication conventions clean.
 
 > [!WARNING]
 > **This tool is not affiliated with, endorsed by, or associated with TradingView Inc.** It interacts with your locally running TradingView Desktop application via Chrome DevTools Protocol. Review the [Disclaimer](#disclaimer) before use.
