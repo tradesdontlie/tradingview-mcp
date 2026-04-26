@@ -339,7 +339,13 @@ The Monaco-based tools (`pine_set_source`, `pine_get_source`, `pine_compile`, `p
 
 Both bugs were diagnosed in-page via `ui_evaluate`: confirmed `scriptIdPart` shape from the live `/pine-facade/list/` response, then identity-wrote the dashboard's own source back via the single-prefix URL form (status 200, `{success:true, result:{IL:"..."}}`, version bumped 48.0→49.0). `node --check` passes after the patch.
 
-**Live smoke:** deferred to next Claude Code restart so the patched MCP server reloads. Smoke matrix: round-trip on `asta_3cs_dashboard.pine` (~30KB / 856 lines) AND `asta_patterns.pine` (~50KB / 1200 lines — largest script in our indicator set).
+**Live smoke (2026-04-26 post-restart):** all green. key_levels (8KB) `8.0→9.0`; dashboard (53KB / 856 lines) `49.0→50.0` with `data_get_pine_tables` returning canonical 16 panel rows on SNDK; Patterns (72KB / 1201 lines) `30.0→31.0`; negative test on bogus name returns clean `{success:false}`. All saves returned `has_il_blob:true` (TV server-side compile clean).
+
+**Follow-up patch — TBD-hash (2026-04-26): `scriptName` corruption fix.** Live smoke uncovered a third regression: `pine_save_source` called id-only was rewriting the cloud script's `scriptName` field to the script id (e.g. `"USER;d101351..."`). Cause: the `name=` URL param on `/pine-facade/save/next/{id}` is **not cosmetic** — pine-facade overwrites the saved script's `scriptName` with whatever value the param carries. The original `doSave` defaulted `displayName` to `scriptId` when no name was provided, silently corrupting the name. After 3 saves during T74 smoke (dashboard, key_levels, Patterns), all three scripts in the user's TV "My Scripts" sidebar showed `USER;<hex>` instead of friendly names. Volume Confirmation, untouched, still showed correctly — confirming the bug was per-call, not session-wide cache pollution.
+
+**Recovery:** A one-shot `ui_evaluate` script restored all 3 names by re-fetching each script's current source (via `/pine-facade/get/{id}/last`) and re-saving with the correct `name=` value. Three sub-second round-trips, source never crossed the MCP boundary. All names verified restored via `pine_list_scripts`.
+
+**Fix:** Patched `doSave` in `src/core/pine.js` so it requires a resolved `displayName` and refuses to fall back to `scriptId`. The id branch now performs a `pine-facade/list/` lookup when the caller doesn't supply a name, extracting the current `scriptName` to preserve it. Caller-supplied name still wins (explicit rename intent). The name branch already used `match.scriptName || match.scriptTitle` correctly — kept verbatim. Added a defensive `if (!displayName) return { error: ... }` guard inside `doSave` so future regressions fail loudly instead of silently corrupting names. `node --check` passes.
 
 ---
 

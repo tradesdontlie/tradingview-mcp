@@ -283,6 +283,14 @@ export async function saveSource({ id, name, source }) {
   // Node process.  We mirror the pattern used by openScript / listScripts.
   // Note: scriptIdPart from pine-facade already contains the "USER;" prefix,
   // so the save URL takes the id as-is (no extra "USER;" concatenation).
+  //
+  // T74 follow-up (2026-04-26): the `name=` URL param on save/next is NOT
+  // cosmetic — pine-facade rewrites the cloud script's `scriptName` field
+  // with whatever is sent.  Earlier versions of this code defaulted the name
+  // to the script id when the caller passed id-only, which silently corrupted
+  // the script's display name to a "USER;..." string.  Fix: if no name is
+  // supplied, look up the current `scriptName` from the pine-facade list and
+  // pass that through.  Idempotent — preserves names by default.
   const escId = JSON.stringify(id || '');
   const escName = JSON.stringify(name || '');
   const escSource = JSON.stringify(source);
@@ -294,10 +302,16 @@ export async function saveSource({ id, name, source }) {
       var src = ${escSource};
 
       function doSave(scriptId, displayName) {
-        var dn = displayName || scriptId;
+        // displayName is REQUIRED here — caller branches must resolve it
+        // (either from caller-supplied name or from pine-facade list lookup)
+        // before invoking doSave.  Falling back to scriptId would corrupt
+        // the cloud's scriptName field; better to fail loudly.
+        if (!displayName) {
+          return Promise.resolve({ error: 'doSave called without resolved displayName — internal bug' });
+        }
         var url = 'https://pine-facade.tradingview.com/pine-facade/save/next/' +
           encodeURIComponent(scriptId) +
-          '?allow_create_new=false&name=' + encodeURIComponent(dn);
+          '?allow_create_new=false&name=' + encodeURIComponent(displayName);
         var body = new URLSearchParams();
         body.append('source', src);
         return fetch(url, {
@@ -315,7 +329,7 @@ export async function saveSource({ id, name, source }) {
             try {
               var data = JSON.parse(text);
               if (data && data.success === true) {
-                return { success: true, id: scriptId, name: dn, has_il_blob: !!(data.result && data.result.IL) };
+                return { success: true, id: scriptId, name: displayName, has_il_blob: !!(data.result && data.result.IL) };
               }
               return { error: 'pine-facade save responded success=false: ' + text.substring(0, 300) };
             } catch (parseErr) {
@@ -325,19 +339,42 @@ export async function saveSource({ id, name, source }) {
         });
       }
 
+      function fetchList() {
+        return fetch('https://pine-facade.tradingview.com/pine-facade/list/?filter=saved', { credentials: 'include' })
+          .then(function(r) {
+            if (!r.ok) throw new Error('pine-facade list returned ' + r.status);
+            return r.json();
+          })
+          .then(function(scripts) {
+            if (!Array.isArray(scripts)) throw new Error('pine-facade list returned unexpected data');
+            return scripts;
+          });
+      }
+
       if (providedId) {
-        return doSave(providedId, providedName);
+        // Caller-supplied name wins (explicit rename intent).  Otherwise
+        // look up the current scriptName so the save preserves it.
+        if (providedName) {
+          return doSave(providedId, providedName);
+        }
+        return fetchList()
+          .then(function(scripts) {
+            var match = null;
+            for (var i = 0; i < scripts.length; i++) {
+              if (scripts[i].scriptIdPart === providedId) { match = scripts[i]; break; }
+            }
+            var resolved = match && match.scriptName;
+            if (!resolved) {
+              return { error: 'Script id "' + providedId + '" not found in pine-facade list — cannot resolve scriptName for save (would corrupt cloud name).' };
+            }
+            return doSave(providedId, resolved);
+          })
+          .catch(function(e) { return { error: e.message }; });
       }
 
       var target = providedName.toLowerCase();
-      return fetch('https://pine-facade.tradingview.com/pine-facade/list/?filter=saved', { credentials: 'include' })
-        .then(function(r) {
-          if (!r.ok) return { error: 'pine-facade list returned ' + r.status };
-          return r.json();
-        })
+      return fetchList()
         .then(function(scripts) {
-          if (scripts && scripts.error) return scripts;
-          if (!Array.isArray(scripts)) return { error: 'pine-facade list returned unexpected data' };
           var match = null;
           for (var i = 0; i < scripts.length; i++) {
             var sn = (scripts[i].scriptName || '').toLowerCase();
@@ -352,6 +389,8 @@ export async function saveSource({ id, name, source }) {
             }
           }
           if (!match) return { error: 'Script "' + providedName + '" not found. Use pine_list_scripts to see available scripts.' };
+          // Use the cloud's current scriptName — never the provided lookup
+          // string — so a fuzzy-match save doesn't accidentally rename.
           return doSave(match.scriptIdPart, match.scriptName || match.scriptTitle);
         })
         .catch(function(e) { return { error: e.message }; });
