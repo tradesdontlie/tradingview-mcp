@@ -700,6 +700,15 @@ export async function addToChart({ script_name } = {}) {
   await dismissSaveConfirmDialog();
   await sleep(200);
 
+  // TradingView's Pine Editor exposes the "add to chart" action differently
+  // depending on layout:
+  //   - Bottom-dock layout (older default): a labeled button "Save and add to chart",
+  //     "Add to chart", or "Update on chart" sits next to Save in the toolbar.
+  //   - Side-panel layout (newer/detached): no labeled button — saving the script
+  //     auto-binds the running study to the new compiled source. The Save button
+  //     IS the add-to-chart action in this layout.
+  // Strategy: try labeled buttons first, then fall back to dispatching Ctrl+S
+  // (which triggers the same backend save+rebind path).
   const clicked = await evaluate(`
     (function() {
       var btns = document.querySelectorAll('button');
@@ -717,15 +726,30 @@ export async function addToChart({ script_name } = {}) {
     })()
   `);
 
+  let buttonClickedLabel = clicked;
   if (!clicked) {
-    return {
-      success: false,
-      error: 'No Add-to-Chart / Update-on-Chart / Save-and-Add button found',
-      study_id_before: script_name ? (studiesBefore.find(s => s.name === script_name)?.id || null) : null,
-      study_id_after: null,
-      study_replaced: false,
-      elapsed_ms: Date.now() - start,
-    };
+    // Side-panel-layout fallback: Ctrl+S triggers TV's save+rebind flow which
+    // serves as the add-to-chart action when no labeled button is present.
+    const c = await getClient();
+    await c.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: 2, key: 's', code: 'KeyS', windowsVirtualKeyCode: 83 });
+    await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 's', code: 'KeyS' });
+    buttonClickedLabel = 'Ctrl+S (side-panel layout fallback)';
+    await sleep(800);
+    // Confirm Save dialog if it appeared (new/unsaved script)
+    await evaluate(`
+      (function() {
+        var btns = document.querySelectorAll('button');
+        for (var i = 0; i < btns.length; i++) {
+          if (btns[i].offsetParent === null) continue;
+          var text = (btns[i].textContent || '').trim();
+          if (text === 'Save') {
+            var parent = btns[i].closest('[class*="dialog"], [class*="modal"], [class*="popup"], [role="dialog"]');
+            if (parent) { btns[i].click(); return true; }
+          }
+        }
+        return false;
+      })()
+    `);
   }
 
   // Post-click: dismiss any confirmation/warning dialog (e.g., "Save before adding")
@@ -754,7 +778,7 @@ export async function addToChart({ script_name } = {}) {
 
   return {
     success: true,
-    button_clicked: clicked,
+    button_clicked: buttonClickedLabel,
     script_name: script_name || null,
     study_id_before,
     study_id_after,

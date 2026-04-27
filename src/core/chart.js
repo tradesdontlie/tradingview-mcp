@@ -172,11 +172,13 @@ export async function replaceStudy({ script_name, inputs: inputsRaw, _deps }) {
   return {
     success: addResult.success && !inputs_error,
     script_name,
+    button_clicked: addResult.button_clicked || null,
     study_id_before: addResult.study_id_before,
     study_id_after: addResult.study_id_after,
     study_replaced: addResult.study_replaced,
     inputs_applied,
     inputs_error,
+    add_to_chart_error: addResult.error || null,
     elapsed_ms: addResult.elapsed_ms,
   };
 }
