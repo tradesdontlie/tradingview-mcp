@@ -43,13 +43,27 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 
 ### "Work on Pine Script"
 1. `pine_set_source` → inject code into editor
-2. `pine_smart_compile` → compile with auto-detection + error check
+2. `pine_smart_compile` → compile with auto-detection + error check. Pass `target: "save" | "add_to_chart" | "save_and_add"` to force the button choice (default = legacy heuristic).
 3. `pine_get_errors` → read compilation errors
 4. `pine_get_console` → read log.info() output
 5. `pine_get_source` → read current code back (WARNING: can be very large for complex scripts)
 6. `pine_save` → save to TradingView cloud
 7. `pine_new` → create blank indicator/strategy/library
 8. `pine_open` → load a saved script by name
+9. `pine_add_to_chart` → click Add-to-Chart and **confirm** study was replaced (polls study list). Use after editing a script that's already on the chart — `pine_smart_compile` may default to Save and leave the chart bound to old code.
+10. `pine_save_and_add_to_chart` → compound (save + dialog dismiss + add-to-chart) in a single round-trip.
+11. `chart_replace_study` → compound: re-add a Pine script with input overrides applied to the new study (eliminates "settings reset to defaults on re-add" friction).
+
+### "Profile a Pine script's execution cost"
+1. `pine_open` (or `pine_set_source` + `pine_smart_compile`) → load the script
+2. `pine_profiler_enable` → toggle TV's Profiler Mode on (idempotent)
+3. (let the script run / scroll bars so timings populate)
+4. `pine_profiler_get_data` with `top_n: 10` → per-line ms / pct, sorted hottest-first
+5. `pine_profiler_disable` → leave editor in pre-enable state
+6. If get_data returns empty, `pine_profiler_probe` dumps DOM landscape so selectors can be updated
+
+### "Did the script hit a runtime warning (timeout, max bars, loop limit)?"
+- `pine_runtime_warnings` → reads the chart pane for warning/error banners (e.g., "script takes too long, 40s limit"). Pure read. Distinct from `pine_get_errors` (compile markers) and `pine_get_console` (log output) — those don't capture runtime overlay banners.
 
 ### "Practice trading with replay"
 1. `replay_start` with `date: "2025-03-01"` → enter replay mode

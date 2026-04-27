@@ -33,8 +33,25 @@ register('pine', {
       },
     }],
     ['compile', {
-      description: 'Smart compile: detect button, compile, check errors',
-      handler: () => core.smartCompile(),
+      description: 'Smart compile: detect button, compile, check errors. --target save|add_to_chart|save_and_add overrides heuristic',
+      options: {
+        target: { type: 'string', short: 't', description: 'Force button choice: save | add_to_chart | save_and_add' },
+      },
+      handler: (opts) => core.smartCompile({ target: opts.target }),
+    }],
+    ['add-to-chart', {
+      description: 'Click Add-to-Chart and confirm study replacement',
+      options: {
+        name: { type: 'string', short: 'n', description: 'Optional script_name to track study_id before/after' },
+      },
+      handler: (opts) => core.addToChart({ script_name: opts.name }),
+    }],
+    ['save-and-add', {
+      description: 'Save then Add-to-Chart (compound, single round-trip)',
+      options: {
+        name: { type: 'string', short: 'n', description: 'Optional script_name to track study_id before/after' },
+      },
+      handler: (opts) => core.saveAndAddToChart({ script_name: opts.name }),
     }],
     ['raw-compile', {
       description: 'Click compile/add button without smart detection',

@@ -3,11 +3,12 @@ import { jsonResult } from './_format.js';
 import * as core from '../core/ui.js';
 
 export function registerUiTools(server) {
-  server.tool('ui_click', 'Click a UI element by aria-label, data-name, text content, or class substring', {
+  server.tool('ui_click', 'Click a UI element by aria-label, data-name, text content, or class substring. Default uses element.click() (works for most TV buttons in modern builds). Pass event_chain="full" to dispatch the full pointerdown→mousedown→pointerup→mouseup→click sequence for stubborn buttons with defensive React handlers.', {
     by: z.enum(['aria-label', 'data-name', 'text', 'class-contains']).describe('Selector strategy'),
     value: z.string().describe('Value to match against the chosen selector strategy'),
-  }, async ({ by, value }) => {
-    try { return jsonResult(await core.click({ by, value })); }
+    event_chain: z.enum(['minimal', 'full']).optional().describe('Click style. "minimal" (default): plain element.click(). "full": pointer + mouse event sequence — try this if a button does not respond to "minimal".'),
+  }, async ({ by, value, event_chain }) => {
+    try { return jsonResult(await core.click({ by, value, event_chain })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 

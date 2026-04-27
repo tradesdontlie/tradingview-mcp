@@ -71,6 +71,17 @@ register('scroll', {
   },
 });
 
+register('replace-study', {
+  description: 'Re-add a Pine script with optional input overrides (compound, single round-trip)',
+  options: {
+    inputs: { type: 'string', short: 'i', description: 'JSON string of input overrides, e.g. \'{"length": 50}\'' },
+  },
+  handler: (opts, positionals) => {
+    if (!positionals[0]) throw new Error('Script name required. Usage: tv replace-study "vse_parity_probe_1m" --inputs \'{"emaLen": 5}\'');
+    return core.replaceStudy({ script_name: positionals.join(' '), inputs: opts.inputs });
+  },
+});
+
 register('discover', {
   description: 'Report which TradingView API paths are available',
   handler: () => healthCore.discover(),

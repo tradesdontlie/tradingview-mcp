@@ -9,8 +9,9 @@ register('ui', {
       options: {
         by: { type: 'string', short: 'b', description: 'Selector: aria-label, data-name, text, class-contains' },
         value: { type: 'string', short: 'v', description: 'Value to match' },
+        chain: { type: 'string', short: 'c', description: 'Event chain: minimal (default) | full — use full for stubborn buttons' },
       },
-      handler: (opts) => core.click({ by: opts.by || 'text', value: opts.value }),
+      handler: (opts) => core.click({ by: opts.by || 'text', value: opts.value, event_chain: opts.chain }),
     }],
     ['keyboard', {
       description: 'Press a keyboard key or shortcut',

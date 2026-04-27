@@ -115,6 +115,72 @@ export async function manageIndicator({ action, indicator, entity_id, inputs: in
   }
 }
 
+/**
+ * Compound: re-add a Pine script to the chart with optional input overrides
+ * applied to the new study in a single round-trip. Eliminates the
+ * "settings reset to defaults on re-add" friction.
+ *
+ *   1. Open the named Pine script in the editor (loads cloud source via pine-facade)
+ *   2. Click Add-to-Chart and poll chart state until the running study is replaced
+ *   3. Apply `inputs` to the new study via the same path as indicator_set_inputs
+ */
+export async function replaceStudy({ script_name, inputs: inputsRaw, _deps }) {
+  if (!script_name) throw new Error('script_name is required');
+  const { evaluate } = _resolve(_deps);
+
+  const inputs = inputsRaw
+    ? (typeof inputsRaw === 'string' ? JSON.parse(inputsRaw) : inputsRaw)
+    : null;
+
+  // Step 1+2 live in pine.js — import lazily to avoid circular dep at module load
+  const pine = await import('./pine.js');
+  await pine.openScript({ name: script_name });
+  // Brief settle so editor binds source before we click add-to-chart
+  await new Promise(r => setTimeout(r, 400));
+  const addResult = await pine.addToChart({ script_name });
+
+  let inputs_applied = null;
+  let inputs_error = null;
+  if (inputs && typeof inputs === 'object' && Object.keys(inputs).length > 0 && addResult.study_id_after) {
+    try {
+      const inputsJson = JSON.stringify(inputs);
+      const result = await evaluate(`
+        (function() {
+          var chart = ${CHART_API};
+          var study = chart.getStudyById(${safeString(addResult.study_id_after)});
+          if (!study) return { error: 'Study not found post-replace: ' + ${safeString(addResult.study_id_after)} };
+          var currentInputs = study.getInputValues();
+          var overrides = ${inputsJson};
+          var updated = {};
+          for (var i = 0; i < currentInputs.length; i++) {
+            if (overrides.hasOwnProperty(currentInputs[i].id)) {
+              currentInputs[i].value = overrides[currentInputs[i].id];
+              updated[currentInputs[i].id] = overrides[currentInputs[i].id];
+            }
+          }
+          study.setInputValues(currentInputs);
+          return { updated_inputs: updated };
+        })()
+      `);
+      if (result?.error) inputs_error = result.error;
+      else inputs_applied = result.updated_inputs;
+    } catch (err) {
+      inputs_error = err.message;
+    }
+  }
+
+  return {
+    success: addResult.success && !inputs_error,
+    script_name,
+    study_id_before: addResult.study_id_before,
+    study_id_after: addResult.study_id_after,
+    study_replaced: addResult.study_replaced,
+    inputs_applied,
+    inputs_error,
+    elapsed_ms: addResult.elapsed_ms,
+  };
+}
+
 export async function getVisibleRange() {
   const result = await evaluate(`
     (function() {
