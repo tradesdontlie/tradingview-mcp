@@ -39,6 +39,14 @@ export function registerChartTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
+  server.tool('chart_replace_study', 'Compound: re-add a Pine script to the chart with optional input overrides applied to the new study in a single round-trip. Eliminates the "settings reset to defaults on re-add" friction. Orchestrates: pine_open → pine_add_to_chart (with study replacement polling) → indicator_set_inputs.', {
+    script_name: z.string().describe('Name of the saved Pine script to (re-)add'),
+    inputs: z.string().optional().describe('JSON string of input overrides applied to the new study, e.g. \'{"length": 50}\''),
+  }, async ({ script_name, inputs }) => {
+    try { return jsonResult(await core.replaceStudy({ script_name, inputs })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
   server.tool('chart_get_visible_range', 'Get the visible date range (unix timestamps) and bars range on the chart', {}, async () => {
     try { return jsonResult(await core.getVisibleRange()); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }

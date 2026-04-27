@@ -35,8 +35,25 @@ export function registerPineTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('pine_smart_compile', 'Intelligent compile: detects button, compiles, checks errors, reports study changes', {}, async () => {
-    try { return jsonResult(await core.smartCompile()); }
+  server.tool('pine_smart_compile', 'Intelligent compile: detects button, compiles, checks errors, reports study changes. Pass target to override the heuristic: "save" | "add_to_chart" | "save_and_add". Default keeps the legacy heuristic.', {
+    target: z.enum(['save', 'add_to_chart', 'save_and_add']).optional()
+      .describe('Force the button choice. Default = heuristic (Save+Add if available, else Add, else Update, else Save).'),
+  }, async ({ target }) => {
+    try { return jsonResult(await core.smartCompile({ target })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('pine_add_to_chart', 'Click Add-to-Chart for the currently open Pine script and confirm the running study was replaced (polls chart.getAllStudies). Use this after editing a script that is already on the chart — pine_smart_compile may default to Save and leave the running study bound to old code.', {
+    script_name: z.string().optional().describe('Optional: name of the target script if multiple studies exist. Used to compute study_id_before/after.'),
+  }, async ({ script_name }) => {
+    try { return jsonResult(await core.addToChart({ script_name })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('pine_save_and_add_to_chart', 'Compound: save the script (handling the name dialog) then click Add-to-Chart, with study-replacement polling — single round-trip for the most common edit→deploy flow.', {
+    script_name: z.string().optional().describe('Optional script name for study_id tracking'),
+  }, async ({ script_name }) => {
+    try { return jsonResult(await core.saveAndAddToChart({ script_name })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 

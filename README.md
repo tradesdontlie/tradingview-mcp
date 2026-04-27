@@ -274,15 +274,60 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 | Tool | Step |
 |------|------|
 | `pine_set_source` | 1. Inject code into editor |
-| `pine_smart_compile` | 2. Compile with auto-detection + error check |
+| `pine_smart_compile` | 2. Compile with auto-detection + error check (pass `target: "save" \| "add_to_chart" \| "save_and_add"` to override the heuristic) |
 | `pine_get_errors` | 3. Read compilation errors if any |
 | `pine_get_console` | 4. Read log.info() output |
 | `pine_save` | 5. Save to TradingView cloud |
+| `pine_add_to_chart` | Click Add-to-Chart and **confirm** study was replaced (polls study list). Use after editing a script that's already on the chart. |
+| `pine_save_and_add_to_chart` | Compound: save + dismiss save dialog + add-to-chart, single round-trip |
 | `pine_get_source` | Read current script (**warning: can be 200KB+ for complex scripts**) |
 | `pine_new` | Create blank indicator/strategy/library |
 | `pine_open` / `pine_list_scripts` | Open or list saved scripts |
 | `pine_analyze` | Offline static analysis (no chart needed) |
 | `pine_check` | Server-side compile check (no chart needed) |
+| `chart_replace_study` | Compound: re-add a Pine script with input overrides applied to the new study (`pine_open` → `pine_add_to_chart` → `indicator_set_inputs` in one round-trip). |
+
+### Pine Profiler
+
+Drives TradingView's built-in Pine Profiler UI (Pine Editor → "..." menu → Developer Tools → Profiler Mode) so agents can measure per-line execution cost. Useful for diagnosing scripts approaching TV's 40-second per-execution wall-clock limit.
+
+| Tool | What it does |
+|------|--------------|
+| `pine_profiler_enable` | Toggle Profiler Mode on for the open script (idempotent) |
+| `pine_profiler_disable` | Toggle Profiler Mode off (idempotent) |
+| `pine_profiler_get_data` | Read per-line metrics from the panel; pass `top_n` to limit output |
+| `pine_runtime_warnings` | Read runtime warning/error banners on the chart (40s timeout, max bars back, loop limit). Pure read. |
+| `pine_profiler_probe` | Dump DOM around the profiler — for debugging when selectors drift |
+
+Example workflow (CLI):
+
+```bash
+tv pine open "vse_parity_probe_1m"
+tv profiler enable
+# wait for the script to execute / scroll some bars
+tv profiler get --top 10
+tv profiler warnings        # check for "script takes too long" runtime banner
+tv profiler disable
+```
+
+Example workflow (MCP, conceptual):
+
+```jsonc
+// 1. Enable
+{"tool": "pine_profiler_enable"}
+// → { "success": true, "was_already_enabled": false, "panel_visible": true }
+
+// 2. Read top-10 hottest lines
+{"tool": "pine_profiler_get_data", "args": {"top_n": 10}}
+// → { "success": true, "total_execution_ms": 18723.4, "bar_count": 2880,
+//     "lines": [ {"line": 263, "ms": 4012.1, "pct": 21.4, "raw": "..."}, ... ] }
+
+// 3. Disable when done
+{"tool": "pine_profiler_disable"}
+// → { "success": true, "was_already_disabled": false }
+```
+
+If `pine_profiler_get_data` returns no rows, run `pine_profiler_probe` — it dumps the relevant DOM landscape (panel anchors, menu items, Monaco state) so selectors in `src/core/profiler.js` can be updated against whatever TradingView shipped most recently.
 
 ### Replay Mode
 
@@ -306,7 +351,7 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 | `batch_run` | Run action across multiple symbols/timeframes |
 | `watchlist_get` / `watchlist_add` | Read/modify watchlist |
 | `layout_list` / `layout_switch` | Manage saved layouts |
-| `ui_open_panel` / `ui_click` / `ui_evaluate` | UI automation |
+| `ui_open_panel` / `ui_click` / `ui_evaluate` | UI automation. `ui_click` accepts `event_chain: "minimal" \| "full"` (default minimal — opt into full for stubborn buttons). |
 | `tv_launch` / `tv_health_check` / `tv_discover` | Connection management |
 
 ## Context Management

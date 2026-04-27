@@ -3,7 +3,57 @@
  * All functions accept plain options objects and return plain JS objects.
  * They throw on error (callers catch and format).
  */
-import { evaluate, evaluateAsync, getClient } from '../connection.js';
+import { evaluate, evaluateAsync, getClient, safeString } from '../connection.js';
+
+const CHART_API = 'window.TradingViewApi._activeChartWidgetWV.value()';
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function snapshotStudies() {
+  return await evaluate(`
+    (function() {
+      try {
+        var chart = ${CHART_API};
+        return chart.getAllStudies().map(function(s) { return { id: s.id, name: s.name || s.title || 'unknown' }; });
+      } catch(e) { return []; }
+    })()
+  `) || [];
+}
+
+async function dismissSaveConfirmDialog() {
+  return await evaluate(`
+    (function() {
+      var btns = document.querySelectorAll('button');
+      for (var i = 0; i < btns.length; i++) {
+        var b = btns[i];
+        if (b.offsetParent === null) continue;
+        var text = (b.textContent || '').trim();
+        if (/discard|don'?t save|open anyway|skip/i.test(text)) {
+          var parent = b.closest('[class*="dialog"], [class*="modal"], [class*="popup"], [role="dialog"]');
+          if (parent) { b.click(); return true; }
+        }
+      }
+      return false;
+    })()
+  `);
+}
+
+function detectStudyReplacement(before, after, scriptName) {
+  if (before.length !== after.length) return true;
+  if (scriptName) {
+    const b = before.find(s => s.name === scriptName);
+    const a = after.find(s => s.name === scriptName);
+    if (b && a && b.id !== a.id) return true;
+    if (!b && a) return true;
+    if (b && !a) return true;
+    return false;
+  }
+  const beforeIds = new Set(before.map(s => s.id));
+  const afterIds = new Set(after.map(s => s.id));
+  for (const id of afterIds) if (!beforeIds.has(id)) return true;
+  for (const id of beforeIds) if (!afterIds.has(id)) return true;
+  return false;
+}
 
 // ── Monaco finder (injected into TV page) ──
 const FIND_MONACO = `
@@ -426,9 +476,13 @@ export async function getConsole() {
   return { success: true, entries: entries || [], entry_count: entries?.length || 0 };
 }
 
-export async function smartCompile() {
+export async function smartCompile({ target } = {}) {
   const editorReady = await ensurePineEditorOpen();
   if (!editorReady) throw new Error('Could not open Pine Editor.');
+
+  if (target && !['save', 'add_to_chart', 'save_and_add'].includes(target)) {
+    throw new Error(`Invalid target: ${target}. Must be one of: save, add_to_chart, save_and_add.`);
+  }
 
   const studiesBefore = await evaluate(`
     (function() {
@@ -440,28 +494,66 @@ export async function smartCompile() {
     })()
   `);
 
+  const targetJson = JSON.stringify(target || null);
   const buttonClicked = await evaluate(`
     (function() {
+      var target = ${targetJson};
       var btns = document.querySelectorAll('button');
-      var addBtn = null;
-      var updateBtn = null;
-      var saveBtn = null;
+      var addBtn = null, updateBtn = null, saveBtn = null, saveAndAddBtn = null;
       for (var i = 0; i < btns.length; i++) {
-        var text = btns[i].textContent.trim();
-        if (/save and add to chart/i.test(text)) {
-          btns[i].click();
-          return 'Save and add to chart';
-        }
+        if (btns[i].offsetParent === null) continue;
+        var text = (btns[i].textContent || '').trim();
+        if (!saveAndAddBtn && /save and add to chart/i.test(text)) saveAndAddBtn = btns[i];
         if (!addBtn && /^add to chart$/i.test(text)) addBtn = btns[i];
         if (!updateBtn && /^update on chart$/i.test(text)) updateBtn = btns[i];
-        if (!saveBtn && btns[i].className.indexOf('saveButton') !== -1 && btns[i].offsetParent !== null) saveBtn = btns[i];
+        if (!saveBtn && btns[i].className.indexOf('saveButton') !== -1) saveBtn = btns[i];
       }
+      // Explicit-target routing
+      if (target === 'save') {
+        if (saveBtn) { saveBtn.click(); return 'Pine Save'; }
+        return null;
+      }
+      if (target === 'add_to_chart') {
+        if (addBtn) { addBtn.click(); return 'Add to chart'; }
+        if (updateBtn) { updateBtn.click(); return 'Update on chart'; }
+        return null;
+      }
+      if (target === 'save_and_add') {
+        if (saveAndAddBtn) { saveAndAddBtn.click(); return 'Save and add to chart'; }
+        // Compound fallback: click save then add (handled in JS-side step below — we just click save here)
+        if (saveBtn) { saveBtn.click(); return 'Pine Save (compound step 1)'; }
+        return null;
+      }
+      // Default heuristic (backward compat)
+      if (saveAndAddBtn) { saveAndAddBtn.click(); return 'Save and add to chart'; }
       if (addBtn) { addBtn.click(); return 'Add to chart'; }
       if (updateBtn) { updateBtn.click(); return 'Update on chart'; }
       if (saveBtn) { saveBtn.click(); return 'Pine Save'; }
       return null;
     })()
   `);
+
+  // For save_and_add, if the single Save+Add button wasn't found we clicked Save first;
+  // now dismiss the save-confirm dialog and click Add to chart in a second step.
+  if (target === 'save_and_add' && buttonClicked && /compound step 1/.test(buttonClicked)) {
+    await sleep(800);
+    await dismissSaveConfirmDialog();
+    await sleep(300);
+    await evaluate(`
+      (function() {
+        var btns = document.querySelectorAll('button');
+        for (var i = 0; i < btns.length; i++) {
+          if (btns[i].offsetParent === null) continue;
+          var text = (btns[i].textContent || '').trim();
+          if (/^add to chart$/i.test(text) || /^update on chart$/i.test(text)) {
+            btns[i].click();
+            return text;
+          }
+        }
+        return null;
+      })()
+    `);
+  }
 
   if (!buttonClicked) {
     const c = await getClient();
@@ -586,6 +678,157 @@ export async function openScript({ name }) {
   }
 
   return { success: true, name: result.name, script_id: result.id, lines: result.lines, source: 'internal_api', opened: true };
+}
+
+/**
+ * Click Add-to-Chart for the currently open Pine script and confirm replacement
+ * by polling chart.getAllStudies(). Distinct from `compile`/`smartCompile`:
+ * this guarantees the running study is rebound to the latest compiled source,
+ * not just saved to the cloud.
+ *
+ * Returns:
+ *   { success, button_clicked, study_id_before, study_id_after, study_replaced, elapsed_ms }
+ */
+export async function addToChart({ script_name } = {}) {
+  const editorReady = await ensurePineEditorOpen();
+  if (!editorReady) throw new Error('Could not open Pine Editor.');
+
+  const start = Date.now();
+  const studiesBefore = await snapshotStudies();
+
+  // Pre-click cleanup: dismiss any lingering save-confirm dialog
+  await dismissSaveConfirmDialog();
+  await sleep(200);
+
+  // TradingView's Pine Editor exposes the "add to chart" action differently
+  // depending on layout:
+  //   - Bottom-dock layout (older default): a labeled button "Save and add to chart",
+  //     "Add to chart", or "Update on chart" sits next to Save in the toolbar.
+  //   - Side-panel layout (newer/detached): no labeled button — saving the script
+  //     auto-binds the running study to the new compiled source. The Save button
+  //     IS the add-to-chart action in this layout.
+  // Strategy: try labeled buttons first, then fall back to dispatching Ctrl+S
+  // (which triggers the same backend save+rebind path).
+  const clicked = await evaluate(`
+    (function() {
+      var btns = document.querySelectorAll('button');
+      for (var i = 0; i < btns.length; i++) {
+        if (btns[i].offsetParent === null) continue;
+        var text = (btns[i].textContent || '').trim();
+        if (/save and add to chart/i.test(text)) { btns[i].click(); return text; }
+      }
+      for (var j = 0; j < btns.length; j++) {
+        if (btns[j].offsetParent === null) continue;
+        var t2 = (btns[j].textContent || '').trim();
+        if (/^add to chart$/i.test(t2) || /^update on chart$/i.test(t2)) { btns[j].click(); return t2; }
+      }
+      return null;
+    })()
+  `);
+
+  let buttonClickedLabel = clicked;
+  if (!clicked) {
+    // Side-panel-layout fallback: Ctrl+S triggers TV's save+rebind flow which
+    // serves as the add-to-chart action when no labeled button is present.
+    const c = await getClient();
+    await c.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: 2, key: 's', code: 'KeyS', windowsVirtualKeyCode: 83 });
+    await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 's', code: 'KeyS' });
+    buttonClickedLabel = 'Ctrl+S (side-panel layout fallback)';
+    await sleep(800);
+    // Confirm Save dialog if it appeared (new/unsaved script)
+    await evaluate(`
+      (function() {
+        var btns = document.querySelectorAll('button');
+        for (var i = 0; i < btns.length; i++) {
+          if (btns[i].offsetParent === null) continue;
+          var text = (btns[i].textContent || '').trim();
+          if (text === 'Save') {
+            var parent = btns[i].closest('[class*="dialog"], [class*="modal"], [class*="popup"], [role="dialog"]');
+            if (parent) { btns[i].click(); return true; }
+          }
+        }
+        return false;
+      })()
+    `);
+  }
+
+  // Post-click: dismiss any confirmation/warning dialog (e.g., "Save before adding")
+  await sleep(500);
+  await dismissSaveConfirmDialog();
+
+  // Poll for study replacement
+  const MAX_POLL_MS = 5000;
+  const POLL_INTERVAL_MS = 250;
+  let studiesAfter = studiesBefore;
+  let study_replaced = false;
+  const pollEnd = Date.now() + MAX_POLL_MS;
+  while (Date.now() < pollEnd) {
+    await sleep(POLL_INTERVAL_MS);
+    studiesAfter = await snapshotStudies();
+    if (detectStudyReplacement(studiesBefore, studiesAfter, script_name)) {
+      study_replaced = true;
+      break;
+    }
+  }
+
+  const study_id_before = script_name ? (studiesBefore.find(s => s.name === script_name)?.id || null) : null;
+  const study_id_after = script_name
+    ? (studiesAfter.find(s => s.name === script_name)?.id || null)
+    : (studiesAfter.find(s => !studiesBefore.some(b => b.id === s.id))?.id || null);
+
+  return {
+    success: true,
+    button_clicked: buttonClickedLabel,
+    script_name: script_name || null,
+    study_id_before,
+    study_id_after,
+    study_replaced,
+    elapsed_ms: Date.now() - start,
+  };
+}
+
+/**
+ * Compound: Save then Add-to-Chart, in a single MCP round-trip. Equivalent to
+ * smartCompile({ target: 'save_and_add' }) but returns study replacement
+ * confirmation instead of just button-click telemetry.
+ */
+export async function saveAndAddToChart({ script_name } = {}) {
+  const editorReady = await ensurePineEditorOpen();
+  if (!editorReady) throw new Error('Could not open Pine Editor.');
+
+  const start = Date.now();
+  const studiesBefore = await snapshotStudies();
+
+  // Save first
+  const c = await getClient();
+  await c.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: 2, key: 's', code: 'KeyS', windowsVirtualKeyCode: 83 });
+  await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 's', code: 'KeyS' });
+  await sleep(800);
+
+  // Confirm Save dialog if shown
+  await evaluate(`
+    (function() {
+      var btns = document.querySelectorAll('button');
+      for (var i = 0; i < btns.length; i++) {
+        if (btns[i].offsetParent === null) continue;
+        var text = (btns[i].textContent || '').trim();
+        if (text === 'Save') {
+          var parent = btns[i].closest('[class*="dialog"], [class*="modal"], [class*="popup"], [role="dialog"]');
+          if (parent) { btns[i].click(); return true; }
+        }
+      }
+      return false;
+    })()
+  `);
+  await sleep(500);
+
+  // Then Add-to-Chart with replacement polling
+  const addResult = await addToChart({ script_name });
+  return {
+    ...addResult,
+    save_step: 'completed',
+    elapsed_ms: Date.now() - start,
+  };
 }
 
 export async function listScripts() {

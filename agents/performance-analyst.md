@@ -17,6 +17,12 @@ Use these TradingView MCP tools:
 4. `chart_get_state` — get current symbol, timeframe, studies
 5. `capture_screenshot` — capture the chart and strategy tester
 
+### Performance / runtime health
+
+If the strategy is slow, near TV's 40s execution wall-clock, or showing intermittent stalls, also pull:
+6. `pine_runtime_warnings` — pure read; surfaces TV's overlay banners (execution_timeout, max_bars_back, loop_limit, memory_limit, etc.). A non-zero `warning_count` means TV throttled or aborted the script — your performance metrics may be incomplete or misleading.
+7. `pine_profiler_enable` → `pine_profiler_get_data` (top_n: 10) → `pine_profiler_disable` — per-line cost (% of total). Returns `ms: null` (TV's profiler DOM only renders %, not absolute ms); the % distribution is what matters for finding hot lines. The strategy must be on the chart and have run recently.
+
 ## Analysis Framework
 
 Evaluate the strategy on:

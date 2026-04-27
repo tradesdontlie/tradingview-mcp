@@ -3,12 +3,15 @@
  */
 import { evaluate, evaluateAsync, getClient } from '../connection.js';
 
-export async function click({ by, value }) {
+export async function click({ by, value, event_chain }) {
   const escaped = JSON.stringify(value);
+  const chain = event_chain === 'full' ? 'full' : 'minimal';
+  const chainJson = JSON.stringify(chain);
   const result = await evaluate(`
     (function() {
       var by = ${JSON.stringify(by)};
       var value = ${escaped};
+      var chain = ${chainJson};
       var el = null;
       if (by === 'aria-label') el = document.querySelector('[aria-label="' + value.replace(/"/g, '\\\\"') + '"]');
       else if (by === 'data-name') el = document.querySelector('[data-name="' + value.replace(/"/g, '\\\\"') + '"]');
@@ -20,8 +23,22 @@ export async function click({ by, value }) {
         }
       } else if (by === 'class-contains') el = document.querySelector('[class*="' + value.replace(/"/g, '\\\\"') + '"]');
       if (!el) return { found: false };
-      el.click();
-      return { found: true, tag: el.tagName.toLowerCase(), text: (el.textContent || '').trim().substring(0, 80), aria_label: el.getAttribute('aria-label') || null, data_name: el.getAttribute('data-name') || null };
+
+      if (chain === 'full') {
+        var rect = el.getBoundingClientRect();
+        var cx = rect.x + rect.width / 2;
+        var cy = rect.y + rect.height / 2;
+        var common = { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, button: 0 };
+        try { el.dispatchEvent(new PointerEvent('pointerdown', Object.assign({ pointerType: 'mouse' }, common))); } catch(e) {}
+        el.dispatchEvent(new MouseEvent('mousedown', common));
+        try { el.dispatchEvent(new PointerEvent('pointerup', Object.assign({ pointerType: 'mouse' }, common))); } catch(e) {}
+        el.dispatchEvent(new MouseEvent('mouseup', common));
+        el.dispatchEvent(new MouseEvent('click', common));
+      } else {
+        el.click();
+      }
+
+      return { found: true, tag: el.tagName.toLowerCase(), text: (el.textContent || '').trim().substring(0, 80), aria_label: el.getAttribute('aria-label') || null, data_name: el.getAttribute('data-name') || null, chain: chain };
     })()
   `);
   if (!result || !result.found) throw new Error('No matching element found for ' + by + '="' + value + '"');
