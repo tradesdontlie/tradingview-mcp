@@ -3,6 +3,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { registerHealthTools } from './tools/health.js';
 import { registerChartTools } from './tools/chart.js';
 import { registerPineTools } from './tools/pine.js';
+import { registerProfilerTools } from './tools/profiler.js';
 import { registerDataTools } from './tools/data.js';
 import { registerCaptureTools } from './tools/capture.js';
 import { registerDrawingTools } from './tools/drawing.js';
@@ -73,6 +74,7 @@ CONTEXT MANAGEMENT:
 registerHealthTools(server);
 registerChartTools(server);
 registerPineTools(server);
+registerProfilerTools(server);
 registerDataTools(server);
 registerCaptureTools(server);
 registerDrawingTools(server);

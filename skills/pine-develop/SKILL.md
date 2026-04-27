@@ -65,7 +65,18 @@ Common Pine Script errors:
 After clean compilation:
 1. `capture_screenshot` — take a screenshot to verify it looks right
 2. `data_get_strategy_results` — if it's a strategy, check performance
-3. Show the user the results
+3. `pine_runtime_warnings` — confirm no runtime banners (execution_timeout, max_bars_back, loop_limit). A `warning_count > 0` means the script compiled but is hitting a TV runtime limit; metrics in step 2 may be incomplete.
+4. Show the user the results
+
+## Step 6b: Profile if slow or near limits (optional)
+
+If step 3 reported `execution_timeout`, the script is visibly slow on high-tick instruments, or the user explicitly asks for performance analysis:
+
+1. `pine_profiler_enable` — toggle TV's Profiler Mode on
+2. Wait ~5–10 s for timings to populate
+3. `pine_profiler_get_data` with `top_n: 10` — per-line cost as % of total (TV does not expose absolute ms; only relative % + a visual bar)
+4. `pine_profiler_disable` — restore pre-profiler state
+5. Report the hottest lines back to the user with file:line refs so they can target the optimization
 
 ## Step 7: Iterate
 
