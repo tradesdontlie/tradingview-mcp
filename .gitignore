@@ -4,3 +4,6 @@ scripts/current.pine
 temp_*
 *.log
 discovery-log.json
+
+.mcp.json
+.DS_Store
