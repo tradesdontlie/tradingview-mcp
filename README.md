@@ -306,7 +306,8 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 | `batch_run` | Run action across multiple symbols/timeframes |
 | `watchlist_get` / `watchlist_add` | Read/modify watchlist |
 | `layout_list` / `layout_switch` | Manage saved layouts |
-| `ui_open_panel` / `ui_click` / `ui_evaluate` | UI automation |
+| `ui_open_panel` / `ui_click` | UI automation |
+| `ui_evaluate` | Arbitrary JS in the TradingView page (disabled by default — see [Security](#security)) |
 | `tv_launch` / `tv_health_check` / `tv_discover` | Connection management |
 
 ## Context Management
@@ -323,6 +324,26 @@ Tools return compact output by default to minimize context usage. For a typical 
 | Indicator inputs | Encrypted/encoded blobs auto-filtered |
 | `verbose: true` | Pass on any pine tool to get raw data with IDs/colors when needed |
 | `study_filter` | Target one indicator instead of scanning all |
+
+## Security
+
+### `ui_evaluate` (disabled by default)
+
+`ui_evaluate` runs arbitrary JavaScript in the TradingView page context via Chrome DevTools Protocol. It bypasses the input sanitization that protects every other tool, so it's disabled by default. Any prompt-injected content reaching it could exfiltrate session cookies, drive trades through the order panel, or pivot to other CDP-attached pages.
+
+To opt in (e.g. for power-user automation you trust end-to-end):
+
+```bash
+TRADINGVIEW_MCP_ALLOW_EVAL=1 npm start
+```
+
+When the flag is unset, the tool is not registered with the MCP server and direct calls into `core.uiEvaluate()` throw.
+
+| Env var | Default | Effect |
+|---|---|---|
+| `TRADINGVIEW_MCP_ALLOW_EVAL` | unset | When `1`, registers `ui_evaluate` and allows arbitrary JS in the TradingView page |
+
+See [SECURITY.md](SECURITY.md) for reporting vulnerabilities.
 
 ## Finding TradingView on Your System
 

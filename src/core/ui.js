@@ -288,6 +288,9 @@ export async function findElement({ query, strategy }) {
 }
 
 export async function uiEvaluate({ expression }) {
+  if (process.env.TRADINGVIEW_MCP_ALLOW_EVAL !== '1') {
+    throw new Error('ui_evaluate is disabled. Set TRADINGVIEW_MCP_ALLOW_EVAL=1 to enable arbitrary JS execution in the TradingView page context.');
+  }
   const result = await evaluate(expression);
   return { success: true, result };
 }

@@ -29,3 +29,12 @@ This project connects to a locally running TradingView Desktop instance via Chro
 - Do not expose port 9222 to your network or the internet
 - Do not pipe `tv stream` output to external services without reviewing the data
 - Keep your TradingView Desktop and Node.js installations up to date
+- Leave `TRADINGVIEW_MCP_ALLOW_EVAL` unset unless you specifically need `ui_evaluate` and trust every input that reaches it (see below)
+
+## Opt-in Capabilities
+
+Some capabilities are powerful enough that they're disabled by default and must be explicitly enabled via environment variable.
+
+| Env var | Default | What it unlocks | Risk |
+|---|---|---|---|
+| `TRADINGVIEW_MCP_ALLOW_EVAL` | unset | Registers `ui_evaluate`, which runs caller-supplied JavaScript in the TradingView page context via CDP | Bypasses all input sanitization. Prompt-injected content (chart data, page DOM, user text) reaching this tool can exfiltrate session cookies, place trades, or pivot to other CDP-attached pages. Only enable when every input source is trusted. |
