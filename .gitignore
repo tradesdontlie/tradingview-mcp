@@ -6,3 +6,4 @@ temp_*
 discovery-log.json
 
 .mcp.json
+.DS_Store
