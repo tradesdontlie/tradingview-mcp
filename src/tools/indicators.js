@@ -40,26 +40,121 @@ export function registerIndicatorTools(server) {
           var study = chart.getStudyById('${escapedId}');
           if (!study) return { error: 'Study not found: ${escapedId}' };
 
-          var currentInputs = study.getInputValues();
           var overrides = ${inputsJson};
           var updatedKeys = {};
+          var path = 'unknown';
+          var unverified = false;
 
-          for (var i = 0; i < currentInputs.length; i++) {
-            if (overrides.hasOwnProperty(currentInputs[i].id)) {
-              currentInputs[i].value = overrides[currentInputs[i].id];
-              updatedKeys[currentInputs[i].id] = overrides[currentInputs[i].id];
+          function countUpdated() { return Object.keys(updatedKeys).length; }
+          function publicInputSummary(inputs) {
+            return (inputs || []).map(function(input) {
+              return { id: input.id, name: input.name, value: input.value };
+            });
+          }
+          function getInputInfoSummary() {
+            try {
+              var info = study.getInputsInfo ? study.getInputsInfo() : [];
+              return (info || []).map(function(input) {
+                return {
+                  id: input.id,
+                  name: input.name || input.title || input.displayName,
+                  value: input.value,
+                  type: input.type,
+                };
+              });
+            } catch(e) {
+              return [];
+            }
+          }
+          function getPropertyInputs() {
+            var props = study._study
+              ? study._study.properties().inputs
+              : (study.properties ? study.properties().inputs : null);
+            var summary = [];
+            if (props) {
+              summary = Object.keys(props).map(function(k) {
+                var p = props[k];
+                return { id: k, value: (p && typeof p.value === 'function') ? p.value() : (p ? p._value : undefined) };
+              });
+            }
+            return { props: props, summary: summary };
+          }
+
+          // ── Path A: public getInputValues/setInputValues (works for built-ins) ──
+          var currentInputs = study.getInputValues ? study.getInputValues() : [];
+          if (currentInputs && currentInputs.length > 0) {
+            path = 'setInputValues';
+            for (var i = 0; i < currentInputs.length; i++) {
+              if (overrides.hasOwnProperty(currentInputs[i].id)) {
+                currentInputs[i].value = overrides[currentInputs[i].id];
+                updatedKeys[currentInputs[i].id] = overrides[currentInputs[i].id];
+              }
+            }
+            if (countUpdated() === 0) {
+              return {
+                error: 'No matching input IDs found for requested overrides',
+                requested_inputs: Object.keys(overrides),
+                available_inputs: publicInputSummary(currentInputs),
+              };
+            }
+            study.setInputValues(currentInputs);
+
+          } else {
+            // ── Path B: custom Pine scripts — getInputValues() returns [] ──
+            // Prefer properties so we can reject unknown IDs instead of silently
+            // claiming success for keys TradingView ignored.
+            var propResult = getPropertyInputs();
+            if (propResult.props) {
+              path = 'properties';
+              var keys = Object.keys(overrides);
+              for (var k = 0; k < keys.length; k++) {
+                var key = keys[k];
+                if (propResult.props[key] && typeof propResult.props[key].setValue === 'function') {
+                  propResult.props[key].setValue(overrides[key]);
+                  updatedKeys[key] = overrides[key];
+                }
+              }
+              if (countUpdated() === 0) {
+                return {
+                  error: 'No matching input IDs found for requested overrides',
+                  requested_inputs: keys,
+                  available_inputs: propResult.summary.length > 0 ? propResult.summary : getInputInfoSummary(),
+                };
+              }
+              // Trigger recompute via modifyStudy with exact updated inputs.
+              try { chart.modifyStudy('${escapedId}', { inputs: updatedKeys }); } catch(e) {
+                try { chart.modifyStudy('${escapedId}', {}); } catch(_) {}
+              }
+            } else {
+              // ── Path C: final public modifyStudy fallback ──
+              // This path is useful for study types with hidden input property
+              // internals, but the result cannot be verified locally.
+              try {
+                chart.modifyStudy('${escapedId}', { inputs: overrides });
+                path = 'modifyStudy';
+                updatedKeys = overrides;
+                unverified = true;
+              } catch(modErr) {
+                return {
+                  error: 'No input path available for this study type',
+                  modifyStudyError: modErr.message,
+                  available_inputs: getInputInfoSummary(),
+                };
+              }
             }
           }
 
-          study.setInputValues(currentInputs);
+          // Enumerate available inputs from properties for diagnostics
+          var propInputs = getPropertyInputs().summary;
+          var infoInputs = getInputInfoSummary();
 
-          // Some complex studies recompile after setInputValues, making getInputValues()
-          // temporarily return []. Return the values we set instead.
-          var allInputs = study.getInputValues();
+          var allInputs = study.getInputValues ? study.getInputValues() : [];
           return {
             updated_inputs: updatedKeys,
-            all_inputs: allInputs.length > 0 ? allInputs : currentInputs,
-            note: allInputs.length === 0 ? 'Study is recompiling — inputs shown are the values set' : undefined,
+            path: path,
+            all_inputs: allInputs.length > 0 ? allInputs : (propInputs.length > 0 ? propInputs : infoInputs),
+            unverified: unverified,
+            note: allInputs.length === 0 ? 'Custom script: getInputValues() empty — used fallback path; prefer IDs shown in all_inputs.' : undefined,
           };
         })()
       `);
@@ -75,8 +170,11 @@ export function registerIndicatorTools(server) {
         content: [{ type: 'text', text: JSON.stringify({
           success: true,
           entity_id,
+          path: result.path,
           updated_inputs: result.updated_inputs,
           all_inputs: result.all_inputs,
+          unverified: result.unverified,
+          note: result.note,
         }, null, 2) }],
       };
     } catch (err) {

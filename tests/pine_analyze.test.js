@@ -293,7 +293,11 @@ this_function_does_not_exist()`;
     // API returns { success: true, result: { errors2: [...] } } for compile errors
     const errors = result?.result?.errors2 || [];
     assert.ok(errors.length > 0, `Should have compilation errors, got: ${JSON.stringify(result).slice(0, 200)}`);
-    assert.ok(errors[0].message.includes('this_function_does_not_exist'), 'Error should mention the bad function');
+    assert.ok(
+      errors[0].message.includes('this_function_does_not_exist') ||
+        errors[0]?.ctx?.fullName === 'this_function_does_not_exist',
+      'Error should identify the bad function'
+    );
   });
 
   it('should handle empty source gracefully', async () => {

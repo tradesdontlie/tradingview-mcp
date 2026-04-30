@@ -3,6 +3,81 @@ import { waitForChartReady } from '../wait.js';
 
 const CHART_API = 'window.TradingViewApi._activeChartWidgetWV.value()';
 
+function jsonResult(obj, isError = false) {
+  return {
+    content: [{ type: 'text', text: JSON.stringify(obj, null, 2) }],
+    ...(isError && { isError: true }),
+  };
+}
+
+export function normalizeTimeframe(value) {
+  if (value === undefined || value === null) {
+    throw new Error('timeframe is required. Examples: 1, 5, 15, 60, 1h, 4h, D, W, M.');
+  }
+
+  const raw = String(value).trim();
+  if (!raw) {
+    throw new Error('timeframe cannot be empty. Examples: 1, 5, 15, 60, 1h, 4h, D, W, M.');
+  }
+
+  const compact = raw.replace(/\s+/g, '');
+
+  if (/^\d+$/.test(compact)) {
+    return compact;
+  }
+
+  if (compact === 'D' || compact === '1D') return 'D';
+  if (compact === 'W' || compact === '1W') return 'W';
+  if (compact === 'M' || compact === '1M') return 'M';
+
+  const uppercasePeriod = compact.match(/^(\d+)([DWM])$/);
+  if (uppercasePeriod) {
+    const count = Number(uppercasePeriod[1]);
+    const unit = uppercasePeriod[2];
+    return count === 1 ? unit : `${count}${unit}`;
+  }
+
+  const lower = compact.toLowerCase();
+
+  const minuteMatch = lower.match(/^(\d+)(m|min|mins|minute|minutes)$/);
+  if (minuteMatch) {
+    return minuteMatch[1];
+  }
+
+  const hourMatch = lower.match(/^(\d+)(h|hr|hrs|hour|hours)$/);
+  if (hourMatch) {
+    return String(Number(hourMatch[1]) * 60);
+  }
+
+  const dayMatch = lower.match(/^(\d+)?(d|day|days)$/);
+  if (dayMatch) {
+    const count = Number(dayMatch[1] || 1);
+    return count === 1 ? 'D' : `${count}D`;
+  }
+
+  const weekMatch = lower.match(/^(\d+)?(w|wk|wks|week|weeks)$/);
+  if (weekMatch) {
+    const count = Number(weekMatch[1] || 1);
+    return count === 1 ? 'W' : `${count}W`;
+  }
+
+  const monthMatch = lower.match(/^(\d+)?(mo|mon|month|months)$/);
+  if (monthMatch) {
+    const count = Number(monthMatch[1] || 1);
+    return count === 1 ? 'M' : `${count}M`;
+  }
+
+  throw new Error(`Unsupported timeframe: ${raw}. Use minute counts, 1h/4h, D, W, or M.`);
+}
+
+function timeframesMatch(actual, expected) {
+  try {
+    return normalizeTimeframe(actual) === normalizeTimeframe(expected);
+  } catch {
+    return String(actual) === String(expected);
+  }
+}
+
 export function registerChartTools(server) {
 
   server.tool('chart_get_state', 'Get current chart state (symbol, timeframe, chart type, indicators)', {}, async () => {
@@ -41,11 +116,16 @@ export function registerChartTools(server) {
     symbol: { type: 'string', description: 'Symbol to set (e.g., BTCUSD, AAPL, ES1!, NYMEX:CL1!)' },
   }, async ({ symbol }) => {
     try {
+      if (!symbol || typeof symbol !== 'string') {
+        return jsonResult({ success: false, error: 'symbol is required.' }, true);
+      }
+
+      const symbolLiteral = JSON.stringify(symbol.trim());
       await evaluateAsync(`
         (function() {
           var chart = ${CHART_API};
           return new Promise(function(resolve) {
-            chart.setSymbol('${symbol.replace(/'/g, "\\'")}', {});
+            chart.setSymbol(${symbolLiteral}, {});
             // Give TV a moment to start the symbol change
             setTimeout(resolve, 500);
           });
@@ -53,47 +133,64 @@ export function registerChartTools(server) {
       `);
 
       const ready = await waitForChartReady(symbol);
+      const actual = await evaluate(`
+        (function() {
+          var chart = ${CHART_API};
+          return { symbol: chart.symbol(), resolution: chart.resolution(), chartType: chart.chartType() };
+        })()
+      `);
 
-      return {
-        content: [{ type: 'text', text: JSON.stringify({
-          success: true,
-          symbol,
-          chart_ready: ready,
-        }, null, 2) }],
-      };
+      const requested = symbol.trim().toUpperCase();
+      const actualSymbol = String(actual?.symbol || '').toUpperCase();
+      const success = actualSymbol.length > 0 && (actualSymbol.includes(requested) || requested.includes(actualSymbol));
+      return jsonResult({
+        success,
+        requested_symbol: symbol.trim(),
+        actual_symbol: actual?.symbol,
+        resolution: actual?.resolution,
+        chartType: actual?.chartType,
+        chart_ready: ready,
+        error: success ? undefined : `TradingView reported symbol ${actual?.symbol ?? 'unknown'} after setting ${symbol.trim()}.`,
+      }, !success);
     } catch (err) {
-      return {
-        content: [{ type: 'text', text: JSON.stringify({ success: false, error: err.message }, null, 2) }],
-        isError: true,
-      };
+      return jsonResult({ success: false, error: err.message }, true);
     }
   });
 
   server.tool('chart_set_timeframe', 'Change the chart timeframe/resolution', {
-    timeframe: { type: 'string', description: 'Timeframe (e.g., 1, 5, 15, 60, D, W, M)' },
+    timeframe: { type: 'string', description: 'Timeframe/resolution. Accepts minute counts or aliases like 1m, 5m, 1h, 4h, D, W, M.' },
   }, async ({ timeframe }) => {
     try {
+      const requested = normalizeTimeframe(timeframe);
+      const timeframeLiteral = JSON.stringify(requested);
       await evaluate(`
         (function() {
           var chart = ${CHART_API};
-          chart.setResolution('${timeframe.replace(/'/g, "\\'")}', {});
+          chart.setResolution(${timeframeLiteral}, {});
         })()
       `);
 
-      const ready = await waitForChartReady(null, timeframe);
+      const ready = await waitForChartReady(null, requested);
+      const actual = await evaluate(`
+        (function() {
+          var chart = ${CHART_API};
+          return { symbol: chart.symbol(), resolution: chart.resolution(), chartType: chart.chartType() };
+        })()
+      `);
 
-      return {
-        content: [{ type: 'text', text: JSON.stringify({
-          success: true,
-          timeframe,
-          chart_ready: ready,
-        }, null, 2) }],
-      };
+      const success = timeframesMatch(actual?.resolution, requested);
+      return jsonResult({
+        success,
+        input_timeframe: timeframe,
+        requested_resolution: requested,
+        actual_resolution: actual?.resolution,
+        symbol: actual?.symbol,
+        chartType: actual?.chartType,
+        chart_ready: ready,
+        error: success ? undefined : `TradingView reported resolution ${actual?.resolution ?? 'unknown'} after setting ${requested}.`,
+      }, !success);
     } catch (err) {
-      return {
-        content: [{ type: 'text', text: JSON.stringify({ success: false, error: err.message }, null, 2) }],
-        isError: true,
-      };
+      return jsonResult({ success: false, error: err.message }, true);
     }
   });
 
@@ -102,20 +199,25 @@ export function registerChartTools(server) {
   }, async ({ chart_type }) => {
     try {
       const typeMap = {
-        'Bars': 0, 'Candles': 1, 'Line': 2, 'Area': 3,
-        'Renko': 4, 'Kagi': 5, 'PointAndFigure': 6, 'LineBreak': 7,
-        'HeikinAshi': 8, 'HollowCandles': 9,
+        bars: 0,
+        candles: 1,
+        line: 2,
+        area: 3,
+        renko: 4,
+        kagi: 5,
+        pointandfigure: 6,
+        linebreak: 7,
+        heikinashi: 8,
+        hollowcandles: 9,
       };
-      const typeNum = typeMap[chart_type] ?? Number(chart_type);
+      const typeKey = String(chart_type).trim();
+      const typeNum = typeMap[typeKey.replace(/\s+/g, '').toLowerCase()] ?? Number(typeKey);
 
       if (isNaN(typeNum)) {
-        return {
-          content: [{ type: 'text', text: JSON.stringify({
-            success: false,
-            error: `Unknown chart type: ${chart_type}. Use a name (Candles, Line, etc.) or number (0-9).`,
-          }, null, 2) }],
-          isError: true,
-        };
+        return jsonResult({
+          success: false,
+          error: `Unknown chart type: ${chart_type}. Use a name (Candles, Line, etc.) or number (0-9).`,
+        }, true);
       }
 
       await evaluate(`
@@ -125,14 +227,10 @@ export function registerChartTools(server) {
         })()
       `);
 
-      return {
-        content: [{ type: 'text', text: JSON.stringify({ success: true, chart_type, type_num: typeNum }, null, 2) }],
-      };
+      const actual = await evaluate(`${CHART_API}.chartType()`);
+      return jsonResult({ success: actual === typeNum, chart_type, type_num: typeNum, actual_chart_type: actual }, actual !== typeNum);
     } catch (err) {
-      return {
-        content: [{ type: 'text', text: JSON.stringify({ success: false, error: err.message }, null, 2) }],
-        isError: true,
-      };
+      return jsonResult({ success: false, error: err.message }, true);
     }
   });
 

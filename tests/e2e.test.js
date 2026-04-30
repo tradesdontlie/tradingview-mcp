@@ -1,26 +1,21 @@
 /**
  * E2E tests for TradingView MCP tools.
- * Requires TradingView Desktop running with --remote-debugging-port=9222
+ * Requires TradingView Desktop running with a chart open. Uses the repo
+ * connection adapter, so it supports direct CDP or the Electron bridge
+ * fallback.
  *
  * Run: node --test tests/e2e.test.js
  */
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import CDP from 'chrome-remote-interface';
+import { disconnect, evaluate as tvEvaluate, getClient } from '../src/connection.js';
 
 let client;
-let Runtime;
 
 // Helper: evaluate JS in TradingView context
 async function evaluate(expr) {
-  const { result } = await Runtime.evaluate({
-    expression: expr,
-    returnByValue: true,
-    awaitPromise: true,
-  });
-  if (result.subtype === 'error') throw new Error(result.description);
-  return result.value;
+  return tvEvaluate(expr, { awaitPromise: true });
 }
 
 // Helper: check if a specific API path exists
@@ -34,31 +29,23 @@ async function apiExists(path) {
 describe('TradingView MCP E2E Tests', () => {
 
   before(async () => {
-    // Connect to TradingView via CDP
     try {
-      const targets = await CDP.List({ host: 'localhost', port: 9222 });
-      const chartTarget = targets.find(t => t.url && t.url.includes('tradingview.com/chart'));
-      if (!chartTarget) throw new Error('No TradingView chart target found');
-
-      client = await CDP({ host: 'localhost', port: 9222, target: chartTarget.id });
-      await client.Runtime.enable();
-      await client.Page.enable();
-      Runtime = client.Runtime;
+      client = await getClient();
     } catch (err) {
-      console.error('Cannot connect to TradingView. Make sure it is running with --remote-debugging-port=9222');
+      console.error(`Cannot connect to TradingView: ${err.message}`);
       process.exit(1);
     }
   });
 
   after(async () => {
-    if (client) try { await client.close(); } catch {}
+    await disconnect();
   });
 
   // ─── Health & Connection ─────────────────────────────────────────
 
   describe('Health & Connection', () => {
-    it('should connect via CDP', () => {
-      assert.ok(client, 'CDP client connected');
+    it('should connect through the TradingView connection adapter', () => {
+      assert.ok(client, 'TradingView client connected');
     });
 
     it('should find chart API', async () => {
@@ -448,7 +435,7 @@ describe('TradingView MCP E2E Tests', () => {
   // ─── Screenshots ─────────────────────────────────────────────────
 
   describe('Screenshots', () => {
-    it('should capture page screenshot via CDP', async () => {
+    it('should capture page screenshot', async () => {
       const { data } = await client.Page.captureScreenshot({ format: 'png' });
       assert.ok(data, 'Screenshot data returned');
       assert.ok(data.length > 100, 'Screenshot has content');

@@ -1,6 +1,6 @@
 # TradingView MCP Bridge
 
-Personal AI assistant for your TradingView Desktop charts. Connects Claude Code to your local TradingView app via Chrome DevTools Protocol for AI-assisted chart analysis, Pine Script development, and workflow automation.
+Personal AI assistant for your TradingView Desktop charts. Connects Claude Code to your local TradingView app via Chrome DevTools Protocol, with an Electron bridge fallback for already-running TradingView Desktop sessions, for AI-assisted chart analysis, Pine Script development, and workflow automation.
 
 > **For personal use only.** See [Disclaimer](#disclaimer) for important information about TradingView's Terms of Service.
 
@@ -27,9 +27,11 @@ cd tradingview-mcp
 npm install
 ```
 
-### 2. Launch TradingView with CDP
+### 2. Launch TradingView
 
-TradingView Desktop must be running with Chrome DevTools Protocol enabled on port 9222.
+Best path: run TradingView Desktop with Chrome DevTools Protocol enabled on port 9222.
+If TradingView is already running without port 9222, the server can fall back to
+an Electron inspector bridge on port 9229 without relaunching TradingView.
 
 **Mac:**
 ```bash
@@ -206,19 +208,21 @@ The key flag: `--remote-debugging-port=9222`
 
 ```bash
 # Requires TradingView running with --remote-debugging-port=9222
+# or an already-running TradingView Desktop session reachable through the
+# Electron bridge fallback.
 npm test
 ```
 
-29 E2E tests covering: CDP connection, chart control, OHLCV data, Pine graphics pipeline, data window values, UI control, screenshots, and context size validation.
+57 tests covering: connection adapter, chart control, OHLCV data, Pine graphics pipeline, data window values, UI control, screenshots, context size validation, tool schema conversion, timeframe normalization, replay date parsing, and Pine compile parsing.
 
 ## Architecture
 
 ```
-Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  TradingView Desktop (Electron)
+Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222) or Electron bridge (port 9229)  ←→  TradingView Desktop
 ```
 
 - **Transport**: MCP over stdio
-- **Connection**: Chrome DevTools Protocol on localhost:9222
+- **Connection**: Chrome DevTools Protocol on localhost:9222, with an Electron webContents debugger bridge fallback on localhost:9229
 - **No dependencies** beyond `@modelcontextprotocol/sdk` and `chrome-remote-interface`
 
 ## Requirements

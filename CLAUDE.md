@@ -1,6 +1,8 @@
 # TradingView MCP — Claude Instructions
 
-68 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
+68 tools for reading and controlling a live TradingView Desktop chart via CDP
+on port 9222, with an Electron bridge fallback on port 9229 when TradingView is
+already running without direct CDP.
 
 ## Decision Tree — Which Tool When
 
@@ -35,7 +37,7 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 
 ### "Change the chart"
 - `chart_set_symbol` → switch ticker (e.g., "AAPL", "ES1!", "NYMEX:CL1!")
-- `chart_set_timeframe` → switch resolution (e.g., "1", "5", "15", "60", "D", "W")
+- `chart_set_timeframe` → switch resolution (e.g., "1", "5", "15", "60", "1h", "4h", "D", "W")
 - `chart_set_type` → switch chart style (Candles, HeikinAshi, Line, Area, Renko, etc.)
 - `chart_manage_indicator` → add or remove studies (use full name: "Relative Strength Index", not "RSI")
 - `chart_scroll_to_date` → jump to a date (ISO format: "2025-01-15")
@@ -123,7 +125,7 @@ These tools can return large payloads. Follow these rules to avoid context bloat
 ## Architecture
 
 ```
-Claude Code ←→ MCP Server (stdio) ←→ CDP (localhost:9222) ←→ TradingView Desktop (Electron)
+Claude Code ←→ MCP Server (stdio) ←→ CDP (localhost:9222) or Electron bridge (localhost:9229) ←→ TradingView Desktop
 ```
 
 Pine graphics path: `study._graphics._primitivesCollection.dwglines.get('lines').get(false)._primitivesDataById`

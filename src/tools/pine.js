@@ -83,6 +83,17 @@ async function ensurePineEditorOpen() {
   return false;
 }
 
+function formatPineCompilerMessage(item) {
+  let message = item?.message || '';
+  const ctx = item?.ctx;
+  if (ctx && typeof ctx === 'object') {
+    for (const [key, value] of Object.entries(ctx)) {
+      message = message.replaceAll(`{${key}}`, String(value));
+    }
+  }
+  return message;
+}
+
 export function registerPineTools(server) {
 
   server.tool('pine_get_source', 'Get current Pine Script source code from the editor', {}, async () => {
@@ -796,7 +807,8 @@ export function registerPineTools(server) {
               column: e.start?.column,
               end_line: e.end?.line,
               end_column: e.end?.column,
-              message: e.message,
+              message: formatPineCompilerMessage(e),
+              code: e.code,
             });
           }
         }
@@ -807,7 +819,8 @@ export function registerPineTools(server) {
             warnings.push({
               line: w.start?.line,
               column: w.start?.column,
-              message: w.message,
+              message: formatPineCompilerMessage(w),
+              code: w.code,
             });
           }
         }

@@ -6,6 +6,22 @@ function wv(path) {
   return `(function(){ var v = ${path}; return (v && typeof v === 'object' && typeof v.value === 'function') ? v.value() : v; })()`;
 }
 
+export function replayDateToUnixSeconds(date) {
+  if (!date) return null;
+
+  const raw = String(date).trim();
+  if (!raw) return null;
+  if (/^\d+$/.test(raw)) return Number(raw);
+
+  const parsed = raw.includes('T') ? new Date(raw) : new Date(`${raw}T00:00:00Z`);
+  const time = parsed.getTime();
+  if (Number.isNaN(time)) {
+    throw new Error(`Invalid replay date: ${date}. Use YYYY-MM-DD, ISO datetime, or a Unix timestamp in seconds.`);
+  }
+
+  return Math.floor(time / 1000);
+}
+
 export function registerReplayTools(server) {
 
   server.tool('replay_start', 'Start bar replay mode, optionally at a specific date', {
@@ -29,13 +45,21 @@ export function registerReplayTools(server) {
       await new Promise(r => setTimeout(r, 500));
 
       if (date) {
-        await evaluate(`${rp}.selectDate(new Date('${date}'))`);
+        // TradingView expects Unix timestamp in seconds for selectDate
+        const ts = replayDateToUnixSeconds(date);
+        await evaluate(`${rp}.selectDate(${ts})`);
       } else {
         await evaluate(`${rp}.selectFirstAvailableDate()`);
       }
-      await new Promise(r => setTimeout(r, 500));
+      await new Promise(r => setTimeout(r, 1000));
 
-      const started = await evaluate(wv(`${rp}.isReplayStarted()`));
+      // Check if replay actually started; if not, try startReplay()
+      let started = await evaluate(wv(`${rp}.isReplayStarted()`));
+      if (!started) {
+        try { await evaluate(`${rp}.startReplay()`); } catch { /* may not exist */ }
+        await new Promise(r => setTimeout(r, 500));
+        started = await evaluate(wv(`${rp}.isReplayStarted()`));
+      }
       const currentDate = await evaluate(wv(`${rp}.currentDate()`));
 
       return {

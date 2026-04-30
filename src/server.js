@@ -1,5 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { installLegacyToolSchemaSupport } from './tool-schema.js';
 import { registerHealthTools } from './tools/health.js';
 import { registerChartTools } from './tools/chart.js';
 import { registerPineTools } from './tools/pine.js';
@@ -64,6 +65,8 @@ CONTEXT MANAGEMENT:
 - Call chart_get_state ONCE at start, reuse entity IDs`,
   }
 );
+
+installLegacyToolSchemaSupport(server);
 
 // Register all tool groups
 registerHealthTools(server);
