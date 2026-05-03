@@ -52,16 +52,39 @@ export async function ensurePineEditorOpen() {
     (function() {
       var bwb = window.TradingView && window.TradingView.bottomWidgetBar;
       if (!bwb) return;
-      if (typeof bwb.activateScriptEditorTab === 'function') bwb.activateScriptEditorTab();
-      else if (typeof bwb.showWidget === 'function') bwb.showWidget('pine-editor');
+      // Desktop: named convenience methods.
+      if (typeof bwb.activateScriptEditorTab === 'function') { bwb.activateScriptEditorTab(); return; }
+      if (typeof bwb.showWidget === 'function') { bwb.showWidget('pine-editor'); return; }
+      // TV web (added vdm/web-compat 2026-05-03): generic open/show with widget name.
+      // The Pine Editor is a right-widgetbar widget on TV web, but bottomWidgetBar.open still routes to it.
+      if (typeof bwb.open === 'function') {
+        try { bwb.open('pine-editor'); return; } catch (e) {}
+        try { bwb.open({ name: 'pine-editor' }); return; } catch (e) {}
+      }
+      if (typeof bwb.show === 'function') {
+        try { bwb.show('pine-editor'); return; } catch (e) {}
+      }
     })()
   `);
 
   await evaluate(`
     (function() {
-      var btn = document.querySelector('[aria-label="Pine"]')
-        || document.querySelector('[data-name="pine-dialog-button"]');
-      if (btn) btn.click();
+      // Multiple selectors for the Pine Editor opener button.
+      // Desktop bottom-widgetbar button: aria-label="Pine" / data-name="pine-dialog-button".
+      // TV web right-widgetbar Pine button (added vdm/web-compat 2026-05-03): same aria-label="Pine"
+      // appears to apply, but cover other potential data-name shapes too.
+      var selectors = [
+        '[aria-label="Pine"]',
+        '[data-name="pine-dialog-button"]',
+        '[data-name="pine-editor"]',
+        '[data-name="bottom-widgetbar-tab-pine_editor"]',
+        '[data-name="widgetbar-pine"]',
+        'button[title*="Pine" i]'
+      ];
+      for (var i = 0; i < selectors.length; i++) {
+        var btn = document.querySelector(selectors[i]);
+        if (btn) { btn.click(); break; }
+      }
     })()
   `);
 
