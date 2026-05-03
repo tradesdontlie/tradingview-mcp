@@ -88,7 +88,11 @@ export async function ensurePineEditorOpen() {
     })()
   `);
 
-  for (let i = 0; i < 50; i++) {
+  // Poll up to 30s. TV web lazy-loads the Pine Editor JS bundle on first activation
+  // after page load — the original 10s budget (50 * 200ms) was sometimes too short on
+  // a cold open. Subsequent toggles within the same page session are instant because
+  // Monaco persists in the DOM. Bumped 50 -> 150 (vdm/web-compat 2026-05-03).
+  for (let i = 0; i < 150; i++) {
     await new Promise(r => setTimeout(r, 200));
     const ready = await evaluate(`(function() { return ${FIND_MONACO} !== null; })()`);
     if (ready) return true;
