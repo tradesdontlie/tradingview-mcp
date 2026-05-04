@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { box-sizing: border-box; }
+  body {
+    background-color: #0d0f12;
+    color: #e5e7eb;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: #13161c; }
+  ::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #4b5563; }
+}
+
+@layer utilities {
+  .text-dim { color: #6b7280; }
+  .text-muted { color: #9ca3af; }
+  .border-subtle { border-color: #1f2937; }
+
+  .card {
+    @apply bg-surface-1 rounded-lg border border-subtle p-4;
+  }
+
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium;
+  }
+
+  .btn {
+    @apply px-3 py-1.5 rounded text-sm font-medium transition-colors;
+  }
+  .btn-primary {
+    @apply btn bg-accent-blue text-white hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+  .btn-ghost {
+    @apply btn bg-transparent text-gray-400 hover:text-white hover:bg-surface-2;
+  }
+}

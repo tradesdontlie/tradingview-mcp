@@ -1,0 +1,30 @@
+{
+  "_note": "Sample trade + equity fixture for scoring tests. Generated synthetically.",
+  "symbol": "ES1!",
+  "timeframe": "15",
+  "initial_capital": 10000,
+  "trades": [
+    { "entry_time": 1704067200000, "exit_time": 1704096000000, "entry_price": 4780.00, "exit_price": 4796.50, "profit_pct": 0.00345, "profit": 34.50 },
+    { "entry_time": 1704153600000, "exit_time": 1704182400000, "entry_price": 4801.25, "exit_price": 4789.00, "profit_pct": -0.00255, "profit": -25.50 },
+    { "entry_time": 1704240000000, "exit_time": 1704268800000, "entry_price": 4792.00, "exit_price": 4815.75, "profit_pct": 0.00496, "profit": 49.60 },
+    { "entry_time": 1704326400000, "exit_time": 1704355200000, "entry_price": 4820.50, "exit_price": 4832.25, "profit_pct": 0.00244, "profit": 24.40 },
+    { "entry_time": 1704412800000, "exit_time": 1704441600000, "entry_price": 4835.00, "exit_price": 4820.00, "profit_pct": -0.00310, "profit": -31.00 },
+    { "entry_time": 1704499200000, "exit_time": 1704528000000, "entry_price": 4818.25, "exit_price": 4840.00, "profit_pct": 0.00451, "profit": 45.10 },
+    { "entry_time": 1704585600000, "exit_time": 1704614400000, "entry_price": 4845.50, "exit_price": 4862.75, "profit_pct": 0.00356, "profit": 35.60 },
+    { "entry_time": 1704672000000, "exit_time": 1704700800000, "entry_price": 4860.00, "exit_price": 4848.25, "profit_pct": -0.00242, "profit": -24.20 },
+    { "entry_time": 1704758400000, "exit_time": 1704787200000, "entry_price": 4852.00, "exit_price": 4875.50, "profit_pct": 0.00485, "profit": 48.50 },
+    { "entry_time": 1704844800000, "exit_time": 1704873600000, "entry_price": 4878.25, "exit_price": 4865.00, "profit_pct": -0.00272, "profit": -27.20 }
+  ],
+  "equity": [
+    { "time": 1704096000000, "equity": 10034.50, "drawdown": 0.0000 },
+    { "time": 1704182400000, "equity": 10009.00, "drawdown": 0.0025 },
+    { "time": 1704268800000, "equity": 10058.60, "drawdown": 0.0000 },
+    { "time": 1704355200000, "equity": 10083.00, "drawdown": 0.0000 },
+    { "time": 1704441600000, "equity": 10052.00, "drawdown": 0.0031 },
+    { "time": 1704528000000, "equity": 10097.10, "drawdown": 0.0000 },
+    { "time": 1704614400000, "equity": 10132.70, "drawdown": 0.0000 },
+    { "time": 1704700800000, "equity": 10108.50, "drawdown": 0.0024 },
+    { "time": 1704787200000, "equity": 10157.00, "drawdown": 0.0000 },
+    { "time": 1704873600000, "equity": 10129.80, "drawdown": 0.0027 }
+  ]
+}

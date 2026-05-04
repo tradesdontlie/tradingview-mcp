@@ -13,17 +13,27 @@
   },
   "scripts": {
     "start": "node src/server.js",
+    "api": "node src/api/server.js",
     "tv": "node src/cli/index.js",
+    "benchmark": "node scripts/run_benchmark.js",
+    "web:dev": "cd web && npm run dev",
+    "web:build": "cd web && npm run build",
+    "web:install": "cd web && npm install",
     "test": "node --test tests/e2e.test.js tests/pine_analyze.test.js",
     "test:e2e": "node --test tests/e2e.test.js",
-    "test:unit": "node --test tests/pine_analyze.test.js tests/cli.test.js",
+    "test:unit": "node --test tests/pine_analyze.test.js tests/cli.test.js tests/parser.test.js tests/scoring.test.js",
+    "test:parser": "node --test tests/parser.test.js",
+    "test:scoring": "node --test tests/scoring.test.js",
     "test:cli": "node --test tests/cli.test.js",
-    "test:all": "node --test tests/e2e.test.js tests/pine_analyze.test.js tests/cli.test.js",
+    "test:all": "node --test tests/e2e.test.js tests/pine_analyze.test.js tests/cli.test.js tests/parser.test.js tests/scoring.test.js",
     "test:verbose": "node --test --test-reporter=spec tests/e2e.test.js tests/pine_analyze.test.js",
     "test:count": "node --test --test-reporter=spec tests/e2e.test.js 2>&1 | tail -5"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.27.0",
     "@modelcontextprotocol/sdk": "^1.12.1",
-    "chrome-remote-interface": "^0.33.2"
+    "better-sqlite3": "^11.3.0",
+    "chrome-remote-interface": "^0.33.2",
+    "express": "^4.21.0"
   }
 }
