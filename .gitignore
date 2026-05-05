@@ -1,6 +1,7 @@
 node_modules/
 screenshots/
 scripts/current.pine
+.env
 temp_*
 *.log
 discovery-log.json

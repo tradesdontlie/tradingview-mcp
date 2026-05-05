@@ -1,0 +1,18 @@
+[mcp_servers.tradingview]
+command = "node"
+args = ["./src/server.js"]
+
+[mcp_servers.tradingview.tools.quote_get]
+approval_mode = "approve"
+
+[mcp_servers.tradingview.tools.chart_get_state]
+approval_mode = "approve"
+
+[mcp_servers.tradingview.tools.data_get_ohlcv]
+approval_mode = "approve"
+
+[mcp_servers.tradingview.tools.pine_get_source]
+approval_mode = "approve"
+
+[mcp_servers.tradingview.tools.ui_open_panel]
+approval_mode = "approve"
