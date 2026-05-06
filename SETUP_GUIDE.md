@@ -14,7 +14,15 @@ If the user specifies a different install path, use that instead of `~/tradingvi
 
 ## Step 2: Add to MCP Config
 
-Add the server to the user's Claude Code MCP configuration. The config file is at `~/.claude/.mcp.json` (global) or `.mcp.json` (project-level).
+Register the server with the Claude Code MCP CLI (preferred — it edits the right file with the right structure):
+
+```bash
+claude mcp add tradingview --scope user -- node <INSTALL_PATH>/src/server.js
+```
+
+`--scope user` writes a top-level `mcpServers` entry into `~/.claude.json` so the server is available in every project. Use `--scope project` instead to write a `.mcp.json` at the project root (committed, shared).
+
+If editing config by hand, the file is `~/.claude.json` (user scope) or `<project>/.mcp.json` (project scope). **Do not use `~/.claude/.mcp.json` — Claude Code does not read that path.** The entry to add (under top-level `mcpServers` for user scope, or top-level for project scope):
 
 ```json
 {
@@ -96,7 +104,7 @@ Then `tv status`, `tv quote`, `tv pine compile`, etc. work from anywhere.
 |---------|----------|
 | `cdp_connected: false` | Launch TradingView with `--remote-debugging-port=9222` |
 | `ECONNREFUSED` | TradingView isn't running or port 9222 is blocked |
-| MCP server not showing in Claude Code | Check `~/.claude/.mcp.json` syntax, restart Claude Code |
+| MCP server not showing in Claude Code | Confirm entry is in `~/.claude.json` (user scope) or `<project>/.mcp.json` (project scope) — not `~/.claude/.mcp.json`. Validate JSON, then restart Claude Code |
 | `tv` command not found | Run `npm link` from the project directory |
 | Tools return stale data | TradingView may still be loading — wait a few seconds |
 | Pine Editor tools fail | Open the Pine Editor panel first (`ui_open_panel pine-editor open`) |

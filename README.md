@@ -72,7 +72,7 @@ Gives your AI assistant eyes and hands on your own chart:
 
 Paste this into Claude Code and it will handle the rest:
 
-> Install the TradingView MCP server. Clone https://github.com/tradesdontlie/tradingview-mcp.git, run npm install, add it to my MCP config at ~/.claude/.mcp.json, and launch TradingView with the debug port. Then verify the connection with tv_health_check.
+> Install the TradingView MCP server. Clone https://github.com/tradesdontlie/tradingview-mcp.git, run npm install, register it with `claude mcp add` (or add it to my user-scope MCP config at ~/.claude.json), and launch TradingView with the debug port. Then verify the connection with tv_health_check.
 
 Or follow the manual steps below.
 
@@ -115,20 +115,41 @@ scripts\launch_tv_debug.bat
 
 ### 3. Add to Claude Code
 
-Add to your Claude Code MCP config (`~/.claude/.mcp.json` or project `.mcp.json`):
+The simplest path is the `claude mcp add` CLI:
 
-```json
-{
-  "mcpServers": {
-    "tradingview": {
-      "command": "node",
-      "args": ["/path/to/tradingview-mcp/src/server.js"]
-    }
-  }
-}
+```bash
+claude mcp add tradingview --scope user -- node /path/to/tradingview-mcp/src/server.js
 ```
 
-Replace `/path/to/tradingview-mcp` with your actual path.
+That writes a top-level `mcpServers` entry into `~/.claude.json` (user scope, available in every project). Replace `/path/to/tradingview-mcp` with your actual clone path.
+
+If you'd rather edit a config by hand, you have two options. Note: **`~/.claude/.mcp.json` is not a path Claude Code reads** — don't use it.
+
+- **User scope** — top-level `mcpServers` in `~/.claude.json` (available everywhere):
+  ```json
+  {
+    "mcpServers": {
+      "tradingview": {
+        "command": "node",
+        "args": ["/path/to/tradingview-mcp/src/server.js"]
+      }
+    }
+  }
+  ```
+
+- **Project scope** — a `.mcp.json` at the root of a specific project (committed, shared with teammates):
+  ```json
+  {
+    "mcpServers": {
+      "tradingview": {
+        "command": "node",
+        "args": ["/path/to/tradingview-mcp/src/server.js"]
+      }
+    }
+  }
+  ```
+
+Restart Claude Code after editing either file so it picks up the new server.
 
 ### 4. Verify
 
