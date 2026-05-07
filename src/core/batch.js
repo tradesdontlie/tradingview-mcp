@@ -1,7 +1,7 @@
 /**
  * Core batch execution logic.
  */
-import { evaluate, evaluateAsync, getClient, getChartApi, getChartCollection, safeString } from '../connection.js';
+import { evaluate, evaluateAsync, getClient, getChartApi, getChartCollection, safeString, withReconnect } from '../connection.js';
 import { waitForChartReady } from '../wait.js';
 import { writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
@@ -37,8 +37,7 @@ export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_co
         let actionResult;
         if (action === 'screenshot') {
           mkdirSync(SCREENSHOT_DIR, { recursive: true });
-          const client = await getClient();
-          const { data } = await client.Page.captureScreenshot({ format: 'png' });
+          const { data } = await withReconnect(c => c.Page.captureScreenshot({ format: 'png' }));
           const ts = new Date().toISOString().replace(/[:.]/g, '-');
           const fname = `batch_${symbol}_${tf || 'default'}_${ts}`.replace(/[\/\\]/g, '_') + '.png';
           const filePath = join(SCREENSHOT_DIR, fname);
