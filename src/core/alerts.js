@@ -1,7 +1,7 @@
 /**
  * Core alert logic.
  */
-import { evaluate, evaluateAsync, getClient, safeString } from '../connection.js';
+import { evaluate, evaluateAsync, getClient, safeString, withReconnect } from '../connection.js';
 
 export async function create({ condition, price, message }) {
   const opened = await evaluate(`
@@ -14,9 +14,8 @@ export async function create({ condition, price, message }) {
   `);
 
   if (!opened) {
-    const client = await getClient();
-    await client.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: 1, key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65 });
-    await client.Input.dispatchKeyEvent({ type: 'keyUp', key: 'a', code: 'KeyA' });
+    await withReconnect(c => c.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: 1, key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65 }));
+    await withReconnect(c => c.Input.dispatchKeyEvent({ type: 'keyUp', key: 'a', code: 'KeyA' }));
   }
 
   await new Promise(r => setTimeout(r, 1000));

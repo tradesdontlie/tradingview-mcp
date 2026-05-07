@@ -50,15 +50,46 @@ export function requireFinite(value, name) {
 export async function getClient() {
   if (client) {
     try {
-      // Quick liveness check
-      await client.Runtime.evaluate({ expression: '1', returnByValue: true });
+      // Quick liveness check with 2s timeout (avoids indefinite hang on dead WS)
+      await Promise.race([
+        client.Runtime.evaluate({ expression: '1', returnByValue: true }),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('liveness timeout')), 2000)),
+      ]);
       return client;
     } catch {
+      try { await client.close(); } catch {}
       client = null;
       targetInfo = null;
     }
   }
   return connect();
+}
+
+/**
+ * Run a CDP operation with automatic reconnect on transient connection failures.
+ * Use this in tools that call client.Page.*, client.DOM.*, etc. directly
+ * (not via evaluate()), since those bypass the cached-client liveness path.
+ */
+const RECONNECT_ERR_RE = /connection closed|websocket|ECONNREFUSED|target closed|liveness timeout|socket hang up|disconnected/i;
+export async function withReconnect(operation, maxRetries = 3) {
+  let lastError;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const c = await getClient();
+      return await operation(c);
+    } catch (err) {
+      lastError = err;
+      const msg = err?.message || String(err);
+      if (!RECONNECT_ERR_RE.test(msg)) throw err;
+      // Force reconnect on next iteration
+      try { if (client) await client.close(); } catch {}
+      client = null;
+      targetInfo = null;
+      const delay = Math.min(BASE_DELAY * Math.pow(2, attempt), 5000);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+  throw new Error(`CDP operation failed after ${maxRetries} reconnect attempts: ${lastError?.message || lastError}`);
 }
 
 export async function connect() {
