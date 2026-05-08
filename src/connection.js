@@ -53,13 +53,19 @@ export function requireFinite(value, name) {
 export async function getClient() {
   if (client) {
     try {
-      // Quick liveness check
-      await client.Runtime.evaluate({ expression: '1', returnByValue: true });
-      return client;
-    } catch {
-      client = null;
-      targetInfo = null;
-    }
+      // Strict liveness: cached tab must be alive AND expose chart APIs.
+      // Plain `Runtime.evaluate('1')` passes on any TradingView page
+      // (news-flow, watchlist, symbols) and used to lock the picker to
+      // whichever tab was attached first — silently breaking every
+      // chart-API tool when a chart tab opened later.
+      const probe = await client.Runtime.evaluate({
+        expression: 'typeof window.TradingViewApi !== "undefined" && window.TradingViewApi._activeChartWidgetWV !== undefined',
+        returnByValue: true,
+      });
+      if (probe?.result?.value === true) return client;
+    } catch {}
+    client = null;
+    targetInfo = null;
   }
   return connect();
 }
@@ -69,10 +75,10 @@ export async function connect(targetId = null) {
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
       const target = targetId ? await findTargetById(targetId) : await findChartTarget();
-      if (!target) {
-        throw new Error(targetId
-          ? `CDP target ${targetId} not found — is the tab still open?`
-          : 'No TradingView chart target found. Is TradingView open with a chart?');
+      // findChartTarget now throws explicit errors with actionable hints (no
+      // chart tab vs no TV at all), so only findTargetById can still return null.
+      if (targetId && !target) {
+        throw new Error(`CDP target ${targetId} not found — is the tab still open?`);
       }
       targetInfo = target;
       client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: target.id });
@@ -85,6 +91,11 @@ export async function connect(targetId = null) {
       return client;
     } catch (err) {
       lastError = err;
+      // Don't retry actionable user-facing errors; they won't fix themselves
+      // by waiting (need user to open a chart tab).
+      if (err.message && /No TradingView chart tab found/.test(err.message)) {
+        throw err;
+      }
       const delay = Math.min(BASE_DELAY * Math.pow(2, attempt), 30000);
       await new Promise(r => setTimeout(r, delay));
     }
@@ -110,10 +121,26 @@ export async function reconnectTo(targetId) {
 async function findChartTarget() {
   const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
   const targets = await resp.json();
-  // Prefer targets with tradingview.com/chart in the URL
-  return targets.find(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
-    || targets.find(t => t.type === 'page' && /tradingview/i.test(t.url))
-    || null;
+  // Strict: only attach to actual chart tabs. Previously fell back to any
+  // tradingview tab (news-flow, watchlist, symbols pages) which silently
+  // broke every chart-API tool because _activeChartWidgetWV was undefined.
+  const chart = targets.find(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url));
+  if (chart) return chart;
+  const otherTV = targets.filter(t => t.type === 'page' && /tradingview/i.test(t.url));
+  if (otherTV.length > 0) {
+    const paths = otherTV.slice(0, 3).map(t => {
+      try { return new URL(t.url).pathname; } catch { return t.url; }
+    });
+    throw new Error(
+      `No TradingView chart tab found. Detected ${otherTV.length} non-chart ` +
+      `TradingView tab(s): ${paths.join(', ')}. Open a chart in TV Desktop ` +
+      `(Cmd+T then a ticker, or click a saved layout) and retry.`
+    );
+  }
+  throw new Error(
+    'No TradingView chart target found. Is TradingView open with a chart? ' +
+    'Launch with: /Applications/TradingView.app/Contents/MacOS/TradingView --remote-debugging-port=9222'
+  );
 }
 
 async function findTargetById(id) {
