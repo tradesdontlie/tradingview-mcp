@@ -364,6 +364,35 @@ Wired into all five mutators (`removeSymbol` → `exclude`, `appendSymbols` → 
 
 ---
 
+## §11 — `removeSymbol` exchange-prefix matcher (T58, 2026-05-08)
+
+**Bug class:** `watchlist_remove(symbol="TSM", from=L)` against a list storing `"NYSE:TSM"` returned `success:true, removed_count:1` even though the TV REST endpoint silently no-op'd (it only matches the exact stored form, prefix-included). Symmetric in the opposite direction (`"NASDAQ:TSM"` requested against a list storing bare `"TSM"`). The function had no view of what was actually targeted server-side — it echoed the caller's input back as `removed_symbols` and called the count from `toRemove.length`. Skills relying on the count to gate further action (decay sweeps, mover refreshes, journal mutators) would proceed as if a removal happened. Filed as T58 after the silent-success was caught by hand on a `/decay-check` mutation.
+
+**Diagnostic method:** Replayed the failing case against `🎯 03 FOCUS` (3 prefixed symbols `NASDAQ:MXL`, `NASDAQ:LBRDK`, `NYSE:NOW`) with `watchlist_remove(symbol="NOW", from="🎯 03 FOCUS")` — got `removed_count:1` but `watchlist_list(include_symbols:true)` immediately after still showed all 3 symbols. Confirms the no-op + false-success at the wire level. The fix doesn't need a wire capture: `listAll()` already returns the list's stored `symbols:[…]` array for free, so we can do the resolution client-side.
+
+**Fix:** Pre-resolve each requested symbol against `target.symbols` before issuing the POST. Resolution order per requested entry:
+1. Exact case-insensitive match → push the stored form.
+2. If requested is bare (`"TSM"`) → look for any stored `"EXCHANGE:TSM"` and push that.
+3. If requested is prefixed (`"NASDAQ:TSM"`) → strip prefix, look for stored bare `"TSM"`.
+4. No match → push to `not_found[]`, exclude from POST.
+
+If `resolved.length === 0` → skip the POST entirely and return early with `removed_count:0` + the full `not_found[]`. Otherwise POST `resolved` (not the original `toRemove`), and dispatch the in-memory `custom-lists/exclude` action with `resolved` too so the UI store stays consistent with what the server actually saw. Response shape: `removed_symbols` is now the **resolved** server-side forms; `removed_count` reflects what was targeted; `not_found[]` is included only when non-empty (existing-call back-compat).
+
+**Files touched:** `src/core/watchlist.js` (+64 / −4 lines, all in `removeSymbol`).
+
+**Node-check:** passes.
+
+**Live smoke (2026-05-08 post-restart):** 5/5 green against `🎯 03 FOCUS`:
+1. `watchlist_remove(symbol="NOW", from="🎯 03 FOCUS")` → `removed_symbols:["NYSE:NOW"]`, `removed_count:1` (auto-qualified bare→prefixed). ✅
+2. `watchlist_list(include_symbols:true)` → `NYSE:NOW` absent (2 symbols left). ✅
+3. `watchlist_remove(symbol="FAKETICKER", from="🎯 03 FOCUS")` → `removed_count:0`, `not_found:["FAKETICKER"]`, no POST sent (verified via list still 2 symbols). ✅
+4. `watchlist_insert(symbol="NYSE:NOW", to="🎯 03 FOCUS")` → restored. ✅
+5. `watchlist_list(include_symbols:true)` → back to 3 symbols `[NASDAQ:MXL, NASDAQ:LBRDK, NYSE:NOW]`. ✅
+
+The previous silent-success class is closed: any caller can now trust `removed_count` as ground truth and react to `not_found[]` for partial-match audits. Skills that expected to see a `not_found` field on no-op should note: it's only included when non-empty (a clean removal with zero misses returns the same shape as before — no breaking change).
+
+---
+
 ## Adding more fixes — workflow
 
 The diagnostic playbook lives in `CLAUDE.md` (project root of ASTA ECO4). Summary:
