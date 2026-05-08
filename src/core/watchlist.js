@@ -250,6 +250,17 @@ export async function switchList({ name } = {}) {
  * `from` defaults to the currently-active watchlist. Works for custom lists;
  * colored lists use the same numeric-id endpoint and have been observed to
  * accept the same wire format (verified empirically during implementation).
+ *
+ * T58 (2026-05-08): pre-resolve each requested symbol against the list's actual
+ * stored symbols (returned free by `listAll()` per its `symbols:[...]` field).
+ *   - Exact match wins (case-insensitive).
+ *   - Else, if user passed bare "TSM" and list stores "NYSE:TSM", auto-qualify.
+ *   - Else, if user passed "NASDAQ:TSM" and list stores bare "TSM", strip prefix.
+ *   - If still no match, the symbol is reported in `not_found[]` and excluded
+ *     from the POST. Prevents the silent-success class where TV's REST endpoint
+ *     no-ops on a missing symbol but the function used to claim removed=N.
+ *   - `removed_count` now reflects what was actually targeted server-side, not
+ *     what the caller asked for.
  */
 export async function removeSymbol({ symbol, symbols, from } = {}) {
   let toRemove = [];
@@ -271,9 +282,57 @@ export async function removeSymbol({ symbol, symbols, from } = {}) {
     if (!target) return { success: false, error: 'No active watchlist found and `from` not provided', source: 'rest_api' };
   }
 
+  // T58: resolve each requested symbol to the form actually stored on the list.
+  const stored = (Array.isArray(target.symbols) ? target.symbols : []).map(s => String(s));
+  const storedUpper = stored.map(s => s.toUpperCase());
+  const resolved = [];   // server-side forms to actually POST
+  const notFound = [];   // requested forms with no match in stored
+
+  for (const requested of toRemove) {
+    const reqUpper = requested.toUpperCase();
+    const exactIdx = storedUpper.indexOf(reqUpper);
+    if (exactIdx !== -1) {
+      resolved.push(stored[exactIdx]);
+      continue;
+    }
+    if (!reqUpper.includes(':')) {
+      // Bare requested → look for any stored "EXCHANGE:REQ".
+      const prefixedIdx = storedUpper.findIndex(s => s.endsWith(':' + reqUpper));
+      if (prefixedIdx !== -1) {
+        resolved.push(stored[prefixedIdx]);
+        continue;
+      }
+    } else {
+      // Prefixed requested → look for the bare tail in stored.
+      const bareReq = reqUpper.split(':').pop();
+      const bareIdx = storedUpper.indexOf(bareReq);
+      if (bareIdx !== -1) {
+        resolved.push(stored[bareIdx]);
+        continue;
+      }
+    }
+    notFound.push(requested);
+  }
+
+  // If nothing resolved, skip the POST — there's nothing to remove server-side.
+  // Reporting honestly avoids the previous silent-success class. UI sync also
+  // skipped since there's no in-memory state to mutate.
+  if (resolved.length === 0) {
+    return {
+      success: true,
+      list_name: target.name || target.color || `#${target.id}`,
+      list_id: target.id,
+      removed_symbols: [],
+      removed_count: 0,
+      not_found: notFound,
+      ui_synced: true,
+      source: 'rest_api',
+    };
+  }
+
   const resp = await tvRest(`/api/v1/symbols_list/custom/${target.id}/remove/?source=web-tvd`, {
     method: 'POST',
-    body: toRemove,
+    body: resolved,
   });
   if (!resp || resp.error) return { success: false, error: resp?.error || 'no response', source: 'rest_api' };
   if (!resp.ok) return { success: false, error: `HTTP ${resp.status}: ${String(resp.body).slice(0, 200)}`, http_status: resp.status, source: 'rest_api' };
@@ -283,7 +342,7 @@ export async function removeSymbol({ symbol, symbols, from } = {}) {
   // that's the "delete the whole list" action, not "remove these symbols").
   const sync = await syncCustomListsStore('custom-lists/exclude', {
     id: target.id,
-    symbols: toRemove,
+    symbols: resolved,
     actionTimestamp: Date.now(),
   });
 
@@ -291,8 +350,9 @@ export async function removeSymbol({ symbol, symbols, from } = {}) {
     success: true,
     list_name: target.name || target.color || `#${target.id}`,
     list_id: target.id,
-    removed_symbols: toRemove,
-    removed_count: toRemove.length,
+    removed_symbols: resolved,
+    removed_count: resolved.length,
+    not_found: notFound.length > 0 ? notFound : undefined,
     ui_synced: sync.ui_synced,
     ui_sync_reason: sync.ui_synced ? undefined : sync.reason,
     source: 'rest_api',
