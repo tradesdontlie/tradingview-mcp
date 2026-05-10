@@ -1,9 +1,229 @@
 /**
  * Core UI automation logic.
  */
-import { evaluate, evaluateAsync, getClient } from '../connection.js';
+import { evaluate as _evaluate, evaluateAsync as _evaluateAsync, getClient as _getClient } from '../connection.js';
 
-export async function click({ by, value }) {
+function _resolve(deps) {
+  return {
+    evaluate: deps?.evaluate || _evaluate,
+    evaluateAsync: deps?.evaluateAsync || _evaluateAsync,
+    getClient: deps?.getClient || _getClient,
+  };
+}
+
+function _normalizeLayout(layout, currentSlug, currentName) {
+  const id = layout?.id ?? layout?.chartId ?? null;
+  const name = layout?.name || layout?.title || 'Untitled';
+  const url = layout?.url || layout?.chartUrl || null;
+  const symbol = layout?.symbol || null;
+  const resolution = layout?.interval || layout?.resolution || null;
+  const modified = layout?.timestamp || layout?.modified || null;
+  const active = currentName
+    ? _normalizeLayoutQuery(name) === _normalizeLayoutQuery(currentName)
+    : !!(url && currentSlug && url === currentSlug);
+
+  return {
+    id,
+    name,
+    url,
+    symbol,
+    resolution,
+    modified,
+    active,
+  };
+}
+
+function _normalizeLayoutQuery(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function _resolveLayoutMatch(layouts, query) {
+  const normalized = _normalizeLayoutQuery(query);
+  const rawQuery = String(query || '').trim();
+  if (!normalized) throw new Error('Layout name or ID is required');
+
+  const exactById = layouts.find(l => String(l.id) === rawQuery);
+  if (exactById) return exactById;
+
+  const exactByUrl = layouts.find(l => _normalizeLayoutQuery(l.url) === normalized);
+  if (exactByUrl) return exactByUrl;
+
+  const exactByName = layouts.find(l => _normalizeLayoutQuery(l.name) === normalized);
+  if (exactByName) return exactByName;
+
+  const partialMatches = layouts.filter(l => _normalizeLayoutQuery(l.name).includes(normalized));
+  if (partialMatches.length === 1) return partialMatches[0];
+  if (partialMatches.length > 1) {
+    const names = partialMatches.slice(0, 5).map(l => l.name).join(', ');
+    throw new Error(`Layout "${query}" is ambiguous. Matches: ${names}`);
+  }
+
+  throw new Error(`Layout "${query}" not found.`);
+}
+
+async function _getLayoutSnapshot({ evaluateAsync }) {
+  const snapshot = await evaluateAsync(`
+    new Promise(function(resolve) {
+      var done = false;
+      function finish(payload) {
+        if (done) return;
+        done = true;
+        resolve(payload);
+      }
+      function currentSlug() {
+        var match = location.pathname.match(/\\/chart\\/([^/?#]+)/i);
+        return match ? match[1] : null;
+      }
+      function currentName() {
+        try {
+          var attr = document.querySelector('[aria-label*="Aktives Layout:"], [aria-label*="Active layout:"]');
+          if (!attr) return null;
+          var label = attr.getAttribute('aria-label') || '';
+          var match = label.match(/(?:Aktives Layout|Active layout):\\s*([^\\n]+)/i);
+          return match ? match[1].trim() : null;
+        } catch (e) {
+          return null;
+        }
+      }
+      function build(rows, source, error) {
+        finish({
+          source: source,
+          error: error || null,
+          current_slug: currentSlug(),
+          current_name: currentName(),
+          current_href: location.href,
+          layouts: Array.isArray(rows) ? rows : [],
+        });
+      }
+
+      try {
+        var api = window.TradingViewApi || {};
+        try {
+          var stateWV = api._loadChartService && api._loadChartService._state;
+          var state = stateWV && typeof stateWV.value === 'function' ? stateWV.value() : null;
+          if (state && Array.isArray(state.chartList) && state.chartList.length > 0) {
+            build(state.chartList, 'load_chart_service');
+            return;
+          }
+        } catch (stateErr) {}
+
+        if (typeof api.getSavedCharts === 'function') {
+          api.getSavedCharts(function(charts) {
+            build(charts, 'getSavedCharts');
+          });
+          setTimeout(function() {
+            build([], 'getSavedCharts', 'getSavedCharts timed out');
+          }, 5000);
+          return;
+        }
+
+        build([], 'internal_api', 'No layout API available');
+      } catch (e) {
+        build([], 'internal_api', e.message);
+      }
+    })
+  `);
+
+  const currentSlug = snapshot?.current_slug || null;
+  const currentName = snapshot?.current_name || null;
+  const layouts = (snapshot?.layouts || []).map(layout => _normalizeLayout(layout, currentSlug, currentName));
+  return {
+    source: snapshot?.source || 'unknown',
+    error: snapshot?.error || null,
+    current_slug: currentSlug,
+    current_name: currentName,
+    current_href: snapshot?.current_href || null,
+    layouts,
+  };
+}
+
+function _findActiveLayout(layouts) {
+  return layouts.find(layout => layout.active) || null;
+}
+
+async function _dismissUnsavedLayoutDialog({ evaluate }) {
+  return evaluate(`
+    (function() {
+      var dialogPattern = /unsaved changes|last changes will be lost|nicht gespeicherte[nr]? änderungen|änderungen verloren gehen|neues layout öffnen/i;
+      var confirmPattern = /open anyway|don't save|do not save|discard|continue without saving|trotzdem öffnen|ohne speichern|nicht speichern|verwerfen|änderungen verwerfen|ja,? öffnen/i;
+
+      function tryButtons(root) {
+        var btns = root.querySelectorAll('button, [role="button"]');
+        for (var i = 0; i < btns.length; i++) {
+          var text = (btns[i].textContent || '').trim();
+          var aria = (btns[i].getAttribute('aria-label') || '').trim();
+          if (confirmPattern.test(text) || confirmPattern.test(aria)) {
+            btns[i].click();
+            return { dismissed: true, label: text || aria || null };
+          }
+        }
+        return null;
+      }
+
+      var dialogs = document.querySelectorAll('[role="dialog"], [data-dialog-name], [class*="dialog"]');
+      for (var j = 0; j < dialogs.length; j++) {
+        var text = (dialogs[j].textContent || '').trim();
+        if (!dialogPattern.test(text)) continue;
+        var scoped = tryButtons(dialogs[j]);
+        if (scoped) return scoped;
+      }
+
+      var fallback = tryButtons(document);
+      if (fallback) return fallback;
+      return { dismissed: false, label: null };
+    })()
+  `);
+}
+
+async function _waitForLayoutActivation(target, { evaluate, evaluateAsync, timeoutMs = 10000, intervalMs = 250 }) {
+  const started = Date.now();
+  let dismissed = false;
+  let attempts = 0;
+
+  while (Date.now() - started < timeoutMs) {
+    attempts += 1;
+    const dialog = await _dismissUnsavedLayoutDialog({ evaluate });
+    dismissed = dismissed || !!dialog?.dismissed;
+
+    const snapshot = await _getLayoutSnapshot({ evaluateAsync });
+    const active = _findActiveLayout(snapshot.layouts);
+    const slugMatches = target.url && snapshot.current_slug === target.url;
+    const idMatches = active && String(active.id) === String(target.id);
+    const nameMatches = active && _normalizeLayoutQuery(active.name) === _normalizeLayoutQuery(target.name);
+
+    if (slugMatches || idMatches || nameMatches) {
+      return {
+        success: true,
+        verified: true,
+        attempts,
+        source: snapshot.source,
+        current_slug: snapshot.current_slug,
+        current_name: snapshot.current_name,
+        current_href: snapshot.current_href,
+        active_layout: active,
+        unsaved_dialog_dismissed: dismissed,
+      };
+    }
+
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+
+  const finalSnapshot = await _getLayoutSnapshot({ evaluateAsync });
+  return {
+    success: false,
+    verified: false,
+    attempts,
+    source: finalSnapshot.source,
+    current_slug: finalSnapshot.current_slug,
+    current_name: finalSnapshot.current_name,
+    current_href: finalSnapshot.current_href,
+    active_layout: _findActiveLayout(finalSnapshot.layouts),
+    unsaved_dialog_dismissed: dismissed,
+  };
+}
+
+export async function click({ by, value, _deps }) {
+  const { evaluate } = _resolve(_deps);
   const escaped = JSON.stringify(value);
   const result = await evaluate(`
     (function() {
@@ -28,7 +248,8 @@ export async function click({ by, value }) {
   return { success: true, clicked: result };
 }
 
-export async function openPanel({ panel, action }) {
+export async function openPanel({ panel, action, _deps }) {
+  const { evaluate } = _resolve(_deps);
   const isBottomPanel = panel === 'pine-editor' || panel === 'strategy-tester';
   if (isBottomPanel) {
     const widgetName = panel === 'pine-editor' ? 'pine-editor' : 'backtesting';
@@ -88,7 +309,8 @@ export async function openPanel({ panel, action }) {
   }
 }
 
-export async function fullscreen() {
+export async function fullscreen({ _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
   const result = await evaluate(`
     (function() {
       var btn = document.querySelector('[data-name="header-toolbar-fullscreen"]');
@@ -101,66 +323,88 @@ export async function fullscreen() {
   return { success: true, action: 'fullscreen_toggled' };
 }
 
-export async function layoutList() {
-  const layouts = await evaluateAsync(`
-    new Promise(function(resolve) {
-      try {
-        window.TradingViewApi.getSavedCharts(function(charts) {
-          if (!charts || !Array.isArray(charts)) { resolve({layouts: [], source: 'internal_api', error: 'getSavedCharts returned no data'}); return; }
-          var result = charts.map(function(c) { return { id: c.id || c.chartId || null, name: c.name || c.title || 'Untitled', symbol: c.symbol || null, resolution: c.resolution || null, modified: c.timestamp || c.modified || null }; });
-          resolve({layouts: result, source: 'internal_api'});
-        });
-        setTimeout(function() { resolve({layouts: [], source: 'internal_api', error: 'getSavedCharts timed out'}); }, 5000);
-      } catch(e) { resolve({layouts: [], source: 'internal_api', error: e.message}); }
-    })
-  `);
-  return { success: true, layout_count: layouts?.layouts?.length || 0, source: layouts?.source, layouts: layouts?.layouts || [], error: layouts?.error };
+export async function layoutList({ _deps } = {}) {
+  const { evaluateAsync } = _resolve(_deps);
+  const snapshot = await _getLayoutSnapshot({ evaluateAsync });
+  const active = _findActiveLayout(snapshot.layouts);
+  return {
+    success: true,
+    layout_count: snapshot.layouts.length,
+    source: snapshot.source,
+    current_slug: snapshot.current_slug,
+    current_name: snapshot.current_name,
+    current_href: snapshot.current_href,
+    active_layout: active,
+    layouts: snapshot.layouts,
+    error: snapshot.error,
+  };
 }
 
-export async function layoutSwitch({ name }) {
-  const escaped = JSON.stringify(name);
+export async function layoutSwitch({ name, _deps }) {
+  const { evaluate, evaluateAsync } = _resolve(_deps);
+  const before = await _getLayoutSnapshot({ evaluateAsync });
+  if (before.error && before.layouts.length === 0) {
+    throw new Error(before.error);
+  }
+
+  const target = _resolveLayoutMatch(before.layouts, name);
+  if (target.active) {
+    return {
+      success: true,
+      action: 'already_active',
+      verified: true,
+      layout: target.name,
+      layout_id: target.id,
+      layout_url: target.url,
+      source: before.source,
+      current_slug: before.current_slug,
+      current_name: before.current_name,
+      current_href: before.current_href,
+      unsaved_dialog_dismissed: false,
+    };
+  }
+
+  const escaped = JSON.stringify(String(target.id));
   const result = await evaluateAsync(`
     new Promise(function(resolve) {
       try {
-        var target = ${escaped};
-        if (/^\\d+$/.test(target)) { window.TradingViewApi.loadChartFromServer(target); resolve({success: true, method: 'loadChartFromServer', id: target, source: 'internal_api'}); return; }
-        window.TradingViewApi.getSavedCharts(function(charts) {
-          if (!charts || !Array.isArray(charts)) { resolve({success: false, error: 'getSavedCharts returned no data', source: 'internal_api'}); return; }
-          var match = null;
-          for (var i = 0; i < charts.length; i++) { var cname = charts[i].name || charts[i].title || ''; if (cname === target || cname.toLowerCase() === target.toLowerCase()) { match = charts[i]; break; } }
-          if (!match) { for (var j = 0; j < charts.length; j++) { var cn = (charts[j].name || charts[j].title || '').toLowerCase(); if (cn.indexOf(target.toLowerCase()) !== -1) { match = charts[j]; break; } } }
-          if (!match) { resolve({success: false, error: 'Layout "' + target + '" not found.', source: 'internal_api'}); return; }
-          var chartId = match.id || match.chartId;
-          window.TradingViewApi.loadChartFromServer(chartId);
-          resolve({success: true, method: 'loadChartFromServer', id: chartId, name: match.name || match.title, source: 'internal_api'});
-        });
-        setTimeout(function() { resolve({success: false, error: 'getSavedCharts timed out', source: 'internal_api'}); }, 5000);
+        var targetId = ${escaped};
+        if (!window.TradingViewApi || typeof window.TradingViewApi.loadChartFromServer !== 'function') {
+          resolve({success: false, error: 'loadChartFromServer is not available', source: 'internal_api'});
+          return;
+        }
+        window.TradingViewApi.loadChartFromServer(targetId);
+        resolve({success: true, method: 'loadChartFromServer', id: targetId, source: 'internal_api'});
       } catch(e) { resolve({success: false, error: e.message, source: 'internal_api'}); }
     })
   `);
   if (!result?.success) throw new Error(result?.error || 'Unknown error switching layout');
 
-  // Handle "unsaved changes" confirmation dialog
-  await new Promise(r => setTimeout(r, 500));
-  const dismissed = await evaluate(`
-    (function() {
-      var btns = document.querySelectorAll('button');
-      for (var i = 0; i < btns.length; i++) {
-        var text = btns[i].textContent.trim();
-        if (/open anyway|don't save|discard/i.test(text)) {
-          btns[i].click();
-          return true;
-        }
-      }
-      return false;
-    })()
-  `);
+  const verification = await _waitForLayoutActivation(target, { evaluate, evaluateAsync });
+  if (!verification.success) {
+    const current = verification.current_name || verification.active_layout?.name || verification.current_slug || 'unknown';
+    throw new Error(`Layout switch to "${target.name}" was not verified. Current layout appears to be "${current}".`);
+  }
 
-  if (dismissed) await new Promise(r => setTimeout(r, 1000));
-  return { success: true, layout: result.name || name, layout_id: result.id, source: result.source, action: 'switched', unsaved_dialog_dismissed: dismissed };
+  return {
+    success: true,
+    action: 'switched',
+    verified: true,
+    layout: target.name,
+    layout_id: target.id,
+    layout_url: target.url,
+    source: verification.source || result.source,
+    current_slug: verification.current_slug,
+    current_name: verification.current_name,
+    current_href: verification.current_href,
+    active_layout: verification.active_layout,
+    verification_attempts: verification.attempts,
+    unsaved_dialog_dismissed: verification.unsaved_dialog_dismissed,
+  };
 }
 
-export async function keyboard({ key, modifiers }) {
+export async function keyboard({ key, modifiers, _deps }) {
+  const { getClient } = _resolve(_deps);
   const c = await getClient();
   let mod = 0;
   if (modifiers) {
@@ -184,13 +428,15 @@ export async function keyboard({ key, modifiers }) {
   return { success: true, key, modifiers: modifiers || [] };
 }
 
-export async function typeText({ text }) {
+export async function typeText({ text, _deps }) {
+  const { getClient } = _resolve(_deps);
   const c = await getClient();
   await c.Input.insertText({ text });
   return { success: true, typed: text.substring(0, 100), length: text.length };
 }
 
-export async function hover({ by, value }) {
+export async function hover({ by, value, _deps }) {
+  const { evaluate, getClient } = _resolve(_deps);
   const coords = await evaluate(`
     (function() {
       var by = ${JSON.stringify(by)};
@@ -216,7 +462,8 @@ export async function hover({ by, value }) {
   return { success: true, hovered: { by, value, tag: coords.tag, x: coords.x, y: coords.y } };
 }
 
-export async function scroll({ direction, amount }) {
+export async function scroll({ direction, amount, _deps }) {
+  const { evaluate, getClient } = _resolve(_deps);
   const c = await getClient();
   const px = amount || 300;
   const center = await evaluate(`
@@ -234,7 +481,8 @@ export async function scroll({ direction, amount }) {
   return { success: true, direction, amount: px };
 }
 
-export async function mouseClick({ x, y, button, double_click }) {
+export async function mouseClick({ x, y, button, double_click, _deps }) {
+  const { getClient } = _resolve(_deps);
   const c = await getClient();
   const btn = button === 'right' ? 'right' : button === 'middle' ? 'middle' : 'left';
   const btnNum = btn === 'right' ? 2 : btn === 'middle' ? 1 : 0;
@@ -249,7 +497,8 @@ export async function mouseClick({ x, y, button, double_click }) {
   return { success: true, x, y, button: btn, double_click: !!double_click };
 }
 
-export async function findElement({ query, strategy }) {
+export async function findElement({ query, strategy, _deps }) {
+  const { evaluate } = _resolve(_deps);
   const strat = strategy || 'text';
   const results = await evaluate(`
     (function() {
@@ -287,7 +536,8 @@ export async function findElement({ query, strategy }) {
   return { success: true, query, strategy: strat, count: results?.length || 0, elements: results || [] };
 }
 
-export async function uiEvaluate({ expression }) {
+export async function uiEvaluate({ expression, _deps }) {
+  const { evaluate } = _resolve(_deps);
   const result = await evaluate(expression);
   return { success: true, result };
 }
