@@ -17,27 +17,23 @@ if exist "%LOCALAPPDATA%\TradingView\TradingView.exe" set "TV_EXE=%LOCALAPPDATA%
 if exist "%PROGRAMFILES%\TradingView\TradingView.exe" set "TV_EXE=%PROGRAMFILES%\TradingView\TradingView.exe"
 if exist "%PROGRAMFILES(x86)%\TradingView\TradingView.exe" set "TV_EXE=%PROGRAMFILES(x86)%\TradingView\TradingView.exe"
 
-REM Check MSIX / Windows Store installs
-if "%TV_EXE%"=="" (
-    for /f "tokens=*" %%i in ('dir /s /b "%PROGRAMFILES%\WindowsApps\TradingView*\TradingView.exe" 2^>nul') do set "TV_EXE=%%i"
-)
+REM Check MSIX / Windows Store installs via where
 if "%TV_EXE%"=="" (
     for /f "tokens=*" %%i in ('where TradingView.exe 2^>nul') do set "TV_EXE=%%i"
 )
 
+REM If still not found, try MSIX launch via COM ApplicationActivationManager (handles WindowsApps ACL restriction)
 if "%TV_EXE%"=="" (
-    echo Error: TradingView not found.
-    echo Checked: %%LOCALAPPDATA%%\TradingView, %%PROGRAMFILES%%\TradingView, WindowsApps
-    echo.
-    echo If installed elsewhere, run manually:
-    echo   "C:\path\to\TradingView.exe" --remote-debugging-port=%PORT%
-    exit /b 1
+    echo TradingView.exe not found in standard paths. Attempting MSIX launch via COM...
+    powershell -NoProfile -NonInteractive -Command "$code='using System; using System.Runtime.InteropServices; namespace AppLauncher { [ComImport,Guid(\"2e941141-7f97-4756-ba1d-9decde894a3d\"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)] public interface IApplicationActivationManager { int ActivateApplication([MarshalAs(UnmanagedType.LPWStr)] string a,[MarshalAs(UnmanagedType.LPWStr)] string b,int c,out uint d); int ActivateForFile(string a,IntPtr b,string c,out uint d); int ActivateForProtocol(string a,IntPtr b,out uint c); } [ComImport,Guid(\"45BA127D-10A8-46EA-8AB7-56EA9078943C\"),ClassInterface(ClassInterfaceType.None)] public class AppActMgr {} public static class Launcher { public static int Launch(string aumid,string args,out uint pid){var m=(IApplicationActivationManager)new AppActMgr();return m.ActivateApplication(aumid,args,0,out pid);} } }'; Add-Type -TypeDefinition $code; $p=[uint32]0; $hr=[AppLauncher.Launcher]::Launch('TradingView.Desktop_n534cwy3pjxzj!TradingView.Desktop','--remote-debugging-port=%PORT%',[ref]$p); if($hr -eq 0){Write-Output \"MSIX launch OK PID=$p\"}else{Write-Output \"MSIX launch failed HRESULT=0x$($hr.ToString(\"X8\"))\"}"
+    goto :wait_cdp
 )
 
 echo Found TradingView at: %TV_EXE%
 echo Starting with --remote-debugging-port=%PORT%...
 start "" "%TV_EXE%" --remote-debugging-port=%PORT%
 
+:wait_cdp
 echo Waiting for CDP to become available...
 timeout /t 5 /nobreak >nul
 
