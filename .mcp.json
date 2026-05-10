@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "tradingview": {
+      "command": "node",
+      "args": ["/Users/leclercq/tradingview-mcp-bridge/src/server.js"]
+    },
+    "tradingview-desktop": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/Users/leclercq/Openclaw/mcp-tradingview-desktop",
+        "run",
+        "python",
+        "server.py"
+      ]
+    }
+  }
+}
