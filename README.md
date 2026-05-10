@@ -157,6 +157,7 @@ tv screenshot -r chart             # capture chart
 tv pine compile                    # compile Pine Script
 tv pane layout 2x2                 # 4-chart grid
 tv pane symbol 1 ES1!              # set pane symbol
+tv strategy open "8AM" --dry-run   # preview which saved layout would open
 tv stream quote | jq '.close'      # monitor price changes
 ```
 
@@ -172,6 +173,7 @@ tv alert list/create/delete
 tv watchlist get/add
 tv indicator add/remove/toggle/set/get
 tv layout list/switch
+tv strategy open
 tv pane list/layout/focus/symbol
 tv tab list/new/close/switch
 tv replay start/step/stop/status/autoplay/trade
@@ -305,7 +307,8 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 | `capture_screenshot` | Screenshot (regions: full, chart, strategy_tester) |
 | `batch_run` | Run action across multiple symbols/timeframes |
 | `watchlist_get` / `watchlist_add` | Read/modify watchlist |
-| `layout_list` / `layout_switch` | Manage saved layouts |
+| `layout_list` / `layout_switch` | Manage saved layouts with active-layout detection and switch verification |
+| `strategy_open` | Open a saved strategy/layout with optional dry-run, panel setup, and chart verification |
 | `ui_open_panel` / `ui_click` / `ui_evaluate` | UI automation |
 | `tv_launch` / `tv_health_check` / `tv_discover` | Connection management |
 
