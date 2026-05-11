@@ -267,7 +267,48 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 |------|-------------|
 | `tab_list` | List open chart tabs |
 | `tab_new` / `tab_close` | Open/close tabs |
-| `tab_switch` | Switch to a tab by index |
+| `tab_switch` | Switch to a tab by index and reconnect this process to that target. Pinned processes cannot switch to a different target. |
+
+### Multi-Agent Isolation
+
+By default the bridge connects to the first open TradingView chart target on
+`localhost:9222`. For parallel agents, run one MCP server process per agent and
+pin each process to a different TradingView chart tab/window:
+
+```json
+{
+  "mcpServers": {
+    "tradingview_a": {
+      "command": "node",
+      "args": ["/path/to/tradingview-mcp/src/server.js"],
+      "env": { "TV_CHART_ID": "9OxWnJaY" }
+    },
+    "tradingview_b": {
+      "command": "node",
+      "args": ["/path/to/tradingview-mcp/src/server.js"],
+      "env": { "TV_CHART_ID": "RUOAxmI2" }
+    }
+  }
+}
+```
+
+Get chart IDs with `tab_list`; `TV_CHART_ID` uses the `chart_id` field, which is
+the `/chart/<id>/` part of each chart URL. Detached TradingView tabs/windows
+still appear as chart targets, and are the recommended setup for parallel
+agents. Advanced selectors are also available: `TV_TARGET_ID` for exact CDP
+target ID from the `id` field, `TV_TARGET_URL_MATCH` for a URL substring, and
+`TV_CDP_HOST` / `TV_CDP_PORT` for non-default DevTools endpoints.
+
+Do not rely on saved layouts alone for isolation. Most tools act on the chart
+target this MCP process is connected to, and unpinned processes can follow
+whatever chart target TradingView exposes first.
+
+Target pinning isolates chart/page state, not individual panes or global user
+input. In multi-pane layouts, many tools operate on TradingView's active pane
+inside the pinned target; `pane_focus` changes which pane later active-chart
+calls use. Tools that use CDP keyboard or mouse input can still focus
+TradingView windows or interact with modal UI. Avoid running two agents through
+UI-heavy workflows at the same time unless you add an external lock.
 
 ### Pine Script Development
 
@@ -348,11 +389,11 @@ npm test
 ## Architecture
 
 ```
-Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  TradingView Desktop (Electron)
+Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222, chart target)  ←→  TradingView Desktop (Electron)
 ```
 
 - **Transport**: MCP over stdio (78 tools) + CLI (`tv` command, 30 commands with 66 subcommands)
-- **Connection**: Chrome DevTools Protocol on localhost:9222
+- **Connection**: Chrome DevTools Protocol on localhost:9222 by default; override with `TV_CDP_HOST`, `TV_CDP_PORT`, `TV_TARGET_ID`, `TV_CHART_ID`, or `TV_TARGET_URL_MATCH`
 - **Streaming**: Poll-and-diff loop with deduplication, JSONL output to stdout
 - **No dependencies** beyond `@modelcontextprotocol/sdk` and `chrome-remote-interface`
 

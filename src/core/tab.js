@@ -2,16 +2,22 @@
  * Core tab management logic.
  * Controls TradingView Desktop tabs via CDP and Electron keyboard shortcuts.
  */
-import { getClient, evaluate } from '../connection.js';
-
-const CDP_HOST = 'localhost';
-const CDP_PORT = 9222;
+import {
+  getClient,
+  evaluate,
+  getCdpEndpoint,
+  getCdpHttpBase,
+  getTargetSelector,
+  hasTargetSelector,
+  reconnectToTarget,
+  targetMatchesSelector,
+} from '../connection.js';
 
 /**
  * List all open chart tabs (CDP page targets).
  */
 export async function list() {
-  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
+  const resp = await fetch(`${getCdpHttpBase()}/json/list`);
   const targets = await resp.json();
 
   const tabs = targets
@@ -89,16 +95,20 @@ export async function switchTab({ index }) {
   const tabs = await list();
   const idx = Number(index);
 
-  if (idx >= tabs.tab_count) {
+  if (!Number.isInteger(idx) || idx < 0 || idx >= tabs.tab_count) {
     throw new Error(`Tab index ${idx} out of range (have ${tabs.tab_count} tabs)`);
   }
 
   const target = tabs.tabs[idx];
+  const selector = getTargetSelector();
+  if (hasTargetSelector(selector) && !targetMatchesSelector(target, selector)) {
+    throw new Error('tab_switch cannot switch a pinned MCP process to a different target. Update TV_CHART_ID/TV_TARGET_ID and restart this MCP server, or use an unpinned server.');
+  }
 
   // Use CDP Target.activateTarget to bring the tab to front
   try {
-    const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/activate/${target.id}`);
-    const text = await resp.text();
+    await fetch(`${getCdpHttpBase(getCdpEndpoint())}/json/activate/${target.id}`);
+    await reconnectToTarget(target);
     return { success: true, action: 'switched', index: idx, tab_id: target.id, chart_id: target.chart_id };
   } catch (e) {
     throw new Error(`Failed to activate tab ${idx}: ${e.message}`);

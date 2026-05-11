@@ -79,6 +79,49 @@ Use the `tv_health_check` tool. Expected response:
 
 If `cdp_connected: false`, TradingView is not running with `--remote-debugging-port=9222`.
 
+## Running Multiple Agents
+
+Run one MCP server process per agent and pin each process to a different
+TradingView chart target. First list chart tabs:
+
+```bash
+npm run tv -- tab list
+```
+
+Use each tab's `chart_id` in MCP config. This is the `/chart/<id>/` part of
+the URL, not the CDP target `id`:
+
+```json
+{
+  "mcpServers": {
+    "tradingview_a": {
+      "command": "node",
+      "args": ["<INSTALL_PATH>/src/server.js"],
+      "env": { "TV_CHART_ID": "9OxWnJaY" }
+    },
+    "tradingview_b": {
+      "command": "node",
+      "args": ["<INSTALL_PATH>/src/server.js"],
+      "env": { "TV_CHART_ID": "RUOAxmI2" }
+    }
+  }
+}
+```
+
+Detached TradingView tabs/windows still appear in `tab list` and are the
+recommended setup for parallel agents. Other selectors: `TV_TARGET_ID` for an
+exact CDP target from `tabs[].id`, `TV_TARGET_URL_MATCH` for a URL substring,
+and `TV_CDP_HOST` / `TV_CDP_PORT` for non-default CDP endpoints. Saved layouts
+alone are not an isolation boundary because unpinned agents can follow
+whichever chart target TradingView exposes first.
+
+Target pinning isolates chart/page state, not individual panes or global user
+input. In multi-pane layouts, many tools operate on TradingView's active pane
+inside the pinned target; `pane_focus` changes which pane later active-chart
+calls use. Tools that use CDP keyboard or mouse input can still focus
+TradingView windows or interact with modal UI. Avoid running two agents through
+UI-heavy workflows at the same time unless you add an external lock.
+
 ## Step 6: Install CLI (Optional)
 
 To use the `tv` CLI command globally:

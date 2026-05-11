@@ -1,7 +1,7 @@
 /**
  * Core health/discovery/launch logic.
  */
-import { getClient, getTargetInfo, evaluate } from '../connection.js';
+import { getClient, getTargetInfo, evaluate, getChartIdFromUrl } from '../connection.js';
 import { existsSync } from 'fs';
 import { execSync, spawn } from 'child_process';
 
@@ -34,6 +34,7 @@ export async function healthCheck() {
     cdp_connected: true,
     target_id: target.id,
     target_url: target.url,
+    target_chart_id: getChartIdFromUrl(target.url),
     target_title: target.title,
     chart_symbol: state?.symbol || 'unknown',
     chart_resolution: state?.resolution || 'unknown',

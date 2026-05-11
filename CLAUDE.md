@@ -84,6 +84,15 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 - `tv_launch` → auto-detect and launch TradingView with CDP on Mac/Win/Linux
 - `tv_health_check` → verify connection is working
 
+### "Run multiple agents"
+- Run one MCP server process per agent and pin each process with `TV_CHART_ID`
+- Get chart IDs from `tab_list`; use `tabs[].chart_id` for `TV_CHART_ID`
+- `TV_TARGET_ID` uses `tabs[].id`, the CDP target id
+- Prefer detached TradingView tabs/windows for parallel agents
+- Saved layouts alone are not isolation; unpinned agents can follow whichever chart target TradingView exposes first
+- Target pinning isolates chart/page state, not individual panes; `pane_focus` changes the active pane inside the pinned target
+- Serialize `ui_*`, `tab_*`, Pine editor, keyboard, and mouse-heavy workflows across agents unless there is an external lock
+
 ## Context Management Rules
 
 These tools can return large payloads. Follow these rules to avoid context bloat:
@@ -123,7 +132,7 @@ These tools can return large payloads. Follow these rules to avoid context bloat
 ## Architecture
 
 ```
-Claude Code ←→ MCP Server (stdio) ←→ CDP (localhost:9222) ←→ TradingView Desktop (Electron)
+Claude Code ←→ MCP Server (stdio) ←→ CDP (localhost:9222, chart target) ←→ TradingView Desktop (Electron)
 ```
 
 Pine graphics path: `study._graphics._primitivesCollection.dwglines.get('lines').get(false)._primitivesDataById`

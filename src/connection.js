@@ -2,8 +2,9 @@ import CDP from 'chrome-remote-interface';
 
 let client = null;
 let targetInfo = null;
-const CDP_HOST = 'localhost';
-const CDP_PORT = 9222;
+let connectedEndpoint = null;
+const DEFAULT_CDP_HOST = 'localhost';
+const DEFAULT_CDP_PORT = 9222;
 const MAX_RETRIES = 5;
 const BASE_DELAY = 500;
 
@@ -47,15 +48,95 @@ export function requireFinite(value, name) {
   return n;
 }
 
+export function getCdpEndpoint() {
+  const host = process.env.TV_CDP_HOST || process.env.CDP_HOST || DEFAULT_CDP_HOST;
+  const rawPort = process.env.TV_CDP_PORT || process.env.CDP_PORT || String(DEFAULT_CDP_PORT);
+  const port = Number(rawPort);
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    throw new Error(`TV_CDP_PORT must be a valid TCP port, got: ${rawPort}`);
+  }
+  return { host, port };
+}
+
+export function getCdpHttpBase(endpoint = getCdpEndpoint()) {
+  const host = endpoint.host.includes(':') && !endpoint.host.startsWith('[')
+    ? `[${endpoint.host}]`
+    : endpoint.host;
+  return `http://${host}:${endpoint.port}`;
+}
+
+export function getChartIdFromUrl(url = '') {
+  return String(url).match(/\/chart\/([^/?#]+)/)?.[1] || null;
+}
+
+export function getTargetSelector() {
+  return {
+    targetId: process.env.TV_TARGET_ID || process.env.CDP_TARGET_ID || '',
+    chartId: process.env.TV_CHART_ID || '',
+    urlMatch: process.env.TV_TARGET_URL_MATCH || '',
+  };
+}
+
+function selectorDescription(selector) {
+  const parts = [];
+  if (selector.targetId) parts.push(`TV_TARGET_ID=${selector.targetId}`);
+  if (selector.chartId) parts.push(`TV_CHART_ID=${selector.chartId}`);
+  if (selector.urlMatch) parts.push(`TV_TARGET_URL_MATCH=${selector.urlMatch}`);
+  return parts.join(', ');
+}
+
+export function selectChartTarget(targets, selector = {}) {
+  const pages = (targets || []).filter(t => t.type === 'page');
+  const chartPages = pages.filter(t => /tradingview\.com\/chart/i.test(t.url || ''));
+  const tradingViewPages = pages.filter(t => /tradingview/i.test(t.url || '') || /tradingview/i.test(t.title || ''));
+
+  if (selector.targetId) {
+    return pages.find(t => t.id === selector.targetId) || null;
+  }
+  if (selector.chartId) {
+    return chartPages.find(t => getChartIdFromUrl(t.url) === selector.chartId) || null;
+  }
+  if (selector.urlMatch) {
+    return pages.find(t => String(t.url || '').includes(selector.urlMatch)) || null;
+  }
+
+  return chartPages[0] || tradingViewPages[0] || null;
+}
+
+export function hasTargetSelector(selector = getTargetSelector()) {
+  return !!(selector.targetId || selector.chartId || selector.urlMatch);
+}
+
+export function targetMatchesSelector(target, selector) {
+  if (!target) return false;
+  if (selector.targetId) return target.id === selector.targetId;
+  if (selector.chartId) return getChartIdFromUrl(target.url) === selector.chartId;
+  if (selector.urlMatch) return String(target.url || '').includes(selector.urlMatch);
+  return true;
+}
+
+function sameEndpoint(a, b) {
+  return !!a && !!b && a.host === b.host && a.port === b.port;
+}
+
 export async function getClient() {
   if (client) {
     try {
+      const endpoint = getCdpEndpoint();
+      const selector = getTargetSelector();
+      const currentTarget = await findCurrentTargetInfo(targetInfo?.id, endpoint);
+      if (!sameEndpoint(connectedEndpoint, endpoint) || !targetMatchesSelector(currentTarget, selector)) {
+        await disconnect();
+        return connect();
+      }
+      targetInfo = currentTarget;
       // Quick liveness check
       await client.Runtime.evaluate({ expression: '1', returnByValue: true });
       return client;
     } catch {
       client = null;
       targetInfo = null;
+      connectedEndpoint = null;
     }
   }
   return connect();
@@ -69,14 +150,22 @@ export async function connect() {
       if (!target) {
         throw new Error('No TradingView chart target found. Is TradingView open with a chart?');
       }
-      targetInfo = target;
-      client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: target.id });
+      const { host, port } = getCdpEndpoint();
+      const nextClient = await CDP({ host, port, target: target.id });
 
       // Enable required domains
-      await client.Runtime.enable();
-      await client.Page.enable();
-      await client.DOM.enable();
+      try {
+        await nextClient.Runtime.enable();
+        await nextClient.Page.enable();
+        await nextClient.DOM.enable();
+      } catch (err) {
+        try { await nextClient.close(); } catch {}
+        throw err;
+      }
 
+      client = nextClient;
+      targetInfo = target;
+      connectedEndpoint = { host, port };
       return client;
     } catch (err) {
       lastError = err;
@@ -88,12 +177,25 @@ export async function connect() {
 }
 
 async function findChartTarget() {
-  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
-  const targets = await resp.json();
-  // Prefer targets with tradingview.com/chart in the URL
-  return targets.find(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
-    || targets.find(t => t.type === 'page' && /tradingview/i.test(t.url))
-    || null;
+  const endpoint = getCdpEndpoint();
+  const targets = await listTargets(endpoint);
+  const selector = getTargetSelector();
+  const target = selectChartTarget(targets, selector);
+  if (!target && selectorDescription(selector)) {
+    throw new Error(`No TradingView chart target found matching ${selectorDescription(selector)} on ${endpoint.host}:${endpoint.port}`);
+  }
+  return target;
+}
+
+async function listTargets(endpoint = getCdpEndpoint()) {
+  const resp = await fetch(`${getCdpHttpBase(endpoint)}/json/list`);
+  return resp.json();
+}
+
+async function findCurrentTargetInfo(targetId, endpoint = getCdpEndpoint()) {
+  if (!targetId) return null;
+  const targets = await listTargets(endpoint);
+  return targets.find(t => t.id === targetId) || null;
 }
 
 export async function getTargetInfo() {
@@ -127,9 +229,28 @@ export async function evaluateAsync(expression) {
 export async function disconnect() {
   if (client) {
     try { await client.close(); } catch {}
-    client = null;
-    targetInfo = null;
   }
+  client = null;
+  targetInfo = null;
+  connectedEndpoint = null;
+}
+
+export async function reconnectToTarget(target) {
+  await disconnect();
+  const { host, port } = getCdpEndpoint();
+  const nextClient = await CDP({ host, port, target: target.id });
+  try {
+    await nextClient.Runtime.enable();
+    await nextClient.Page.enable();
+    await nextClient.DOM.enable();
+  } catch (err) {
+    try { await nextClient.close(); } catch {}
+    throw err;
+  }
+  client = nextClient;
+  targetInfo = target;
+  connectedEndpoint = { host, port };
+  return nextClient;
 }
 
 // --- Direct API path helpers ---
