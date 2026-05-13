@@ -1,12 +1,59 @@
 /**
  * Core data access logic.
  */
-import { evaluate, evaluateAsync, KNOWN_PATHS, safeString } from '../connection.js';
+import { evaluate as _evaluate, evaluateAsync, KNOWN_PATHS, safeString } from '../connection.js';
 
 const MAX_OHLCV_BARS = 500;
 const MAX_TRADES = 20;
 const CHART_API = KNOWN_PATHS.chartApi;
 const BARS_PATH = KNOWN_PATHS.mainSeriesBars;
+
+// Default re-export kept for callers that still import { evaluate } from this module's history.
+const evaluate = _evaluate;
+
+function _resolveDeps(deps) {
+  return { evaluate: deps?.evaluate || _evaluate };
+}
+
+/**
+ * Parse a TradingView strategy report cell value string into structured fields.
+ * Examples it handles:
+ *   "+15,437.00USD+1.54%"  → { value: 15437, currency: "USD", percent: 1.54, raw }
+ *   "7,256.00"             → { value: 7256, raw }
+ *   "748"                  → { value: 748, raw }
+ *   "33.29%"               → { percent: 33.29, raw }
+ *   "1.172"                → { value: 1.172, raw }
+ *   "-1,234.50USD-2.10%"   → { value: -1234.5, currency: "USD", percent: -2.10, raw }
+ * Returns an object with whichever fields can be parsed; always includes `raw`.
+ */
+export function parseReportValue(raw) {
+  if (raw == null) return { raw: '' };
+  const text = String(raw).trim();
+  const out = { raw: text };
+  if (!text) return out;
+
+  // Detect currency code (3 uppercase letters between numeric blocks, e.g. "USD", "EUR")
+  const currencyMatch = text.match(/([A-Z]{3,4})(?=[\s+\-0-9.]|$)/);
+  if (currencyMatch) out.currency = currencyMatch[1];
+
+  // Find all numbers (incl. sign, thousands separators, decimals). Strip commas.
+  const numericTokens = [];
+  const re = /([+\-]?[0-9][0-9,]*(?:\.[0-9]+)?)(\s*%)?/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const num = parseFloat(m[1].replace(/,/g, ''));
+    if (Number.isFinite(num)) numericTokens.push({ num, isPercent: !!m[2] });
+  }
+
+  // Heuristic: first non-percent token is `value`, first percent token is `percent`.
+  for (const tok of numericTokens) {
+    if (tok.isPercent && out.percent === undefined) out.percent = tok.num;
+    else if (!tok.isPercent && out.value === undefined) out.value = tok.num;
+  }
+  // Fallback: only a percent appeared (e.g. "33.29%") — leave value undefined.
+  // Fallback: only a bare number (e.g. "1.172") — value is set, percent absent.
+  return out;
+}
 
 function buildGraphicsJS(collectionName, mapKey, filter) {
   return `
@@ -132,18 +179,63 @@ export async function getIndicator({ entity_id }) {
   return { success: true, entity_id, visible: data?.visible, inputs };
 }
 
-export async function getStrategyResults() {
+// JS injected into the page to scrape the Strategy Tester report DOM.
+// Returns { metrics: { [label]: rawText }, found: bool, error?: string }.
+// Selectors use [class*="..."] because TradingView CSS-module hashes (e.g. -hIlv5It8) rotate.
+const STRATEGY_DOM_SCRAPE_JS = `
+  (function() {
+    try {
+      // TradingView rotates the CSS-module hash; try multiple historical names.
+      // Observed: backtestingReport-* (TV 3.1.0.7818 May 2026), reportContainer-* (earlier),
+      // strategyReport-* (older). The .bottom-widgetbar-content.backtesting wrapper is stable.
+      var root = document.querySelector('[class*="backtestingReport"]')
+              || document.querySelector('[class*="reportContainer"]')
+              || document.querySelector('.bottom-widgetbar-content.backtesting')
+              || document.querySelector('[class*="strategyReport"]')
+              || document.querySelector('[data-name="backtesting"]');
+      if (!root) return { found: false, error: 'strategy tester DOM container not found (tried backtestingReport, reportContainer, .backtesting, strategyReport, [data-name=backtesting])' };
+      var cards = root.querySelectorAll('[class*="containerCell"], [class*="cardContainer"], [class*="card-"]');
+      var metrics = {};
+      for (var i = 0; i < cards.length; i++) {
+        var card = cards[i];
+        var labelEl = card.querySelector('[class*="title"], [class*="label"]');
+        var valueEl = card.querySelector('[class*="positiveValue"], [class*="negativeValue"], [class*="value"]');
+        if (!labelEl || !valueEl) continue;
+        var label = (labelEl.textContent || '').trim();
+        var value = (valueEl.textContent || '').trim();
+        if (label && value && !metrics[label]) metrics[label] = value;
+      }
+      return { found: true, metrics: metrics, card_count: cards.length };
+    } catch(e) { return { found: false, error: e.message }; }
+  })()
+`;
+
+// Filter accepting any data source that looks like a strategy. Robust to TV builds
+// where strategies are marked is_price_study=true (overlay=true).
+const STRATEGY_FILTER_JS = `
+  function(s) {
+    if (!s || typeof s.metaInfo !== 'function') return false;
+    var meta = null; try { meta = s.metaInfo(); } catch(e) { return false; }
+    var notPriceStudy = !(meta && meta.is_price_study);
+    var hasStratData = !!(s.reportData || s.ordersData || s.equityData || s.performance);
+    return hasStratData || notPriceStudy;
+  }
+`;
+
+export async function getStrategyResults({ _deps } = {}) {
+  const { evaluate } = _resolveDeps(_deps);
   const results = await evaluate(`
     (function() {
       try {
         var chart = ${CHART_API}._chartWidget;
         var sources = chart.model().model().dataSources();
+        var isStrat = ${STRATEGY_FILTER_JS};
         var strat = null;
         for (var i = 0; i < sources.length; i++) {
           var s = sources[i];
-          if (s.metaInfo && s.metaInfo().is_price_study === false && (s.reportData || s.performance)) { strat = s; break; }
+          if (isStrat(s) && (s.reportData || s.performance)) { strat = s; break; }
         }
-        if (!strat) return {metrics: {}, source: 'internal_api', error: 'No strategy found on chart. Add a strategy indicator first.'};
+        if (!strat) return {metrics: {}, source: 'internal_api', error: 'No strategy found on chart.'};
         var metrics = {};
         if (strat.reportData) {
           var rd = typeof strat.reportData === 'function' ? strat.reportData() : strat.reportData;
@@ -161,20 +253,104 @@ export async function getStrategyResults() {
       } catch(e) { return {metrics: {}, source: 'internal_api', error: e.message}; }
     })()
   `);
-  return { success: true, metric_count: Object.keys(results?.metrics || {}).length, source: results?.source, metrics: results?.metrics || {}, error: results?.error };
+
+  const internalCount = Object.keys(results?.metrics || {}).length;
+  if (internalCount > 0) {
+    return { success: true, metric_count: internalCount, source: 'internal_api', metrics: results.metrics };
+  }
+
+  // Fallback: scrape the Strategy Tester report DOM.
+  const dom = await evaluate(STRATEGY_DOM_SCRAPE_JS);
+  if (dom?.found && dom.metrics && Object.keys(dom.metrics).length > 0) {
+    const rawMetrics = dom.metrics;
+    const parsed = {};
+    for (const [label, raw] of Object.entries(rawMetrics)) parsed[label] = parseReportValue(raw);
+    return {
+      success: true,
+      metric_count: Object.keys(parsed).length,
+      source: 'dom_fallback',
+      metrics: parsed,
+      metrics_raw: rawMetrics,
+    };
+  }
+
+  const internalErr = results?.error || 'internal_api returned no metrics';
+  const domErr = dom?.error || (dom?.found ? 'DOM had no metric cards' : 'strategy tester DOM container not found');
+  return {
+    success: false,
+    metric_count: 0,
+    source: 'none',
+    metrics: {},
+    error: `Both lookup paths failed. internal_api: ${internalErr}. dom_fallback: ${domErr}.`,
+  };
 }
 
-export async function getTrades({ max_trades } = {}) {
+// Scrape the Strategy Tester "List of trades" table from the DOM.
+// NOTE: these selectors are GUESSED based on TV conventions — verify against live DOM.
+// TODO verify: exact class hash for the trades-table container and row/cell classes.
+function buildTradesDomScrapeJs(limit) {
+  return `
+    (function() {
+      try {
+        var root = document.querySelector('[class*="backtestingReport"]')
+                || document.querySelector('[class*="reportContainer"]')
+                || document.querySelector('.bottom-widgetbar-content.backtesting')
+                || document.querySelector('[class*="strategyReport"]')
+                || document.querySelector('[data-name="backtesting"]');
+        if (!root) return { found: false, error: 'strategy tester DOM container not found' };
+        // TODO verify: trades table selector. Trying common patterns.
+        var table = root.querySelector('[class*="listOfTrades"], [class*="tradesList"], [class*="trades-"], table[class*="reportTable"]');
+        if (!table) {
+          // Last resort: any table inside reportContainer with multiple rows
+          var tables = root.querySelectorAll('table, [role="table"]');
+          for (var ti = 0; ti < tables.length; ti++) {
+            if (tables[ti].querySelectorAll('tr, [role="row"]').length > 2) { table = tables[ti]; break; }
+          }
+        }
+        if (!table) return { found: false, error: 'trades table not in reportContainer' };
+        var rows = table.querySelectorAll('tr, [role="row"]');
+        if (rows.length < 2) return { found: false, error: 'no trade rows' };
+        // First row(s) usually headers — collect text cells per row.
+        var headers = null;
+        var trades = [];
+        for (var i = 0; i < rows.length && trades.length < ${limit}; i++) {
+          var row = rows[i];
+          var cells = row.querySelectorAll('td, th, [role="cell"], [role="columnheader"]');
+          if (cells.length === 0) continue;
+          var cellTexts = [];
+          for (var c = 0; c < cells.length; c++) cellTexts.push((cells[c].textContent || '').trim());
+          if (!headers) {
+            // Heuristic: a header row contains no leading numeric cell.
+            var isHeader = cellTexts.length > 0 && isNaN(parseFloat(cellTexts[0].replace(/[^0-9.\\-]/g, '')));
+            if (isHeader) { headers = cellTexts; continue; }
+          }
+          if (headers && cellTexts.length === headers.length) {
+            var trade = {};
+            for (var h = 0; h < headers.length; h++) trade[headers[h] || ('col_' + h)] = cellTexts[h];
+            trades.push(trade);
+          } else {
+            trades.push({ cells: cellTexts });
+          }
+        }
+        return { found: true, trades: trades, headers: headers };
+      } catch(e) { return { found: false, error: e.message }; }
+    })()
+  `;
+}
+
+export async function getTrades({ max_trades, _deps } = {}) {
+  const { evaluate } = _resolveDeps(_deps);
   const limit = Math.min(max_trades || 20, MAX_TRADES);
   const trades = await evaluate(`
     (function() {
       try {
         var chart = ${CHART_API}._chartWidget;
         var sources = chart.model().model().dataSources();
+        var isStrat = ${STRATEGY_FILTER_JS};
         var strat = null;
         for (var i = 0; i < sources.length; i++) {
           var s = sources[i];
-          if (s.metaInfo && s.metaInfo().is_price_study === false && (s.ordersData || s.reportData)) { strat = s; break; }
+          if (isStrat(s) && (s.ordersData || s.reportData)) { strat = s; break; }
         }
         if (!strat) return {trades: [], source: 'internal_api', error: 'No strategy found on chart.'};
         var orders = null;
@@ -198,19 +374,46 @@ export async function getTrades({ max_trades } = {}) {
       } catch(e) { return {trades: [], source: 'internal_api', error: e.message}; }
     })()
   `);
-  return { success: true, trade_count: trades?.trades?.length || 0, source: trades?.source, trades: trades?.trades || [], error: trades?.error };
+
+  if (trades?.trades && trades.trades.length > 0) {
+    return { success: true, trade_count: trades.trades.length, source: 'internal_api', trades: trades.trades };
+  }
+
+  // Fallback: DOM scrape of trades table.
+  const dom = await evaluate(buildTradesDomScrapeJs(limit));
+  if (dom?.found && Array.isArray(dom.trades) && dom.trades.length > 0) {
+    return {
+      success: true,
+      trade_count: dom.trades.length,
+      source: 'dom_fallback',
+      trades: dom.trades,
+      headers: dom.headers,
+    };
+  }
+
+  const internalErr = trades?.error || 'internal_api returned no trades';
+  const domErr = dom?.error || 'no trades parsed from DOM';
+  return {
+    success: false,
+    trade_count: 0,
+    source: 'none',
+    trades: [],
+    error: `Both lookup paths failed. internal_api: ${internalErr}. dom_fallback: ${domErr}.`,
+  };
 }
 
-export async function getEquity() {
+export async function getEquity({ _deps } = {}) {
+  const { evaluate } = _resolveDeps(_deps);
   const equity = await evaluate(`
     (function() {
       try {
         var chart = ${CHART_API}._chartWidget;
         var sources = chart.model().model().dataSources();
+        var isStrat = ${STRATEGY_FILTER_JS};
         var strat = null;
         for (var i = 0; i < sources.length; i++) {
           var s = sources[i];
-          if (s.metaInfo && s.metaInfo().is_price_study === false && (s.reportData || s.performance)) { strat = s; break; }
+          if (isStrat(s) && (s.reportData || s.performance || s.equityData)) { strat = s; break; }
         }
         if (!strat) return {data: [], source: 'internal_api', error: 'No strategy found on chart.'};
         var data = [];
@@ -226,20 +429,65 @@ export async function getEquity() {
             for (var i = start; i <= end; i++) { var v = bars.valueAt(i); if (v) data.push({time: v[0], equity: v[1], drawdown: v[2] || null}); }
           }
         }
-        if (data.length === 0) {
-          var perfData = {};
-          if (strat.performance) {
-            var perf = strat.performance();
-            if (perf && typeof perf.value === 'function') perf = perf.value();
-            if (perf && typeof perf === 'object') { var pkeys = Object.keys(perf); for (var p = 0; p < pkeys.length; p++) { if (/equity|drawdown|profit|net/i.test(pkeys[p])) perfData[pkeys[p]] = perf[pkeys[p]]; } }
-          }
-          if (Object.keys(perfData).length > 0) return {data: [], equity_summary: perfData, source: 'internal_api', note: 'Full equity curve not available via API; equity summary metrics returned instead.'};
+        var perfData = {};
+        if (data.length === 0 && strat.performance) {
+          var perf = strat.performance();
+          if (perf && typeof perf.value === 'function') perf = perf.value();
+          if (perf && typeof perf === 'object') { var pkeys = Object.keys(perf); for (var p = 0; p < pkeys.length; p++) { if (/equity|drawdown|profit|net/i.test(pkeys[p])) perfData[pkeys[p]] = perf[pkeys[p]]; } }
         }
-        return {data: data, source: 'internal_api'};
+        return {data: data, equity_summary: Object.keys(perfData).length > 0 ? perfData : null, source: 'internal_api'};
       } catch(e) { return {data: [], source: 'internal_api', error: e.message}; }
     })()
   `);
-  return { success: true, data_points: equity?.data?.length || 0, source: equity?.source, data: equity?.data || [], equity_summary: equity?.equity_summary, note: equity?.note, error: equity?.error };
+
+  const internalPoints = equity?.data?.length || 0;
+  const internalSummary = equity?.equity_summary;
+  if (internalPoints > 0) {
+    return { success: true, data_points: internalPoints, source: 'internal_api', data: equity.data };
+  }
+  if (internalSummary && Object.keys(internalSummary).length > 0) {
+    return {
+      success: true,
+      data_points: 0,
+      source: 'internal_api',
+      data: [],
+      equity_summary: internalSummary,
+      note: 'Full equity curve not available via API; equity summary metrics returned instead.',
+    };
+  }
+
+  // Fallback: scrape equity-related labels from the report DOM
+  // (Total P&L, Max equity drawdown, Net profit, etc.).
+  // TODO verify: full equity *curve* (per-bar series) likely lives in a canvas chart inside
+  // the Performance Summary tab — not extractable via DOM. We return summary metrics only.
+  const dom = await evaluate(STRATEGY_DOM_SCRAPE_JS);
+  if (dom?.found && dom.metrics) {
+    const equityLabels = /p&l|pnl|profit|drawdown|equity|net/i;
+    const summary = {};
+    for (const [label, raw] of Object.entries(dom.metrics)) {
+      if (equityLabels.test(label)) summary[label] = parseReportValue(raw);
+    }
+    if (Object.keys(summary).length > 0) {
+      return {
+        success: true,
+        data_points: 0,
+        source: 'dom_fallback',
+        data: [],
+        equity_summary: summary,
+        note: 'Full equity curve not available; summary metrics scraped from report DOM.',
+      };
+    }
+  }
+
+  const internalErr = equity?.error || 'internal_api returned no equity data';
+  const domErr = dom?.error || 'no equity-related metrics in DOM';
+  return {
+    success: false,
+    data_points: 0,
+    source: 'none',
+    data: [],
+    error: `Both lookup paths failed. internal_api: ${internalErr}. dom_fallback: ${domErr}.`,
+  };
 }
 
 export async function getQuote({ symbol } = {}) {

@@ -1,7 +1,89 @@
 /**
  * Core UI automation logic.
  */
-import { evaluate, evaluateAsync, getClient } from '../connection.js';
+import { evaluate as _evaluate, evaluateAsync as _evaluateAsync, getClient as _getClient } from '../connection.js';
+
+// Re-export under original names so existing call sites continue to work
+// while new `_deps`-aware functions can swap them out for tests.
+const evaluate = _evaluate;
+const evaluateAsync = _evaluateAsync;
+const getClient = _getClient;
+
+// ─── Centralized DOM selectors ──────────────────────────────────────────────
+// TradingView Desktop uses CSS-module hashed class names (e.g.
+// `reportContainer-hIlv5It8`) that change across releases. Use attribute-
+// substring matchers and keep fallback lists so a UI refactor only requires
+// updating this map.
+export const SELECTORS = {
+  bottomArea: ['[class*="layout__area--bottom"]'],
+  rightArea: ['[class*="layout__area--right"]'],
+  pineMonaco: ['.monaco-editor.pine-editor-monaco'],
+  // Strategy Tester panel container. TradingView rotates the CSS-module hash
+  // across releases, so keep multiple substring matchers and a generic
+  // `.bottom-widgetbar-content.backtesting` class (stable across builds).
+  // Observed names: `backtestingReport-qyUx4U7K` (TV 3.1.0.7818, May 2026),
+  // `reportContainer-hIlv5It8` (earlier in same release), older `strategyReport-*`,
+  // and the legacy `[data-name="backtesting"]` attribute.
+  strategyTesterPanel: [
+    '[class*="backtestingReport"]',
+    '[class*="reportContainer"]',
+    '.bottom-widgetbar-content.backtesting',
+    '[data-name="backtesting"]',
+    '[class*="strategyReport"]',
+  ],
+  // Tab buttons that are unique to the Strategy Tester. Their visibility is a
+  // reliable secondary signal even when the container hash changes.
+  strategyTesterTabLabels: ['Metrics', 'List of trades', 'Performance', 'Performance Summary'],
+};
+
+// Build a JS-source array literal for use inside evaluate() bodies.
+function _arrLit(arr) { return '[' + arr.map(s => JSON.stringify(s)).join(',') + ']'; }
+
+function _resolve(deps) {
+  return {
+    evaluate: deps?.evaluate || _evaluate,
+    evaluateAsync: deps?.evaluateAsync || _evaluateAsync,
+    getClient: deps?.getClient || _getClient,
+  };
+}
+
+/**
+ * Detect whether the Strategy Tester panel is open, independent of whether the
+ * bottom panel itself is open. Returns { open, signals } where `signals` lists
+ * which detection paths matched (useful for debugging when detection fails).
+ */
+export async function detectStrategyTester({ _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
+  const panelSelsLit = _arrLit(SELECTORS.strategyTesterPanel);
+  const tabLabelsLit = _arrLit(SELECTORS.strategyTesterTabLabels);
+  const result = await evaluate(`
+    (function() {
+      var signals = [];
+      var panelSels = ${panelSelsLit};
+      for (var i = 0; i < panelSels.length; i++) {
+        var el = document.querySelector(panelSels[i]);
+        if (el && el.offsetParent) { signals.push('panel:' + panelSels[i]); break; }
+      }
+      var tabLabels = ${tabLabelsLit};
+      var btns = document.querySelectorAll('button, [role="tab"]');
+      // TradingView buttons commonly emit their label twice in textContent
+      // (visible span + tooltip span), producing strings like "MetricsMetrics".
+      // Accept the literal label OR the doubled form.
+      for (var j = 0; j < btns.length; j++) {
+        var b = btns[j];
+        if (!b.offsetParent) continue;
+        var text = (b.textContent || '').trim();
+        for (var k = 0; k < tabLabels.length; k++) {
+          var lbl = tabLabels[k];
+          if (text === lbl || text === lbl + lbl) { signals.push('tab:' + lbl); break; }
+        }
+        if (signals.length >= 4) break;
+      }
+      return { open: signals.length > 0, signals: signals, tried: { panels: panelSels, tabs: tabLabels } };
+    })()
+  `);
+  return result || { open: false, signals: [], tried: { panels: SELECTORS.strategyTesterPanel, tabs: SELECTORS.strategyTesterTabLabels } };
+}
 
 export async function click({ by, value }) {
   const escaped = JSON.stringify(value);
@@ -28,10 +110,13 @@ export async function click({ by, value }) {
   return { success: true, clicked: result };
 }
 
-export async function openPanel({ panel, action }) {
+export async function openPanel({ panel, action, _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
   const isBottomPanel = panel === 'pine-editor' || panel === 'strategy-tester';
   if (isBottomPanel) {
     const widgetName = panel === 'pine-editor' ? 'pine-editor' : 'backtesting';
+    const stratPanelSelsLit = _arrLit(SELECTORS.strategyTesterPanel);
+    const stratTabLabelsLit = _arrLit(SELECTORS.strategyTesterTabLabels);
     const result = await evaluate(`
       (function() {
         var bwb = window.TradingView && window.TradingView.bottomWidgetBar;
@@ -40,9 +125,37 @@ export async function openPanel({ panel, action }) {
         var widgetName = ${JSON.stringify(widgetName)};
         var action = ${JSON.stringify(action)};
         var bottomArea = document.querySelector('[class*="layout__area--bottom"]');
-        var isOpen = !!(bottomArea && bottomArea.offsetHeight > 50);
-        if (panel === 'pine-editor') { var monacoEl = document.querySelector('.monaco-editor.pine-editor-monaco'); isOpen = isOpen && !!monacoEl; }
-        if (panel === 'strategy-tester') { var stratPanel = document.querySelector('[data-name="backtesting"]') || document.querySelector('[class*="strategyReport"]'); isOpen = isOpen && !!(stratPanel && stratPanel.offsetParent); }
+        var bottomOpen = !!(bottomArea && bottomArea.offsetHeight > 50);
+        var isOpen;
+        var signals = [];
+        if (panel === 'pine-editor') {
+          var monacoEl = document.querySelector('.monaco-editor.pine-editor-monaco');
+          // Pine editor still requires the bottom area to be visible to count as open.
+          isOpen = bottomOpen && !!monacoEl;
+        } else {
+          // Strategy-tester openness is computed INDEPENDENTLY of the bottom-area
+          // height: the Strategy Tester IS the bottom panel in many layouts, so
+          // gating on bottomOpen inverted detection (B10). We trust the panel
+          // container OR a visible Metrics/List-of-trades/Performance tab (B6).
+          var stratSels = ${stratPanelSelsLit};
+          for (var i = 0; i < stratSels.length; i++) {
+            var el = document.querySelector(stratSels[i]);
+            if (el && el.offsetParent) { signals.push('panel:' + stratSels[i]); break; }
+          }
+          if (signals.length === 0) {
+            var tabLabels = ${stratTabLabelsLit};
+            var btns = document.querySelectorAll('button, [role="tab"]');
+            for (var j = 0; j < btns.length && signals.length === 0; j++) {
+              var b = btns[j];
+              if (!b.offsetParent) continue;
+              var text = (b.textContent || '').trim();
+              for (var k = 0; k < tabLabels.length; k++) {
+                if (text === tabLabels[k]) { signals.push('tab:' + tabLabels[k]); break; }
+              }
+            }
+          }
+          isOpen = signals.length > 0;
+        }
         var performed = 'none';
         if (action === 'open' || (action === 'toggle' && !isOpen)) {
           if (panel === 'pine-editor') { if (typeof bwb.activateScriptEditorTab === 'function') bwb.activateScriptEditorTab(); else if (typeof bwb.showWidget === 'function') bwb.showWidget(widgetName); }
@@ -52,11 +165,11 @@ export async function openPanel({ panel, action }) {
           if (typeof bwb.hideWidget === 'function') bwb.hideWidget(widgetName);
           performed = 'closed';
         }
-        return { was_open: isOpen, performed: performed };
+        return { was_open: isOpen, performed: performed, signals: signals };
       })()
     `);
     if (result && result.error) throw new Error(result.error);
-    return { success: true, panel, action, was_open: result?.was_open ?? false, performed: result?.performed ?? 'unknown' };
+    return { success: true, panel, action, was_open: result?.was_open ?? false, performed: result?.performed ?? 'unknown', ...(result?.signals ? { signals: result.signals } : {}) };
   } else {
     const selectorMap = {
       'watchlist': { dataName: 'base-watchlist-widget-button', ariaLabel: 'Watchlist' },

@@ -37,18 +37,39 @@ const FIND_MONACO = `
 
 /**
  * Opens the Pine Editor panel and waits for Monaco to become available.
- * Returns true if editor is accessible, false on timeout.
+ * Returns { ready: bool, lastState: {...} } describing the final observed
+ * editor state. Callers that want a simple boolean can read `.ready`.
+ *
+ * B12 fix: surface diagnostic state (panel/container/monaco visibility) so
+ * callers can include it in error responses when timeout occurs.
+ *
+ * @param {object} [opts]
+ * @param {Function} [opts._evaluate] — DI hook for testing.
  */
-export async function ensurePineEditorOpen() {
-  const already = await evaluate(`
-    (function() {
-      var m = ${FIND_MONACO};
-      return m !== null;
-    })()
-  `);
-  if (already) return true;
+export async function ensurePineEditorOpen({ _evaluate } = {}) {
+  const ev = _evaluate || evaluate;
 
-  await evaluate(`
+  // Diagnostic probe — returns shape of editor environment for reporting.
+  const PROBE = `
+    (function() {
+      var container = document.querySelector('.monaco-editor.pine-editor-monaco');
+      var panel = document.querySelector('[class*="pine-editor"]')
+        || document.querySelector('[class*="layout__area--bottom"]');
+      var monacoFound = ${FIND_MONACO} !== null;
+      return {
+        monaco_ready: monacoFound,
+        container_present: container !== null,
+        container_visible: container !== null && container.offsetParent !== null,
+        panel_present: panel !== null,
+        panel_visible: panel !== null && panel.offsetParent !== null,
+      };
+    })()
+  `;
+
+  let lastState = await ev(PROBE);
+  if (lastState && lastState.monaco_ready) return { ready: true, lastState };
+
+  await ev(`
     (function() {
       var bwb = window.TradingView && window.TradingView.bottomWidgetBar;
       if (!bwb) return;
@@ -57,7 +78,7 @@ export async function ensurePineEditorOpen() {
     })()
   `);
 
-  await evaluate(`
+  await ev(`
     (function() {
       var btn = document.querySelector('[aria-label="Pine"]')
         || document.querySelector('[data-name="pine-dialog-button"]');
@@ -67,10 +88,25 @@ export async function ensurePineEditorOpen() {
 
   for (let i = 0; i < 50; i++) {
     await new Promise(r => setTimeout(r, 200));
-    const ready = await evaluate(`(function() { return ${FIND_MONACO} !== null; })()`);
-    if (ready) return true;
+    lastState = await ev(PROBE);
+    if (lastState && lastState.monaco_ready) return { ready: true, lastState };
   }
-  return false;
+  return { ready: false, lastState: lastState || { monaco_ready: false } };
+}
+
+/**
+ * Format the diagnostic state from ensurePineEditorOpen into an error message.
+ */
+function formatEditorOpenError(lastState) {
+  if (!lastState) return 'Could not open Pine Editor (no diagnostic state captured).';
+  const parts = [];
+  if (!lastState.panel_present) parts.push('Pine editor panel not in DOM');
+  else if (!lastState.panel_visible) parts.push('Pine editor panel hidden');
+  if (!lastState.container_present) parts.push('Monaco container not found');
+  else if (!lastState.container_visible) parts.push('Monaco container hidden');
+  if (lastState.container_present && !lastState.monaco_ready) parts.push('Monaco DOM exists but React fiber/editor instance not yet attached');
+  const detail = parts.length > 0 ? ` (${parts.join('; ')})` : '';
+  return `Could not open Pine Editor or Monaco not found in React fiber tree${detail}.`;
 }
 
 // ── Pure / offline functions ──
@@ -245,8 +281,8 @@ export async function check({ source }) {
 // ── Functions requiring TradingView connection ──
 
 export async function getSource() {
-  const editorReady = await ensurePineEditorOpen();
-  if (!editorReady) throw new Error('Could not open Pine Editor or Monaco not found in React fiber tree.');
+  const editor = await ensurePineEditorOpen();
+  if (!editor.ready) throw new Error(formatEditorOpenError(editor.lastState));
 
   const source = await evaluate(`
     (function() {
@@ -264,8 +300,8 @@ export async function getSource() {
 }
 
 export async function setSource({ source }) {
-  const editorReady = await ensurePineEditorOpen();
-  if (!editorReady) throw new Error('Could not open Pine Editor.');
+  const editor = await ensurePineEditorOpen();
+  if (!editor.ready) throw new Error(formatEditorOpenError(editor.lastState));
 
   const escaped = JSON.stringify(source);
   const set = await evaluate(`
@@ -281,11 +317,27 @@ export async function setSource({ source }) {
   return { success: true, lines_set: source.split('\n').length };
 }
 
-export async function compile() {
-  const editorReady = await ensurePineEditorOpen();
-  if (!editorReady) throw new Error('Could not open Pine Editor.');
+// JS expression that returns the current chart's study count (or null on failure).
+const STUDY_COUNT_EXPR = `
+  (function() {
+    try {
+      var chart = window.TradingViewApi._activeChartWidgetWV.value();
+      if (chart && typeof chart.getAllStudies === 'function') return chart.getAllStudies().length;
+    } catch(e) {}
+    return null;
+  })()
+`;
 
-  const clicked = await evaluate(`
+export async function compile({ _deps } = {}) {
+  const ev = (_deps && _deps.evaluate) || evaluate;
+  const getCdpClient = (_deps && _deps.getClient) || getClient;
+
+  const editor = await ensurePineEditorOpen({ _evaluate: ev });
+  if (!editor.ready) throw new Error(formatEditorOpenError(editor.lastState));
+
+  const studiesBefore = await ev(STUDY_COUNT_EXPR);
+
+  const clicked = await ev(`
     (function() {
       var btns = document.querySelectorAll('button');
       var fallback = null;
@@ -309,19 +361,43 @@ export async function compile() {
     })()
   `);
 
+  let keyboardFallback = false;
   if (!clicked) {
-    const c = await getClient();
+    keyboardFallback = true;
+    const c = await getCdpClient();
     await c.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: 2, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
     await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 'Enter', code: 'Enter' });
   }
 
   await new Promise(r => setTimeout(r, 2000));
-  return { success: true, button_clicked: clicked || 'keyboard_shortcut', source: 'dom_fallback' };
+
+  // B9 fix: verify keyboard fallback by comparing study counts before/after.
+  const studiesAfter = await ev(STUDY_COUNT_EXPR);
+  let studyAdded = null;
+  if (studiesBefore !== null && studiesAfter !== null) {
+    studyAdded = studiesAfter > studiesBefore;
+  }
+
+  const result = {
+    success: true,
+    button_clicked: clicked || 'keyboard_shortcut',
+    source: 'dom_fallback',
+    studies_before: studiesBefore,
+    studies_after: studiesAfter,
+    study_added: studyAdded,
+  };
+
+  if (keyboardFallback && studyAdded === null) {
+    result.verification = 'unverified_keyboard_fallback';
+    result.note = 'No compile button found; dispatched Ctrl+Enter but study count could not be read to verify.';
+  }
+
+  return result;
 }
 
 export async function getErrors() {
-  const editorReady = await ensurePineEditorOpen();
-  if (!editorReady) throw new Error('Could not open Pine Editor.');
+  const editor = await ensurePineEditorOpen();
+  if (!editor.ready) throw new Error(formatEditorOpenError(editor.lastState));
 
   const errors = await evaluate(`
     (function() {
@@ -345,8 +421,8 @@ export async function getErrors() {
 }
 
 export async function save() {
-  const editorReady = await ensurePineEditorOpen();
-  if (!editorReady) throw new Error('Could not open Pine Editor.');
+  const editor = await ensurePineEditorOpen();
+  if (!editor.ready) throw new Error(formatEditorOpenError(editor.lastState));
 
   const c = await getClient();
   await c.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: 2, key: 's', code: 'KeyS', windowsVirtualKeyCode: 83 });
@@ -377,8 +453,8 @@ export async function save() {
 }
 
 export async function getConsole() {
-  const editorReady = await ensurePineEditorOpen();
-  if (!editorReady) throw new Error('Could not open Pine Editor.');
+  const editor = await ensurePineEditorOpen();
+  if (!editor.ready) throw new Error(formatEditorOpenError(editor.lastState));
 
   const entries = await evaluate(`
     (function() {
@@ -426,21 +502,23 @@ export async function getConsole() {
   return { success: true, entries: entries || [], entry_count: entries?.length || 0 };
 }
 
-export async function smartCompile() {
-  const editorReady = await ensurePineEditorOpen();
-  if (!editorReady) throw new Error('Could not open Pine Editor.');
+export async function smartCompile({ _deps } = {}) {
+  const ev = (_deps && _deps.evaluate) || evaluate;
+  const getCdpClient = (_deps && _deps.getClient) || getClient;
 
-  const studiesBefore = await evaluate(`
-    (function() {
-      try {
-        var chart = window.TradingViewApi._activeChartWidgetWV.value();
-        if (chart && typeof chart.getAllStudies === 'function') return chart.getAllStudies().length;
-      } catch(e) {}
-      return null;
-    })()
-  `);
+  const editor = await ensurePineEditorOpen({ _evaluate: ev });
+  if (!editor.ready) throw new Error(formatEditorOpenError(editor.lastState));
 
-  const buttonClicked = await evaluate(`
+  const studiesBefore = await ev(STUDY_COUNT_EXPR);
+
+  // B5 fix: priority order is
+  //   1. "Save and add to chart" (single-click combo on a brand-new script)
+  //   2. "Update on chart" (a previous instance is already on chart)
+  //   3. "Add to chart" (compiles + adds — what most callers actually want)
+  //   4. "Save" (LAST RESORT — only persists; does NOT add/compile to chart)
+  // The previous bug preferred "Save" before "Add to chart", so smart_compile
+  // never actually compiled the script onto the chart.
+  const buttonClicked = await ev(`
     (function() {
       var btns = document.querySelectorAll('button');
       var addBtn = null;
@@ -456,22 +534,24 @@ export async function smartCompile() {
         if (!updateBtn && /^update on chart$/i.test(text)) updateBtn = btns[i];
         if (!saveBtn && btns[i].className.indexOf('saveButton') !== -1 && btns[i].offsetParent !== null) saveBtn = btns[i];
       }
-      if (addBtn) { addBtn.click(); return 'Add to chart'; }
       if (updateBtn) { updateBtn.click(); return 'Update on chart'; }
+      if (addBtn) { addBtn.click(); return 'Add to chart'; }
       if (saveBtn) { saveBtn.click(); return 'Pine Save'; }
       return null;
     })()
   `);
 
+  let keyboardFallback = false;
   if (!buttonClicked) {
-    const c = await getClient();
+    keyboardFallback = true;
+    const c = await getCdpClient();
     await c.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: 2, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
     await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 'Enter', code: 'Enter' });
   }
 
   await new Promise(r => setTimeout(r, 2500));
 
-  const errors = await evaluate(`
+  const errors = await ev(`
     (function() {
       var m = ${FIND_MONACO};
       if (!m) return [];
@@ -484,30 +564,60 @@ export async function smartCompile() {
     })()
   `);
 
-  const studiesAfter = await evaluate(`
-    (function() {
-      try {
-        var chart = window.TradingViewApi._activeChartWidgetWV.value();
-        if (chart && typeof chart.getAllStudies === 'function') return chart.getAllStudies().length;
-      } catch(e) {}
-      return null;
-    })()
-  `);
+  const studiesAfter = await ev(STUDY_COUNT_EXPR);
+  const countDelta = (studiesBefore !== null && studiesAfter !== null) ? studiesAfter - studiesBefore : null;
 
-  const studyAdded = (studiesBefore !== null && studiesAfter !== null) ? studiesAfter > studiesBefore : null;
+  // Determine outcome based on the button we clicked + study count delta.
+  // We use the *clicked* button as the source-of-truth signal, and verify
+  // against the count delta where possible.
+  let studyAdded = null;
+  let studyUpdated = false;
+  let studySaved = false;
+  let note;
 
-  return {
+  if (buttonClicked === 'Update on chart') {
+    studyUpdated = true;
+    // Update doesn't change the count — same instance re-compiled.
+    studyAdded = false;
+  } else if (buttonClicked === 'Add to chart' || buttonClicked === 'Save and add to chart') {
+    if (countDelta !== null) {
+      studyAdded = countDelta > 0;
+    } else {
+      studyAdded = null;
+    }
+  } else if (buttonClicked === 'Pine Save') {
+    studyAdded = false;
+    studySaved = true;
+    note = 'Only a Pine "Save" button was available — the script was persisted to your saved scripts but was NOT compiled/added to the chart. To add it, ensure the editor instance is connected to a chart and that an "Add to chart" or "Update on chart" button is visible.';
+  } else {
+    // Keyboard fallback. Verify via count delta if possible.
+    if (countDelta !== null) studyAdded = countDelta > 0;
+    else studyAdded = null;
+  }
+
+  const result = {
     success: true,
     button_clicked: buttonClicked || 'keyboard_shortcut',
     has_errors: errors?.length > 0,
     errors: errors || [],
     study_added: studyAdded,
+    study_updated: studyUpdated,
+    study_saved: studySaved,
+    studies_before: studiesBefore,
+    studies_after: studiesAfter,
   };
+
+  if (note) result.note = note;
+  if (keyboardFallback && studyAdded === null) {
+    result.verification = 'unverified_keyboard_fallback';
+  }
+
+  return result;
 }
 
 export async function newScript({ type }) {
-  const editorReady = await ensurePineEditorOpen();
-  if (!editorReady) throw new Error('Could not open Pine Editor.');
+  const editor = await ensurePineEditorOpen();
+  if (!editor.ready) throw new Error(formatEditorOpenError(editor.lastState));
 
   const typeMap = { indicator: 'indicator', strategy: 'strategy', library: 'library' };
   const templates = {
@@ -535,8 +645,8 @@ export async function newScript({ type }) {
 }
 
 export async function openScript({ name }) {
-  const editorReady = await ensurePineEditorOpen();
-  if (!editorReady) throw new Error('Could not open Pine Editor.');
+  const editor = await ensurePineEditorOpen();
+  if (!editor.ready) throw new Error(formatEditorOpenError(editor.lastState));
 
   const escapedName = JSON.stringify(name.toLowerCase());
 

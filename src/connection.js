@@ -90,6 +90,18 @@ export async function connect() {
 async function findChartTarget() {
   const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
   const targets = await resp.json();
+  // B14: TradingView Desktop frequently has multiple chart pages open. Allow the
+  // caller to disambiguate via env vars; otherwise prefer the first chart page.
+  const urlHint = process.env.TRADINGVIEW_CHART_URL;
+  const idHint = process.env.TRADINGVIEW_TARGET_ID;
+  if (idHint) {
+    const byId = targets.find(t => t.type === 'page' && t.id && t.id.startsWith(idHint));
+    if (byId) return byId;
+  }
+  if (urlHint) {
+    const byUrl = targets.find(t => t.type === 'page' && t.url && t.url.includes(urlHint));
+    if (byUrl) return byUrl;
+  }
   // Prefer targets with tradingview.com/chart in the URL
   return targets.find(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
     || targets.find(t => t.type === 'page' && /tradingview/i.test(t.url))
