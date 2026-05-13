@@ -445,35 +445,47 @@ export async function list() {
   return { success: true, alert_count: result?.alerts?.length || 0, source: 'internal_api', alerts: result?.alerts || [], error: result?.error };
 }
 
-// TODO(per-alert delete): TradingView's REST surface for deleting a single
-// alert is currently not discoverable from CDP. Tried (all returned
-// `code=no_such_endpoint`): GET /remove_alert, /delete_alert, /alert,
-// /show_alert, /alert_details, /get_alert, /get_alert_details, /remove_alerts,
-// /remove, /delete, /archive_alert. POST /remove_alert and HTTP DELETE on
-// /list_alerts / /alerts / /alert also fail (DELETE errors before send).
-// The UI's per-row delete button dispatches at zero-bounding-rect when the
-// alerts side panel is collapsed, which is why a synthetic click did not
-// trigger a network request in repro. A future iteration should either:
-//   (a) intercept TV's own delete request (via Network panel during a manual
-//       delete) to identify the real endpoint + HTTP verb;
-//   (b) ensure the alerts panel is fully expanded and visible before clicking
-//       the per-row delete button, then handle the confirm dialog;
-//   (c) call the TV WS protocol if that's where deletes actually flow.
-// Until then, `name` / `alert_id` matching still runs and reports which
-// alerts would be deleted — the caller can use TV's UI or alert_delete with
-// delete_all: true (which opens the panel context menu for manual confirm).
-async function deleteOneByApi(alertId) {
-  const url = `https://pricealerts.tradingview.com/remove_alert?alert_id=${encodeURIComponent(alertId)}`;
+/**
+ * Delete one or more alerts in a single batched POST to TradingView's
+ * pricealerts service. Endpoint discovered via DevTools network capture on
+ * the web client (see commit message). Auth piggybacks on the session
+ * cookies already present in the TV Desktop context.
+ *
+ *   POST https://pricealerts.tradingview.com/delete_alerts
+ *   Content-Type: text/plain;charset=UTF-8
+ *   Body: {"payload":{"alert_ids":[<id>, ...]}}
+ *
+ * On success TV returns {s:"ok", ...}. On failure it returns
+ * {s:"error", errmsg:"...", err:{code:"..."}}.
+ */
+async function deleteAlertsByApi(alertIds) {
+  if (!Array.isArray(alertIds) || alertIds.length === 0) {
+    return { ok: false, error: 'alertIds must be a non-empty array' };
+  }
+  const idsAsNumbers = alertIds.map(x => {
+    const n = Number(x);
+    return Number.isFinite(n) ? n : x;
+  });
+  const body = JSON.stringify({ payload: { alert_ids: idsAsNumbers } });
   const result = await evaluateAsync(`
-    fetch(${safeString(url)}, { credentials: 'include' })
-      .then(function(r) { return r.json().then(function(j) { return { status: r.status, body: j }; }).catch(function() { return { status: r.status, body: null }; }); })
+    fetch('https://pricealerts.tradingview.com/delete_alerts', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'content-type': 'text/plain;charset=UTF-8' },
+      body: ${safeString(body)}
+    })
+      .then(function(r) {
+        return r.json()
+          .then(function(j) { return { status: r.status, body: j }; })
+          .catch(function() { return { status: r.status, body: null }; });
+      })
       .catch(function(e) { return { error: e.message }; })
   `);
   if (result?.error) return { ok: false, error: result.error };
-  const body = result?.body;
-  if (body && body.s === 'ok') return { ok: true, body };
-  if (result?.status === 200 && !body) return { ok: true, body: null };
-  return { ok: false, status: result?.status, body, errmsg: body?.errmsg };
+  const b = result?.body;
+  if (b && b.s === 'ok') return { ok: true, body: b };
+  if (result?.status === 200 && !b) return { ok: true, body: null };
+  return { ok: false, status: result?.status, body: b, errmsg: b?.errmsg };
 }
 
 export async function deleteAlerts({ delete_all, name, alert_id }) {
@@ -521,23 +533,19 @@ export async function deleteAlerts({ delete_all, name, alert_id }) {
     };
   }
 
-  const results = [];
-  for (const a of targets) {
-    const res = await deleteOneByApi(a.alert_id);
-    results.push({
-      alert_id: a.alert_id,
-      message: (a.message || '').slice(0, 60),
-      ok: res.ok,
-      error: res.error,
-      status: res.status,
-    });
-  }
-  const okCount = results.filter(r => r.ok).length;
+  // Batch delete in a single POST — the /delete_alerts endpoint accepts an
+  // array of alert_ids and returns a single ok/error response for the whole
+  // batch. We surface the matched targets so the caller can audit what got
+  // removed even when only one was requested.
+  const ids = targets.map(a => a.alert_id);
+  const res = await deleteAlertsByApi(ids);
+
   return {
-    success: okCount === targets.length,
-    deleted: okCount,
+    success: !!res.ok,
+    deleted: res.ok ? targets.length : 0,
     attempted: targets.length,
-    results,
+    matched: targets.map(a => ({ alert_id: a.alert_id, message: (a.message || '').slice(0, 80), symbol: a.symbol })),
+    error: res.ok ? undefined : (res.errmsg || res.error || `delete_alerts returned status ${res.status}`),
     source: 'rest_api',
   };
 }
