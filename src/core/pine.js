@@ -505,6 +505,24 @@ export async function smartCompile() {
   };
 }
 
+/**
+ * DEPRECATED. Use createScript() (MCP tool: pine_create_script) instead.
+ *
+ * newScript() does NOT create a new cloud-saved script. It just overwrites
+ * the currently-active editor tab with a template — and the editor tab is
+ * still bound to whatever saved-script slot it had before. A subsequent
+ * pine_set_source + pine_compile therefore saves the new code INTO that
+ * existing slot, silently overwriting the prior content of whatever script
+ * the user happened to have open. (See incident §22.176 where this clobbered
+ * a strategy the user explicitly asked us not to touch.)
+ *
+ * The safe alternative, createScript(), POSTs directly to the pine-facade
+ * REST CREATE endpoint and gets back a fresh script_id with no editor
+ * interaction, so there is no way for it to disturb existing scripts.
+ *
+ * Kept here for backwards compatibility with anything still calling
+ * pine_new — the tool wrapper attaches a runtime warning.
+ */
 export async function newScript({ type }) {
   const editorReady = await ensurePineEditorOpen();
   if (!editorReady) throw new Error('Could not open Pine Editor.');
@@ -531,7 +549,108 @@ export async function newScript({ type }) {
 
   if (!set) throw new Error('Monaco editor not found. Ensure Pine Editor is open.');
 
-  return { success: true, type, action: 'new_script_created', template: typeMap[type] };
+  return {
+    success: true,
+    type,
+    action: 'new_script_created',
+    template: typeMap[type],
+    deprecated: true,
+    warning: 'pine_new only overwrites the editor — it does NOT create a fresh cloud-saved script. Subsequent saves will land in whichever script slot the editor was bound to, which can silently overwrite an existing script (see §22.176). Use pine_create_script instead — it POSTs directly to pine-facade and returns a fresh script_id with no editor interaction.',
+  };
+}
+
+/**
+ * Create a brand-new saved Pine script via the pine-facade REST CREATE
+ * endpoint. Returns the new script_id. Does NOT touch the editor, so it is
+ * SAFE to call while other scripts are open — there is no risk of
+ * overwriting them.
+ *
+ *   POST https://pine-facade.tradingview.com/pine-facade/save/new
+ *     ?name=<urlencoded>&allow_overwrite=<bool>
+ *   Content-Type: multipart/form-data
+ *   Body: form field `source` = full Pine source
+ *
+ * Defaults `allow_overwrite` to false (the operator must explicitly opt in
+ * to overwrite — this is the safety guarantee that prevents the §22.176
+ * clobber from recurring).
+ *
+ * Auth piggybacks on the TV session cookies already present in the CDP
+ * context.
+ */
+export async function createScript({ name, source, allow_overwrite }) {
+  if (!name || typeof name !== 'string') throw new Error('name is required (string).');
+  if (!source || typeof source !== 'string') throw new Error('source is required (string).');
+  const overwrite = !!allow_overwrite;
+
+  // Safety pre-check: if not overwriting, refuse on name collision rather
+  // than relying on the server to reject. This also lets us return a more
+  // helpful error than TV's facade does.
+  if (!overwrite) {
+    const listing = await listScripts();
+    const collide = (listing.scripts || []).find(s => {
+      const n = (s.name || '').toLowerCase();
+      const t = (s.title || '').toLowerCase();
+      const want = name.toLowerCase();
+      return n === want || t === want;
+    });
+    if (collide) {
+      throw new Error(
+        `A saved script named "${name}" already exists (id=${collide.id}, version=${collide.version}). ` +
+        `Pass allow_overwrite: true to replace it, or use a different name.`
+      );
+    }
+  }
+
+  const url =
+    `https://pine-facade.tradingview.com/pine-facade/save/new` +
+    `?name=${encodeURIComponent(name)}` +
+    `&allow_overwrite=${overwrite ? 'true' : 'false'}`;
+
+  // Construct multipart form in the page context so the browser sets the
+  // multipart boundary header automatically (manually setting Content-Type
+  // breaks the boundary).
+  const result = await evaluateAsync(`
+    (function() {
+      var fd = new FormData();
+      fd.append('source', ${JSON.stringify(source)});
+      return fetch(${JSON.stringify(url)}, {
+        method: 'POST',
+        credentials: 'include',
+        body: fd,
+      })
+        .then(function(r) {
+          return r.text().then(function(text) {
+            var parsed = null;
+            try { parsed = JSON.parse(text); } catch(e) {}
+            return { status: r.status, ok: r.ok, body: parsed, raw: parsed ? null : text.slice(0, 500) };
+          });
+        })
+        .catch(function(e) { return { error: e.message }; });
+    })()
+  `);
+
+  if (result?.error) throw new Error(`pine-facade save/new fetch failed: ${result.error}`);
+  if (!result?.ok) {
+    throw new Error(
+      `pine-facade save/new returned status ${result?.status}` +
+      (result?.body?.errmsg ? `: ${result.body.errmsg}` : '') +
+      (result?.raw ? ` (body: ${result.raw})` : '')
+    );
+  }
+
+  // Successful create returns the new script descriptor. Fields vary by TV
+  // version — keep the raw body around for the caller.
+  const body = result.body || {};
+  return {
+    success: true,
+    name,
+    allow_overwrite: overwrite,
+    script_id: body.scriptIdPart || body.script_id_part || body.id || null,
+    title: body.scriptTitle || body.title || null,
+    version: body.version || null,
+    raw: body,
+    source: 'pine_facade_rest',
+  };
 }
 
 export async function openScript({ name }) {
