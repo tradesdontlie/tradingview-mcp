@@ -121,27 +121,66 @@ export async function create({ condition, price, message, webhook_url, expiratio
   // input to TV's "current price" default and discards any value we wrote
   // earlier. Setting price last is the only reliable order.
 
-  // 3. Condition — best-effort. The condition operator is an inline dropdown
-  //    in a portal; clicking the row opens a popover with options like
-  //    Crossing / Crossing Up / Greater Than / etc. We try to match the
-  //    requested option but don't fail the create if we can't.
+  // 3. Condition operator (Crossing / Greater Than / Less Than / etc.).
+  //    The operator row is a button whose text is the current operator name.
+  //    Clicking it opens a portal popover (class positioner-lATuqHRX +
+  //    contentDefaultAppearance-ODkmI6nR) outside the dialog DOM. The first
+  //    three options (Crossing / Crossing Up / Crossing Down) are visible
+  //    initially; the remaining 10 are revealed by clicking "Show more". Each
+  //    option's text lives in a [class*="title-RDCgMoEQ"] inside a clickable
+  //    [class*="button-HZXWyU6m"] wrapper.
   let conditionSet = false;
   let conditionApplied = canonicalCondition(condition);
+  const PORTAL_SELECTOR = `[class*="positioner-lATuqHRX"][class*="contentDefaultAppearance"]`;
   if (conditionApplied) {
     const conditionRowOpened = await clickButtonInDialogByText(
-      `(t === 'Crossing' || t === 'Crossing Up' || t === 'Crossing Down' || t === 'Greater Than' || t === 'Less Than' || t === 'Entering Channel' || t === 'Exiting Channel' || t === 'Moving Up' || t === 'Moving Down')`
+      `(t === 'Crossing' || t === 'Crossing Up' || t === 'Crossing Down' || t === 'Greater Than' || t === 'Less Than' || t === 'Entering Channel' || t === 'Exiting Channel' || t === 'Inside Channel' || t === 'Outside Channel' || t === 'Moving Up' || t === 'Moving Down' || t === 'Moving Up %' || t === 'Moving Down %')`
     );
     if (conditionRowOpened) {
-      await sleep(400);
+      await sleep(500);
+      // If the wanted option isn't in the first 3 visible items, click "Show more".
+      const wantInTopThree = ['Crossing', 'Crossing Up', 'Crossing Down'].some(
+        s => s.toLowerCase() === conditionApplied.toLowerCase()
+      );
+      if (!wantInTopThree) {
+        const expanded = await evaluate(`
+          (function() {
+            var portal = document.querySelector(${safeString(PORTAL_SELECTOR)});
+            if (!portal) return false;
+            // Show more is rendered as a "customListItem" BUTTON. Match by its text.
+            var clickables = portal.querySelectorAll('button, [class*="customListItem"], [class*="clickable"]');
+            for (var i = 0; i < clickables.length; i++) {
+              if ((clickables[i].textContent || '').trim() === 'Show more') {
+                clickables[i].click();
+                return true;
+              }
+            }
+            return false;
+          })()
+        `);
+        if (expanded) await sleep(500);
+      }
+      // Click the option whose title matches the requested operator.
       conditionSet = await evaluate(`
         (function() {
           var want = ${safeString(conditionApplied)};
-          var items = document.querySelectorAll('[role="menuitem"], [class*="menuItem"], [class*="item-"][role], [class*="dropdownItem"], li, [class*="option"]');
-          for (var i = 0; i < items.length; i++) {
-            var t = (items[i].textContent || '').trim();
-            if (t.length < 30 && t.toLowerCase() === want.toLowerCase()) { items[i].click(); return true; }
+          var portal = document.querySelector(${safeString(PORTAL_SELECTOR)});
+          if (!portal) return false;
+          var titles = portal.querySelectorAll('[class*="title-RDCgMoEQ"]');
+          for (var i = 0; i < titles.length; i++) {
+            var t = (titles[i].textContent || '').trim();
+            if (t.toLowerCase() === want.toLowerCase()) {
+              // Walk up to the clickable button-HZXWyU6m wrapper
+              var p = titles[i];
+              for (var d = 0; d < 6 && p.parentElement; d++) {
+                p = p.parentElement;
+                if ((p.className || '').indexOf('button-HZXWyU6m') !== -1) { p.click(); return true; }
+              }
+              titles[i].click();
+              return true;
+            }
           }
-          // Dismiss any open popover before continuing
+          // Dismiss the popover if we couldn't match
           document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
           return false;
         })()
@@ -299,31 +338,70 @@ export async function create({ condition, price, message, webhook_url, expiratio
   const createdLabel = await clickButtonInDialogByText(`t === 'Create'`);
 
   // 9. Verification — read back the just-created alert from the REST API to
-  //    confirm web_hook actually landed in TV's stored state. This catches
-  //    cases where our DOM toggle reported success but TV silently dropped
-  //    the URL (rare but possible if the sub-view was in a transient state).
+  //    confirm web_hook and condition operator actually landed in TV's stored
+  //    state. DOM observation alone is unreliable because the dialog inherits
+  //    fields from previous alerts.
   let webhookVerified = null;
-  if (createdLabel && webhook_url) {
-    await sleep(400);
+  let conditionVerified = null;
+  let verifiedAlertId = null;
+  if (createdLabel) {
+    // TV's REST list_alerts can lag the Create click by 1-1.5s. Wait long
+    // enough that the newest alert is reliably visible to the API; otherwise
+    // verify reads back the *previous* alert and falsely reports the new
+    // condition/webhook as not stored.
+    await sleep(1500);
     const verify = await evaluateAsync(`
       fetch('https://pricealerts.tradingview.com/list_alerts?limit=1', { credentials: 'include' })
         .then(function(r) { return r.json(); })
         .then(function(d) {
           if (d.s !== 'ok' || !Array.isArray(d.r) || d.r.length === 0) return null;
           var newest = d.r[0];
-          return { alert_id: newest.alert_id, web_hook: newest.web_hook, message: newest.message };
+          return {
+            alert_id: newest.alert_id,
+            web_hook: newest.web_hook,
+            message: newest.message,
+            condition_type: newest.condition && newest.condition.type,
+            condition_value: newest.condition && newest.condition.series && newest.condition.series[1] && newest.condition.series[1].value
+          };
         })
         .catch(function() { return null; })
     `);
-    if (verify) webhookVerified = verify.web_hook === webhook_url;
+    if (verify) {
+      verifiedAlertId = verify.alert_id;
+      if (webhook_url) webhookVerified = verify.web_hook === webhook_url;
+      if (conditionApplied) {
+        // TV's stored condition type is "cross" / "greater" / "less" / etc — a
+        // shortened slug. Map our canonical operator name to the matching slug.
+        const wantSlug = (function(name) {
+          var n = String(name).toLowerCase();
+          if (n === 'crossing') return 'cross';
+          if (n === 'crossing up') return 'cross_up';
+          if (n === 'crossing down') return 'cross_down';
+          if (n === 'greater than') return 'greater';
+          if (n === 'less than') return 'less';
+          if (n === 'entering channel') return 'entering_channel';
+          if (n === 'exiting channel') return 'exiting_channel';
+          if (n === 'inside channel') return 'inside_channel';
+          if (n === 'outside channel') return 'outside_channel';
+          if (n === 'moving up') return 'moving_up';
+          if (n === 'moving down') return 'moving_down';
+          if (n === 'moving up %') return 'moving_up_percent';
+          if (n === 'moving down %') return 'moving_down_percent';
+          return n;
+        })(conditionApplied);
+        conditionVerified = verify.condition_type === wantSlug;
+      }
+    }
   }
 
   return {
     success: !!createdLabel,
+    alert_id: verifiedAlertId,
     price,
     price_set: !!priceSet,
     condition: conditionApplied,
     condition_set: !!conditionSet,
+    condition_verified_in_tv: conditionVerified,
     condition_note: conditionApplied && !conditionSet ? 'Could not locate the condition menu item; alert will use TV\'s currently selected operator.' : undefined,
     message: message || null,
     message_set: !!messageSet,
