@@ -69,6 +69,16 @@ export function registerPineTools(server) {
     }
   );
 
+  server.tool(
+    'pine_refresh_catalog',
+    'Refresh the TV chart-side saved-scripts catalog so scripts created/modified/deleted via pine_create_script (or any pine-facade REST mutation) become visible in the Indicators dialog "My scripts" tab without a page reload. Call this after pine_create_script to make the new script attachable from the same session.',
+    {},
+    async () => {
+      try { return jsonResult(await core.refreshCatalog()); }
+      catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+    }
+  );
+
   server.tool('pine_open', 'Open a saved Pine Script by name', {
     name: z.string().describe('Name of the saved script to open (case-insensitive match)'),
   }, async ({ name }) => {

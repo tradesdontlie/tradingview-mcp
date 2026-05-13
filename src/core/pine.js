@@ -653,6 +653,89 @@ export async function createScript({ name, source, allow_overwrite }) {
   };
 }
 
+/**
+ * DEFECT 7 — refresh TV's chart-side saved-scripts catalog.
+ *
+ * Problem: pine_create_script (D3) and pine-facade REST mutations write
+ * server-side, but the chart's Indicators dialog holds a one-shot Promise
+ * in `TradingViewApi._studyMarket._dialog._initIndicatorsPromises.userScriptsPromise`
+ * that was settled at chart-page load time. Subsequent dialog opens read
+ * from the resolved (stale) Promise; the dialog does not re-hit pine-facade
+ * on open (verified empirically: opening the dialog and clicking the
+ * "My scripts" sidebar produces ZERO pine-facade fetches).
+ *
+ * Findings from investigation:
+ *   - `window.TradingViewApi.resetCache()` and `getStudiesList()` exist on
+ *     the prototype but are `$t()` stubs that throw "not implemented" —
+ *     dead ends.
+ *   - `_studyMarket._dialog.resetAllStudies()` (alias `_studyMarket.resetAllPages()`)
+ *     calls the dialog's `_init()` which clears `_studies` and re-runs the
+ *     init promises — but those promises are CACHED, so the re-init repopulates
+ *     `_studies` from the SAME stale resolved Promise. Confirmed: calling
+ *     resetAllStudies() produced zero pine-facade fetches and the cache
+ *     stayed at the pre-mutation contents.
+ *   - The dialog method `_updateUserStudies()` awaits
+ *     `_initIndicatorsPromises.userScriptsPromise`, runs
+ *     `_preparePineUserStudies()` on the result, and replaces
+ *     `_studies['Script$USER']` from the transformed list. If we swap
+ *     `userScriptsPromise` to a FRESH fetch before calling
+ *     `_updateUserStudies()`, the cache is rebuilt from the live REST list.
+ *
+ * The implementation below does exactly that:
+ *   1. Overwrite `_initIndicatorsPromises.userScriptsPromise` with a new
+ *      Promise resolving to `fetch('/pine-facade/list/?filter=saved').json()`.
+ *   2. Call `_updateUserStudies()` and await its completion.
+ *   3. Return the updated cache count so callers can verify.
+ *
+ * No page reload, no chart re-render, no visible UI flash. The next
+ * Indicators dialog open sees fresh data.
+ *
+ * Verified live: created 5 saved scripts via REST; the dialog's pre-refresh
+ * cache showed 2 of 5 (the two created BEFORE the page last loaded). After
+ * `refreshCatalog()`: cache showed 5/5 including the 3 created post-load
+ * (capture_v2_test, DELETE_ME_capture_test, MCP_DEFECT3_round3_test).
+ */
+export async function refreshCatalog() {
+  const result = await evaluateAsync(`
+    (function() {
+      try {
+        var market = window.TradingViewApi && window.TradingViewApi._studyMarket;
+        if (!market) return { error: 'TradingViewApi._studyMarket not initialized' };
+        var dlg = market._dialog;
+        if (!dlg || !dlg._initIndicatorsPromises) {
+          return { error: 'Indicators dialog state not initialized — open the dialog once before refreshing (TV lazy-initializes it).' };
+        }
+        var before = (dlg._studies && dlg._studies['Script$USER']) ? dlg._studies['Script$USER'].length : 0;
+        // Replace the cached promise with a fresh fetch
+        dlg._initIndicatorsPromises.userScriptsPromise = fetch(
+          'https://pine-facade.tradingview.com/pine-facade/list/?filter=saved',
+          { credentials: 'include' }
+        ).then(function(r) { return r.json(); });
+        // _updateUserStudies awaits the (new) promise, transforms, and
+        // replaces _studies['Script$USER']. Return its promise so awaitPromise
+        // resolves only after the cache is rebuilt.
+        return dlg._updateUserStudies().then(function() {
+          var after = (dlg._studies && dlg._studies['Script$USER']) ? dlg._studies['Script$USER'].length : 0;
+          var scripts = (dlg._studies['Script$USER'] || []).map(function(s) {
+            return { id: s.id, title: s.title };
+          });
+          return { ok: true, before: before, after: after, scripts: scripts };
+        }).catch(function(e) { return { error: '_updateUserStudies failed: ' + (e && e.message || String(e)) }; });
+      } catch(e) { return { error: 'refreshCatalog threw: ' + e.message }; }
+    })()
+  `);
+  if (result && result.error) throw new Error(result.error);
+  return {
+    success: true,
+    cache_before_count: result?.before ?? null,
+    cache_after_count: result?.after ?? null,
+    delta: (result?.after ?? 0) - (result?.before ?? 0),
+    scripts: result?.scripts || [],
+    source: 'pine_facade_rest',
+    note: 'TV chart-side Indicators-dialog catalog refreshed. New scripts are now visible in the dialog without page reload.',
+  };
+}
+
 export async function openScript({ name }) {
   const editorReady = await ensurePineEditorOpen();
   if (!editorReady) throw new Error('Could not open Pine Editor.');
