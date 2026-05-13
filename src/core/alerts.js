@@ -75,7 +75,99 @@ async function applySubView() {
   return clickButtonInDialogByText(`t === 'Back'`);
 }
 
-export async function create({ condition, price, message, webhook_url, expiration_minutes }) {
+/**
+ * DEFECT 8 — select the Source dropdown option in the Create Alert dialog.
+ *
+ * This dropdown is the FIRST dropdown in the Condition row (e.g. currently
+ * "Price"). Clicking it opens an inline popover with a different DOM
+ * architecture than the operator-row portal (DEFECT 2c):
+ *
+ *   Popover container: [role="listbox"][data-qa-id="popup-menu-container main-series-select"]
+ *     class: menuWrap-XktvVkFF
+ *     position: fixed (rendered to document.body — NOT inside the dialog)
+ *   Items: [role="option"][class*="menuItem-VfhgWFqC"]
+ *     id pattern: id_item_$Price$ | id_item_$Study$-<num>_<num>
+ *     aria-selected: "true" on current selection
+ *   Item label: [data-qa-id="main-series-select-title"] [class*="label-VfhgWFqC"]
+ *     Example labels observed:
+ *       "Price"
+ *       "HyperClaw Stack v1 (Hurst + VWAP-Z + wRSI + RSI-Div) (100, 24, 7, ...)"
+ *       "Vol"
+ *       "Test1 RSI Sweep (14, 30, 70)"
+ *
+ * The popover dismisses on any document-level interaction, so the open
+ * dropdown → find option → click flow must happen inside a single
+ * page-context script (the MutationObserver pattern used during DOM probing
+ * confirmed this).
+ *
+ * Matching strategy: case-insensitive substring match against the label
+ * text — Pine indicators on the chart include their full param list in the
+ * label, so callers can pass just the script title ("HyperClaw Stack v1")
+ * without enumerating params.
+ */
+async function selectAlertSource(sourceName) {
+  const want = String(sourceName).trim();
+  const result = await evaluate(`
+    (function() {
+      var dialog = document.querySelector(${safeString(DIALOG_SELECTOR)});
+      if (!dialog) return { ok: false, error: 'no dialog' };
+      // Find the source dropdown row — the FIRST select wrapper in the Condition row.
+      var allSelects = dialog.querySelectorAll('[class*="select-VfhgWFqC"]');
+      var sourceWrapper = allSelects[0];
+      if (!sourceWrapper) return { ok: false, error: 'no source dropdown' };
+      var realBtn = sourceWrapper.querySelector('[role="button"]');
+      if (!realBtn) return { ok: false, error: 'no role=button child' };
+      // Open the popover
+      realBtn.click();
+      // The popover renders via a React portal at document.body — it should be
+      // available synchronously after the click, before this script returns
+      // (because no setTimeout or microtask gap intervenes).
+      var portal = document.querySelector('[role="listbox"][class*="menuWrap-XktvVkFF"]');
+      if (!portal) {
+        // Older popover class fallback
+        portal = document.querySelector('[role="listbox"][data-qa-id*="main-series-select"]');
+      }
+      if (!portal) return { ok: false, error: 'source popover did not appear', source_wanted: ${safeString(want)} };
+      // Collect all option labels for diagnostics
+      var options = portal.querySelectorAll('[role="option"]');
+      var labels = [];
+      var match = null;
+      var wantLower = ${safeString(want.toLowerCase())};
+      for (var i = 0; i < options.length; i++) {
+        var labelEl = options[i].querySelector('[data-qa-id="main-series-select-title"] [class*="label-VfhgWFqC"]')
+                   || options[i].querySelector('[class*="label-VfhgWFqC"]');
+        var labelText = (labelEl && labelEl.textContent || '').trim();
+        labels.push(labelText);
+        var lowerLabel = labelText.toLowerCase();
+        if (!match) {
+          // Prefer exact match first, then substring
+          if (lowerLabel === wantLower) match = { el: options[i], label: labelText, score: 'exact' };
+        }
+      }
+      if (!match) {
+        for (var j = 0; j < options.length; j++) {
+          var labelEl2 = options[j].querySelector('[data-qa-id="main-series-select-title"] [class*="label-VfhgWFqC"]')
+                     || options[j].querySelector('[class*="label-VfhgWFqC"]');
+          var labelText2 = (labelEl2 && labelEl2.textContent || '').trim().toLowerCase();
+          if (labelText2.indexOf(wantLower) !== -1) {
+            match = { el: options[j], label: (labelEl2 && labelEl2.textContent || '').trim(), score: 'substring' };
+            break;
+          }
+        }
+      }
+      if (!match) {
+        // Close popover so we don't leave it dangling
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
+        return { ok: false, error: 'source not found', wanted: ${safeString(want)}, available: labels };
+      }
+      match.el.click();
+      return { ok: true, matched_label: match.label, match_kind: match.score, available: labels };
+    })()
+  `);
+  return result;
+}
+
+export async function create({ source, condition, price, message, webhook_url, expiration_minutes }) {
   // 0. Preflight — if a leftover alert dialog is open from a previous run, drop
   //    out of any sub-view and close it before we open a fresh one. Sub-view
   //    Cancel returns to the main view; the second Cancel actually closes.
@@ -121,6 +213,36 @@ export async function create({ condition, price, message, webhook_url, expiratio
   // input to TV's "current price" default and discards any value we wrote
   // earlier. Setting price last is the only reliable order.
 
+  // 2. Source (DEFECT 8) — change the alert data source from the default
+  //    "Price" to a chart indicator (Pine alertcondition source). Must run
+  //    BEFORE the operator step because switching source re-renders the
+  //    operator dropdown's options (Price uses Crossing/Greater/Less; a
+  //    Pine indicator uses its alertcondition() titles).
+  let sourceSet = false;
+  let sourceMatchedLabel = null;
+  let sourceAvailable = null;
+  if (source) {
+    // The dialog defaults to "Price" — so if caller asked for "Price" exactly
+    // and that's already what's shown, skip the dropdown round-trip. Any
+    // other value (Vol, Volume, a Pine indicator title, etc) goes through
+    // the source selector.
+    const skipBecauseDefault = String(source).trim().toLowerCase() === 'price';
+    if (!skipBecauseDefault) {
+      const srcResult = await selectAlertSource(source);
+      sourceSet = !!(srcResult && srcResult.ok);
+      sourceMatchedLabel = srcResult?.matched_label || null;
+      sourceAvailable = srcResult?.available || null;
+      if (!sourceSet) {
+        throw new Error(
+          `Source "${source}" not found in alert dropdown — is the Pine indicator attached to the chart? ` +
+          (sourceAvailable ? `Available: ${sourceAvailable.join(' | ')}` : '')
+        );
+      }
+      // Switching source re-renders dependent fields; let TV settle.
+      await sleep(700);
+    }
+  }
+
   // 3. Condition operator (Crossing / Greater Than / Less Than / etc.).
   //    The operator row is a button whose text is the current operator name.
   //    Clicking it opens a portal popover (class positioner-lATuqHRX +
@@ -130,12 +252,29 @@ export async function create({ condition, price, message, webhook_url, expiratio
   //    option's text lives in a [class*="title-RDCgMoEQ"] inside a clickable
   //    [class*="button-HZXWyU6m"] wrapper.
   let conditionSet = false;
-  let conditionApplied = canonicalCondition(condition);
+  let conditionApplied = source ? String(condition || '').trim() : canonicalCondition(condition);
   const PORTAL_SELECTOR = `[class*="positioner-lATuqHRX"][class*="contentDefaultAppearance"]`;
   if (conditionApplied) {
-    const conditionRowOpened = await clickButtonInDialogByText(
+    // When source is a Pine indicator, the row button text is the current
+    // alertcondition title — arbitrary text. Fall back to matching the
+    // dropdown button by class rather than known operator names.
+    let conditionRowOpened = await clickButtonInDialogByText(
       `(t === 'Crossing' || t === 'Crossing Up' || t === 'Crossing Down' || t === 'Greater Than' || t === 'Less Than' || t === 'Entering Channel' || t === 'Exiting Channel' || t === 'Inside Channel' || t === 'Outside Channel' || t === 'Moving Up' || t === 'Moving Down' || t === 'Moving Up %' || t === 'Moving Down %')`
     );
+    if (!conditionRowOpened && source) {
+      // Pine-source path: click the dropdownButton-lFPR_Qij in the Condition row.
+      conditionRowOpened = await evaluate(`
+        (function() {
+          var dialog = document.querySelector(${safeString(DIALOG_SELECTOR)});
+          if (!dialog) return false;
+          var btn = dialog.querySelector('[class*="dropdownButton-lFPR_Qij"]');
+          if (!btn) return false;
+          var realBtn = btn.querySelector('[role="button"]') || btn;
+          realBtn.click();
+          return (btn.textContent || '').trim();
+        })()
+      `);
+    }
     if (conditionRowOpened) {
       await sleep(500);
       // If the wanted option isn't in the first 3 visible items, click "Show more".
@@ -345,23 +484,31 @@ export async function create({ condition, price, message, webhook_url, expiratio
   let conditionVerified = null;
   let verifiedAlertId = null;
   if (createdLabel) {
-    // TV's REST list_alerts can lag the Create click by 1-1.5s. Wait long
-    // enough that the newest alert is reliably visible to the API; otherwise
-    // verify reads back the *previous* alert and falsely reports the new
-    // condition/webhook as not stored.
-    await sleep(1500);
+    // TV's REST list_alerts can lag the Create click by ~1.5-2s, especially
+    // for indicator-sourced alerts whose payload is larger. Wait long enough
+    // that the newest alert is reliably visible to the API; otherwise verify
+    // reads back the *previous* alert and falsely reports a stale alert_id /
+    // condition / webhook for the just-created one.
+    await sleep(2500);
     const verify = await evaluateAsync(`
       fetch('https://pricealerts.tradingview.com/list_alerts?limit=1', { credentials: 'include' })
         .then(function(r) { return r.json(); })
         .then(function(d) {
           if (d.s !== 'ok' || !Array.isArray(d.r) || d.r.length === 0) return null;
           var newest = d.r[0];
+          var series0 = newest.condition && newest.condition.series && newest.condition.series[0];
           return {
             alert_id: newest.alert_id,
             web_hook: newest.web_hook,
             message: newest.message,
+            type: newest.type,
             condition_type: newest.condition && newest.condition.type,
-            condition_value: newest.condition && newest.condition.series && newest.condition.series[1] && newest.condition.series[1].value
+            condition_value: newest.condition && newest.condition.series && newest.condition.series[1] && newest.condition.series[1].value,
+            // Pine-source fields (only populated when type === "indicator")
+            series_type: series0 && series0.type,
+            pine_id: series0 && series0.pine_id,
+            pine_version: series0 && series0.pine_version,
+            alert_cond_id: newest.condition && newest.condition.alert_cond_id
           };
         })
         .catch(function() { return null; })
@@ -370,26 +517,34 @@ export async function create({ condition, price, message, webhook_url, expiratio
       verifiedAlertId = verify.alert_id;
       if (webhook_url) webhookVerified = verify.web_hook === webhook_url;
       if (conditionApplied) {
-        // TV's stored condition type is "cross" / "greater" / "less" / etc — a
-        // shortened slug. Map our canonical operator name to the matching slug.
-        const wantSlug = (function(name) {
-          var n = String(name).toLowerCase();
-          if (n === 'crossing') return 'cross';
-          if (n === 'crossing up') return 'cross_up';
-          if (n === 'crossing down') return 'cross_down';
-          if (n === 'greater than') return 'greater';
-          if (n === 'less than') return 'less';
-          if (n === 'entering channel') return 'entering_channel';
-          if (n === 'exiting channel') return 'exiting_channel';
-          if (n === 'inside channel') return 'inside_channel';
-          if (n === 'outside channel') return 'outside_channel';
-          if (n === 'moving up') return 'moving_up';
-          if (n === 'moving down') return 'moving_down';
-          if (n === 'moving up %') return 'moving_up_percent';
-          if (n === 'moving down %') return 'moving_down_percent';
-          return n;
-        })(conditionApplied);
-        conditionVerified = verify.condition_type === wantSlug;
+        if (source && verify.type === 'indicator' && verify.condition_type === 'alert_cond') {
+          // Pine-source alert: verification is "did TV store the alert as an
+          // indicator alert with our pine_id?" We can't easily verify the
+          // exact alertcondition title from the REST payload (it stores an
+          // opaque alert_cond_id like "plot_1"), so we accept the alert if
+          // it landed as a pine_id alert at all.
+          conditionVerified = !!verify.pine_id;
+        } else {
+          // TV's stored condition type is "cross" / "greater" / "less" — slug.
+          const wantSlug = (function(name) {
+            var n = String(name).toLowerCase();
+            if (n === 'crossing') return 'cross';
+            if (n === 'crossing up') return 'cross_up';
+            if (n === 'crossing down') return 'cross_down';
+            if (n === 'greater than') return 'greater';
+            if (n === 'less than') return 'less';
+            if (n === 'entering channel') return 'entering_channel';
+            if (n === 'exiting channel') return 'exiting_channel';
+            if (n === 'inside channel') return 'inside_channel';
+            if (n === 'outside channel') return 'outside_channel';
+            if (n === 'moving up') return 'moving_up';
+            if (n === 'moving down') return 'moving_down';
+            if (n === 'moving up %') return 'moving_up_percent';
+            if (n === 'moving down %') return 'moving_down_percent';
+            return n;
+          })(conditionApplied);
+          conditionVerified = verify.condition_type === wantSlug;
+        }
       }
     }
   }
@@ -399,6 +554,11 @@ export async function create({ condition, price, message, webhook_url, expiratio
     alert_id: verifiedAlertId,
     price,
     price_set: !!priceSet,
+    // Source selection (DEFECT 8)
+    source: source || null,
+    source_set: !!sourceSet,
+    source_matched_label: sourceMatchedLabel,
+    source_available: sourceAvailable,
     condition: conditionApplied,
     condition_set: !!conditionSet,
     condition_verified_in_tv: conditionVerified,
@@ -411,7 +571,7 @@ export async function create({ condition, price, message, webhook_url, expiratio
     expiration_minutes: expiration_minutes || null,
     expiration_iso: expirationAppliedIso,
     expiration_set: !!expirationSet,
-    source: 'dom_fallback',
+    walker_source: 'dom_fallback',
   };
 }
 
