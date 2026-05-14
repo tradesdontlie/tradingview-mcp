@@ -4,22 +4,35 @@
 import { getClient, evaluate, getChartCollection } from '../connection.js';
 import { waitForChartRender } from '../wait.js';
 import { writeFileSync, mkdirSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, isAbsolute, resolve as pathResolve, parse as pathParse } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCREENSHOT_DIR = join(dirname(dirname(__dirname)), 'screenshots');
 
-export async function captureScreenshot({ region, filename, method, waitForRender = false } = {}) {
-  mkdirSync(SCREENSHOT_DIR, { recursive: true });
-
+export async function captureScreenshot({ region, filename, method, waitForRender = false, out_dir, path } = {}) {
   if (waitForRender) {
     await waitForChartRender();
   }
 
-  const ts = new Date().toISOString().replace(/[:.]/g, '-');
-  const fname = (filename || `tv_${region || 'full'}_${ts}`).replace(/[\\/]/g, '_');
-  const filePath = join(SCREENSHOT_DIR, `${fname}.png`);
+  // Resolution order:
+  //   1. `path` (full path including filename — wins outright)
+  //   2. `out_dir` + `filename` (or auto-generated filename)
+  //   3. legacy: SCREENSHOT_DIR + filename
+  let filePath;
+  if (path) {
+    filePath = isAbsolute(path) ? path : pathResolve(process.cwd(), path);
+    if (!pathParse(filePath).ext) filePath += '.png';
+    mkdirSync(dirname(filePath), { recursive: true });
+  } else {
+    const dir = out_dir
+      ? (isAbsolute(out_dir) ? out_dir : pathResolve(process.cwd(), out_dir))
+      : SCREENSHOT_DIR;
+    mkdirSync(dir, { recursive: true });
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const fname = (filename || `tv_${region || 'full'}_${ts}`).replace(/[\\/]/g, '_');
+    filePath = join(dir, `${fname}.png`);
+  }
 
   if (method === 'api') {
     try {
