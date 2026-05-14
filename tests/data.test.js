@@ -170,6 +170,95 @@ describe('getTrades() — internal_api → dom_fallback', () => {
     assert.ok(out.error.includes('internal_api'));
     assert.ok(out.error.includes('dom_fallback'));
   });
+
+  // ── R3-R1: tab-aware DOM scrape ────────────────────────────────────────
+  it('R3-R1: returns trades and populates active_tab when "List of trades" tab is active', async () => {
+    const evaluate = makeEvaluate([
+      { match: 'chart.model().model().dataSources', value: { trades: [], source: 'internal_api', error: 'No strategy found on chart.' } },
+      { match: 'reportContainer', value: {
+        found: true,
+        active_tab: 'List of trades',
+        trades: [{ Trade: '1', Type: 'Long', Price: '100.50' }],
+        headers: ['Trade', 'Type', 'Price'],
+      } },
+    ]);
+    const out = await getTrades({ _deps: { evaluate } });
+    assert.equal(out.success, true);
+    assert.equal(out.source, 'dom_fallback');
+    assert.equal(out.trade_count, 1);
+    assert.equal(out.active_tab, 'List of trades');
+  });
+
+  it('R3-R1: returns success=false with diagnostic when "Metrics" tab is active', async () => {
+    const evaluate = makeEvaluate([
+      { match: 'chart.model().model().dataSources', value: { trades: [], source: 'internal_api', error: 'No strategy found on chart.' } },
+      // Scraper detected Metrics is active → refuses to scrape, reports error.
+      { match: 'reportContainer', value: {
+        found: false,
+        active_tab: 'Metrics',
+        error: 'List of trades tab is not active (active tab: "Metrics"). Activate it in Strategy Tester before calling getTrades.',
+      } },
+    ]);
+    const out = await getTrades({ _deps: { evaluate } });
+    assert.equal(out.success, false);
+    assert.equal(out.source, 'none');
+    assert.equal(out.trade_count, 0);
+    assert.equal(out.active_tab, 'Metrics');
+    assert.ok(/List of trades tab is not active/i.test(out.error), 'error mentions inactive tab');
+  });
+
+  it('R3-R1: does NOT return Performance Summary rows as trades', async () => {
+    // Simulates the live bug: caller is on Metrics tab; the old code would
+    // happily return rows like {Metric, All, Long, Short} from the summary
+    // table. The new scraper must refuse.
+    const evaluate = makeEvaluate([
+      { match: 'chart.model().model().dataSources', value: { trades: [], source: 'internal_api', error: 'No strategy found on chart.' } },
+      { match: 'reportContainer', value: {
+        found: false,
+        active_tab: 'Metrics',
+        error: 'List of trades tab is not active (active tab: "Metrics").',
+      } },
+    ]);
+    const out = await getTrades({ _deps: { evaluate } });
+    assert.equal(out.success, false);
+    // Make sure no summary-shaped row leaks into trades
+    assert.deepEqual(out.trades, []);
+    assert.notEqual(out.trade_count, 5);
+  });
+
+  it('R3-R1: scraper IIFE source contains aria-selected/active-class active-tab detection', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../src/core/data.js', import.meta.url), 'utf8');
+    // The scraper builder must inspect tab state before scraping.
+    assert.ok(/aria-selected/.test(src), 'aria-selected check present');
+    assert.ok(/List of trades/.test(src), 'List of trades label referenced');
+    assert.ok(/active_tab/.test(src), 'active_tab field returned by scraper');
+  });
+
+  // ── R5-N1: requireFinite sanitization of max_trades ───────────────────
+  it('R5-N1: getTrades({ max_trades: "foo" }) throws via requireFinite', async () => {
+    const evaluate = makeEvaluate([]);
+    await assert.rejects(
+      () => getTrades({ max_trades: 'foo', _deps: { evaluate } }),
+      /max_trades must be a finite number/i,
+    );
+  });
+
+  it('R5-N1: getTrades({ max_trades: NaN }) throws via requireFinite', async () => {
+    const evaluate = makeEvaluate([]);
+    await assert.rejects(
+      () => getTrades({ max_trades: NaN, _deps: { evaluate } }),
+      /max_trades must be a finite number/i,
+    );
+  });
+
+  it('R5-N1: getTrades({}) (undefined max_trades) defaults to 20 without throwing', async () => {
+    const evaluate = makeEvaluate([
+      { match: 'ordersData', value: { trades: [{ price: 1 }], source: 'internal_api' } },
+    ]);
+    const out = await getTrades({ _deps: { evaluate } });
+    assert.equal(out.success, true);
+  });
 });
 
 // ── getEquity() ──────────────────────────────────────────────────────────

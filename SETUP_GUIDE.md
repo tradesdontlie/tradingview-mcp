@@ -90,6 +90,39 @@ npm link
 
 Then `tv status`, `tv quote`, `tv pine compile`, etc. work from anywhere.
 
+## Selecting a Specific Chart (Multiple Charts Open)
+
+TradingView Desktop frequently has several chart pages open simultaneously. By default the MCP connects to the first chart page it finds via CDP, which may not be the one you want. To pin the MCP to a specific chart, set one of these environment variables in the `env` object of your `~/.claude/.mcp.json` entry **before** Claude Code launches the server:
+
+| Env var | Type | Match | Example |
+|---------|------|-------|---------|
+| `TRADINGVIEW_TARGET_ID` | string | Prefix-match against the CDP target id | `"3E096BC2"` (first 8 chars are enough) |
+| `TRADINGVIEW_CHART_URL` | string | Substring match against the chart URL | `"R2Nyob9Y"` (the chart's slug from `tradingview.com/chart/<slug>/`) |
+
+Precedence: `TRADINGVIEW_TARGET_ID` > `TRADINGVIEW_CHART_URL` > default (first chart page).
+
+**To list the available targets:**
+```bash
+curl -s http://127.0.0.1:9222/json/list | grep -oE '"id":[^,]+|"url":[^,]+' | head -20
+```
+
+**Example MCP config with a pinned chart:**
+```json
+{
+  "mcpServers": {
+    "tradingview": {
+      "command": "node",
+      "args": ["<INSTALL_PATH>/src/server.js"],
+      "env": {
+        "TRADINGVIEW_CHART_URL": "R2Nyob9Y"
+      }
+    }
+  }
+}
+```
+
+Note: these env vars are read at MCP-server startup. Switching the active chart requires restarting Claude Code (which respawns the MCP server).
+
 ## Troubleshooting
 
 | Problem | Solution |
@@ -100,6 +133,7 @@ Then `tv status`, `tv quote`, `tv pine compile`, etc. work from anywhere.
 | `tv` command not found | Run `npm link` from the project directory |
 | Tools return stale data | TradingView may still be loading — wait a few seconds |
 | Pine Editor tools fail | Open the Pine Editor panel first (`ui_open_panel pine-editor open`) |
+| MCP connects to wrong chart | Set `TRADINGVIEW_CHART_URL` or `TRADINGVIEW_TARGET_ID` env var (see "Selecting a Specific Chart" above) |
 
 ## What to Read Next
 

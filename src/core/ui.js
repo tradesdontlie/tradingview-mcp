@@ -2,6 +2,7 @@
  * Core UI automation logic.
  */
 import { evaluate as _evaluate, evaluateAsync as _evaluateAsync, getClient as _getClient } from '../connection.js';
+import { SELECTORS as _SELECTORS, arrLit as _arrLit } from './selectors.js';
 
 // Re-export under original names so existing call sites continue to work
 // while new `_deps`-aware functions can swap them out for tests.
@@ -9,35 +10,10 @@ const evaluate = _evaluate;
 const evaluateAsync = _evaluateAsync;
 const getClient = _getClient;
 
-// ─── Centralized DOM selectors ──────────────────────────────────────────────
-// TradingView Desktop uses CSS-module hashed class names (e.g.
-// `reportContainer-hIlv5It8`) that change across releases. Use attribute-
-// substring matchers and keep fallback lists so a UI refactor only requires
-// updating this map.
-export const SELECTORS = {
-  bottomArea: ['[class*="layout__area--bottom"]'],
-  rightArea: ['[class*="layout__area--right"]'],
-  pineMonaco: ['.monaco-editor.pine-editor-monaco'],
-  // Strategy Tester panel container. TradingView rotates the CSS-module hash
-  // across releases, so keep multiple substring matchers and a generic
-  // `.bottom-widgetbar-content.backtesting` class (stable across builds).
-  // Observed names: `backtestingReport-qyUx4U7K` (TV 3.1.0.7818, May 2026),
-  // `reportContainer-hIlv5It8` (earlier in same release), older `strategyReport-*`,
-  // and the legacy `[data-name="backtesting"]` attribute.
-  strategyTesterPanel: [
-    '[class*="backtestingReport"]',
-    '[class*="reportContainer"]',
-    '.bottom-widgetbar-content.backtesting',
-    '[data-name="backtesting"]',
-    '[class*="strategyReport"]',
-  ],
-  // Tab buttons that are unique to the Strategy Tester. Their visibility is a
-  // reliable secondary signal even when the container hash changes.
-  strategyTesterTabLabels: ['Metrics', 'List of trades', 'Performance', 'Performance Summary'],
-};
-
-// Build a JS-source array literal for use inside evaluate() bodies.
-function _arrLit(arr) { return '[' + arr.map(s => JSON.stringify(s)).join(',') + ']'; }
+// Re-export SELECTORS from this module path for backwards compatibility with
+// any consumer that imported it from ui.js. New code should import from
+// ./selectors.js directly.
+export const SELECTORS = _SELECTORS;
 
 function _resolve(deps) {
   return {
@@ -145,12 +121,16 @@ export async function openPanel({ panel, action, _deps } = {}) {
           if (signals.length === 0) {
             var tabLabels = ${stratTabLabelsLit};
             var btns = document.querySelectorAll('button, [role="tab"]');
+            // TradingView buttons commonly emit their label twice in textContent
+            // (visible span + tooltip span), producing strings like "MetricsMetrics".
+            // Accept the literal label OR the doubled form (mirrors detectStrategyTester).
             for (var j = 0; j < btns.length && signals.length === 0; j++) {
               var b = btns[j];
               if (!b.offsetParent) continue;
               var text = (b.textContent || '').trim();
               for (var k = 0; k < tabLabels.length; k++) {
-                if (text === tabLabels[k]) { signals.push('tab:' + tabLabels[k]); break; }
+                var lbl = tabLabels[k];
+                if (text === lbl || text === lbl + lbl) { signals.push('tab:' + lbl); break; }
               }
             }
           }

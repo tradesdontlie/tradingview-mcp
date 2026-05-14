@@ -4,7 +4,7 @@
 import { getClient, getTargetInfo, evaluate } from '../connection.js';
 import { existsSync as _existsSync, readdirSync as _readdirSync } from 'fs';
 import { execSync as _execSync, spawn as _spawn } from 'child_process';
-import { SELECTORS as _UI_SELECTORS } from './ui.js';
+import { SELECTORS as _UI_SELECTORS } from './selectors.js';
 
 export async function healthCheck() {
   await getClient();

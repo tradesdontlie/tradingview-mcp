@@ -104,13 +104,25 @@ function fail(label, detail) { console.log(`  ✘ ${label}${detail ? ' — ' + d
     allOk = false;
   }
 
-  section('5. getTrades (B3 — DOM fallback)');
+  section('5. getTrades (B3 — DOM fallback, tab-aware after R3-1 fix)');
   try {
     const t = await getTrades({ max_trades: 5 });
     console.log('  raw response keys:', Object.keys(t).join(', '));
-    console.log('  source:', t.source, 'trade_count:', t.trade_count, 'first trade:', JSON.stringify(t.trades?.[0] || null));
-    if (t.success !== false && t.trade_count > 0) ok(`source=${t.source}, ${t.trade_count} trades`);
-    else { fail(`trade_count=${t.trade_count}, error=${t.error || 'none'}`); allOk = false; }
+    console.log('  source:', t.source, 'trade_count:', t.trade_count, 'active_tab:', t.active_tab, 'first trade:', JSON.stringify(t.trades?.[0] || null));
+    // After R3-1, getTrades correctly REFUSES to scrape when List-of-trades tab
+    // isn't active. Either outcome is a passing fix verification:
+    //   (a) tab active + trades returned (real data)
+    //   (b) tab NOT active + success:false + diagnostic error (R3-1 protective)
+    // Old behavior (silently returning summary rows as trades) would now be a FAIL.
+    const tradesActive = t.active_tab === 'List of trades';
+    if (t.success !== false && t.trade_count > 0 && tradesActive) {
+      ok(`source=${t.source}, ${t.trade_count} trades (List of trades tab active)`);
+    } else if (t.success === false && !tradesActive && /not active/i.test(t.error || '')) {
+      ok(`R3-1 protective refusal correctly engaged (active_tab=${t.active_tab})`);
+    } else {
+      fail(`unexpected combination: success=${t.success}, trade_count=${t.trade_count}, active_tab=${t.active_tab}, error=${t.error || 'none'}`);
+      allOk = false;
+    }
   } catch (e) {
     fail('getTrades threw', e.message);
     allOk = false;

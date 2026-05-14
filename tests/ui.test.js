@@ -174,3 +174,100 @@ describe('openPanel({ panel: "pine-editor" }) — unchanged gating', () => {
       'pine-editor branch retains bottomOpen gate');
   });
 });
+
+// ── Doubled-text matching — behavioral test (R2) ─────────────────────────
+//
+// Strategy: capture the actual IIFE source string the production code injects
+// (by mocking evaluate and reading the expression it was called with), then
+// run that source against a synthetic DOM via `new Function('document', ...)`.
+// This catches regressions that alter the comparison logic but keep the
+// "lbl + lbl" substring intact (which a regex-only assertion would miss).
+
+/**
+ * Build a minimal mock DOM that satisfies the queries the IIFE issues:
+ *   - document.querySelector(panelSel) — for strategyTesterPanel matches
+ *   - document.querySelectorAll('button, [role="tab"]') — for tab matches
+ * Each button mock exposes `textContent` (string) and a truthy `offsetParent`.
+ */
+function makeMockDoc({ panelMatch = false, buttonTexts = [] } = {}) {
+  const buttons = buttonTexts.map((t) => ({
+    textContent: t,
+    offsetParent: {}, // truthy → "visible"
+    getAttribute: () => null,
+  }));
+  return {
+    querySelector(sel) {
+      // Strategy-tester panel selectors come from SELECTORS.strategyTesterPanel.
+      // Any of them returns a matching element only if `panelMatch` is true.
+      if (panelMatch && /backtestingReport|reportContainer|backtesting|strategyReport/.test(sel)) {
+        return { offsetParent: {} };
+      }
+      // Pine editor / layout queries: never match in these tests.
+      return null;
+    },
+    querySelectorAll(sel) {
+      if (sel.includes('button') || sel.includes('role="tab"')) return buttons;
+      return [];
+    },
+  };
+}
+
+/**
+ * Run the detectStrategyTester IIFE source against a synthetic document.
+ * Returns whatever the IIFE returned (an object with { open, signals, tried }).
+ */
+async function runDetectIIFEAgainst(mockDoc) {
+  let captured = null;
+  const evaluate = async (expr) => {
+    captured = expr;
+    return null; // we only need the source; return null so detectStrategyTester
+                 // falls back to its defensive default (we don't use that here).
+  };
+  await detectStrategyTester({ _deps: { evaluate } });
+  // The captured expression is `(function(){...})()`. Trim it so the JS
+  // parser doesn't apply ASI to a bare `return\n` and silently yield
+  // undefined. Wrap it so a passed `document` parameter shadows the global
+  // one inside the IIFE.
+  const runner = new Function('document', 'return (' + captured.trim() + ');');
+  return runner(mockDoc);
+}
+
+describe('doubled-text tab matching — behavioral (R2)', () => {
+  it('matches a doubled-text "MetricsMetrics" button as tab:Metrics', async () => {
+    const doc = makeMockDoc({ buttonTexts: ['MetricsMetrics'] });
+    const out = await runDetectIIFEAgainst(doc);
+    assert.equal(out.open, true);
+    assert.ok(out.signals.includes('tab:Metrics'),
+      `expected tab:Metrics in signals, got ${JSON.stringify(out.signals)}`);
+  });
+
+  it('matches a doubled-text "List of tradesList of trades" button as tab:List of trades', async () => {
+    const doc = makeMockDoc({ buttonTexts: ['List of tradesList of trades'] });
+    const out = await runDetectIIFEAgainst(doc);
+    assert.equal(out.open, true);
+    assert.ok(out.signals.includes('tab:List of trades'),
+      `expected tab:List of trades in signals, got ${JSON.stringify(out.signals)}`);
+  });
+
+  it('matches a literal (non-doubled) "Performance" button as tab:Performance', async () => {
+    const doc = makeMockDoc({ buttonTexts: ['Performance'] });
+    const out = await runDetectIIFEAgainst(doc);
+    assert.equal(out.open, true);
+    assert.ok(out.signals.includes('tab:Performance'));
+  });
+
+  it('does NOT match a truncated "Metric" button (negative case)', async () => {
+    const doc = makeMockDoc({ buttonTexts: ['Metric'] });
+    const out = await runDetectIIFEAgainst(doc);
+    assert.equal(out.open, false);
+    assert.deepEqual(out.signals, []);
+  });
+
+  it('does NOT match unrelated text "SomethingElse"', async () => {
+    const doc = makeMockDoc({ buttonTexts: ['SomethingElse', 'MetricsMetricsMetrics'] });
+    const out = await runDetectIIFEAgainst(doc);
+    // "MetricsMetricsMetrics" is neither "Metrics" nor "MetricsMetrics" — must NOT match.
+    assert.equal(out.open, false);
+    assert.deepEqual(out.signals, []);
+  });
+});

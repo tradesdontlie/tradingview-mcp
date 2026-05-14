@@ -1,7 +1,8 @@
 /**
  * Core data access logic.
  */
-import { evaluate as _evaluate, evaluateAsync, KNOWN_PATHS, safeString } from '../connection.js';
+import { evaluate as _evaluate, evaluateAsync, KNOWN_PATHS, safeString, requireFinite } from '../connection.js';
+import { SELECTORS, arrLit } from './selectors.js';
 
 const MAX_OHLCV_BARS = 500;
 const MAX_TRADES = 20;
@@ -181,25 +182,27 @@ export async function getIndicator({ entity_id }) {
 
 // JS injected into the page to scrape the Strategy Tester report DOM.
 // Returns { metrics: { [label]: rawText }, found: bool, error?: string }.
-// Selectors use [class*="..."] because TradingView CSS-module hashes (e.g. -hIlv5It8) rotate.
+// Selectors centralized in ./selectors.js — see SELECTORS.strategyTesterPanel,
+// SELECTORS.metricCard, SELECTORS.metricLabel, SELECTORS.metricValue.
 const STRATEGY_DOM_SCRAPE_JS = `
   (function() {
     try {
-      // TradingView rotates the CSS-module hash; try multiple historical names.
-      // Observed: backtestingReport-* (TV 3.1.0.7818 May 2026), reportContainer-* (earlier),
-      // strategyReport-* (older). The .bottom-widgetbar-content.backtesting wrapper is stable.
-      var root = document.querySelector('[class*="backtestingReport"]')
-              || document.querySelector('[class*="reportContainer"]')
-              || document.querySelector('.bottom-widgetbar-content.backtesting')
-              || document.querySelector('[class*="strategyReport"]')
-              || document.querySelector('[data-name="backtesting"]');
-      if (!root) return { found: false, error: 'strategy tester DOM container not found (tried backtestingReport, reportContainer, .backtesting, strategyReport, [data-name=backtesting])' };
-      var cards = root.querySelectorAll('[class*="containerCell"], [class*="cardContainer"], [class*="card-"]');
+      var panelSels = ${arrLit(SELECTORS.strategyTesterPanel)};
+      var cardSels = ${arrLit(SELECTORS.metricCard)};
+      var labelSels = ${arrLit(SELECTORS.metricLabel)};
+      var valueSels = ${arrLit(SELECTORS.metricValue)};
+      var root = null;
+      for (var p = 0; p < panelSels.length; p++) {
+        root = document.querySelector(panelSels[p]);
+        if (root) break;
+      }
+      if (!root) return { found: false, error: 'strategy tester DOM container not found (tried ' + panelSels.join(', ') + ')' };
+      var cards = root.querySelectorAll(cardSels.join(','));
       var metrics = {};
       for (var i = 0; i < cards.length; i++) {
         var card = cards[i];
-        var labelEl = card.querySelector('[class*="title"], [class*="label"]');
-        var valueEl = card.querySelector('[class*="positiveValue"], [class*="negativeValue"], [class*="value"]');
+        var labelEl = card.querySelector(labelSels.join(','));
+        var valueEl = card.querySelector(valueSels.join(','));
         if (!labelEl || !valueEl) continue;
         var label = (labelEl.textContent || '').trim();
         var value = (valueEl.textContent || '').trim();
@@ -288,7 +291,17 @@ export async function getStrategyResults({ _deps } = {}) {
 // Scrape the Strategy Tester "List of trades" table from the DOM.
 // NOTE: these selectors are GUESSED based on TV conventions — verify against live DOM.
 // TODO verify: exact class hash for the trades-table container and row/cell classes.
+//
+// R3-R1: BEFORE scraping, detect which Strategy Tester tab is active. If the
+// "List of trades" tab is NOT active, return early — DO NOT fall back to
+// scraping whichever table happens to be visible (e.g. the Performance
+// Summary table on the Metrics tab), because that returns summary rows shaped
+// like {Metric, All, Long, Short} as if they were trades. The caller MUST be
+// able to detect this case via `active_tab` in the response.
 function buildTradesDomScrapeJs(limit) {
+  // limit is required to be a finite int by the caller via requireFinite();
+  // we still inline it as a Number literal here for defense-in-depth.
+  const safeLimit = Number(limit);
   return `
     (function() {
       try {
@@ -297,23 +310,70 @@ function buildTradesDomScrapeJs(limit) {
                 || document.querySelector('.bottom-widgetbar-content.backtesting')
                 || document.querySelector('[class*="strategyReport"]')
                 || document.querySelector('[data-name="backtesting"]');
-        if (!root) return { found: false, error: 'strategy tester DOM container not found' };
+        if (!root) return { found: false, active_tab: null, error: 'strategy tester DOM container not found' };
+
+        // ── Active-tab detection ─────────────────────────────────────────
+        // TV builds the tab strip as [role="tab"] or <button> elements. The
+        // active one has aria-selected="true" OR a class containing "selected"
+        // / "active" / "isActive". We collect every plausible tab control,
+        // pick the one that looks selected, and record its label.
+        var TAB_LABELS = ['List of trades', 'Metrics', 'Performance', 'Performance Summary', 'Properties'];
+        var tabEls = root.querySelectorAll('[role="tab"], button, [class*="tab"]');
+        var activeTab = null;
+        var seenLabels = [];
+        for (var ti = 0; ti < tabEls.length; ti++) {
+          var el = tabEls[ti];
+          var txt = (el.textContent || '').trim();
+          if (!txt || txt.length > 40) continue;
+          var matched = null;
+          for (var li = 0; li < TAB_LABELS.length; li++) {
+            if (txt === TAB_LABELS[li] || txt.toLowerCase() === TAB_LABELS[li].toLowerCase()) { matched = TAB_LABELS[li]; break; }
+          }
+          if (!matched) continue;
+          if (seenLabels.indexOf(matched) === -1) seenLabels.push(matched);
+          var ariaSel = el.getAttribute && el.getAttribute('aria-selected');
+          var cls = (el.className && typeof el.className === 'string') ? el.className : '';
+          var looksActive = ariaSel === 'true' || /(^|[^A-Za-z])(selected|active|isActive)([^A-Za-z]|$)/i.test(cls);
+          if (looksActive && !activeTab) activeTab = matched;
+        }
+        // Fallback: if nothing claims to be selected but only one tab label is
+        // visible (very unusual), assume that one. Otherwise leave null.
+
+        if (activeTab && activeTab !== 'List of trades') {
+          return {
+            found: false,
+            active_tab: activeTab,
+            error: 'List of trades tab is not active (active tab: "' + activeTab + '"). Activate it in Strategy Tester before calling getTrades.',
+          };
+        }
+
+        // ── Trades table scrape ──────────────────────────────────────────
         // TODO verify: trades table selector. Trying common patterns.
         var table = root.querySelector('[class*="listOfTrades"], [class*="tradesList"], [class*="trades-"], table[class*="reportTable"]');
         if (!table) {
-          // Last resort: any table inside reportContainer with multiple rows
+          // Last resort: any table inside reportContainer with multiple rows.
+          // SAFETY: only attempt this if we have positive confirmation that
+          // "List of trades" is the active tab — otherwise we'd return rows
+          // from whatever table is on screen (e.g. Performance Summary).
+          if (activeTab !== 'List of trades') {
+            return {
+              found: false,
+              active_tab: activeTab,
+              error: 'trades table not found and active tab "' + (activeTab || 'unknown') + '" is not confirmed to be "List of trades"; refusing to scrape unrelated tables.',
+            };
+          }
           var tables = root.querySelectorAll('table, [role="table"]');
-          for (var ti = 0; ti < tables.length; ti++) {
-            if (tables[ti].querySelectorAll('tr, [role="row"]').length > 2) { table = tables[ti]; break; }
+          for (var ti2 = 0; ti2 < tables.length; ti2++) {
+            if (tables[ti2].querySelectorAll('tr, [role="row"]').length > 2) { table = tables[ti2]; break; }
           }
         }
-        if (!table) return { found: false, error: 'trades table not in reportContainer' };
+        if (!table) return { found: false, active_tab: activeTab, error: 'trades table not in reportContainer (active tab: ' + (activeTab || 'unknown') + ')' };
         var rows = table.querySelectorAll('tr, [role="row"]');
-        if (rows.length < 2) return { found: false, error: 'no trade rows' };
+        if (rows.length < 2) return { found: false, active_tab: activeTab, error: 'no trade rows (active tab: ' + (activeTab || 'unknown') + ')' };
         // First row(s) usually headers — collect text cells per row.
         var headers = null;
         var trades = [];
-        for (var i = 0; i < rows.length && trades.length < ${limit}; i++) {
+        for (var i = 0; i < rows.length && trades.length < ${safeLimit}; i++) {
           var row = rows[i];
           var cells = row.querySelectorAll('td, th, [role="cell"], [role="columnheader"]');
           if (cells.length === 0) continue;
@@ -332,15 +392,19 @@ function buildTradesDomScrapeJs(limit) {
             trades.push({ cells: cellTexts });
           }
         }
-        return { found: true, trades: trades, headers: headers };
-      } catch(e) { return { found: false, error: e.message }; }
+        return { found: true, active_tab: activeTab, trades: trades, headers: headers };
+      } catch(e) { return { found: false, active_tab: null, error: e.message }; }
     })()
   `;
 }
 
 export async function getTrades({ max_trades, _deps } = {}) {
   const { evaluate } = _resolveDeps(_deps);
-  const limit = Math.min(max_trades || 20, MAX_TRADES);
+  // R5-N1: route limit through requireFinite (the canonical CDP-injection
+  // sanitizer established by commit 133963e). A non-numeric `max_trades` now
+  // throws cleanly instead of NaN'ing through the IIFE.
+  const requested = max_trades === undefined || max_trades === null ? 20 : max_trades;
+  const limit = Math.min(requireFinite(requested, 'max_trades'), MAX_TRADES);
   const trades = await evaluate(`
     (function() {
       try {
@@ -380,23 +444,32 @@ export async function getTrades({ max_trades, _deps } = {}) {
   }
 
   // Fallback: DOM scrape of trades table.
+  // R3-R1: the scraper detects which Strategy Tester tab is active. If
+  // "List of trades" is not active, refuse to scrape and surface the active
+  // tab back to the caller (otherwise we'd silently return Performance
+  // Summary rows shaped like {Metric, All, Long, Short} as if they were
+  // trades).
   const dom = await evaluate(buildTradesDomScrapeJs(limit));
+  const activeTab = dom?.active_tab ?? null;
+
   if (dom?.found && Array.isArray(dom.trades) && dom.trades.length > 0) {
     return {
       success: true,
       trade_count: dom.trades.length,
       source: 'dom_fallback',
+      active_tab: activeTab,
       trades: dom.trades,
       headers: dom.headers,
     };
   }
 
   const internalErr = trades?.error || 'internal_api returned no trades';
-  const domErr = dom?.error || 'no trades parsed from DOM';
+  const domErr = dom?.error || `no trades parsed from DOM (active tab: ${activeTab || 'unknown'})`;
   return {
     success: false,
     trade_count: 0,
     source: 'none',
+    active_tab: activeTab,
     trades: [],
     error: `Both lookup paths failed. internal_api: ${internalErr}. dom_fallback: ${domErr}.`,
   };

@@ -530,9 +530,9 @@ export async function smartCompile({ _deps } = {}) {
           btns[i].click();
           return 'Save and add to chart';
         }
-        if (!addBtn && /^add to chart$/i.test(text)) addBtn = btns[i];
-        if (!updateBtn && /^update on chart$/i.test(text)) updateBtn = btns[i];
-        if (!saveBtn && btns[i].className.indexOf('saveButton') !== -1 && btns[i].offsetParent !== null) saveBtn = btns[i];
+        if (!addBtn && /^add to chart$/i.test(text) && btns[i].offsetParent !== null && !btns[i].disabled) addBtn = btns[i];
+        if (!updateBtn && /^update on chart$/i.test(text) && btns[i].offsetParent !== null && !btns[i].disabled) updateBtn = btns[i];
+        if (!saveBtn && btns[i].className.indexOf('saveButton') !== -1 && btns[i].offsetParent !== null && !btns[i].disabled) saveBtn = btns[i];
       }
       if (updateBtn) { updateBtn.click(); return 'Update on chart'; }
       if (addBtn) { addBtn.click(); return 'Add to chart'; }

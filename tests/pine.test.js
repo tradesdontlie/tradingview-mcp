@@ -172,6 +172,44 @@ describe('smartCompile() — B5: button priority', () => {
     assert.equal(result.study_added, false);
   });
 
+  it('priority Update > Add > Save still holds when all three are visible+enabled (source-level check)', async () => {
+    // R1-C2: addBtn / updateBtn captures must include offsetParent && !disabled guards
+    // so a hidden/disabled Update doesn't outrank a visible Add.
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../src/core/pine.js', import.meta.url), 'utf8');
+    // Find the smartCompile IIFE block (the one with /^update on chart$/i)
+    const idx = src.indexOf('/^update on chart$/i');
+    assert.ok(idx > 0, 'smartCompile update-on-chart regex present');
+    // Within ~600 chars around that region we should see addBtn AND updateBtn both
+    // guarded by offsetParent !== null && !btns[i].disabled
+    const region = src.slice(Math.max(0, idx - 400), idx + 400);
+    assert.ok(/addBtn\b[^;]*offsetParent !== null[^;]*!btns\[i\]\.disabled/.test(region),
+      'addBtn capture guards offsetParent and !disabled');
+    assert.ok(/updateBtn\b[^;]*offsetParent !== null[^;]*!btns\[i\]\.disabled/.test(region),
+      'updateBtn capture guards offsetParent and !disabled');
+    assert.ok(/saveBtn\b[^;]*offsetParent !== null[^;]*!btns\[i\]\.disabled/.test(region),
+      'saveBtn capture guards offsetParent and !disabled');
+  });
+
+  it('chooses Update over Add when both visible (live mock priority check)', async () => {
+    let clicked = null;
+    const page = {
+      studies: 5,
+      buttons: [
+        { text: 'Save', isSave: true, visible: true },
+        { text: 'Add to chart' },
+        { text: 'Update on chart' },
+      ],
+      onClick: (label) => { clicked = label; },
+    };
+    const evaluate = mockEvaluate(page);
+    const result = await smartCompile({
+      _deps: { evaluate, getClient: mockGetClient() },
+    });
+    assert.equal(clicked, 'Update on chart');
+    assert.equal(result.button_clicked, 'Update on chart');
+  });
+
   it('falls back to "Save" only when no Add/Update button exists and marks study_added=false', async () => {
     let clicked = null;
     const page = {
