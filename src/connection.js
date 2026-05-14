@@ -87,9 +87,26 @@ export async function connect() {
   throw new Error(`CDP connection failed after ${MAX_RETRIES} attempts: ${lastError?.message}`);
 }
 
-async function findChartTarget() {
-  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
+export async function findChartTarget(_deps = {}) {
+  const fetchFn = _deps.fetch || globalThis.fetch;
+  const env = _deps.env || process.env;
+  const warn = _deps.warn || ((...args) => console.warn(...args));
+  const resp = await fetchFn(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
   const targets = await resp.json();
+  // B14: TradingView Desktop frequently has multiple chart pages open. Allow the
+  // caller to disambiguate via env vars; otherwise prefer the first chart page.
+  const urlHint = env.TRADINGVIEW_CHART_URL;
+  const idHint = env.TRADINGVIEW_TARGET_ID;
+  if (idHint) {
+    const byId = targets.find(t => t.type === 'page' && t.id && t.id.startsWith(idHint));
+    if (byId) return byId;
+    warn(`[tradingview-mcp] WARNING: TRADINGVIEW_TARGET_ID="${idHint}" did not match any chart target. Falling back to URL match / first chart page.`);
+  }
+  if (urlHint) {
+    const byUrl = targets.find(t => t.type === 'page' && t.url && t.url.includes(urlHint));
+    if (byUrl) return byUrl;
+    warn(`[tradingview-mcp] WARNING: TRADINGVIEW_CHART_URL="${urlHint}" did not match any chart target. Falling back to first chart page.`);
+  }
   // Prefer targets with tradingview.com/chart in the URL
   return targets.find(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
     || targets.find(t => t.type === 'page' && /tradingview/i.test(t.url))
