@@ -2,11 +2,201 @@
  * Core data access logic.
  */
 import { evaluate, evaluateAsync, KNOWN_PATHS, safeString } from '../connection.js';
+import { waitForChartReady } from '../wait.js';
+import { isFallbackActive } from '../fallback/state.js';
+import * as fallback from '../fallback/adapter.js';
 
 const MAX_OHLCV_BARS = 500;
 const MAX_TRADES = 20;
 const CHART_API = KNOWN_PATHS.chartApi;
 const BARS_PATH = KNOWN_PATHS.mainSeriesBars;
+
+// v2 patch (Lesson #37 → Lesson #36 v2): when `_waitForSeriesLoaded` times
+// out, instead of either silently returning stale data or throwing a generic
+// error, we return a sentinel object that callers (EIT skill, bulten
+// pipeline) can recognise and use to short-circuit into a non-TV fallback
+// (CCXT for crypto, services.yahoo_fallback for forex/metals/indices).
+const STALE_FEED_TIMEOUT_MS = 5000;
+function _staleFeedSentinel(requestedSymbol, currentChartSymbol) {
+  return {
+    __TV_STALE_FEED__: true,
+    requested_symbol: requestedSymbol || null,
+    current_chart_symbol: currentChartSymbol || null,
+    reason:
+      'mainSeries.isLoading() timeout after ' +
+      (STALE_FEED_TIMEOUT_MS / 1000) +
+      's — TV Chrome WS feed appears frozen',
+  };
+}
+function _isStaleSentinel(x) {
+  return !!(x && typeof x === 'object' && x.__TV_STALE_FEED__ === true);
+}
+function _staleFallbackResponse(sentinel) {
+  return {
+    success: false,
+    stale_feed: true,
+    reason: sentinel.reason,
+    fallback_advice:
+      'Use CCXT MCP for crypto or services.yahoo_fallback for forex/metals/indices',
+    requested_symbol: sentinel.requested_symbol,
+    current_chart_symbol: sentinel.current_chart_symbol,
+  };
+}
+
+// Upstream issue #140 / MKO Lesson #36 — getQuote() and getOhlcv() accept a
+// `symbol` parameter, but the underlying JS reads from BARS_PATH (the active
+// chart's main series bars). The `symbol` argument was previously cosmetic:
+// it was echoed back in the response object but never used to fetch data for
+// a different ticker. Consecutive calls with different symbols therefore all
+// returned the data of whichever symbol was last active on the chart.
+//
+// Fix (Approach A — wrapper pattern):
+//   1. Read the chart's current symbol.
+//   2. If the caller asked for a different symbol, switch the chart to it
+//      and wait for bars to stabilise.
+//   3. Run the read.
+//   4. In a finally block, restore the original symbol on a best-effort
+//      basis so we don't permanently mutate the user's chart.
+//
+// Trade-offs: causes brief UI flicker, and is serialised. A future iteration
+// (Approach B) could open a TradingView internal quote session via
+// `TradingViewApi.factory.createQuoteSession` to read quote data without
+// touching the visible chart at all.
+
+async function _getCurrentSymbol() {
+  try {
+    return await evaluate(`(function() {
+      try { return ${CHART_API}.symbol(); } catch(e) { return null; }
+    })()`);
+  } catch {
+    return null;
+  }
+}
+
+function _symbolsMatch(a, b) {
+  if (!a || !b) return false;
+  return String(a).toUpperCase() === String(b).toUpperCase();
+}
+
+async function _setChartSymbol(symbol) {
+  await evaluateAsync(`
+    (function() {
+      var chart = ${CHART_API};
+      return new Promise(function(resolve) {
+        chart.setSymbol(${safeString(symbol)}, {});
+        setTimeout(resolve, 500);
+      });
+    })()
+  `);
+  // DOM-level wait (spinner + symbol header). Capped at the stale-feed
+  // timeout so we don't sit on a frozen UI for tens of seconds.
+  await waitForChartReady(symbol, null, STALE_FEED_TIMEOUT_MS);
+  // Internal state wait — mainSeries.isLoading() flips to false and bars
+  // settle on the new symbol. Without this, bars.valueAt() still returns
+  // the previous symbol's cached values for several seconds after the
+  // chart UI has visually switched.
+  //
+  // v2 (Lesson #37): if this poll times out, we treat the TV WS feed as
+  // frozen and signal the caller (via STALE_FEED sentinel propagated by
+  // `_withSymbol`) so it can fall back to CCXT/yahoo without returning
+  // stale data. Returns true on success, false on timeout.
+  return await _waitForSeriesLoaded(symbol, STALE_FEED_TIMEOUT_MS);
+}
+
+// Poll until mainSeries.isLoading() === false AND bars.lastIndex() is
+// stable for two consecutive samples. Returns true on success, false on
+// timeout. Errors during polling are treated as "not ready yet".
+async function _waitForSeriesLoaded(expectedSymbol, timeoutMs = STALE_FEED_TIMEOUT_MS) {
+  const start = Date.now();
+  let lastIdx = -1;
+  let stableCount = 0;
+  while (Date.now() - start < timeoutMs) {
+    let state = null;
+    try {
+      state = await evaluate(`(function() {
+        try {
+          var ms = ${CHART_API}._chartWidget.model().mainSeries();
+          var bars = ms.bars();
+          var li = (bars && typeof bars.lastIndex === 'function') ? bars.lastIndex() : null;
+          return { loading: !!ms.isLoading(), symbol: ms.symbol(), lastIdx: li, size: bars ? bars.size() : 0 };
+        } catch(e) { return { err: e.message }; }
+      })()`);
+    } catch {
+      state = null;
+    }
+    if (state && !state.err && !state.loading && state.size > 0) {
+      // Confirm symbol matches what we asked for (case-insensitive,
+      // substring — handles exchange prefixes like "OANDA:XAUUSD" vs "XAUUSD").
+      const symOk = !expectedSymbol
+        || (state.symbol
+            && (String(state.symbol).toUpperCase().includes(String(expectedSymbol).toUpperCase())
+              || String(expectedSymbol).toUpperCase().includes(String(state.symbol).toUpperCase())));
+      if (symOk && state.lastIdx === lastIdx) {
+        stableCount++;
+        if (stableCount >= 2) return true;
+      } else {
+        stableCount = 0;
+      }
+      lastIdx = state.lastIdx;
+    } else {
+      stableCount = 0;
+    }
+    await new Promise(r => setTimeout(r, 250));
+  }
+  return false;
+}
+
+// Switch the chart to `symbol` (if different from current) for the duration
+// of `fn`, then restore the original symbol. Returns whatever `fn` returns.
+// If `symbol` is falsy or equal to the current symbol, `fn` is called as-is.
+//
+// v2 (Lesson #37): if `_setChartSymbol` reports the series never finished
+// loading within `STALE_FEED_TIMEOUT_MS`, return a STALE_FEED sentinel
+// instead of running `fn` on stale bars. The public wrappers (`getQuote`,
+// `getOhlcv`) detect this sentinel and translate it into a structured
+// `{ success: false, stale_feed: true, ... }` response so callers can fall
+// back to a non-TV data source immediately.
+async function _withSymbol(symbol, fn) {
+  if (!symbol) return fn();
+
+  const originalSymbol = await _getCurrentSymbol();
+  const needsSwitch = originalSymbol && !_symbolsMatch(originalSymbol, symbol);
+  if (!needsSwitch) return fn();
+
+  let switchedOk = false;
+  try {
+    switchedOk = await _setChartSymbol(symbol);
+  } catch (err) {
+    // If we can't switch, fall through and let `fn` run on whatever the
+    // chart is showing. The caller will still see incorrect data, but at
+    // least we surface a real read instead of a silent cache hit.
+    throw new Error(`Failed to switch chart to ${symbol}: ${err.message}`);
+  }
+
+  if (switchedOk === false) {
+    // v2 silent fallback: WS feed appears frozen. Do NOT run `fn` (it would
+    // return stale cached bars from the previous symbol). Restore the
+    // original symbol on best-effort and return the sentinel.
+    if (originalSymbol) {
+      try { await _setChartSymbol(originalSymbol); } catch { /* ignore */ }
+    }
+    return _staleFeedSentinel(symbol, originalSymbol);
+  }
+
+  try {
+    return await fn();
+  } finally {
+    // Best-effort restore. We deliberately swallow errors here so the
+    // primary read result is not lost if the restore itself fails.
+    if (originalSymbol) {
+      try {
+        await _setChartSymbol(originalSymbol);
+      } catch {
+        // ignore — chart is left on `symbol`; user can restore manually
+      }
+    }
+  }
+}
 
 function buildGraphicsJS(collectionName, mapKey, filter) {
   return `
@@ -59,25 +249,37 @@ function buildGraphicsJS(collectionName, mapKey, filter) {
   `;
 }
 
-export async function getOhlcv({ count, summary } = {}) {
+export async function getOhlcv({ count, summary, symbol, timeframe } = {}) {
+  if (isFallbackActive()) {
+    return fallback.getOhlcv({ count, summary, symbol, timeframe });
+  }
   const limit = Math.min(count || 100, MAX_OHLCV_BARS);
-  let data;
-  try {
-    data = await evaluate(`
-      (function() {
-        var bars = ${BARS_PATH};
-        if (!bars || typeof bars.lastIndex !== 'function') return null;
-        var result = [];
-        var end = bars.lastIndex();
-        var start = Math.max(bars.firstIndex(), end - ${limit} + 1);
-        for (var i = start; i <= end; i++) {
-          var v = bars.valueAt(i);
-          if (v) result.push({time: v[0], open: v[1], high: v[2], low: v[3], close: v[4], volume: v[5] || 0});
-        }
-        return {bars: result, total_bars: bars.size(), source: 'direct_bars'};
-      })()
-    `);
-  } catch { data = null; }
+
+  // Wrap the read so that an explicit `symbol` actually fetches that
+  // symbol's bars instead of returning whatever the chart was already on
+  // (issue #140 / Lesson #36).
+  const data = await _withSymbol(symbol, async () => {
+    try {
+      return await evaluate(`
+        (function() {
+          var bars = ${BARS_PATH};
+          if (!bars || typeof bars.lastIndex !== 'function') return null;
+          var result = [];
+          var end = bars.lastIndex();
+          var start = Math.max(bars.firstIndex(), end - ${limit} + 1);
+          for (var i = start; i <= end; i++) {
+            var v = bars.valueAt(i);
+            if (v) result.push({time: v[0], open: v[1], high: v[2], low: v[3], close: v[4], volume: v[5] || 0});
+          }
+          return {bars: result, total_bars: bars.size(), source: 'direct_bars'};
+        })()
+      `);
+    } catch { return null; }
+  });
+
+  // v2 silent fallback (Lesson #37): WS feed frozen, surface a structured
+  // response so caller can pivot to CCXT / yahoo without polling further.
+  if (_isStaleSentinel(data)) return _staleFallbackResponse(data);
 
   if (!data || !data.bars || data.bars.length === 0) {
     throw new Error('Could not extract OHLCV data. The chart may still be loading.');
@@ -107,6 +309,7 @@ export async function getOhlcv({ count, summary } = {}) {
 }
 
 export async function getIndicator({ entity_id }) {
+  if (isFallbackActive()) return fallback.getIndicator();
   const data = await evaluate(`
     (function() {
       var api = ${CHART_API};
@@ -133,6 +336,7 @@ export async function getIndicator({ entity_id }) {
 }
 
 export async function getStrategyResults() {
+  if (isFallbackActive()) return fallback.getStrategyResults();
   const results = await evaluate(`
     (function() {
       try {
@@ -165,6 +369,7 @@ export async function getStrategyResults() {
 }
 
 export async function getTrades({ max_trades } = {}) {
+  if (isFallbackActive()) return fallback.getTrades();
   const limit = Math.min(max_trades || 20, MAX_TRADES);
   const trades = await evaluate(`
     (function() {
@@ -202,6 +407,7 @@ export async function getTrades({ max_trades } = {}) {
 }
 
 export async function getEquity() {
+  if (isFallbackActive()) return fallback.getEquity();
   const equity = await evaluate(`
     (function() {
       try {
@@ -243,41 +449,56 @@ export async function getEquity() {
 }
 
 export async function getQuote({ symbol } = {}) {
-  const data = await evaluate(`
-    (function() {
-      var api = ${CHART_API};
-      var sym = ${safeString(symbol || '')};
-      if (!sym) { try { sym = api.symbol(); } catch(e) {} }
-      if (!sym) { try { sym = api.symbolExt().symbol; } catch(e) {} }
-      var ext = {};
-      try { ext = api.symbolExt() || {}; } catch(e) {}
-      var bars = ${BARS_PATH};
-      var quote = { symbol: sym };
-      if (bars && typeof bars.lastIndex === 'function') {
-        var last = bars.valueAt(bars.lastIndex());
-        if (last) { quote.time = last[0]; quote.open = last[1]; quote.high = last[2]; quote.low = last[3]; quote.close = last[4]; quote.last = last[4]; quote.volume = last[5] || 0; }
-      }
-      try {
-        var bidEl = document.querySelector('[class*="bid"] [class*="price"], [class*="dom-"] [class*="bid"]');
-        var askEl = document.querySelector('[class*="ask"] [class*="price"], [class*="dom-"] [class*="ask"]');
-        if (bidEl) quote.bid = parseFloat(bidEl.textContent.replace(/[^0-9.\\-]/g, ''));
-        if (askEl) quote.ask = parseFloat(askEl.textContent.replace(/[^0-9.\\-]/g, ''));
-      } catch(e) {}
-      try {
-        var hdr = document.querySelector('[class*="headerRow"] [class*="last-"]');
-        if (hdr) { var hdrPrice = parseFloat(hdr.textContent.replace(/[^0-9.\\-]/g, '')); if (!isNaN(hdrPrice)) quote.header_price = hdrPrice; }
-      } catch(e) {}
-      if (ext.description) quote.description = ext.description;
-      if (ext.exchange) quote.exchange = ext.exchange;
-      if (ext.type) quote.type = ext.type;
-      return quote;
-    })()
-  `);
+  if (isFallbackActive()) {
+    return fallback.getQuote({ symbol });
+  }
+
+  // Wrap the read so that an explicit `symbol` actually fetches that
+  // symbol's quote instead of returning whatever the chart was already on
+  // (issue #140 / Lesson #36).
+  const data = await _withSymbol(symbol, async () => {
+    return evaluate(`
+      (function() {
+        var api = ${CHART_API};
+        var sym = ${safeString(symbol || '')};
+        if (!sym) { try { sym = api.symbol(); } catch(e) {} }
+        if (!sym) { try { sym = api.symbolExt().symbol; } catch(e) {} }
+        var ext = {};
+        try { ext = api.symbolExt() || {}; } catch(e) {}
+        var bars = ${BARS_PATH};
+        var quote = { symbol: sym };
+        if (bars && typeof bars.lastIndex === 'function') {
+          var last = bars.valueAt(bars.lastIndex());
+          if (last) { quote.time = last[0]; quote.open = last[1]; quote.high = last[2]; quote.low = last[3]; quote.close = last[4]; quote.last = last[4]; quote.volume = last[5] || 0; }
+        }
+        try {
+          var bidEl = document.querySelector('[class*="bid"] [class*="price"], [class*="dom-"] [class*="bid"]');
+          var askEl = document.querySelector('[class*="ask"] [class*="price"], [class*="dom-"] [class*="ask"]');
+          if (bidEl) quote.bid = parseFloat(bidEl.textContent.replace(/[^0-9.\\-]/g, ''));
+          if (askEl) quote.ask = parseFloat(askEl.textContent.replace(/[^0-9.\\-]/g, ''));
+        } catch(e) {}
+        try {
+          var hdr = document.querySelector('[class*="headerRow"] [class*="last-"]');
+          if (hdr) { var hdrPrice = parseFloat(hdr.textContent.replace(/[^0-9.\\-]/g, '')); if (!isNaN(hdrPrice)) quote.header_price = hdrPrice; }
+        } catch(e) {}
+        if (ext.description) quote.description = ext.description;
+        if (ext.exchange) quote.exchange = ext.exchange;
+        if (ext.type) quote.type = ext.type;
+        return quote;
+      })()
+    `);
+  });
+
+  // v2 silent fallback (Lesson #37): WS feed frozen, surface a structured
+  // response so caller can pivot to CCXT / yahoo without polling further.
+  if (_isStaleSentinel(data)) return _staleFallbackResponse(data);
+
   if (!data || (!data.last && !data.close)) throw new Error('Could not retrieve quote. The chart may still be loading.');
   return { success: true, ...data };
 }
 
 export async function getDepth() {
+  if (isFallbackActive()) return fallback.getDepth();
   const data = await evaluate(`
     (function() {
       var domPanel = document.querySelector('[class*="depth"]')
@@ -322,6 +543,7 @@ export async function getDepth() {
 }
 
 export async function getStudyValues() {
+  if (isFallbackActive()) return fallback.getStudyValues();
   const data = await evaluate(`
     (function() {
       var chart = window.TradingViewApi._activeChartWidgetWV.value()._chartWidget;
@@ -358,6 +580,7 @@ export async function getStudyValues() {
 }
 
 export async function getPineLines({ study_filter, verbose } = {}) {
+  if (isFallbackActive()) return fallback.getPineLines();
   const filter = study_filter || '';
   const raw = await evaluate(buildGraphicsJS('dwglines', 'lines', filter));
   if (!raw || raw.length === 0) return { success: true, study_count: 0, studies: [] };
@@ -382,6 +605,7 @@ export async function getPineLines({ study_filter, verbose } = {}) {
 }
 
 export async function getPineLabels({ study_filter, max_labels, verbose } = {}) {
+  if (isFallbackActive()) return fallback.getPineLabels();
   const filter = study_filter || '';
   const raw = await evaluate(buildGraphicsJS('dwglabels', 'labels', filter));
   if (!raw || raw.length === 0) return { success: true, study_count: 0, studies: [] };
@@ -402,6 +626,7 @@ export async function getPineLabels({ study_filter, max_labels, verbose } = {}) 
 }
 
 export async function getPineTables({ study_filter } = {}) {
+  if (isFallbackActive()) return fallback.getPineTables();
   const filter = study_filter || '';
   const raw = await evaluate(buildGraphicsJS('dwgtablecells', 'tableCells', filter));
   if (!raw || raw.length === 0) return { success: true, study_count: 0, studies: [] };
@@ -430,6 +655,7 @@ export async function getPineTables({ study_filter } = {}) {
 }
 
 export async function getPineBoxes({ study_filter, verbose } = {}) {
+  if (isFallbackActive()) return fallback.getPineBoxes();
   const filter = study_filter || '';
   const raw = await evaluate(buildGraphicsJS('dwgboxes', 'boxes', filter));
   if (!raw || raw.length === 0) return { success: true, study_count: 0, studies: [] };
