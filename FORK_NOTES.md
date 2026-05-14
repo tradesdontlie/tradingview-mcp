@@ -522,6 +522,46 @@ Five surgical cherry-picks landed from the open-PR triage at `system-design/rese
 
 ---
 
+### 12. `with_pine_save` orchestrator (T110, 2026-05-13)
+
+Composes RULEBOOK §11's 5-step save cycle (compile → save → cache-bust → reload → verify) into one MCP call. Replaces every skill's hand-rolled dance.
+
+**Files:** `src/core/pine.js` `withSave()` (~165 LoC at end of file), `src/tools/pine.js` `with_pine_save` registration (~19 LoC).
+
+**Sequence:**
+1. `pine_check(source)` — abort on errors. Records `errors`/`warnings` counts.
+2. `pine_save_source({id|name, source})` — abort on save fail or missing `has_il_blob`.
+3. `pine_refresh_catalog()` — best-effort; failure does not abort.
+4. If `indicator_display_name`: find existing matching study via `chart_get_state`, remove all matches, `chart_manage_indicator(add)`.
+5. Verify: prefer `expected_version` substring match on reloaded entity name; else `data_get_pine_tables` row count > 0.
+6. On verify-fail with retries left, repeat (3)+(4)+(5) up to `max_retries` (default 2).
+
+**Response:**
+```
+{
+  success: bool,
+  steps: [{name, success, ms, detail}, ...],
+  final_verification: 'passed' | 'save_only' | 'failed_compile' | 'failed_save' | 'failed_reload' | 'failed_after_retries',
+  total_ms: int,
+  source_lines: int,
+  has_il_blob: bool,
+  error?: string,
+}
+```
+
+**Id heuristic:** strict `^USER;` prefix → treated as id; otherwise treated as name. Removes the previous coin-flip in skills that hand-rolled the dispatch.
+
+**Verification preference (most reliable first):**
+1. `expected_version` + `indicator_display_name` → label substring match on reloaded entity name (works because Pine `indicator()` declaration title is reflected in `chart_get_state`).
+2. `indicator_display_name` only → `pine_tables` row count > 0 (proves the IL renders the panel).
+3. Neither → save-only mode; no reload, no verify, terminal success on save.
+
+**Skill audit pending** (next session): `/3cs`, `pine-visual-verify`, and any in-tree script that does manual save+reload should switch to `with_pine_save` or document a reason to stay manual.
+
+**Spec ref:** `ASTA ECO4/system-design/tasks/done.md#T110`.
+
+---
+
 ## Open upstream-facing work (optional)
 
 Draft issue reports for the two unreported bugs we patched exist in the ASTA ECO4 session transcript (Session 15). Paste at https://github.com/tradesdontlie/tradingview-mcp/issues/new when you want maintainer attention. Issues:
