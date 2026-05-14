@@ -1,7 +1,7 @@
 /**
  * Core screenshot/capture logic.
  */
-import { getClient, evaluate, getChartCollection } from '../connection.js';
+import { evaluate, getChartCollection, withReconnect } from '../connection.js';
 import { waitForChartRender } from '../wait.js';
 import { writeFileSync, mkdirSync } from 'fs';
 import { join, dirname, isAbsolute, resolve as pathResolve, parse as pathParse } from 'path';
@@ -49,7 +49,6 @@ export async function captureScreenshot({ region, filename, method, waitForRende
     }
   }
 
-  const client = await getClient();
   let clip = undefined;
 
   if (region === 'chart') {
@@ -80,7 +79,7 @@ export async function captureScreenshot({ region, filename, method, waitForRende
   const params = { format: 'png' };
   if (clip) params.clip = clip;
 
-  const { data } = await client.Page.captureScreenshot(params);
+  const { data } = await withReconnect(c => c.Page.captureScreenshot(params));
   writeFileSync(filePath, Buffer.from(data, 'base64'));
 
   return {

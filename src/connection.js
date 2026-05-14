@@ -50,21 +50,54 @@ export function requireFinite(value, name) {
 export async function getClient() {
   if (client) {
     try {
-      // Strict liveness: cached tab must be alive AND expose chart APIs.
-      // Plain `Runtime.evaluate('1')` passes on any TradingView page
-      // (news-flow, watchlist, symbols) and used to lock the picker to
-      // whichever tab was attached first — silently breaking every
+      // Strict liveness (PR #133 / T109 pick E): cached tab must be alive AND
+      // expose chart APIs. Plain `Runtime.evaluate('1')` passes on any
+      // TradingView page (news-flow, watchlist, symbols) and used to lock the
+      // picker to whichever tab was attached first — silently breaking every
       // chart-API tool when a chart tab opened later.
-      const probe = await client.Runtime.evaluate({
-        expression: 'typeof window.TradingViewApi !== "undefined" && window.TradingViewApi._activeChartWidgetWV !== undefined',
-        returnByValue: true,
-      });
+      // Wrapped in 2s timeout (PR #131 / T109 pick F): prevents indefinite
+      // hang on half-open WebSocket.
+      const probe = await Promise.race([
+        client.Runtime.evaluate({
+          expression: 'typeof window.TradingViewApi !== "undefined" && window.TradingViewApi._activeChartWidgetWV !== undefined',
+          returnByValue: true,
+        }),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('liveness timeout')), 2000)),
+      ]);
       if (probe?.result?.value === true) return client;
     } catch {}
+    try { await client.close(); } catch {}
     client = null;
     targetInfo = null;
   }
   return connect();
+}
+
+/**
+ * Run a CDP operation with automatic reconnect on transient connection failures.
+ * Use this in tools that call client.Page.*, client.DOM.*, etc. directly
+ * (not via evaluate()), since those bypass the cached-client liveness path.
+ */
+const RECONNECT_ERR_RE = /connection closed|websocket|ECONNREFUSED|target closed|liveness timeout|socket hang up|disconnected/i;
+export async function withReconnect(operation, maxRetries = 3) {
+  let lastError;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const c = await getClient();
+      return await operation(c);
+    } catch (err) {
+      lastError = err;
+      const msg = err?.message || String(err);
+      if (!RECONNECT_ERR_RE.test(msg)) throw err;
+      // Force reconnect on next iteration
+      try { if (client) await client.close(); } catch {}
+      client = null;
+      targetInfo = null;
+      const delay = Math.min(BASE_DELAY * Math.pow(2, attempt), 5000);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+  throw new Error(`CDP operation failed after ${maxRetries} reconnect attempts: ${lastError?.message || lastError}`);
 }
 
 export async function connect() {
