@@ -85,22 +85,107 @@ export async function setType({ chart_type, _deps }) {
 }
 
 export async function manageIndicator({ action, indicator, entity_id, inputs: inputsRaw, _deps }) {
-  const { evaluate } = _resolve(_deps);
+  const { evaluate, evaluateAsync } = _resolve(_deps);
   const inputs = inputsRaw ? (typeof inputsRaw === 'string' ? JSON.parse(inputsRaw) : inputsRaw) : undefined;
 
   if (action === 'add') {
     const inputArr = inputs ? Object.entries(inputs).map(([k, v]) => ({ id: k, value: v })) : [];
-    const before = await evaluate(`${CHART_API}.getAllStudies().map(function(s) { return s.id; })`);
-    await evaluate(`
-      (function() {
+
+    // T108 (2026-05-13): combine descriptor lookup + createStudy + 1500ms wait
+    // + new-id snapshot into one evaluateAsync. Two bugs fixed here:
+    //
+    //   Bug 1 (T107 smoke discovery): chart.createStudy(<bare title>) throws
+    //     "unexpected study id:<lowercase>" for user scripts. TV's name→token
+    //     map covers built-ins only (Volume@..., MACD@..., etc.). User scripts
+    //     need the studyData.descriptor OBJECT reached through
+    //     TradingViewApi._studyMarket._dialog._studies['Script$USER'] (populated
+    //     by _updateUserStudies via T107's pine_refresh_catalog mechanism).
+    //
+    //   Bug 2 (upstream Issue #142): add-path failure leaves TV's Indicators
+    //     dialog stuck open. Subsequent automation fails until manual Escape.
+    //     Fix: dispatch synthetic Escape via CDP Input.dispatchKeyEvent on
+    //     any failure path (pattern from watchlist.js:731-732).
+    const result = await evaluateAsync(`
+      (async function() {
         var chart = ${CHART_API};
-        chart.createStudy(${safeString(indicator)}, false, false, ${JSON.stringify(inputArr)});
+        var beforeIds = chart.getAllStudies().map(function(s) { return s.id; });
+        var resolution = 'fallback';
+        var firstArg = ${safeString(indicator)};
+
+        // User-script descriptor lookup. Populate cache via T107's mechanism if empty.
+        try {
+          var api = window.TradingViewApi;
+          var dlg = api && api._studyMarket && api._studyMarket._dialog;
+          if (dlg) {
+            var us0 = (dlg._studies && dlg._studies['Script$USER']) || [];
+            if (us0.length === 0 && dlg._initIndicatorsPromises && dlg._updateUserStudies) {
+              dlg._initIndicatorsPromises.userScriptsPromise = fetch(
+                'https://pine-facade.tradingview.com/pine-facade/list/?filter=saved',
+                { credentials: 'include' }
+              ).then(function(r) { return r.json(); });
+              try { await dlg._updateUserStudies(); } catch (_) {}
+            }
+            var us = (dlg._studies && dlg._studies['Script$USER']) || [];
+            var want = ${safeString(indicator)}.toLowerCase();
+            var match = null;
+            for (var i = 0; i < us.length; i++) {
+              if ((us[i].title || '').toLowerCase() === want) { match = us[i]; break; }
+            }
+            if (match && match.studyData && match.studyData.descriptor) {
+              firstArg = match.studyData.descriptor;
+              resolution = 'descriptor';
+            }
+          }
+        } catch (_) {}
+
+        // Call createStudy. For user scripts it returns a Promise; for built-ins it returns synchronously.
+        var createErr = null;
+        try {
+          var cs = chart.createStudy(firstArg, false, false, ${JSON.stringify(inputArr)});
+          if (cs && typeof cs.then === 'function') {
+            try { await cs; } catch (e) { createErr = String(e && e.message || e); }
+          }
+        } catch (e) { createErr = String(e && e.message || e); }
+
+        await new Promise(function(r) { setTimeout(r, 1500); });
+        var afterIds = chart.getAllStudies().map(function(s) { return s.id; });
+        var newIds = afterIds.filter(function(id) { return beforeIds.indexOf(id) === -1; });
+
+        return { beforeIds: beforeIds, afterIds: afterIds, newIds: newIds, resolution: resolution, createErr: createErr };
       })()
     `);
-    await new Promise(r => setTimeout(r, 1500));
-    const after = await evaluate(`${CHART_API}.getAllStudies().map(function(s) { return s.id; })`);
-    const newIds = (after || []).filter(id => !(before || []).includes(id));
-    return { success: newIds.length > 0, action: 'add', indicator, entity_id: newIds[0] || null, new_study_count: newIds.length };
+
+    if (result && result.newIds && result.newIds.length > 0) {
+      return {
+        success: true,
+        action: 'add',
+        indicator,
+        entity_id: result.newIds[0],
+        new_study_count: result.newIds.length,
+        resolution: result.resolution,
+      };
+    }
+
+    // Failure path — dispatch Escape via CDP to clear stuck dialog state.
+    let recovery_attempted = false;
+    try {
+      const { getClient } = await import('../connection.js');
+      const c = await getClient();
+      await c.Input.dispatchKeyEvent({ type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+      await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 'Escape', code: 'Escape' });
+      recovery_attempted = true;
+    } catch (_) {}
+
+    return {
+      success: false,
+      action: 'add',
+      indicator,
+      entity_id: null,
+      new_study_count: 0,
+      resolution: result && result.resolution,
+      error: (result && result.createErr) || 'no new study after 1500ms',
+      recovery_attempted,
+    };
   } else if (action === 'remove') {
     if (!entity_id) throw new Error('entity_id required for remove action. Use chart_get_state to find study IDs.');
     await evaluate(`

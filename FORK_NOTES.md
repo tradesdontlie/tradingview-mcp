@@ -462,6 +462,38 @@ data_get_pine_tables({ study_filter: "ASTA <X>" })  // verify fresh IL via panel
 
 ---
 
+### 10. `chart_manage_indicator(add)` — user-script descriptor + Escape recovery (T108, 2026-05-13)
+
+**Bug 1 (root cause):** `src/core/chart.js` `manageIndicator()` add path called `chart.createStudy(<bare title string>, false, false, inputArr)` for ALL indicators. TV accepts a bare title only for built-ins (which have an internal name→token map for `"Volume@tv-basicstudies-241!"` etc.). For user scripts, `createStudy` rejects the bare title with `Error: unexpected study id:<lowercased input>`. The only accepted shape for user scripts is the `studyData.descriptor` OBJECT reached through `TradingViewApi._studyMarket._dialog._studies['Script$USER']` (populated by `_updateUserStudies()` — T107's mechanism).
+
+Verified during T107 smoke 2026-05-13 (BB v1.1.4 on HWM-D, post-T107 cache refresh):
+- `chart.createStudy("ASTA Bollinger Bands", false, false, [])` → throws `unexpected study id:asta bollinger bands`.
+- `chart.createStudy(bb.studyData.descriptor, false, false, [])` → resolves to entity `s0ZGgl` named "ASTA Bollinger Bands v1.1.4" first try.
+
+This bug **pre-existed T107** — `chart_manage_indicator(add)` has always returned `success:false` for user scripts. The codebase's coping strategy was "ask operator to manually re-add via Indicators dialog" (cited in CLAUDE.md MCP recipes and in several skill workflows).
+
+**Bug 2 (upstream Issue #142):** add-path failure leaves TV's Indicators-dialog modal stuck open. Subsequent automation calls fail until operator manually presses Escape. Surgical fix: dispatch synthetic Escape via CDP `Input.dispatchKeyEvent` on any failure path.
+
+**Fix:** Rewrote the `add` branch of `manageIndicator()` to:
+1. Run a single `evaluateAsync` that:
+   a. Snapshots `getAllStudies()` ids before.
+   b. Looks up `_studies['Script$USER']` for a case-insensitive title match. If empty, internally repeats T107's cache-populate (replace `userScriptsPromise` + `await _updateUserStudies()`) and retries.
+   c. If matched → `firstArg = match.studyData.descriptor`; `resolution = 'descriptor'`. Else → `firstArg = <bare title>`; `resolution = 'fallback'`.
+   d. Calls `chart.createStudy(firstArg, false, false, inputArr)`. For user scripts the return is a Promise (awaited); for built-ins it's synchronous.
+   e. `await sleep(1500ms)`, snapshots `getAllStudies()` again, computes `newIds` diff.
+2. On success (`newIds.length > 0`) → returns `{success:true, entity_id, new_study_count, resolution}`.
+3. On failure → dispatches Escape via CDP `Input.dispatchKeyEvent` (pattern from `watchlist.js:731-732`) to clear stuck dialog state, returns `{success:false, error, recovery_attempted:true, resolution}`.
+
+Single `evaluateAsync` round-trip replaces the prior three-call dance (before-snapshot + createStudy + after-snapshot with node-side sleep). Cleaner; same effective timing.
+
+**Response shape additive** — existing callers see `success / action / indicator / entity_id / new_study_count` unchanged. New optional fields: `resolution: "descriptor" | "fallback"`, `error`, `recovery_attempted`.
+
+**Files touched:** `src/core/chart.js` `manageIndicator()` add branch (~85 LoC).
+
+**Source:** Bug 1 self-diagnosed during T107 smoke. Bug 2 cherry-pick of approach from [tradesdontlie/tradingview-mcp Issue #142](https://github.com/tradesdontlie/tradingview-mcp/issues/142) (no upstream patch shipped — only the Escape recovery technique is re-used; pattern was already present in our own `watchlist.js:731-732` for sidebar Add-Symbol).
+
+---
+
 ## Open upstream-facing work (optional)
 
 Draft issue reports for the two unreported bugs we patched exist in the ASTA ECO4 session transcript (Session 15). Paste at https://github.com/tradesdontlie/tradingview-mcp/issues/new when you want maintainer attention. Issues:
