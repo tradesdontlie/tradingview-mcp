@@ -494,6 +494,34 @@ Single `evaluateAsync` round-trip replaces the prior three-call dance (before-sn
 
 ---
 
+### 11. Upstream cherry-pick batch (T109, 2026-05-13)
+
+Five surgical cherry-picks landed from the open-PR triage at `system-design/research/upstream-pr-triage-2026-05-13.md`. Each is a separate commit on `fixes/draw-api-resolve` so they can be rebased / dropped individually if upstream merges them. PR #143 / Issue #141 are issues, not PRs; #143 was confirmed and fixed with our own patch; #141 was repro'd and found WORKING (no fix needed).
+
+| Pick | Source | Commit | Files | Risk | Summary |
+|---|---|---|---|---|---|
+| A | upstream PR #148 `e177b56` | `b542b34` | `capture.js`, `tools/capture.js`, `wait.js` | LOW | `wait_for_render:true` opt-in on `capture_screenshot`. Polls canvas+symbol+resolution for 3 stable polls or 5s timeout. Closes upstream Issue #144 (stale-frame after `chart_set_symbol`). BOM bytes stripped post-pick. |
+| B | upstream PR #117 `b64b2e0` + `264a55c` | `76cdc7e` | `chart.js`, `capture.js`, `tools/capture.js` | LOW-MED | `chart_scroll_to_date` now drives TV's native "Go to date" (Alt+G) dialog instead of `timeScale.zoomToBarsRange` (worked only for loaded bars). New `strategy` field in response. Plus `out_dir` / `path` params on `capture_screenshot`. Merged with pick A's `wait_for_render`. Skipped commit `2df3c93` (DI fix on getVisibleRange/symbolInfo) — deferred to T111. |
+| C | Issue #143 — own fix | `08d44f5` | `data.js` `getStudyValues()` | LOW | `data_get_study_values` now returns `entity_id` and a normalized `inputs` map per study, so same-name studies (e.g. multiple EMAs) are disambiguable. Live repro confirmed 3× EMAs at L=5/13/200 came back as 3 identical entries pre-fix; post-fix shape additive (old `name`/`values` retained). |
+| D | Issue #141 — verified WORKING | — | — | — | `chart_manage_indicator(add, inputs={length:N})` DOES apply the input — probe confirmed `propState.inputs.length.value = N` on the created study. The user-reported behavior was actually the dataWindowView staleness bug (separate, deferred). No fix needed. |
+| E | upstream PR #133 `577f907` + `0887394` + `635da77` | `eea9b8b` | `connection.js`, `chart.js`, `wait.js` | MED | CDP target picker fails loud when no chart tab is found (was silently targeting wrong page); strict TV-API liveness probe; `symbolSearch` defensive array extraction; `waitForChartReady` uses TV-API bar count + non-empty legend (more reliable than canvas-only); bare-ticker tolerance. PR was macOS-tested upstream; re-smoke on Windows MSIX pending post-restart. |
+| F | upstream PR #131 `6f0e530`, partial | `7f98d28` | `connection.js`, `capture.js`, `batch.js` | HIGH (alerts.js merge) | `withReconnect(operation, maxRetries=3)` helper with exponential backoff (500ms → 1s → 2s → 4s, cap 5s) keyed off `/connection closed\|websocket\|target closed\|liveness timeout\|socket hang up\|disconnected/i`. Wraps `Page.captureScreenshot` (capture.js + batch.js). `getClient()` liveness now wrapped in 2s `Promise.race` timeout — merged with pick E's strict TV-API probe (combined: TV-API check, 2s-bounded, attempts graceful `close()` before nulling). **alerts.js SKIPPED** — our alerts.js is REST-based (T31), not CDP; `withReconnect` doesn't apply to `fetch()` calls. |
+
+**Deferred upstream picks (filed for later, NOT in T109):**
+- PR #90 `04993ea` — TV 3.1 strategy/equity/trades compat in `data.js`. Defer until T105 strategy mode work begins.
+- PR #112 — `alert_create_indicator` for Pine alertcondition signals. File as follow-up post-Block H if needed.
+- PR #35 — `data_get_pine_shapes` for `plotshape()`/`plotchar()`. File when plotshape adoption begins.
+- PR #107 — 16-fix bundle, ~80% redundant with our fork. Only `safeBacktickBody()` consolidation interesting; file as small refactor if it surfaces.
+
+**Permanently skipped:**
+- PR #54 — removes `ui_evaluate`; we actively rely on it for diagnostics.
+- PR #97 / #95 — Monaco-Pine; deprecated per RULEBOOK §11.2.
+- PR #103 / #110 / #76 — MSIX launch; resolved by our PowerShell recipe.
+
+**Spec ref:** `ASTA ECO4/system-design/tasks/done.md#T109`.
+
+---
+
 ## Open upstream-facing work (optional)
 
 Draft issue reports for the two unreported bugs we patched exist in the ASTA ECO4 session transcript (Session 15). Paste at https://github.com/tradesdontlie/tradingview-mcp/issues/new when you want maintainer attention. Issues:
