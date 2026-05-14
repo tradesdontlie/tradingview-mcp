@@ -4,6 +4,8 @@
  * They throw on error (callers catch and format).
  */
 import { evaluate, evaluateAsync, getClient } from '../connection.js';
+import { manageIndicator, getState as chartGetState } from './chart.js';
+import { getPineTables } from './data.js';
 
 // ── Monaco finder (injected into TV page) ──
 const FIND_MONACO = `
@@ -977,5 +979,162 @@ export async function refreshCatalog() {
     scripts: result?.scripts || [],
     source: 'pine_facade_rest',
     note: 'TV chart-side Indicators-dialog catalog refreshed. New scripts are now visible in the dialog without page reload.',
+  };
+}
+
+// ── T110 — withPineSave orchestrator ──
+// Composes pine_check + pine_save_source + pine_refresh_catalog +
+// chart_manage_indicator(remove + add) + verify into a single MCP call.
+// Built on top of T107 (cache-bust) + T108 (descriptor lookup + Escape recovery).
+// Replaces the 4-5 manual MCP calls per save cycle with 1; built-in retry on
+// cache miss / verification failure.
+//
+// Signature:
+//   { script_id_or_name, source, expected_version?, indicator_display_name?, max_retries=2 }
+// Response:
+//   { success, steps: [{name, success, ms, detail}], final_verification,
+//     total_ms, source_lines, has_il_blob }
+
+function _stepTimer() {
+  const t = Date.now();
+  return () => Date.now() - t;
+}
+
+export async function withSave({ script_id_or_name, source, expected_version, indicator_display_name, max_retries = 2 } = {}) {
+  if (!script_id_or_name) throw new Error('script_id_or_name required');
+  if (!source) throw new Error('source required');
+  const t0 = Date.now();
+  const steps = [];
+  const recordStep = (name, success, detail, ms) => steps.push({ name, success, ms, detail });
+
+  // (a) pine_check — compile via REST
+  let stepMs = _stepTimer();
+  let checkRes;
+  try {
+    checkRes = await check({ source });
+    const errorCount = checkRes?.error_count ?? checkRes?.errors?.length ?? 0;
+    recordStep('pine_check', !!checkRes?.success && errorCount === 0, {
+      errors: errorCount,
+      warnings: checkRes?.warning_count ?? checkRes?.warnings?.length ?? null,
+    }, stepMs());
+    if (!checkRes?.success || errorCount > 0) {
+      return {
+        success: false,
+        steps,
+        final_verification: 'failed_compile',
+        total_ms: Date.now() - t0,
+        source_lines: source.split('\n').length,
+        has_il_blob: false,
+        error: 'pine_check reported compile errors',
+      };
+    }
+  } catch (err) {
+    recordStep('pine_check', false, { error: err.message }, stepMs());
+    return { success: false, steps, final_verification: 'failed_compile', total_ms: Date.now() - t0, source_lines: source.split('\n').length, has_il_blob: false, error: err.message };
+  }
+
+  // (b) pine_save_source — REST save. Heuristic: TV cloud ids look like
+  // `USER;<hex>` — strict prefix check. Anything else is treated as a name.
+  stepMs = _stepTimer();
+  let saveRes;
+  try {
+    const looksLikeId = /^USER;/i.test(script_id_or_name);
+    saveRes = await saveSource(looksLikeId ? { id: script_id_or_name, source } : { name: script_id_or_name, source });
+    recordStep('pine_save_source', !!saveRes?.success && !!saveRes?.has_il_blob, {
+      id: saveRes?.id,
+      source_chars: saveRes?.source_chars,
+      has_il_blob: saveRes?.has_il_blob,
+    }, stepMs());
+    if (!saveRes?.success || !saveRes?.has_il_blob) {
+      return { success: false, steps, final_verification: 'failed_save', total_ms: Date.now() - t0, source_lines: source.split('\n').length, has_il_blob: !!saveRes?.has_il_blob, error: 'pine_save_source returned no il_blob' };
+    }
+  } catch (err) {
+    recordStep('pine_save_source', false, { error: err.message }, stepMs());
+    return { success: false, steps, final_verification: 'failed_save', total_ms: Date.now() - t0, source_lines: source.split('\n').length, has_il_blob: false, error: err.message };
+  }
+
+  // (c)+(d)+(e) refresh + reload + verify, with retries on cache miss
+  let verification = 'not_attempted';
+  for (let attempt = 0; attempt <= max_retries; attempt++) {
+    const suffix = attempt > 0 ? `[retry${attempt}]` : '';
+
+    // (c) refresh catalog — best-effort
+    stepMs = _stepTimer();
+    try {
+      const refRes = await refreshCatalog();
+      recordStep('pine_refresh_catalog' + suffix, !!refRes?.success, {
+        cache_after_count: refRes?.cache_after_count,
+        delta: refRes?.delta,
+      }, stepMs());
+    } catch (err) {
+      recordStep('pine_refresh_catalog' + suffix, false, { error: err.message, note: 'best-effort; continuing' }, stepMs());
+    }
+
+    // (d) chart_manage_indicator(remove + add) — only if indicator_display_name was passed
+    if (indicator_display_name) {
+      stepMs = _stepTimer();
+      try {
+        const state = await chartGetState();
+        const existing = (state?.studies || []).filter(s => (s.name || '').toLowerCase().includes(indicator_display_name.toLowerCase()));
+        for (const e of existing) {
+          await manageIndicator({ action: 'remove', indicator: indicator_display_name, entity_id: e.id });
+        }
+        const addRes = await manageIndicator({ action: 'add', indicator: indicator_display_name });
+        const reloadOk = !!addRes?.success;
+        recordStep('chart_reload' + suffix, reloadOk, {
+          removed: existing.length,
+          add_resolution: addRes?.resolution,
+          add_entity_id: addRes?.entity_id,
+        }, stepMs());
+        if (!reloadOk) {
+          if (attempt < max_retries) continue;
+          return { success: false, steps, final_verification: 'failed_reload', total_ms: Date.now() - t0, source_lines: source.split('\n').length, has_il_blob: true, error: addRes?.error || 'chart_manage_indicator(add) failed' };
+        }
+      } catch (err) {
+        recordStep('chart_reload' + suffix, false, { error: err.message }, stepMs());
+        if (attempt < max_retries) continue;
+        return { success: false, steps, final_verification: 'failed_reload', total_ms: Date.now() - t0, source_lines: source.split('\n').length, has_il_blob: true, error: err.message };
+      }
+    }
+
+    // (e) verify — by expected_version label (preferred) or by row count
+    stepMs = _stepTimer();
+    if (expected_version && indicator_display_name) {
+      try {
+        const state = await chartGetState();
+        const reloaded = (state?.studies || []).find(s => (s.name || '').toLowerCase().includes(indicator_display_name.toLowerCase()));
+        const found = reloaded ? reloaded.name : null;
+        const matched = found && found.toLowerCase().includes(expected_version.toLowerCase());
+        recordStep('verify' + suffix, !!matched, { expected_version, found, matched }, stepMs());
+        if (matched) { verification = 'passed'; break; }
+      } catch (err) {
+        recordStep('verify' + suffix, false, { error: err.message }, stepMs());
+      }
+    } else if (indicator_display_name) {
+      try {
+        const tables = await getPineTables({ study_filter: indicator_display_name });
+        const rowCount = tables?.studies?.[0]?.rows?.length ?? 0;
+        const ok = rowCount > 0;
+        recordStep('verify' + suffix, ok, { row_count: rowCount, study_filter: indicator_display_name }, stepMs());
+        if (ok) { verification = 'passed'; break; }
+      } catch (err) {
+        recordStep('verify' + suffix, false, { error: err.message }, stepMs());
+      }
+    } else {
+      // No reload-and-verify probe specified — accept save+refresh as terminal success.
+      verification = 'save_only';
+      break;
+    }
+  }
+
+  if (verification === 'not_attempted') verification = 'failed_after_retries';
+
+  return {
+    success: verification === 'passed' || verification === 'save_only',
+    steps,
+    final_verification: verification,
+    total_ms: Date.now() - t0,
+    source_lines: source.split('\n').length,
+    has_il_blob: !!saveRes?.has_il_blob,
   };
 }

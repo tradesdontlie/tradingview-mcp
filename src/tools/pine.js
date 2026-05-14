@@ -100,4 +100,18 @@ export function registerPineTools(server) {
     try { return jsonResult(await core.getSourceByREST({ id, name, version })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
+
+  server.tool('with_pine_save', 'Orchestrated Pine save: compile + REST save + cache-bust + chart reload + verification, with retry on cache-miss. Replaces the 4-5 manual MCP call dance (pine_check → pine_save_source → pine_refresh_catalog → chart_manage_indicator remove+add → data_get_pine_tables verify) with a single call. Returns per-step timings + final_verification status. Pass `indicator_display_name` to auto-reload the chart; omit to save-only. Pass `expected_version` (e.g. "v2.12.1") to verify the reloaded entity\'s name contains that substring; otherwise verification falls back to pine_tables row count > 0.', {
+    script_id_or_name: z.string().describe('Saved-script id (preferred, starts with `USER;`) or case-insensitive display name.'),
+    source: z.string().describe('Full Pine v6 source. Will be compiled via pine_check before save.'),
+    expected_version: z.string().optional().describe('Version substring to assert in the reloaded entity name (e.g. "v2.12.1"). Most reliable verification probe.'),
+    indicator_display_name: z.string().optional().describe('Display name used by chart_manage_indicator(add). Required for chart reload + verification. Omit for save-only mode.'),
+    max_retries: z.number().int().min(0).max(5).optional().describe('Retries on cache miss / verification failure. Default 2.'),
+  }, async ({ script_id_or_name, source, expected_version, indicator_display_name, max_retries }) => {
+    try {
+      return jsonResult(await core.withSave({ script_id_or_name, source, expected_version, indicator_display_name, max_retries }));
+    } catch (err) {
+      return jsonResult({ success: false, error: err.message }, true);
+    }
+  });
 }
