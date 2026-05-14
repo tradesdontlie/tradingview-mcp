@@ -428,6 +428,40 @@ git push origin fixes/draw-api-resolve --force-with-lease
 
 If upstream merges PR #62, drop our `285587d` commit during rebase (git should auto-detect the duplicate). Our `80a69eb`, `33b578b`, and `9d05087` should stay separate; they're not upstream.
 
+---
+
+### 9. `pine_refresh_catalog` — bust TV's chart-side My-scripts metaInfo cache (T107)
+
+**Bug:** TV Desktop's Indicators dialog holds a one-shot Promise in `TradingViewApi._studyMarket._dialog._initIndicatorsPromises.userScriptsPromise` that was settled at chart-page load time. After `pine_save_source` REST-saves a new script version, the cached promise is still the stale resolved value from page-load — and `_studies['Script$USER']` (which feeds `chart.createStudy()`) is rebuilt only from that cached promise. Result: post-save `chart_manage_indicator(remove + add)` cycles serve the OLD compiled IL roughly 60% of the time. Hit on T67, T90, T51, T102, T103, T104, T74, T85, T91, T97, T92, T95, T98 (13+ ships requiring manual UI re-add to bust the cache).
+
+**Diagnosis credit:** Upstream PR #152 commit `63fe862` by `taiwor88` (open, unmerged as of 2026-05-13). Investigation found `resetCache()` / `getStudiesList()` are `$t()` stubs that throw; `resetAllStudies()` clears `_studies` but reuses the same cached promises so the cache repopulates with stale data. The only method that actually rebuilds `_studies['Script$USER']` from a fresh REST hit is `_dialog._updateUserStudies()` — but only if `userScriptsPromise` is replaced first.
+
+**Fix:** Cherry-pick `refreshCatalog()` + tool registration from PR #152 (NOT the full PR — it bundles 8 unrelated defects; we take only the cache-bust). New MCP tool `pine_refresh_catalog`:
+1. Overwrite `_initIndicatorsPromises.userScriptsPromise` with a fresh `fetch('/pine-facade/list/?filter=saved', {credentials:'include'}).then(r => r.json())`.
+2. Call `_dialog._updateUserStudies()` and await its completion — rebuilds `_studies['Script$USER']` from the new promise.
+3. Return `{success, cache_before_count, cache_after_count, delta, scripts[{id,title}]}`.
+
+Sub-second. No page reload. No UI flash. Routes through `evaluateAsync` so the TV session cookie is in scope (same lesson as T74 follow-up `771fa38`).
+
+**Probe (2026-05-13)** — validated against live **TV Desktop 3.1.0 / Electron 38.2.2 / Chromium 140** that every required path exists. Re-verified `userScriptsPromise` is a Promise; `_updateUserStudies` is a function; `_studies['Script$USER']` is accessible (6 entries at probe time). No fallback needed; mechanism ports directly.
+
+**Files touched:** `src/core/pine.js` (refreshCatalog function added after listScripts, ~95 LoC including the verbatim diagnostic comment from PR #152), `src/tools/pine.js` (server.tool registration after pine_list_scripts, ~8 LoC).
+
+**Caveat from PR #152 author** — fixes the *catalog* half (script appears in dialog). The author notes `chart.createStudy`/`insertStudy` IL-selection-time half "silently fails" is flagged as a separate unresolved defect. T110 (Block H follow-up) wraps `pine_save_source` + `pine_refresh_catalog` + `chart_manage_indicator(remove + add)` + verify + retry in a `withPineSave` orchestrator to handle any residual race.
+
+**Usage pattern (replaces manual RULEBOOK §11 step 5):**
+```
+pine_save_source({ id, source })
+pine_refresh_catalog()
+chart_manage_indicator({ action: "remove", entity_id: <study_id> })
+chart_manage_indicator({ action: "add", indicator: "ASTA <X>" })
+data_get_pine_tables({ study_filter: "ASTA <X>" })  // verify fresh IL via panel content
+```
+
+**Source:** Upstream PR https://github.com/tradesdontlie/tradingview-mcp/pull/152 commit `63fe862`. Cherry-picked verbatim with port to pine.js (upstream PR placed it in alerts.js — incidental, given PR bundles unrelated fixes).
+
+---
+
 ## Open upstream-facing work (optional)
 
 Draft issue reports for the two unreported bugs we patched exist in the ASTA ECO4 session transcript (Session 15). Paste at https://github.com/tradesdontlie/tradingview-mcp/issues/new when you want maintainer attention. Issues:

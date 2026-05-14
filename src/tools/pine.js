@@ -59,6 +59,16 @@ export function registerPineTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
+  server.tool(
+    'pine_refresh_catalog',
+    'Bust TV\'s chart-side My-scripts metaInfo cache by replacing the cached `userScriptsPromise` with a fresh `/pine-facade/list/` fetch and forcing `_updateUserStudies()` to rebuild `_studies[\'Script$USER\']`. CALL THIS AFTER `pine_save_source` and BEFORE `chart_manage_indicator(remove + add)` so the chart picks up the freshly compiled IL instead of the stale cached version. Returns `{success, cache_before_count, cache_after_count, delta, scripts[{id,title}]}`. Sub-second, no page reload, no UI flash. T107 / cherry-pick of upstream PR #152 commit `63fe862`.',
+    {},
+    async () => {
+      try { return jsonResult(await core.refreshCatalog()); }
+      catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+    }
+  );
+
   server.tool('pine_analyze', 'Run static analysis on Pine Script code WITHOUT compiling — catches array out-of-bounds, unguarded array.first()/last(), bad loop bounds, and implicit bool casts. Works offline, no TradingView connection needed.', {
     source: z.string().describe('Pine Script source code to analyze'),
   }, async ({ source }) => {
