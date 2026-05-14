@@ -219,7 +219,14 @@ export async function launch({ port, kill_existing } = {}) {
     } catch { /* may not be running */ }
   }
 
-  const child = spawn(tvPath, [`--remote-debugging-port=${cdpPort}`], { detached: true, stdio: 'ignore' });
+  // Strip ELECTRON_RUN_AS_NODE from the spawn env: when this MCP server is launched
+  // from a parent that runs as an Electron utility process (e.g. VSCode's Code Helper
+  // (Plugin), Claude Desktop), the var is set to '1' and inherited through the child
+  // chain. With it set, the TradingView binary boots in Node mode and rejects
+  // --remote-debugging-port at argv parsing ('bad option: --remote-debugging-port'),
+  // making it look like TV is broken when it is actually env contamination.
+  const { ELECTRON_RUN_AS_NODE: _stripped, ...spawnEnv } = process.env;
+  const child = spawn(tvPath, [`--remote-debugging-port=${cdpPort}`], { detached: true, stdio: 'ignore', env: spawnEnv });
   child.unref();
 
   for (let i = 0; i < 15; i++) {
