@@ -40,12 +40,44 @@ export function registerPineTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('pine_new', 'Create a new blank Pine Script', {
-    type: z.enum(['indicator', 'strategy', 'library']).describe('Type of script to create'),
-  }, async ({ type }) => {
-    try { return jsonResult(await core.newScript({ type })); }
-    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
-  });
+  server.tool(
+    'pine_new',
+    'DEPRECATED — use pine_create_script instead. pine_new only replaces the active editor content with a template; a subsequent save will overwrite whatever cloud script the editor was bound to (this caused the §22.176 incident). pine_create_script POSTs directly to pine-facade and returns a fresh script_id with no editor interaction.',
+    {
+      type: z.enum(['indicator', 'strategy', 'library']).describe('Type of script to create'),
+    },
+    async ({ type }) => {
+      try { return jsonResult(await core.newScript({ type })); }
+      catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+    }
+  );
+
+  server.tool(
+    'pine_create_script',
+    'Create a brand-new saved Pine Script via pine-facade REST. Safe: never touches the editor, so cannot overwrite any existing script unless allow_overwrite is explicitly true. Returns the new script_id.',
+    {
+      name: z.string().describe('Name for the new saved script (e.g. "B2 multi-condition test").'),
+      source: z.string().describe('Full Pine source code, including //@version=N header.'),
+      allow_overwrite: z
+        .coerce.boolean()
+        .optional()
+        .describe('If true and a script with this name already exists, replace it. Defaults to FALSE for safety — caller must opt in to clobber.'),
+    },
+    async ({ name, source, allow_overwrite }) => {
+      try { return jsonResult(await core.createScript({ name, source, allow_overwrite })); }
+      catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+    }
+  );
+
+  server.tool(
+    'pine_refresh_catalog',
+    'Refresh the TV chart-side saved-scripts catalog so scripts created/modified/deleted via pine_create_script (or any pine-facade REST mutation) become visible in the Indicators dialog "My scripts" tab without a page reload. Call this after pine_create_script to make the new script attachable from the same session.',
+    {},
+    async () => {
+      try { return jsonResult(await core.refreshCatalog()); }
+      catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+    }
+  );
 
   server.tool('pine_open', 'Open a saved Pine Script by name', {
     name: z.string().describe('Name of the saved script to open (case-insensitive match)'),

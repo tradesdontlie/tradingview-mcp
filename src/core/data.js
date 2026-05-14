@@ -133,35 +133,119 @@ export async function getIndicator({ entity_id }) {
 }
 
 export async function getStrategyResults() {
+  // Strategy metrics live nested under reportData.performance — both as scalars
+  // (sharpeRatio, maxStrategyDrawDown, etc.) and inside .all / .long / .short.
+  // The previous implementation (a) matched Volume/Overlay sources first because
+  // every chart source exposes a `performance` fn, and (b) only walked the
+  // shallow top-level keys of reportData. This walks the real nesting and
+  // requires reportData (the unambiguous strategy signal).
   const results = await evaluate(`
     (function() {
+      function flatten(obj) {
+        var out = {};
+        if (!obj || typeof obj !== 'object') return out;
+        var keys = Object.keys(obj);
+        for (var i = 0; i < keys.length; i++) {
+          var v = obj[keys[i]];
+          if (v === null || v === undefined) continue;
+          if (typeof v === 'function' || typeof v === 'object') continue;
+          out[keys[i]] = v;
+        }
+        return out;
+      }
       try {
         var chart = ${CHART_API}._chartWidget;
         var sources = chart.model().model().dataSources();
-        var strat = null;
+        var candidates = [];
         for (var i = 0; i < sources.length; i++) {
           var s = sources[i];
-          if (s.metaInfo && s.metaInfo().is_price_study === false && (s.reportData || s.performance)) { strat = s; break; }
+          if (!s.metaInfo) continue;
+          var mi;
+          try { mi = s.metaInfo(); } catch(e) { continue; }
+          if (!mi || mi.is_price_study !== false) continue;
+          var hasReport = typeof s.reportData === 'function';
+          var hasPerf = typeof s.performance === 'function';
+          if (!hasReport && !hasPerf) continue;
+          candidates.push({
+            s: s,
+            name: mi.description || mi.shortDescription || mi.id || 'unknown',
+            hasReport: hasReport,
+            hasPerf: hasPerf
+          });
         }
-        if (!strat) return {metrics: {}, source: 'internal_api', error: 'No strategy found on chart. Add a strategy indicator first.'};
-        var metrics = {};
-        if (strat.reportData) {
-          var rd = typeof strat.reportData === 'function' ? strat.reportData() : strat.reportData;
-          if (rd && typeof rd === 'object') {
-            if (typeof rd.value === 'function') rd = rd.value();
-            if (rd) { var keys = Object.keys(rd); for (var k = 0; k < keys.length; k++) { var val = rd[keys[k]]; if (val !== null && val !== undefined && typeof val !== 'function') metrics[keys[k]] = val; } }
+        // Real strategies expose reportData; pick them first.
+        candidates.sort(function(a, b) { return (b.hasReport ? 1 : 0) - (a.hasReport ? 1 : 0); });
+        for (var c = 0; c < candidates.length; c++) {
+          var cand = candidates[c];
+          var rd = null;
+          if (cand.hasReport) {
+            try {
+              rd = cand.s.reportData();
+              if (rd && typeof rd.value === 'function') rd = rd.value();
+            } catch(e) {}
           }
+          var perfRoot = null;
+          if (rd && rd.performance && typeof rd.performance === 'object') {
+            perfRoot = rd.performance;
+          } else if (cand.hasPerf) {
+            // Legacy fallback path for strategies without reportData.
+            try {
+              perfRoot = cand.s.performance();
+              if (perfRoot && typeof perfRoot.value === 'function') perfRoot = perfRoot.value();
+            } catch(e) {}
+          }
+          if (!perfRoot || typeof perfRoot !== 'object') continue;
+          // Scalars on perfRoot (sharpe, sortino, max DD, run-up, buy&hold, etc.)
+          var metrics = flatten(perfRoot);
+          // Plus .all (totalTrades, profitFactor, win rate, net profit, ...)
+          if (perfRoot.all && typeof perfRoot.all === 'object') {
+            var allFlat = flatten(perfRoot.all);
+            var akeys = Object.keys(allFlat);
+            for (var ak = 0; ak < akeys.length; ak++) metrics[akeys[ak]] = allFlat[akeys[ak]];
+          }
+          if (Object.keys(metrics).length === 0) continue;
+          var longMetrics = perfRoot.long ? flatten(perfRoot.long) : {};
+          var shortMetrics = perfRoot.short ? flatten(perfRoot.short) : {};
+          var btRange = null, trRange = null;
+          if (rd && rd.settings && rd.settings.dateRange) {
+            btRange = rd.settings.dateRange.backtest || null;
+            trRange = rd.settings.dateRange.trade || null;
+          }
+          return {
+            strategy_name: cand.name,
+            currency: rd ? rd.currency : null,
+            backtest_range: btRange,
+            trade_range: trRange,
+            trade_count_in_report: rd && Array.isArray(rd.trades) ? rd.trades.length : null,
+            filled_orders_in_report: rd && Array.isArray(rd.filledOrders) ? rd.filledOrders.length : null,
+            metrics: metrics,
+            long_metrics: longMetrics,
+            short_metrics: shortMetrics,
+            source: 'internal_api'
+          };
         }
-        if (Object.keys(metrics).length === 0 && strat.performance) {
-          var perf = strat.performance();
-          if (perf && typeof perf.value === 'function') perf = perf.value();
-          if (perf && typeof perf === 'object') { var pkeys = Object.keys(perf); for (var p = 0; p < pkeys.length; p++) { var pval = perf[pkeys[p]]; if (pval !== null && pval !== undefined && typeof pval !== 'function') metrics[pkeys[p]] = pval; } }
+        if (candidates.length === 0) {
+          return { metrics: {}, source: 'internal_api', error: 'No strategy found on chart. Add a strategy indicator first.' };
         }
-        return {metrics: metrics, source: 'internal_api'};
-      } catch(e) { return {metrics: {}, source: 'internal_api', error: e.message}; }
+        return { metrics: {}, source: 'internal_api', error: 'Strategy present but reportData/performance returned empty. Backtest may still be computing.' };
+      } catch(e) { return { metrics: {}, source: 'internal_api', error: e.message }; }
     })()
   `);
-  return { success: true, metric_count: Object.keys(results?.metrics || {}).length, source: results?.source, metrics: results?.metrics || {}, error: results?.error };
+  return {
+    success: true,
+    metric_count: Object.keys(results?.metrics || {}).length,
+    source: results?.source,
+    strategy_name: results?.strategy_name,
+    currency: results?.currency,
+    backtest_range: results?.backtest_range,
+    trade_range: results?.trade_range,
+    trade_count_in_report: results?.trade_count_in_report,
+    filled_orders_in_report: results?.filled_orders_in_report,
+    metrics: results?.metrics || {},
+    long_metrics: results?.long_metrics || {},
+    short_metrics: results?.short_metrics || {},
+    error: results?.error,
+  };
 }
 
 export async function getTrades({ max_trades } = {}) {

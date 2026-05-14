@@ -505,6 +505,24 @@ export async function smartCompile() {
   };
 }
 
+/**
+ * DEPRECATED. Use createScript() (MCP tool: pine_create_script) instead.
+ *
+ * newScript() does NOT create a new cloud-saved script. It just overwrites
+ * the currently-active editor tab with a template — and the editor tab is
+ * still bound to whatever saved-script slot it had before. A subsequent
+ * pine_set_source + pine_compile therefore saves the new code INTO that
+ * existing slot, silently overwriting the prior content of whatever script
+ * the user happened to have open. (See incident §22.176 where this clobbered
+ * a strategy the user explicitly asked us not to touch.)
+ *
+ * The safe alternative, createScript(), POSTs directly to the pine-facade
+ * REST CREATE endpoint and gets back a fresh script_id with no editor
+ * interaction, so there is no way for it to disturb existing scripts.
+ *
+ * Kept here for backwards compatibility with anything still calling
+ * pine_new — the tool wrapper attaches a runtime warning.
+ */
 export async function newScript({ type }) {
   const editorReady = await ensurePineEditorOpen();
   if (!editorReady) throw new Error('Could not open Pine Editor.');
@@ -531,7 +549,191 @@ export async function newScript({ type }) {
 
   if (!set) throw new Error('Monaco editor not found. Ensure Pine Editor is open.');
 
-  return { success: true, type, action: 'new_script_created', template: typeMap[type] };
+  return {
+    success: true,
+    type,
+    action: 'new_script_created',
+    template: typeMap[type],
+    deprecated: true,
+    warning: 'pine_new only overwrites the editor — it does NOT create a fresh cloud-saved script. Subsequent saves will land in whichever script slot the editor was bound to, which can silently overwrite an existing script (see §22.176). Use pine_create_script instead — it POSTs directly to pine-facade and returns a fresh script_id with no editor interaction.',
+  };
+}
+
+/**
+ * Create a brand-new saved Pine script via the pine-facade REST CREATE
+ * endpoint. Returns the new script_id. Does NOT touch the editor, so it is
+ * SAFE to call while other scripts are open — there is no risk of
+ * overwriting them.
+ *
+ *   POST https://pine-facade.tradingview.com/pine-facade/save/new
+ *     ?name=<urlencoded>&allow_overwrite=<bool>
+ *   Content-Type: multipart/form-data
+ *   Body: form field `source` = full Pine source
+ *
+ * Defaults `allow_overwrite` to false (the operator must explicitly opt in
+ * to overwrite — this is the safety guarantee that prevents the §22.176
+ * clobber from recurring).
+ *
+ * Auth piggybacks on the TV session cookies already present in the CDP
+ * context.
+ */
+export async function createScript({ name, source, allow_overwrite }) {
+  if (!name || typeof name !== 'string') throw new Error('name is required (string).');
+  if (!source || typeof source !== 'string') throw new Error('source is required (string).');
+  const overwrite = !!allow_overwrite;
+
+  // Safety pre-check: if not overwriting, refuse on name collision rather
+  // than relying on the server to reject. This also lets us return a more
+  // helpful error than TV's facade does.
+  if (!overwrite) {
+    const listing = await listScripts();
+    const collide = (listing.scripts || []).find(s => {
+      const n = (s.name || '').toLowerCase();
+      const t = (s.title || '').toLowerCase();
+      const want = name.toLowerCase();
+      return n === want || t === want;
+    });
+    if (collide) {
+      throw new Error(
+        `A saved script named "${name}" already exists (id=${collide.id}, version=${collide.version}). ` +
+        `Pass allow_overwrite: true to replace it, or use a different name.`
+      );
+    }
+  }
+
+  const url =
+    `https://pine-facade.tradingview.com/pine-facade/save/new` +
+    `?name=${encodeURIComponent(name)}` +
+    `&allow_overwrite=${overwrite ? 'true' : 'false'}`;
+
+  // Construct multipart form in the page context so the browser sets the
+  // multipart boundary header automatically (manually setting Content-Type
+  // breaks the boundary).
+  const result = await evaluateAsync(`
+    (function() {
+      var fd = new FormData();
+      fd.append('source', ${JSON.stringify(source)});
+      return fetch(${JSON.stringify(url)}, {
+        method: 'POST',
+        credentials: 'include',
+        body: fd,
+      })
+        .then(function(r) {
+          return r.text().then(function(text) {
+            var parsed = null;
+            try { parsed = JSON.parse(text); } catch(e) {}
+            return { status: r.status, ok: r.ok, body: parsed, raw: parsed ? null : text.slice(0, 500) };
+          });
+        })
+        .catch(function(e) { return { error: e.message }; });
+    })()
+  `);
+
+  if (result?.error) throw new Error(`pine-facade save/new fetch failed: ${result.error}`);
+  if (!result?.ok) {
+    throw new Error(
+      `pine-facade save/new returned status ${result?.status}` +
+      (result?.body?.errmsg ? `: ${result.body.errmsg}` : '') +
+      (result?.raw ? ` (body: ${result.raw})` : '')
+    );
+  }
+
+  // Successful create returns the new script descriptor. Fields vary by TV
+  // version — keep the raw body around for the caller.
+  const body = result.body || {};
+  return {
+    success: true,
+    name,
+    allow_overwrite: overwrite,
+    script_id: body.scriptIdPart || body.script_id_part || body.id || null,
+    title: body.scriptTitle || body.title || null,
+    version: body.version || null,
+    raw: body,
+    source: 'pine_facade_rest',
+  };
+}
+
+/**
+ * DEFECT 7 — refresh TV's chart-side saved-scripts catalog.
+ *
+ * Problem: pine_create_script (D3) and pine-facade REST mutations write
+ * server-side, but the chart's Indicators dialog holds a one-shot Promise
+ * in `TradingViewApi._studyMarket._dialog._initIndicatorsPromises.userScriptsPromise`
+ * that was settled at chart-page load time. Subsequent dialog opens read
+ * from the resolved (stale) Promise; the dialog does not re-hit pine-facade
+ * on open (verified empirically: opening the dialog and clicking the
+ * "My scripts" sidebar produces ZERO pine-facade fetches).
+ *
+ * Findings from investigation:
+ *   - `window.TradingViewApi.resetCache()` and `getStudiesList()` exist on
+ *     the prototype but are `$t()` stubs that throw "not implemented" —
+ *     dead ends.
+ *   - `_studyMarket._dialog.resetAllStudies()` (alias `_studyMarket.resetAllPages()`)
+ *     calls the dialog's `_init()` which clears `_studies` and re-runs the
+ *     init promises — but those promises are CACHED, so the re-init repopulates
+ *     `_studies` from the SAME stale resolved Promise. Confirmed: calling
+ *     resetAllStudies() produced zero pine-facade fetches and the cache
+ *     stayed at the pre-mutation contents.
+ *   - The dialog method `_updateUserStudies()` awaits
+ *     `_initIndicatorsPromises.userScriptsPromise`, runs
+ *     `_preparePineUserStudies()` on the result, and replaces
+ *     `_studies['Script$USER']` from the transformed list. If we swap
+ *     `userScriptsPromise` to a FRESH fetch before calling
+ *     `_updateUserStudies()`, the cache is rebuilt from the live REST list.
+ *
+ * The implementation below does exactly that:
+ *   1. Overwrite `_initIndicatorsPromises.userScriptsPromise` with a new
+ *      Promise resolving to `fetch('/pine-facade/list/?filter=saved').json()`.
+ *   2. Call `_updateUserStudies()` and await its completion.
+ *   3. Return the updated cache count so callers can verify.
+ *
+ * No page reload, no chart re-render, no visible UI flash. The next
+ * Indicators dialog open sees fresh data.
+ *
+ * Verified live: created 5 saved scripts via REST; the dialog's pre-refresh
+ * cache showed 2 of 5 (the two created BEFORE the page last loaded). After
+ * `refreshCatalog()`: cache showed 5/5 including the 3 created post-load
+ * (capture_v2_test, DELETE_ME_capture_test, MCP_DEFECT3_round3_test).
+ */
+export async function refreshCatalog() {
+  const result = await evaluateAsync(`
+    (function() {
+      try {
+        var market = window.TradingViewApi && window.TradingViewApi._studyMarket;
+        if (!market) return { error: 'TradingViewApi._studyMarket not initialized' };
+        var dlg = market._dialog;
+        if (!dlg || !dlg._initIndicatorsPromises) {
+          return { error: 'Indicators dialog state not initialized — open the dialog once before refreshing (TV lazy-initializes it).' };
+        }
+        var before = (dlg._studies && dlg._studies['Script$USER']) ? dlg._studies['Script$USER'].length : 0;
+        // Replace the cached promise with a fresh fetch
+        dlg._initIndicatorsPromises.userScriptsPromise = fetch(
+          'https://pine-facade.tradingview.com/pine-facade/list/?filter=saved',
+          { credentials: 'include' }
+        ).then(function(r) { return r.json(); });
+        // _updateUserStudies awaits the (new) promise, transforms, and
+        // replaces _studies['Script$USER']. Return its promise so awaitPromise
+        // resolves only after the cache is rebuilt.
+        return dlg._updateUserStudies().then(function() {
+          var after = (dlg._studies && dlg._studies['Script$USER']) ? dlg._studies['Script$USER'].length : 0;
+          var scripts = (dlg._studies['Script$USER'] || []).map(function(s) {
+            return { id: s.id, title: s.title };
+          });
+          return { ok: true, before: before, after: after, scripts: scripts };
+        }).catch(function(e) { return { error: '_updateUserStudies failed: ' + (e && e.message || String(e)) }; });
+      } catch(e) { return { error: 'refreshCatalog threw: ' + e.message }; }
+    })()
+  `);
+  if (result && result.error) throw new Error(result.error);
+  return {
+    success: true,
+    cache_before_count: result?.before ?? null,
+    cache_after_count: result?.after ?? null,
+    delta: (result?.after ?? 0) - (result?.before ?? 0),
+    scripts: result?.scripts || [],
+    source: 'pine_facade_rest',
+    note: 'TV chart-side Indicators-dialog catalog refreshed. New scripts are now visible in the dialog without page reload.',
+  };
 }
 
 export async function openScript({ name }) {
