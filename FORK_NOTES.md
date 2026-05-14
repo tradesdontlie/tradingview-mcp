@@ -562,6 +562,22 @@ Composes RULEBOOK §11's 5-step save cycle (compile → save → cache-bust → 
 
 ---
 
+### 13. `408dca4` — `getVisibleRange` + `symbolInfo` DI wiring (post-T110 smoke fix, 2026-05-13)
+
+**Bug:** `chart_get_visible_range` and `symbol_info` returned `evaluate is not defined`. Both function bodies referenced the bare `evaluate` symbol, but the module-level import on line 4 has long been aliased: `import { evaluate as _evaluate, ... }`. Most other functions in chart.js go through `_resolve(_deps)` which destructures the alias back to `evaluate`; these two were left out of the DI refactor.
+
+**Surfaced by:** T109 + T110 post-restart smoke (case 2 — `chart_scroll_to_date` validation tried to read back the visible range via `chart_get_visible_range` and got the error). Pre-existing bug, not a T109 regression. T108 baseline `692d630` already had it.
+
+**Root cause / why missed by T109:** Pick B's spec rationale said "those functions don't use _deps in our fork; addressed in T111" — technically true but missed that the bare `evaluate` symbol they call is already broken regardless of DI status. Upstream's `2df3c93` (skipped during pick B) was the correct fix; this commit applies the same surgical change locally.
+
+**Fix:** ~4 LoC. `getVisibleRange()` → `getVisibleRange({ _deps } = {})` + `const { evaluate } = _resolve(_deps)`. Mirror for `symbolInfo`. Function bodies otherwise unchanged. `tools/chart.js` call sites pass no args, so the default-empty-object pattern is back-compat.
+
+**Validation:** `node --check src/core/chart.js` clean. Live re-smoke pending next MCP restart.
+
+**Spec ref:** Closed inline (no separate ASTA task — fix is a known-broken-tool repair surfaced during smoke).
+
+---
+
 ## Open upstream-facing work (optional)
 
 Draft issue reports for the two unreported bugs we patched exist in the ASTA ECO4 session transcript (Session 15). Paste at https://github.com/tradesdontlie/tradingview-mcp/issues/new when you want maintainer attention. Issues:
