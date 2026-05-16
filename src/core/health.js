@@ -197,6 +197,20 @@ export async function launch({ port, kill_existing } = {}) {
     } catch { /* ignore */ }
   }
 
+  // Fallback: detect MSIX (Microsoft Store) install path via PowerShell
+  if (!tvPath && platform === 'win32') {
+    try {
+      const raw = execSync(
+        'powershell -NoProfile -Command "(Get-AppxPackage | Where-Object { $_.Name -like \'*TradingView*\' }).InstallLocation"',
+        { timeout: 5000 }
+      ).toString().trim();
+      if (raw) {
+        const msixExe = `${raw}\\TradingView.exe`;
+        if (existsSync(msixExe)) tvPath = msixExe;
+      }
+    } catch { /* ignore */ }
+  }
+
   if (!tvPath && platform === 'darwin') {
     try {
       const found = execSync('mdfind "kMDItemFSName == TradingView.app" | head -1', { timeout: 5000 }).toString().trim();
