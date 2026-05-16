@@ -61,13 +61,19 @@ export async function getClient() {
   return connect();
 }
 
-export async function connect() {
+export async function connect(targetId = null) {
   let lastError;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
-      const target = await findChartTarget();
+      const target = targetId
+        ? await findTargetById(targetId)
+        : await findChartTarget();
       if (!target) {
-        throw new Error('No TradingView chart target found. Is TradingView open with a chart?');
+        throw new Error(
+          targetId
+            ? `CDP target ${targetId} not found.`
+            : 'No TradingView chart target found. Is TradingView open with a chart?'
+        );
       }
       targetInfo = target;
       client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: target.id });
@@ -87,6 +93,19 @@ export async function connect() {
   throw new Error(`CDP connection failed after ${MAX_RETRIES} attempts: ${lastError?.message}`);
 }
 
+/**
+ * Re-attach the cached CDP client to a specific target id.
+ * Used by tab_switch so subsequent reads come from the chosen tab.
+ */
+export async function reconnectTo(targetId) {
+  if (client) {
+    try { await client.close(); } catch {}
+    client = null;
+    targetInfo = null;
+  }
+  return connect(targetId);
+}
+
 async function findChartTarget() {
   const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
   const targets = await resp.json();
@@ -94,6 +113,12 @@ async function findChartTarget() {
   return targets.find(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
     || targets.find(t => t.type === 'page' && /tradingview/i.test(t.url))
     || null;
+}
+
+async function findTargetById(id) {
+  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
+  const targets = await resp.json();
+  return targets.find(t => t.id === id) || null;
 }
 
 export async function getTargetInfo() {
