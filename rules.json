@@ -1,0 +1,43 @@
+{
+  "watchlist": [
+    "OANDA:XAUUSD",
+    "OANDA:EURUSD",
+    "OANDA:GBPUSD",
+    "OANDA:USDJPY",
+    "OANDA:USDCHF",
+    "OANDA:AUDUSD",
+    "OANDA:NZDUSD",
+    "OANDA:USDCAD"
+  ],
+  "timeframes": ["D", "240", "60", "15"],
+  "bias_criteria": {
+    "trend": {
+      "indicators": ["EMA 20", "EMA 50", "EMA 200"],
+      "bullish": "Price above EMA 20; EMA 20 > EMA 50 > EMA 200",
+      "bearish": "Price below EMA 20; EMA 20 < EMA 50 < EMA 200",
+      "neutral": "Mixed EMA alignment or price between key EMAs"
+    },
+    "momentum": {
+      "indicators": ["RSI 14"],
+      "bullish": "RSI above 50 and rising",
+      "bearish": "RSI below 50 and falling",
+      "neutral": "RSI near 50 or flat"
+    },
+    "structure": {
+      "bullish": "Higher highs and higher lows (HH/HL)",
+      "bearish": "Lower highs and lower lows (LH/LL)",
+      "neutral": "Consolidation or choppy price action"
+    },
+    "confluence": {
+      "strong_bias": "All three criteria agree",
+      "moderate_bias": "Two of three criteria agree",
+      "no_bias": "Mixed or conflicting signals"
+    }
+  },
+  "report_settings": {
+    "output_dir": "~/.tradingview-mcp/sessions",
+    "format": "json",
+    "include_screenshot": true,
+    "ohlcv_count": 50
+  }
+}

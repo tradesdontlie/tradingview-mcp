@@ -127,3 +127,40 @@ Claude Code ←→ MCP Server (stdio) ←→ CDP (localhost:9222) ←→ Trading
 ```
 
 Pine graphics path: `study._graphics._primitivesCollection.dwglines.get('lines').get(false)._primitivesDataById`
+
+## 12 Hr Update
+
+When asked to "run a 12 hr update", follow this workflow exactly:
+
+### Prerequisites
+1. Run `tv_health_check` — abort and report if `cdp_connected` is not `true`
+2. Load `rules.json` from the repo root for watchlist, timeframes, and bias criteria
+
+### Per-Symbol Analysis Loop
+For each `symbol` in `watchlist` × each `timeframe` in `timeframes`:
+1. `chart_set_symbol` → navigate to the symbol
+2. `chart_set_timeframe` → set timeframe
+3. Wait ~2 seconds for the chart to reload
+4. `chart_get_state` → confirm symbol and timeframe loaded correctly
+5. `data_get_study_values` → collect all indicator readings (EMA 20/50/200, RSI 14)
+6. `data_get_ohlcv` with `summary: true, count: 50` → price action summary
+7. `data_get_pine_lines` → key horizontal price levels from custom indicators
+8. `data_get_pine_labels` → labeled levels (PDH, PDL, session highs/lows, bias labels)
+9. Apply `bias_criteria` from rules.json → determine **BULLISH / BEARISH / NEUTRAL**
+10. `capture_screenshot` → save visual confirmation
+
+### Bias Determination Rules
+- **BULLISH** — price above EMA 20, RSI > 50 and rising, HH/HL structure (majority criteria agree)
+- **BEARISH** — price below EMA 20, RSI < 50 and falling, LH/LL structure (majority criteria agree)
+- **NEUTRAL** — mixed signals, consolidation, or criteria conflict
+- **Strong Bias** — all three criteria (trend + momentum + structure) fully aligned
+
+### Output
+1. Compile results into a timestamped JSON snapshot
+2. Save to `~/.tradingview-mcp/sessions/snapshot_YYYY-MM-DD_HHMM.json`
+3. Print a summary table in the console:
+   - Rows: symbols
+   - Columns: D / H4 / H1 / M15
+   - Cells: BULLISH / BEARISH / NEUTRAL
+4. Highlight **confluent setups** — same bias across 3 or more timeframes
+5. Highlight **strong bias** setups — all criteria aligned on a given timeframe
