@@ -32,7 +32,7 @@ Commits are listed oldest → newest. All four are on `fixes/draw-api-resolve`.
 
 ### 2. `80a69eb` — `pine_labels` default cap + `watchlist_get` lazy-render
 
-**Part A: `data_get_pine_labels` default cap.** Before: `max_labels || 50` in `src/core/data.js:389`. Dense indicators (ASTA 3Cs Dashboard, multi-EMA dashboards) routinely emit 100+ labels; the 50-cap silently dropped the earliest ones — which are often foundational (Fib levels, pivot prices, EMA tags) — while retaining only the latest dynamic event labels. After: default raised to 500, plus a new `truncated: boolean` field on each study entry so callers can detect truncation without comparing `showing` vs `total_labels`.
+**Part A: `data_get_pine_labels` default cap.** Before: `max_labels || 50` in `src/core/data.js:389`. Dense indicators (complex multi-output dashboards, multi-EMA dashboards) routinely emit 100+ labels; the 50-cap silently dropped the earliest ones — which are often foundational (Fib levels, pivot prices, EMA tags) — while retaining only the latest dynamic event labels. After: default raised to 500, plus a new `truncated: boolean` field on each study entry so callers can detect truncation without comparing `showing` vs `total_labels`.
 
 **Part B: `watchlist_get` returns `count:0` when a different sidebar tab is active.** TradingView lazy-renders sidebar widgets: when the Alerts tab (or Object Tree, News, etc.) is the active sidebar tab, the `[class*="widgetbar-widget-watchlist"]` element exists in the DOM but has empty `innerHTML` — so `[data-symbol-full]` returns 0 elements and both DOM-fallback paths find nothing. Fix: before scraping, click `[aria-label="Watchlist, details, and news"]` if `aria-pressed !== "true"`, then wait 400ms for TV to populate the DOM. No selector change needed — the existing `[data-symbol-full]` scraping still works once the widget renders.
 
@@ -153,7 +153,7 @@ DELETE /api/v1/symbols_list/custom/{id}/?source=web-tvd
 
 **Files touched:** `src/core/watchlist.js` (extended), `src/tools/watchlist.js` (6 new tool registrations).
 
-**Spec:** `ASTA ECO4/system-design/MCP_WATCHLIST_MGMT_SPEC.md`.
+**Spec:** downstream consumer's watchlist-management spec.
 
 ---
 
@@ -225,7 +225,7 @@ Response: {"totalCount":3,"data":[{"s":"NASDAQ:TSCO","d":[38.17,38.98,38.98,38.0
 
 ### 8. `watchlist_insert` — REST-safe targeted-add (replaces DOM `watchlist_add` for race-free inserts)
 
-**Gap:** The upstream `watchlist_add` types into the sidebar search box via CDP keyboard events, so adds always land on whichever list is **visibly open** in the UI, not whatever `watchlist_switch(name=X)` flagged active via REST. Any user click on a different sidebar tab during a skill run routed adds to the wrong list. The original workaround — `watchlist_delete` + `watchlist_create(symbols=[...])` — is race-free but assigns the recreated list a **new id**, which in TV drops it out of the user's pin/favorite sidebar order. Observed live (Session 20, 2026-04-24): repeated pin-order breakage on `/refresh-movers` runs forced the user to re-pin watchlists every session.
+**Gap:** The upstream `watchlist_add` types into the sidebar search box via CDP keyboard events, so adds always land on whichever list is **visibly open** in the UI, not whatever `watchlist_switch(name=X)` flagged active via REST. Any user click on a different sidebar tab during a skill run routed adds to the wrong list. The original workaround — `watchlist_delete` + `watchlist_create(symbols=[...])` — is race-free but assigns the recreated list a **new id**, which in TV drops it out of the user's pin/favorite sidebar order. Observed live (2026-04-24): repeated pin-order breakage on `/refresh-movers` runs forced the user to re-pin watchlists every session.
 
 **Diagnostic method:** Same interceptor playbook as `alert_create` / `alert_delete` / watchlist-mgmt. Installed `fetch` + `XMLHttpRequest` interceptor via `ui_evaluate` stashing requests on `window.__t37_capture`, switched the UI to the empty `🐂 02 BULL` list via `watchlist_switch`, asked the user to manually add `NASDAQ:AAPL` via the sidebar "+" button, then polled the capture. Captured wire format on TV Desktop 3.1.0.7818:
 
@@ -254,7 +254,7 @@ Exactly the mirror of `/remove/`: same same-origin endpoint, same numeric-id tar
 
 ## §9 — `scanner_enrich`: batch price/volume/market-cap enrichment (T26, 2026-04-24)
 
-**Why:** `/refresh-movers` populates 🐂 02 BULL + 🐻 06 BEAR from the raw TV hotlist presets. Hotlists are great at finding *movers* but terrible at finding *tradeable* movers — today's 9-hotlist scan surfaced LIDR ($1.40), SMX (<$1), OIO ($1), TRUG, WNW, ZTG, SIDU — pump/penny tickers that ASTA quality gates will never allow a trade on. Triaging them with `/find-setups` burns ~40 Claude calls per sweep with a foregone-conclusion SKIP verdict. User directive (Session 20): "we are not going to look at anything under $10 and we need a certain amount of volume." Filed as T26 in TASKS.md.
+**Why:** `/refresh-movers` populates 🐂 02 BULL + 🐻 06 BEAR from the raw TV hotlist presets. Hotlists are great at finding *movers* but terrible at finding *tradeable* movers — today's 9-hotlist scan surfaced LIDR ($1.40), SMX (<$1), OIO ($1), TRUG, WNW, ZTG, SIDU — pump/penny tickers that downstream quality gates will never allow a trade on. Triaging them with `/find-setups` burns ~40 Claude calls per sweep with a foregone-conclusion SKIP verdict. Operator directive: "we are not going to look at anything under $10 and we need a certain amount of volume." Filed as T26 in downstream task tracker.
 
 **Chosen path:** Enrich every unique candidate symbol in ONE cross-origin POST to `scanner.tradingview.com/america/scan` — the same endpoint T35 fixed `quote_get` to route through, so we already know the CORS rules (plain-string body, no `Content-Type`). The scanner returns any columns you ask for; for T26 we request `close` + `average_volume_30d_calc` + `market_cap_basic` + `description`. Python-side filter then drops anything below `price $10 / avg_vol 1M / mcap $1B` BEFORE the vote-rank dedup — a 4-vote pump loses to a 1-vote real name.
 
@@ -395,7 +395,7 @@ The previous silent-success class is closed: any caller can now trust `removed_c
 
 ## Adding more fixes — workflow
 
-The diagnostic playbook lives in `CLAUDE.md` (project root of ASTA ECO4). Summary:
+The diagnostic playbook lives in the downstream consumer's `CLAUDE.md`. Summary:
 
 1. Reproduce the bug, capture exact response.
 2. `Grep` the tool name or symptom to find the source file in `src/core/`.
@@ -404,7 +404,7 @@ The diagnostic playbook lives in `CLAUDE.md` (project root of ASTA ECO4). Summar
 5. `node --check src/core/<file>.js` before commit.
 6. Restart Claude Code; smoke-test the fix with a real chart loaded.
 7. Commit on `fixes/draw-api-resolve`, push to `origin`.
-8. Update this file + the "Known limitations" section in the ASTA ECO4 CLAUDE.md.
+8. Update this file + the "Known limitations" section in your downstream CLAUDE.md.
 9. (Optional) File upstream issue with repro + link to our commit.
 
 ## Tests
@@ -418,7 +418,7 @@ The `source audit — no unsafe interpolation patterns` test case has a pre-exis
 Periodic rebase pattern:
 
 ```bash
-cd C:\Users\Kp\tradingview-mcp
+cd ~/tradingview-mcp   # or wherever you cloned the fork
 git fetch upstream
 git checkout fixes/draw-api-resolve
 git rebase upstream/main
@@ -454,8 +454,8 @@ Sub-second. No page reload. No UI flash. Routes through `evaluateAsync` so the T
 pine_save_source({ id, source })
 pine_refresh_catalog()
 chart_manage_indicator({ action: "remove", entity_id: <study_id> })
-chart_manage_indicator({ action: "add", indicator: "ASTA <X>" })
-data_get_pine_tables({ study_filter: "ASTA <X>" })  // verify fresh IL via panel content
+chart_manage_indicator({ action: "add", indicator: "<My Indicator>" })
+data_get_pine_tables({ study_filter: "<My Indicator>" })  // verify fresh IL via panel content
 ```
 
 **Source:** Upstream PR https://github.com/tradesdontlie/tradingview-mcp/pull/152 commit `63fe862`. Cherry-picked verbatim with port to pine.js (upstream PR placed it in alerts.js — incidental, given PR bundles unrelated fixes).
@@ -466,9 +466,9 @@ data_get_pine_tables({ study_filter: "ASTA <X>" })  // verify fresh IL via panel
 
 **Bug 1 (root cause):** `src/core/chart.js` `manageIndicator()` add path called `chart.createStudy(<bare title string>, false, false, inputArr)` for ALL indicators. TV accepts a bare title only for built-ins (which have an internal name→token map for `"Volume@tv-basicstudies-241!"` etc.). For user scripts, `createStudy` rejects the bare title with `Error: unexpected study id:<lowercased input>`. The only accepted shape for user scripts is the `studyData.descriptor` OBJECT reached through `TradingViewApi._studyMarket._dialog._studies['Script$USER']` (populated by `_updateUserStudies()` — T107's mechanism).
 
-Verified during T107 smoke 2026-05-13 (BB v1.1.4 on HWM-D, post-T107 cache refresh):
-- `chart.createStudy("ASTA Bollinger Bands", false, false, [])` → throws `unexpected study id:asta bollinger bands`.
-- `chart.createStudy(bb.studyData.descriptor, false, false, [])` → resolves to entity `s0ZGgl` named "ASTA Bollinger Bands v1.1.4" first try.
+Verified during T107 smoke 2026-05-13 (custom BB v1.1.4 on HWM-D, post-T107 cache refresh):
+- `chart.createStudy("MyCustomBB", false, false, [])` → throws `unexpected study id:mycustombb`.
+- `chart.createStudy(bb.studyData.descriptor, false, false, [])` → resolves to entity `s0ZGgl` named "MyCustomBB v1.1.4" first try.
 
 This bug **pre-existed T107** — `chart_manage_indicator(add)` has always returned `success:false` for user scripts. The codebase's coping strategy was "ask operator to manually re-add via Indicators dialog" (cited in CLAUDE.md MCP recipes and in several skill workflows).
 
@@ -518,7 +518,7 @@ Five surgical cherry-picks landed from the open-PR triage at `system-design/rese
 - PR #97 / #95 — Monaco-Pine; deprecated per RULEBOOK §11.2.
 - PR #103 / #110 / #76 — MSIX launch; resolved by our PowerShell recipe.
 
-**Spec ref:** `ASTA ECO4/system-design/tasks/done.md#T109`.
+**Spec ref:** downstream task tracker T109.
 
 ---
 
@@ -558,7 +558,7 @@ Composes RULEBOOK §11's 5-step save cycle (compile → save → cache-bust → 
 
 **Skill audit pending** (next session): `/3cs`, `pine-visual-verify`, and any in-tree script that does manual save+reload should switch to `with_pine_save` or document a reason to stay manual.
 
-**Spec ref:** `ASTA ECO4/system-design/tasks/done.md#T110`.
+**Spec ref:** downstream task tracker T110.
 
 ---
 
@@ -574,13 +574,13 @@ Composes RULEBOOK §11's 5-step save cycle (compile → save → cache-bust → 
 
 **Validation:** `node --check src/core/chart.js` clean. Live re-smoke pending next MCP restart.
 
-**Spec ref:** Closed inline (no separate ASTA task — fix is a known-broken-tool repair surfaced during smoke).
+**Spec ref:** Closed inline (no separate downstream task — fix is a known-broken-tool repair surfaced during smoke).
 
 ---
 
 ## Open upstream-facing work (optional)
 
-Draft issue reports for the two unreported bugs we patched exist in the ASTA ECO4 session transcript (Session 15). Paste at https://github.com/tradesdontlie/tradingview-mcp/issues/new when you want maintainer attention. Issues:
+Draft issue reports for the two unreported bugs we patched exist in local development notes. Paste at https://github.com/tradesdontlie/tradingview-mcp/issues/new when you want maintainer attention. Issues:
 
 - `data_get_pine_labels` silently truncates to 50 labels — default cap too low for real indicators
 - `watchlist_get` returns `count: 0` when a different sidebar tab is active — TV lazy-renders hidden widgets

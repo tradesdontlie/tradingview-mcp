@@ -573,7 +573,7 @@ export async function getPineLabels({ study_filter, max_labels, verbose } = {}) 
   const raw = await evaluate(buildGraphicsJS('dwglabels', 'labels', filter));
   if (!raw || raw.length === 0) return { success: true, study_count: 0, studies: [] };
 
-  // Default raised from 50 → 500: real indicators (ASTA 3Cs, volume profilers, multi-EMA dashboards)
+  // Default raised from 50 → 500: real indicators (complex 3-component dashboards, volume profilers, multi-EMA dashboards)
   // routinely emit 100+ labels, and a 50-label cap silently drops the earliest ones — which are
   // often the foundational labels (Fib levels, pivot prices, EMA tags) while keeping dynamic
   // later-bar signals. Caller can still override with max_labels.

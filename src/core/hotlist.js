@@ -14,7 +14,7 @@
  *     time:       <ms since epoch, server-side>
  *   }
  *
- * Known slugs (both bull and bear — ASTA trades both directions):
+ * Known slugs (both bull and bear — downstream consumers may trade either direction):
  *   BULL: volume_gainers, percent_change_gainers, percent_range_gainers,
  *         gap_gainers, percent_gap_gainers
  *   BEAR: percent_change_losers, percent_range_losers, gap_losers,

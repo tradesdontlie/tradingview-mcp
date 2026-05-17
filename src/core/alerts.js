@@ -97,7 +97,7 @@ export async function create({ condition, price, message }) {
   const condType = normalizeCondition(condition);
 
   // T31 — refuse the create if the message cites a price that disagrees with the condition value.
-  // Prevents the "phone alert says $X, actual trigger is $Y" drift (observed twice in Session 18).
+  // Prevents the "phone alert says $X, actual trigger is $Y" drift (observed twice in field use).
   const parity = validateMessageConditionParity(defaultMessage, numericPrice);
   if (!parity.ok) {
     return {
