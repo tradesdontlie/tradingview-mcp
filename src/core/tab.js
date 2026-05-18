@@ -8,6 +8,29 @@ import { getClient, evaluate } from '../connection.js';
 const CDP_HOST = 'localhost';
 const CDP_PORT = 9222;
 
+/**
+ * Open a new TradingView chart tab by evaluating window.open() in an
+ * existing chart tab's renderer. TradingView Desktop's Electron host
+ * intercepts same-origin opens and creates a new in-app tab — no menu
+ * shortcut, no keystroke injection, no Accessibility permission needed.
+ *
+ * (CDP's Input.dispatchKeyEvent can't trigger Electron menu shortcuts
+ * like Cmd+T, and AppleScript System Events requires the parent process
+ * to be granted Accessibility, which is fragile for a daemon.)
+ */
+async function openNewTabViaJS(existingTargetId) {
+  const c = await CDP({ host: CDP_HOST, port: CDP_PORT, target: existingTargetId });
+  try {
+    await c.Runtime.enable();
+    await c.Runtime.evaluate({
+      expression: `window.open('https://www.tradingview.com/chart/', '_blank')`,
+      returnByValue: true,
+    });
+  } finally {
+    try { await c.close(); } catch {}
+  }
+}
+
 // Marker placed on the document.title of the MCP-dedicated tab.
 // Visible via CDP /json/list without needing to attach.
 export const DEDICATED_TITLE_PREFIX = '[MCP] ';
@@ -26,8 +49,30 @@ const MARKER_JS = `
       }
     }
     apply();
-    if (!window.__MCP_TITLE_INTERVAL) {
-      window.__MCP_TITLE_INTERVAL = setInterval(apply, 5000);
+    // MutationObserver on the <title> node fires synchronously whenever
+    // TradingView overwrites the title (every few seconds with the ticker
+    // and price), so the prefix is restored instantly. A periodic timer
+    // can't keep up — TV's updates race in between ticks.
+    if (!window.__MCP_TITLE_OBSERVER) {
+      var titleEl = document.querySelector('title');
+      if (titleEl) {
+        var obs = new MutationObserver(apply);
+        obs.observe(titleEl, { childList: true, characterData: true, subtree: true });
+        window.__MCP_TITLE_OBSERVER = obs;
+      }
+      // Belt-and-suspenders: a 2s timer in case <title> is replaced wholesale
+      // (which would detach our observer).
+      window.__MCP_TITLE_INTERVAL = setInterval(function(){
+        var cur = document.querySelector('title');
+        if (cur && cur !== window.__MCP_TITLE_OBSERVER_NODE) {
+          window.__MCP_TITLE_OBSERVER_NODE = cur;
+          try { window.__MCP_TITLE_OBSERVER && window.__MCP_TITLE_OBSERVER.disconnect(); } catch(e){}
+          var o = new MutationObserver(apply);
+          o.observe(cur, { childList: true, characterData: true, subtree: true });
+          window.__MCP_TITLE_OBSERVER = o;
+        }
+        apply();
+      }, 2000);
     }
     return { marked: true, title: document.title };
   })()
@@ -86,20 +131,10 @@ export async function ensureDedicated() {
     throw new Error('No TradingView chart tab is open. Open TradingView Desktop first.');
   }
 
-  // Dispatch Cmd+T directly against an existing tab via a fresh CDP attach.
-  // We must NOT route this through getClient() — that would recurse back
-  // through findChartTarget() during bootstrap.
-  const isMac = process.platform === 'darwin';
-  const mod = isMac ? 4 : 2;
-  const bootstrapClient = await CDP({ host: CDP_HOST, port: CDP_PORT, target: before[0].id });
-  try {
-    await bootstrapClient.Input.dispatchKeyEvent({
-      type: 'keyDown', modifiers: mod, key: 't', code: 'KeyT', windowsVirtualKeyCode: 84,
-    });
-    await bootstrapClient.Input.dispatchKeyEvent({ type: 'keyUp', key: 't', code: 'KeyT' });
-  } finally {
-    try { await bootstrapClient.close(); } catch {}
-  }
+  // Open a new tab via window.open() in an existing tab's JS context.
+  // Electron's host intercepts same-origin opens and creates a new in-app
+  // tab — no keystroke or Accessibility permission required.
+  await openNewTabViaJS(before[0].id);
 
   // Wait for a new chart target to appear with a tradingview.com/chart URL.
   const beforeIds = new Set(before.map(t => t.id));
@@ -112,7 +147,7 @@ export async function ensureDedicated() {
     if (newTarget) break;
   }
   if (!newTarget) {
-    throw new Error('New chart tab did not appear after Cmd+T. Is TradingView Desktop the focused app?');
+    throw new Error('New chart tab did not appear after window.open(). Is TradingView Desktop responsive?');
   }
 
   // Give the page a moment to mount its document before we touch the title.
