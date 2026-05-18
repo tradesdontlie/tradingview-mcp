@@ -2,7 +2,6 @@
  * Core data access logic.
  */
 import { evaluate, evaluateAsync, KNOWN_PATHS, safeString } from '../connection.js';
-import { waitForChartReady } from '../wait.js';
 
 const MAX_OHLCV_BARS = 500;
 const MAX_TRADES = 20;
@@ -267,8 +266,18 @@ async function ensureSymbol(symbol) {
       });
     })()
   `);
-  const ready = await waitForChartReady(requested);
-  if (!ready) throw new Error(`Chart did not load symbol ${requested} in time.`);
+  // Poll api.symbol() directly — more reliable than DOM inspection on TV Desktop.
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 300));
+    let sym;
+    try { sym = await evaluate(`(function(){ return ${CHART_API}.symbol(); })()`); } catch {}
+    if (sym) {
+      const a = sym.toUpperCase(), b = requested.toUpperCase();
+      if (a === b || a.endsWith(':' + b) || b.endsWith(':' + a)) return;
+    }
+  }
+  throw new Error(`Chart did not load symbol ${requested} in time.`);
 }
 
 export async function getQuote({ symbol } = {}) {
