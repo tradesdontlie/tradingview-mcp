@@ -2,6 +2,7 @@
  * Core data access logic.
  */
 import { evaluate, evaluateAsync, KNOWN_PATHS, safeString } from '../connection.js';
+import { waitForChartReady } from '../wait.js';
 
 const MAX_OHLCV_BARS = 500;
 const MAX_TRADES = 20;
@@ -242,12 +243,41 @@ export async function getEquity() {
   return { success: true, data_points: equity?.data?.length || 0, source: equity?.source, data: equity?.data || [], equity_summary: equity?.equity_summary, note: equity?.note, error: equity?.error };
 }
 
+/**
+ * If `symbol` is provided and differs from the chart's current symbol,
+ * call chart.setSymbol(...) and wait for the new data to land.
+ * No-op when `symbol` is falsy or already matches.
+ */
+async function ensureSymbol(symbol) {
+  if (!symbol) return;
+  const current = await evaluate(`(function(){ try { return ${CHART_API}.symbol(); } catch(e) { return null; } })()`);
+  const requested = String(symbol);
+  // TV may normalize "TSLA" -> "NASDAQ:TSLA"; treat a suffix/prefix match as already-loaded.
+  if (current) {
+    const a = current.toUpperCase();
+    const b = requested.toUpperCase();
+    if (a === b || a.endsWith(':' + b) || b.endsWith(':' + a)) return;
+  }
+  await evaluateAsync(`
+    (function() {
+      var chart = ${CHART_API};
+      return new Promise(function(resolve) {
+        chart.setSymbol(${safeString(requested)}, {});
+        setTimeout(resolve, 500);
+      });
+    })()
+  `);
+  const ready = await waitForChartReady(requested);
+  if (!ready) throw new Error(`Chart did not load symbol ${requested} in time.`);
+}
+
 export async function getQuote({ symbol } = {}) {
+  await ensureSymbol(symbol);
   const data = await evaluate(`
     (function() {
       var api = ${CHART_API};
-      var sym = ${safeString(symbol || '')};
-      if (!sym) { try { sym = api.symbol(); } catch(e) {} }
+      var sym = '';
+      try { sym = api.symbol(); } catch(e) {}
       if (!sym) { try { sym = api.symbolExt().symbol; } catch(e) {} }
       var ext = {};
       try { ext = api.symbolExt() || {}; } catch(e) {}
