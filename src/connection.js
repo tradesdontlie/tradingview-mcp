@@ -87,11 +87,38 @@ export async function connect() {
   throw new Error(`CDP connection failed after ${MAX_RETRIES} attempts: ${lastError?.message}`);
 }
 
+// MCP-dedicated tab marker. Mirrors core/tab.js's DEDICATED_TITLE_PREFIX
+// (kept duplicated to avoid a circular import at module load time).
+const MCP_DEDICATED_PREFIX = '[MCP] ';
+
+/**
+ * Returns true unless the caller has explicitly opted out via
+ * TV_MCP_REQUIRE_DEDICATED=0. The default-on behavior prevents the MCP
+ * from hijacking the user's interactive TradingView tab.
+ */
+function requireDedicatedTab() {
+  const v = process.env.TV_MCP_REQUIRE_DEDICATED;
+  return v !== '0' && v !== 'false' && v !== 'off';
+}
+
 async function findChartTarget() {
   const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
   const targets = await resp.json();
-  // Prefer targets with tradingview.com/chart in the URL
-  return targets.find(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
+  const charts = targets.filter(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url));
+  const dedicated = charts.find(t => typeof t.title === 'string' && t.title.startsWith(MCP_DEDICATED_PREFIX));
+  if (dedicated) return dedicated;
+
+  if (requireDedicatedTab()) {
+    // Auto-bootstrap a dedicated tab so we never drive the user's interactive
+    // chart by accident. Dynamic import breaks the circular dependency with
+    // core/tab.js (which imports getClient from this file).
+    const { ensureDedicated } = await import('./core/tab.js');
+    const result = await ensureDedicated();
+    return result.target;
+  }
+
+  // Opt-out path: fall back to the first chart tab (legacy behavior).
+  return charts[0]
     || targets.find(t => t.type === 'page' && /tradingview/i.test(t.url))
     || null;
 }

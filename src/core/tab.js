@@ -2,10 +2,128 @@
  * Core tab management logic.
  * Controls TradingView Desktop tabs via CDP and Electron keyboard shortcuts.
  */
+import CDP from 'chrome-remote-interface';
 import { getClient, evaluate } from '../connection.js';
 
 const CDP_HOST = 'localhost';
 const CDP_PORT = 9222;
+
+// Marker placed on the document.title of the MCP-dedicated tab.
+// Visible via CDP /json/list without needing to attach.
+export const DEDICATED_TITLE_PREFIX = '[MCP] ';
+
+/**
+ * Inline JS that marks a tab as MCP-dedicated and keeps the title prefix
+ * sticky against TradingView's own title updates.
+ */
+const MARKER_JS = `
+  (function(){
+    window.__MCP_DEDICATED = true;
+    var prefix = ${JSON.stringify(DEDICATED_TITLE_PREFIX)};
+    function apply() {
+      if (typeof document.title === 'string' && document.title.indexOf(prefix) !== 0) {
+        document.title = prefix + document.title;
+      }
+    }
+    apply();
+    if (!window.__MCP_TITLE_INTERVAL) {
+      window.__MCP_TITLE_INTERVAL = setInterval(apply, 5000);
+    }
+    return { marked: true, title: document.title };
+  })()
+`;
+
+async function listChartTargets() {
+  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
+  const targets = await resp.json();
+  return targets.filter(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url));
+}
+
+export function isDedicatedTarget(target) {
+  return !!(target && typeof target.title === 'string' && target.title.startsWith(DEDICATED_TITLE_PREFIX));
+}
+
+/** Find the existing dedicated tab, if any. */
+export async function findDedicatedTarget() {
+  const charts = await listChartTargets();
+  return charts.find(isDedicatedTarget) || null;
+}
+
+/**
+ * Attach to a specific target by id, evaluate an expression, then disconnect.
+ * Used to mark a freshly-opened tab without disturbing the connection module's
+ * cached client.
+ */
+async function evaluateOnTarget(targetId, expression) {
+  const c = await CDP({ host: CDP_HOST, port: CDP_PORT, target: targetId });
+  try {
+    await c.Runtime.enable();
+    const result = await c.Runtime.evaluate({ expression, returnByValue: true });
+    if (result.exceptionDetails) {
+      const msg = result.exceptionDetails.exception?.description || result.exceptionDetails.text || 'eval error';
+      throw new Error(msg);
+    }
+    return result.result?.value;
+  } finally {
+    try { await c.close(); } catch {}
+  }
+}
+
+/**
+ * Ensure an MCP-dedicated tab exists. Returns the dedicated target object.
+ *
+ * If one already exists (title starts with [MCP] ), returns it untouched.
+ * Otherwise opens a new chart tab via Cmd+T (TV Desktop) on an existing
+ * tab's CDP client, waits for it to load tradingview.com/chart, then marks
+ * its document.title.
+ */
+export async function ensureDedicated() {
+  const existing = await findDedicatedTarget();
+  if (existing) return { success: true, action: 'reused', target: existing };
+
+  const before = await listChartTargets();
+  if (before.length === 0) {
+    throw new Error('No TradingView chart tab is open. Open TradingView Desktop first.');
+  }
+
+  // Dispatch Cmd+T directly against an existing tab via a fresh CDP attach.
+  // We must NOT route this through getClient() — that would recurse back
+  // through findChartTarget() during bootstrap.
+  const isMac = process.platform === 'darwin';
+  const mod = isMac ? 4 : 2;
+  const bootstrapClient = await CDP({ host: CDP_HOST, port: CDP_PORT, target: before[0].id });
+  try {
+    await bootstrapClient.Input.dispatchKeyEvent({
+      type: 'keyDown', modifiers: mod, key: 't', code: 'KeyT', windowsVirtualKeyCode: 84,
+    });
+    await bootstrapClient.Input.dispatchKeyEvent({ type: 'keyUp', key: 't', code: 'KeyT' });
+  } finally {
+    try { await bootstrapClient.close(); } catch {}
+  }
+
+  // Wait for a new chart target to appear with a tradingview.com/chart URL.
+  const beforeIds = new Set(before.map(t => t.id));
+  const deadline = Date.now() + 15000;
+  let newTarget = null;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 500));
+    const charts = await listChartTargets();
+    newTarget = charts.find(t => !beforeIds.has(t.id));
+    if (newTarget) break;
+  }
+  if (!newTarget) {
+    throw new Error('New chart tab did not appear after Cmd+T. Is TradingView Desktop the focused app?');
+  }
+
+  // Give the page a moment to mount its document before we touch the title.
+  await new Promise(r => setTimeout(r, 500));
+  await evaluateOnTarget(newTarget.id, MARKER_JS);
+
+  // Refresh the target info so the returned object reflects the new title.
+  const charts = await listChartTargets();
+  const marked = charts.find(t => t.id === newTarget.id) || newTarget;
+  return { success: true, action: 'created', target: marked };
+}
 
 /**
  * List all open chart tabs (CDP page targets).
