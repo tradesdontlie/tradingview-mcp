@@ -173,7 +173,7 @@ tv watchlist get/add
 tv indicator add/remove/toggle/set/get
 tv layout list/switch
 tv pane list/layout/focus/symbol
-tv tab list/new/close/switch
+tv tab list/new/close/switch/ensure
 tv replay start/step/stop/status/autoplay/trade
 tv stream quote/bars/values/lines/labels/tables/all
 tv ui click/keyboard/hover/scroll/find/eval/type/panel/fullscreen/mouse
@@ -268,6 +268,34 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 | `tab_list` | List open chart tabs |
 | `tab_new` / `tab_close` | Open/close tabs |
 | `tab_switch` | Switch to a tab by index |
+| `tab_ensure` | Create (or reuse) the dedicated `[MCP]` tab — see Isolation below |
+
+## Isolation: Dedicated MCP Tab
+
+By default the MCP would drive whichever chart tab CDP returned first — which is usually the one you're actively using. That means every `chart_set_symbol` or `quote_get` call could yank your visible chart to a different ticker.
+
+To keep the MCP off your active chart, this server can run against a **dedicated tab** marked with the `[MCP] ` title prefix. `findChartTarget()` prefers that tab if present and only falls back to the first chart tab when it isn't (or errors out if you've opted into strict mode).
+
+```bash
+# One-time per TradingView session — opens a new chart tab and marks it [MCP] …
+tv tab ensure
+# (Idempotent — finds and reuses an existing dedicated tab.)
+```
+
+Under the hood the new tab is opened via `window.open()` inside an existing tab's renderer context. TradingView Desktop (Electron) intercepts same-origin opens and creates a new in-app tab — no keyboard shortcut injection and no Accessibility permission required. A MutationObserver keeps the `[MCP] ` title prefix sticky against TradingView's own title rewrites.
+
+### `TV_MCP_REQUIRE_DEDICATED`
+
+| Value | Behavior |
+|-------|----------|
+| unset / `0` (default) | Prefer `[MCP]` tab if present, fall back to first chart tab. Back-compat with existing single-tab setups. |
+| `1` | Strict mode. If no `[MCP]` tab exists, requests **error out** instead of hijacking your active chart. Run `tv tab ensure` once per TradingView session. |
+
+Set it on the MCP server process (e.g. in your `launchd` plist, `systemd` unit, or your shell before starting the HTTP shim):
+
+```bash
+TV_MCP_REQUIRE_DEDICATED=1 node src/server.js
+```
 
 ### Pine Script Development
 

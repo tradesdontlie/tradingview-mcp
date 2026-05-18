@@ -84,6 +84,11 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 - `tv_launch` → auto-detect and launch TradingView with CDP on Mac/Win/Linux
 - `tv_health_check` → verify connection is working
 
+### "MCP keeps hijacking my active chart" / dedicated tab
+- `tab_ensure` → create or reuse a dedicated `[MCP] `-titled chart tab. The server prefers this tab over the user's active one. Idempotent — safe to call on every session start.
+- Set `TV_MCP_REQUIRE_DEDICATED=1` in the server env to make the dedicated tab mandatory; without it the server will error rather than fall back to the user's first chart tab.
+- The dedicated tab is opened via `window.open()` inside an existing renderer (Electron intercepts and creates an in-app tab) — no Cmd+T / Accessibility permission needed. A MutationObserver keeps the `[MCP] ` title prefix sticky.
+
 ## Context Management Rules
 
 These tools can return large payloads. Follow these rules to avoid context bloat:

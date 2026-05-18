@@ -79,7 +79,33 @@ Use the `tv_health_check` tool. Expected response:
 
 If `cdp_connected: false`, TradingView is not running with `--remote-debugging-port=9222`.
 
-## Step 6: Install CLI (Optional)
+## Step 6: Create Dedicated MCP Tab (Recommended)
+
+By default the MCP drives whichever chart tab CDP returns first — usually the user's active chart. To avoid hijacking their visible chart, create a dedicated tab marked with the `[MCP] ` title prefix:
+
+```bash
+node <INSTALL_PATH>/src/cli/index.js tab ensure
+# or, if CLI is linked:
+tv tab ensure
+```
+
+This is idempotent — running it again reuses the existing dedicated tab.
+
+To make this **required** (so the server errors out instead of falling back to the user's tab when the dedicated tab is missing), set `TV_MCP_REQUIRE_DEDICATED=1` in the MCP server's environment. For Claude Code stdio servers, add it to the `env` block of `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "tradingview": {
+      "command": "node",
+      "args": ["<INSTALL_PATH>/src/server.js"],
+      "env": { "TV_MCP_REQUIRE_DEDICATED": "1" }
+    }
+  }
+}
+```
+
+## Step 7: Install CLI (Optional)
 
 To use the `tv` CLI command globally:
 
@@ -100,6 +126,8 @@ Then `tv status`, `tv quote`, `tv pine compile`, etc. work from anywhere.
 | `tv` command not found | Run `npm link` from the project directory |
 | Tools return stale data | TradingView may still be loading — wait a few seconds |
 | Pine Editor tools fail | Open the Pine Editor panel first (`ui_open_panel pine-editor open`) |
+| MCP keeps changing the user's active chart | Run `tv tab ensure` to create the dedicated `[MCP]` tab; optionally set `TV_MCP_REQUIRE_DEDICATED=1` |
+| `No MCP-dedicated TradingView tab found` error | `TV_MCP_REQUIRE_DEDICATED=1` is set but no `[MCP]` tab exists — run `tv tab ensure` once per TradingView session |
 
 ## What to Read Next
 
