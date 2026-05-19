@@ -23,24 +23,22 @@ export async function create({ condition, price, message }) {
 
   const priceSet = await evaluate(`
     (function() {
-      var inputs = document.querySelectorAll('[class*="alert"] input[type="text"], [class*="alert"] input[type="number"]');
-      for (var i = 0; i < inputs.length; i++) {
-        var label = inputs[i].closest('[class*="row"]')?.querySelector('[class*="label"]');
-        if (label && /value|price/i.test(label.textContent)) {
-          var nativeSet = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-          nativeSet.call(inputs[i], ${safeString(String(price))});
-          inputs[i].dispatchEvent(new Event('input', { bubbles: true }));
-          inputs[i].dispatchEvent(new Event('change', { bubbles: true }));
-          return true;
-        }
-      }
-      if (inputs.length > 0) {
-        var nativeSet = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-        nativeSet.call(inputs[0], ${safeString(String(price))});
-        inputs[0].dispatchEvent(new Event('input', { bubbles: true }));
-        return true;
-      }
-      return false;
+      // The alert dialog wrapper has no data-name and no class fragment containing "alert"
+      // in current TradingView builds, so [class*="alert"] returns 0 inputs (see issue #168).
+      // Anchor on the "Create" submit button instead — its text is stable across releases —
+      // then find the price input as the first visible numeric-valued input in that dialog.
+      var createBtn = Array.from(document.querySelectorAll('button'))
+        .find(function(b) { return /^create$/i.test(b.textContent.trim()) && b.offsetParent !== null; });
+      var dialog = createBtn && createBtn.closest('div[class*="dialog"]');
+      if (!dialog) return false;
+      var inputs = Array.from(dialog.querySelectorAll('input')).filter(function(i) { return i.offsetParent !== null; });
+      var priceInput = inputs.find(function(i) { return !isNaN(parseFloat(i.value)); });
+      if (!priceInput) return false;
+      var nativeSet = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      nativeSet.call(priceInput, ${safeString(String(price))});
+      priceInput.dispatchEvent(new Event('input', { bubbles: true }));
+      priceInput.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
     })()
   `);
 
