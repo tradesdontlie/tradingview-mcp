@@ -1,0 +1,35 @@
+{
+  "date": "2026-05-18",
+  "session": "NY",
+  "symbol": "MNQ1!",
+  "bias": "LONG",
+  "bias_source": "15m uptrend, price above VWAP, PDH swept and holding",
+  "key_levels": {
+    "PDH": 21450.00,
+    "PDL": 21200.00,
+    "OR_high": 21385.00,
+    "OR_low": 21340.00,
+    "VWAP": 21360.00,
+    "Asia_high": 21410.00,
+    "Asia_low": 21290.00,
+    "London_high": 21430.00,
+    "London_low": 21310.00,
+    "HTF_FVG_high": 21395.00,
+    "HTF_FVG_low": 21375.00
+  },
+  "signals_today": [
+    {
+      "time": "09:45",
+      "decision": "LONG",
+      "setup": "OR Breakout Retest",
+      "entry": 21388.00,
+      "stop": 21332.00,
+      "tp1": 21430.00,
+      "tp2": 21460.00,
+      "r_to_tp1": 1.75,
+      "confidence": "HIGH",
+      "result": "TP1 hit"
+    }
+  ],
+  "notes": "Clean OR breakout, FVG held on retest. London high taken as TP2 target."
+}
