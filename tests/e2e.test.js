@@ -1276,6 +1276,44 @@ val = array.get(a, 5)`;
       const found = await evaluate(`!!document.querySelector('[data-name="alerts"]')`);
       assert.ok(typeof found === 'boolean', 'Alerts button detection works');
     });
+
+    it('alert_create — locate price input via Create-button anchor (issue #168)', async () => {
+      // Open the alert dialog
+      await evaluate(`(function() {
+        var btn = document.querySelector('[data-name="set-alert-button"]')
+          || document.querySelector('[data-name="alerts"]');
+        if (btn) btn.click();
+      })()`);
+      await sleep(800);
+
+      // Apply the same selector strategy used by core/alerts.js create()
+      const result = await evaluate(`(function() {
+        var createBtn = Array.from(document.querySelectorAll('button'))
+          .find(function(b) { return /^create$/i.test(b.textContent.trim()) && b.offsetParent !== null; });
+        var dialog = createBtn && createBtn.closest('div[class*="dialog"]');
+        if (!dialog) return { dialog_found: false };
+        var inputs = Array.from(dialog.querySelectorAll('input')).filter(function(i) { return i.offsetParent !== null; });
+        var priceInput = inputs.find(function(i) { return !isNaN(parseFloat(i.value)); });
+        return {
+          dialog_found: true,
+          price_input_found: !!priceInput,
+          price_input_value: priceInput ? priceInput.value : null,
+        };
+      })()`);
+
+      // Clean up: close the dialog before the next test runs
+      await Input.dispatchKeyEvent({ type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+      await Input.dispatchKeyEvent({ type: 'keyUp', key: 'Escape', code: 'Escape' });
+      await sleep(200);
+
+      // Tolerate a TV plan/UX state where the dialog can't open (e.g. alert quota reached),
+      // but if it does open, the new selector strategy MUST find a numeric price input —
+      // that's the regression we're guarding against.
+      if (result.dialog_found) {
+        assert.ok(result.price_input_found, 'Create-button anchor located the price input in alert dialog');
+        assert.ok(!isNaN(parseFloat(result.price_input_value)), `Price input has numeric value (got: ${result.price_input_value})`);
+      }
+    });
   });
 
   // ─── 9. WATCHLIST (2 tools) ───────────────────────────────────────────
