@@ -158,6 +158,7 @@ export async function setVisibleRange({ from, to, _deps }) {
 }
 
 export async function scrollToDate({ date }) {
+  const { evaluate } = _resolve();
   let timestamp;
   if (/^\d+$/.test(date)) timestamp = Number(date);
   else timestamp = Math.floor(new Date(date).getTime() / 1000);

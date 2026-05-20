@@ -90,6 +90,22 @@ export async function connect() {
 async function findChartTarget() {
   const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
   const targets = await resp.json();
+  return selectChartTarget(targets, process.env.TV_TARGET_ID || '');
+}
+
+export function selectChartTarget(targets, requestedTargetId = '') {
+  const requested = String(requestedTargetId || '').trim();
+  if (requested) {
+    const target = targets.find(t => t.id === requested);
+    if (!target) {
+      throw new Error(`TV_TARGET_ID ${requested} was not found in Chrome DevTools targets`);
+    }
+    if (target.type !== 'page') {
+      throw new Error(`TV_TARGET_ID ${requested} is not a page target`);
+    }
+    return target;
+  }
+
   // Prefer targets with tradingview.com/chart in the URL
   return targets.find(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
     || targets.find(t => t.type === 'page' && /tradingview/i.test(t.url))
