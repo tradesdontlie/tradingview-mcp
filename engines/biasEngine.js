@@ -1,9 +1,10 @@
 /**
- * Determines directional bias from OHLCV bars.
- * Phase 2A uses a simple SMA comparison — swing-pivot logic replaces this in Phase 3.
+ * Determines directional bias from OHLCV bars using confirmed swing structure.
  *
  * @module biasEngine
  */
+
+import { findSwingPoints } from './structureEngine.js';
 
 /**
  * @typedef {"bullish"|"bearish"|"neutral"} Bias
@@ -13,19 +14,27 @@
  */
 
 /**
- * Classifies directional bias from a bar array using a prior-period SMA.
+ * Classifies directional bias from a bar array using confirmed swing structure.
  *
- * @param {Array<{close: number}>} bars - OHLCV bars (oldest first)
- * @param {number} [period=5] - SMA lookback (excludes the current bar)
+ * Bullish:  higher highs (HH) AND higher lows (HL)
+ * Bearish:  lower  highs (LH) AND lower  lows (LL)
+ * Neutral:  fewer than 2 confirmed swing highs/lows, or mixed signals
+ *
+ * @param {Array<{high: number, low: number}>} bars - OHLCV bars (oldest first)
+ * @param {number} [lookback=2] - bars required on each side to confirm a swing point
  * @returns {Bias}
  */
-export function classifyBias(bars, period = 5) {
-  if (bars.length < period + 1) return 'neutral';
-  const prior = bars.slice(-(period + 1), -1);
-  const sma = prior.reduce((sum, b) => sum + b.close, 0) / period;
-  const last = bars[bars.length - 1].close;
-  if (last > sma * 1.001) return 'bullish';
-  if (last < sma * 0.999) return 'bearish';
+export function classifyBias(bars, lookback = 2) {
+  const { highs, lows } = findSwingPoints(bars, lookback);
+  if (highs.length < 2 || lows.length < 2) return 'neutral';
+
+  const isHH = highs.at(-1).price > highs.at(-2).price;
+  const isHL = lows.at(-1).price  > lows.at(-2).price;
+  const isLH = highs.at(-1).price < highs.at(-2).price;
+  const isLL = lows.at(-1).price  < lows.at(-2).price;
+
+  if (isHH && isHL) return 'bullish';
+  if (isLH && isLL) return 'bearish';
   return 'neutral';
 }
 

@@ -22,7 +22,8 @@ import { dirname, join } from 'path';
 import { classifyBias, buildMtfBias }           from '../engines/biasEngine.js';
 import { extractSessionLevels }                 from '../engines/sessionEngine.js';
 import { detectSweep, detectReclaim }           from '../engines/liquidityEngine.js';
-import { detectMss, findDisplacementCandle }    from '../engines/structureEngine.js';
+import { detectMss, findDisplacementCandle,
+         findSwingPoints }                       from '../engines/structureEngine.js';
 import { detectVolumeSurge }                    from '../engines/volumeEngine.js';
 import { buildSignal, checkExpiry }             from '../strategies/mtfSessionLiquidityTrap.js';
 import { validate }                             from '../risk/riskManager.js';
@@ -57,38 +58,136 @@ function makeFlatBars(count, price, startTs = 1748000000000) {
   }));
 }
 
+/**
+ * 20-bar zigzag with HH+HL structure (lookback=2).
+ * Confirmed swing highs: index 2 (price 110), index 12 (price 116).
+ * Confirmed swing lows:  index 7 (price  94), index 17 (price 100).
+ */
+function makeBullishZigzag() {
+  return [
+    // Phase 1 — rising to SH1=110
+    { high: 104, low: 100, close: 102, vol: 1000 }, // 0
+    { high: 107, low: 103, close: 105, vol: 1000 }, // 1
+    { high: 110, low: 106, close: 108, vol: 1000 }, // 2  SH1=110
+    { high: 107, low: 103, close: 105, vol: 1000 }, // 3
+    { high: 104, low: 100, close: 102, vol: 1000 }, // 4
+    // Phase 2 — falling to SL1=94
+    { high: 107, low: 100, close: 103, vol: 1000 }, // 5
+    { high: 104, low:  97, close: 100, vol: 1000 }, // 6
+    { high: 101, low:  94, close:  97, vol: 1000 }, // 7  SL1=94
+    { high: 104, low:  97, close: 100, vol: 1000 }, // 8
+    { high: 107, low: 100, close: 103, vol: 1000 }, // 9
+    // Phase 3 — rising to SH2=116  (HH: 116 > 110)
+    { high: 110, low: 106, close: 108, vol: 1000 }, // 10
+    { high: 113, low: 109, close: 111, vol: 1000 }, // 11
+    { high: 116, low: 112, close: 114, vol: 1000 }, // 12  SH2=116
+    { high: 113, low: 109, close: 111, vol: 1000 }, // 13
+    { high: 110, low: 106, close: 108, vol: 1000 }, // 14
+    // Phase 4 — falling to SL2=100  (HL: 100 > 94)
+    { high: 113, low: 106, close: 109, vol: 1000 }, // 15
+    { high: 110, low: 103, close: 106, vol: 1000 }, // 16
+    { high: 107, low: 100, close: 103, vol: 1000 }, // 17  SL2=100
+    { high: 110, low: 103, close: 106, vol: 1000 }, // 18
+    { high: 113, low: 106, close: 109, vol: 1000 }, // 19
+  ];
+}
+
+/**
+ * 20-bar zigzag with LH+LL structure (lookback=2).
+ * Confirmed swing highs: index 2 (price 116), index 12 (price 107).
+ * Confirmed swing lows:  index 7 (price  94), index 17 (price  85).
+ */
+function makeBearishZigzag() {
+  return [
+    // Phase 1 — rising to SH1=116
+    { high: 110, low: 106, close: 108, vol: 1000 }, // 0
+    { high: 113, low: 109, close: 111, vol: 1000 }, // 1
+    { high: 116, low: 112, close: 114, vol: 1000 }, // 2  SH1=116
+    { high: 113, low: 109, close: 111, vol: 1000 }, // 3
+    { high: 110, low: 106, close: 108, vol: 1000 }, // 4
+    // Phase 2 — falling to SL1=94 (steeper right side to avoid phantom SH at bar 9)
+    { high: 107, low: 100, close: 103, vol: 1000 }, // 5
+    { high: 101, low:  97, close:  99, vol: 1000 }, // 6
+    { high:  98, low:  94, close:  96, vol: 1000 }, // 7  SL1=94
+    { high: 101, low:  97, close:  99, vol: 1000 }, // 8
+    { high: 104, low: 100, close: 102, vol: 1000 }, // 9
+    // Phase 3 — rallying to SH2=107  (LH: 107 < 116)
+    { high: 101, low:  97, close:  99, vol: 1000 }, // 10
+    { high: 104, low: 100, close: 102, vol: 1000 }, // 11
+    { high: 107, low: 103, close: 105, vol: 1000 }, // 12  SH2=107
+    { high: 104, low: 100, close: 102, vol: 1000 }, // 13
+    { high: 101, low:  97, close:  99, vol: 1000 }, // 14
+    // Phase 4 — falling to SL2=85  (LL: 85 < 94)
+    { high:  98, low:  91, close:  94, vol: 1000 }, // 15
+    { high:  95, low:  88, close:  91, vol: 1000 }, // 16
+    { high:  92, low:  85, close:  88, vol: 1000 }, // 17  SL2=85
+    { high:  95, low:  88, close:  91, vol: 1000 }, // 18
+    { high:  98, low:  91, close:  94, vol: 1000 }, // 19
+  ];
+}
+
+/**
+ * 20-bar zigzag with HH+LL (conflicting signals → neutral).
+ * Same phases 1-3 as bullish, but phase 4 falls to SL2=88 (< SL1=94).
+ */
+function makeMixedZigzag() {
+  return [
+    // Phases 1-3 identical to bullish (SH1=110, SL1=94, SH2=116)
+    { high: 104, low: 100, close: 102, vol: 1000 }, // 0
+    { high: 107, low: 103, close: 105, vol: 1000 }, // 1
+    { high: 110, low: 106, close: 108, vol: 1000 }, // 2  SH1=110
+    { high: 107, low: 103, close: 105, vol: 1000 }, // 3
+    { high: 104, low: 100, close: 102, vol: 1000 }, // 4
+    { high: 107, low: 100, close: 103, vol: 1000 }, // 5
+    { high: 104, low:  97, close: 100, vol: 1000 }, // 6
+    { high: 101, low:  94, close:  97, vol: 1000 }, // 7  SL1=94
+    { high: 104, low:  97, close: 100, vol: 1000 }, // 8
+    { high: 107, low: 100, close: 103, vol: 1000 }, // 9
+    { high: 110, low: 106, close: 108, vol: 1000 }, // 10
+    { high: 113, low: 109, close: 111, vol: 1000 }, // 11
+    { high: 116, low: 112, close: 114, vol: 1000 }, // 12  SH2=116
+    { high: 113, low: 109, close: 111, vol: 1000 }, // 13
+    { high: 110, low: 106, close: 108, vol: 1000 }, // 14
+    // Phase 4 — falls to SL2=88, below SL1=94 → LL (conflicts with HH → neutral)
+    { high: 109, low: 103, close: 106, vol: 1000 }, // 15
+    { high: 103, low:  97, close: 100, vol: 1000 }, // 16
+    { high:  97, low:  88, close:  92, vol: 1000 }, // 17  SL2=88
+    { high: 100, low:  91, close:  95, vol: 1000 }, // 18
+    { high: 103, low:  94, close:  98, vol: 1000 }, // 19
+  ];
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // biasEngine
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('biasEngine', () => {
-  it('classifyBias returns bullish on rising bars', () => {
-    // 10 bars from 100 to 118, step=2. SMA of prior 5 ≈ 110, last close = 118 → bullish
-    const bars = makeBars(10, 100, 2);
-    assert.equal(classifyBias(bars), 'bullish');
+  it('classifyBias returns bullish on HH/HL structure', () => {
+    // 20-bar zigzag: SH1=110 → SH2=116 (HH), SL1=94 → SL2=100 (HL)
+    assert.equal(classifyBias(makeBullishZigzag()), 'bullish');
   });
 
-  it('classifyBias returns bearish on falling bars', () => {
-    // 10 bars from 110 down to 92, step=-2. SMA of prior 5 ≈ 100, last close = 92 → bearish
-    const bars = makeBars(10, 110, -2);
-    assert.equal(classifyBias(bars), 'bearish');
+  it('classifyBias returns bearish on LH/LL structure', () => {
+    // 20-bar zigzag: SH1=116 → SH2=107 (LH), SL1=94 → SL2=85 (LL)
+    assert.equal(classifyBias(makeBearishZigzag()), 'bearish');
   });
 
-  it('classifyBias returns neutral on flat bars', () => {
-    const bars = makeFlatBars(10, 100);
-    assert.equal(classifyBias(bars), 'neutral');
+  it('classifyBias returns neutral on mixed structure (HH + LL)', () => {
+    // 20-bar zigzag: SH1=110 → SH2=116 (HH) but SL1=94 → SL2=88 (LL) → conflicting → neutral
+    assert.equal(classifyBias(makeMixedZigzag()), 'neutral');
   });
 
-  it('classifyBias returns neutral when insufficient bars', () => {
-    assert.equal(classifyBias(makeBars(3, 100, 2)), 'neutral');
+  it('classifyBias returns neutral when fewer than 2 confirmed swing highs or lows', () => {
+    // Flat bars produce no swing points (all highs/lows identical → no strict pivot)
+    assert.equal(classifyBias(makeFlatBars(10, 100)), 'neutral');
   });
 
   it('buildMtfBias sets permission=none on 4H/1H conflict', () => {
     const result = buildMtfBias({
-      '4H':  makeBars(10, 100, 2),   // bullish
-      '1H':  makeBars(10, 110, -2),  // bearish
-      '15m': makeFlatBars(10, 105),  // neutral
-      '5m':  makeFlatBars(10, 105),  // neutral
+      '4H':  makeBullishZigzag(),    // bullish  (HH/HL)
+      '1H':  makeBearishZigzag(),    // bearish  (LH/LL)
+      '15m': makeFlatBars(10, 105), // neutral
+      '5m':  makeFlatBars(10, 105), // neutral
     });
     assert.equal(result['4H'],  'bullish');
     assert.equal(result['1H'],  'bearish');
@@ -97,10 +196,10 @@ describe('biasEngine', () => {
 
   it('buildMtfBias sets permission=long when both 4H and 1H are bullish', () => {
     const result = buildMtfBias({
-      '4H':  makeBars(10, 100, 2),
-      '1H':  makeBars(10, 100, 2),
-      '15m': makeBars(10, 100, 2),
-      '5m':  makeBars(10, 100, 2),
+      '4H':  makeBullishZigzag(),
+      '1H':  makeBullishZigzag(),
+      '15m': makeBullishZigzag(),
+      '5m':  makeBullishZigzag(),
     });
     assert.equal(result.permission, 'long');
   });
@@ -255,6 +354,61 @@ describe('structureEngine', () => {
     }));
     const result = findDisplacementCandle(bars, 5);
     assert.equal(result, null, 'no displacement candle should be found');
+  });
+
+  it('findSwingPoints detects confirmed swing high and low in a zigzag', () => {
+    // 7-bar up-down-up: peak at index 2 (high=106), trough at index 4 (low=96), lookback=2
+    const bars = [
+      { high: 100, low:  96, close:  98 }, // 0
+      { high: 103, low:  99, close: 101 }, // 1
+      { high: 106, low: 102, close: 104 }, // 2  SH=106
+      { high: 103, low:  99, close: 101 }, // 3
+      { high: 100, low:  96, close:  98 }, // 4  SL=96
+      { high: 103, low:  99, close: 101 }, // 5
+      { high: 106, low: 102, close: 104 }, // 6  (not checked — outside loop range)
+    ];
+    const { highs, lows } = findSwingPoints(bars, 2);
+    assert.ok(highs.some(h => h.index === 2 && h.price === 106), 'swing high at index 2 price 106');
+    assert.ok(lows.some(l => l.index === 4 && l.price === 96),  'swing low  at index 4 price 96');
+  });
+
+  it('findSwingPoints: swing high confirmed only after lookback right-side bars exist', () => {
+    // Symmetric peak at index 3 with lookback=3 — needs bars 0,1,2 and 4,5,6 to be lower
+    const peak = [
+      { high: 100, low:  96, close:  98 }, // 0
+      { high: 102, low:  98, close: 100 }, // 1
+      { high: 104, low: 100, close: 102 }, // 2
+      { high: 106, low: 102, close: 104 }, // 3  candidate SH
+      { high: 104, low: 100, close: 102 }, // 4
+      { high: 102, low:  98, close: 100 }, // 5
+      { high: 100, low:  96, close:  98 }, // 6
+    ];
+    // All 7 bars present: bar 3 should be a confirmed swing high
+    const { highs: withAll } = findSwingPoints(peak, 3);
+    assert.ok(withAll.some(h => h.index === 3), 'peak at index 3 confirmed with 7 bars (lookback=3)');
+
+    // Only 6 bars: loop range is [3, 3) — no iterations — bar 3 cannot be confirmed
+    const { highs: partial } = findSwingPoints(peak.slice(0, 6), 3);
+    assert.ok(!partial.some(h => h.index === 3), 'peak at index 3 NOT confirmed with only 6 bars (no lookahead)');
+  });
+
+  it('detectMss uses confirmed swing high as reference, not raw max spike', () => {
+    // preSlice (bars 0-5): confirmed SH at index 2 price=205, plus a spike at index 5 (high=250, not a swing)
+    // post-sweep bar 6: close=208 > confirmed SH 205 but 208 < spike 250
+    // Old code (raw max=250): 210 high < 250 → no MSS
+    // New code (confirmed SH=205): close 208 > 205 → MSS at index 6
+    const bars = [
+      { high: 195, low: 191, close: 193 }, // 0
+      { high: 200, low: 196, close: 198 }, // 1
+      { high: 205, low: 201, close: 203 }, // 2  confirmed SH=205
+      { high: 202, low: 198, close: 200 }, // 3
+      { high: 199, low: 195, close: 197 }, // 4  right-side confirmation complete
+      { high: 250, low: 195, close: 200 }, // 5  afterIndex: spike (raw max=250, not a confirmed swing)
+      { high: 210, low: 205, close: 208 }, // 6  close=208 > 205 → MSS
+    ];
+    const result = detectMss(bars, 5, 'bullish');
+    assert.equal(result.detected,    true, 'MSS detected using confirmed swing reference (not spike)');
+    assert.equal(result.mssBarIndex, 6,    'MSS bar index 6');
   });
 });
 

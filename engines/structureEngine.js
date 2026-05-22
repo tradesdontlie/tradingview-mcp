@@ -41,29 +41,35 @@ export function findSwingPoints(bars, lookback = 3) {
 /**
  * Detects a Market Structure Shift (MSS) or Change of Character (CHoCH) after a sweep.
  *
- * Bullish MSS: after `afterIndex`, the first bar whose high exceeds the highest high
- *              seen in bars[0..afterIndex] signals that buyers have taken control.
- * Bearish MSS: after `afterIndex`, the first bar whose low falls below the lowest low
- *              seen in bars[0..afterIndex] signals that sellers have taken control.
+ * Reference level is the most recent confirmed swing high/low in bars[0..afterIndex]
+ * (falls back to raw max/min when no confirmed swings exist). MSS is confirmed when
+ * a bar's CLOSE crosses that level, not just a wick.
  *
- * @param {Array<{high:number,low:number}>} bars
+ * @param {Array<{high:number,low:number,close:number}>} bars
  * @param {number} afterIndex - the sweep bar index; search begins at afterIndex+1
  * @param {"bullish"|"bearish"} direction
+ * @param {number} [lookback=2] - bars required on each side to confirm a swing point
  * @returns {MssResult}
  */
-export function detectMss(bars, afterIndex, direction) {
+export function detectMss(bars, afterIndex, direction, lookback = 2) {
   const preSlice = bars.slice(0, afterIndex + 1);
   if (!preSlice.length) return { detected: false, mssBarIndex: null };
 
+  const swings = findSwingPoints(preSlice, lookback);
+
   if (direction === 'bullish') {
-    const refHigh = Math.max(...preSlice.map(b => b.high));
+    const refLevel = swings.highs.length
+      ? swings.highs.at(-1).price
+      : Math.max(...preSlice.map(b => b.high));
     for (let i = afterIndex + 1; i < bars.length; i++) {
-      if (bars[i].high > refHigh) return { detected: true, mssBarIndex: i };
+      if (bars[i].close > refLevel) return { detected: true, mssBarIndex: i };
     }
   } else {
-    const refLow = Math.min(...preSlice.map(b => b.low));
+    const refLevel = swings.lows.length
+      ? swings.lows.at(-1).price
+      : Math.min(...preSlice.map(b => b.low));
     for (let i = afterIndex + 1; i < bars.length; i++) {
-      if (bars[i].low < refLow) return { detected: true, mssBarIndex: i };
+      if (bars[i].close < refLevel) return { detected: true, mssBarIndex: i };
     }
   }
   return { detected: false, mssBarIndex: null };
