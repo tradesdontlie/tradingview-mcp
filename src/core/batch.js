@@ -1,8 +1,12 @@
 /**
  * Core batch execution logic.
  */
-import { evaluate, evaluateAsync, getClient, getChartApi, getChartCollection, safeString } from '../connection.js';
+import { evaluate, evaluateAsync, getClient, getChartApi, getChartCollection, safeString, KNOWN_PATHS } from '../connection.js';
 import { waitForChartReady } from '../wait.js';
+
+// Same path used by data_get_ohlcv — reads directly from chart's bar storage (no Promise, no rejection)
+const CHART_API  = 'window.TradingViewApi._activeChartWidgetWV.value()';
+const BARS_PATH  = KNOWN_PATHS ? KNOWN_PATHS.mainSeriesBars : `${CHART_API}._chartWidget.model().mainSeries().bars()`;
 import { writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -15,20 +19,15 @@ export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_co
   const delay = delay_ms || 2000;
   const results = [];
 
-  let colPath, apiPath;
-  try { colPath = await getChartCollection(); } catch {}
-  try { apiPath = await getChartApi(); } catch {}
-
   for (const symbol of symbols) {
     for (const tf of tfs) {
       const combo = { symbol, timeframe: tf };
       try {
-        if (colPath) await evaluate(`${colPath}.setSymbol(${safeString(symbol)})`);
-        else if (apiPath) await evaluate(`${apiPath}.setSymbol(${safeString(symbol)})`);
+        // Use the same stable CHART_API path that chart_set_symbol uses
+        await evaluate(`${CHART_API}.setSymbol(${safeString(symbol)})`);
 
         if (tf) {
-          if (colPath) await evaluate(`${colPath}.setResolution(${safeString(tf)})`);
-          else if (apiPath) await evaluate(`${apiPath}.setResolution(${safeString(tf)})`);
+          await evaluate(`${CHART_API}.setResolution(${safeString(tf)})`);
         }
 
         await waitForChartReady(symbol);
@@ -44,17 +43,28 @@ export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_co
           const filePath = join(SCREENSHOT_DIR, fname);
           writeFileSync(filePath, Buffer.from(data, 'base64'));
           actionResult = { file_path: filePath };
-        } else if (action === 'get_ohlcv' && apiPath) {
+        } else if (action === 'get_ohlcv') {
+          // Use direct bar storage read — same as data_get_ohlcv, no Promise rejection risk
           const limit = Math.min(ohlcv_count || 100, 500);
-          actionResult = await evaluateAsync(`
-            new Promise(function(resolve, reject) {
-              ${apiPath}.exportData({ includeTime: true, includeSeries: true, includeStudies: false })
-                .then(function(result) {
-                  var bars = (result.data || []).slice(-${limit});
-                  resolve({ bar_count: bars.length, last_bar: bars[bars.length - 1] || null });
-                }).catch(reject);
-            })
+          const raw = await evaluate(`
+            (function() {
+              var bars = ${BARS_PATH};
+              if (!bars || typeof bars.lastIndex !== 'function') return null;
+              var result = [];
+              var end = bars.lastIndex();
+              var start = Math.max(bars.firstIndex(), end - ${limit} + 1);
+              for (var i = start; i <= end; i++) {
+                var v = bars.valueAt(i);
+                if (v) result.push({ time: v[0], open: v[1], high: v[2], low: v[3], close: v[4], volume: v[5] || 0 });
+              }
+              return { bars: result, total: bars.size() };
+            })()
           `);
+          if (!raw || !raw.bars || raw.bars.length === 0) {
+            actionResult = { error: 'No bar data — chart may still be loading' };
+          } else {
+            actionResult = { bar_count: raw.bars.length, total_available: raw.total, bars: raw.bars };
+          }
         } else if (action === 'get_strategy_results') {
           await new Promise(r => setTimeout(r, 1000));
           actionResult = await evaluate(`
