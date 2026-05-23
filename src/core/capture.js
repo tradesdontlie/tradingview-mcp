@@ -23,8 +23,8 @@ function sanitiseFilename(name) {
 export async function captureScreenshot({ region, filename, method } = {}) {
   mkdirSync(SCREENSHOT_DIR, { recursive: true });
 
-  const ts = new Date().toISOString().replace(/[:.]/g, "-");
-  const fname = filename ? sanitiseFilename(filename) : `tv_${region}_${ts}`;
+  const ts = new Date().toISOString().replace(/[:.]/g, '-');
+  const fname = (filename || `tv_${region}_${ts}`).replace(/[\/\\]/g, '_');
   const filePath = join(SCREENSHOT_DIR, `${fname}.png`);
 
   if (method === "api") {

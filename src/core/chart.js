@@ -1,12 +1,21 @@
 /**
  * Core chart control logic.
  */
-import { evaluate, evaluateAsync } from '../connection.js';
-import { waitForChartReady } from '../wait.js';
+import { evaluate as _evaluate, evaluateAsync as _evaluateAsync, safeString, requireFinite } from '../connection.js';
+import { waitForChartReady as _waitForChartReady } from '../wait.js';
 
 const CHART_API = 'window.TradingViewApi._activeChartWidgetWV.value()';
 
-export async function getState() {
+function _resolve(deps) {
+  return {
+    evaluate: deps?.evaluate || _evaluate,
+    evaluateAsync: deps?.evaluateAsync || _evaluateAsync,
+    waitForChartReady: deps?.waitForChartReady || _waitForChartReady,
+  };
+}
+
+export async function getState({ _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
   const state = await evaluate(`
     (function() {
       var chart = ${CHART_API};
@@ -28,12 +37,13 @@ export async function getState() {
   return { success: true, ...state };
 }
 
-export async function setSymbol({ symbol }) {
+export async function setSymbol({ symbol, _deps }) {
+  const { evaluateAsync, waitForChartReady } = _resolve(_deps);
   await evaluateAsync(`
     (function() {
       var chart = ${CHART_API};
       return new Promise(function(resolve) {
-        chart.setSymbol('${symbol.replace(/'/g, "\\'")}', {});
+        chart.setSymbol(${safeString(symbol)}, {});
         setTimeout(resolve, 500);
       });
     })()
@@ -42,25 +52,27 @@ export async function setSymbol({ symbol }) {
   return { success: true, symbol, chart_ready: ready };
 }
 
-export async function setTimeframe({ timeframe }) {
+export async function setTimeframe({ timeframe, _deps }) {
+  const { evaluate, waitForChartReady } = _resolve(_deps);
   await evaluate(`
     (function() {
       var chart = ${CHART_API};
-      chart.setResolution('${timeframe.replace(/'/g, "\\'")}', {});
+      chart.setResolution(${safeString(timeframe)}, {});
     })()
   `);
   const ready = await waitForChartReady(null, timeframe);
   return { success: true, timeframe, chart_ready: ready };
 }
 
-export async function setType({ chart_type }) {
+export async function setType({ chart_type, _deps }) {
+  const { evaluate } = _resolve(_deps);
   const typeMap = {
     'Bars': 0, 'Candles': 1, 'Line': 2, 'Area': 3,
     'Renko': 4, 'Kagi': 5, 'PointAndFigure': 6, 'LineBreak': 7,
     'HeikinAshi': 8, 'HollowCandles': 9,
   };
   const typeNum = typeMap[chart_type] ?? Number(chart_type);
-  if (isNaN(typeNum)) {
+  if (isNaN(typeNum) || typeNum < 0 || typeNum > 9 || !Number.isInteger(typeNum)) {
     throw new Error(`Unknown chart type: ${chart_type}. Use a name (Candles, Line, etc.) or number (0-9).`);
   }
   await evaluate(`
@@ -72,7 +84,8 @@ export async function setType({ chart_type }) {
   return { success: true, chart_type, type_num: typeNum };
 }
 
-export async function manageIndicator({ action, indicator, entity_id, inputs: inputsRaw }) {
+export async function manageIndicator({ action, indicator, entity_id, inputs: inputsRaw, _deps }) {
+  const { evaluate } = _resolve(_deps);
   const inputs = inputsRaw ? (typeof inputsRaw === 'string' ? JSON.parse(inputsRaw) : inputsRaw) : undefined;
 
   if (action === 'add') {
@@ -81,7 +94,7 @@ export async function manageIndicator({ action, indicator, entity_id, inputs: in
     await evaluate(`
       (function() {
         var chart = ${CHART_API};
-        chart.createStudy('${indicator.replace(/'/g, "\\'")}', false, false, ${JSON.stringify(inputArr)});
+        chart.createStudy(${safeString(indicator)}, false, false, ${JSON.stringify(inputArr)});
       })()
     `);
     await new Promise(r => setTimeout(r, 1500));
@@ -93,7 +106,7 @@ export async function manageIndicator({ action, indicator, entity_id, inputs: in
     await evaluate(`
       (function() {
         var chart = ${CHART_API};
-        chart.removeEntity('${entity_id.replace(/'/g, "\\'")}');
+        chart.removeEntity(${safeString(entity_id)});
       })()
     `);
     return { success: true, action: 'remove', entity_id };
@@ -112,7 +125,10 @@ export async function getVisibleRange() {
   return { success: true, visible_range: result.visible_range, bars_range: result.bars_range };
 }
 
-export async function setVisibleRange({ from, to }) {
+export async function setVisibleRange({ from, to, _deps }) {
+  const { evaluate } = _resolve(_deps);
+  const f = requireFinite(from, 'from');
+  const t = requireFinite(to, 'to');
   await evaluate(`
     (function() {
       var chart = ${CHART_API};
@@ -124,8 +140,8 @@ export async function setVisibleRange({ from, to }) {
       var fromIdx = startIdx, toIdx = endIdx;
       for (var i = startIdx; i <= endIdx; i++) {
         var v = bars.valueAt(i);
-        if (v && v[0] >= ${from} && fromIdx === startIdx) fromIdx = i;
-        if (v && v[0] <= ${to}) toIdx = i;
+        if (v && v[0] >= ${f} && fromIdx === startIdx) fromIdx = i;
+        if (v && v[0] <= ${t}) toIdx = i;
       }
       ts.zoomToBarsRange(fromIdx, toIdx);
     })()
