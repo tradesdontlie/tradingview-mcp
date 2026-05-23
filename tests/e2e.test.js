@@ -142,12 +142,38 @@ describe('TradingView MCP — Full E2E (70 tools)', () => {
     it('tv_launch — auto-detect binary (verify path resolution only)', async () => {
       // tv_launch is destructive (kills TradingView), so we only test path detection
       const { existsSync } = await import('fs');
-      const paths = [
-        '/Applications/TradingView.app/Contents/MacOS/TradingView',
-        `${process.env.HOME}/Applications/TradingView.app/Contents/MacOS/TradingView`,
-      ];
-      const found = paths.some(p => existsSync(p));
-      assert.ok(found, 'TradingView binary found on disk');
+      const { execSync } = await import('child_process');
+      const pathsByPlatform = {
+        darwin: [
+          '/Applications/TradingView.app/Contents/MacOS/TradingView',
+          `${process.env.HOME}/Applications/TradingView.app/Contents/MacOS/TradingView`,
+        ],
+        win32: [
+          `${process.env.LOCALAPPDATA}\\TradingView\\TradingView.exe`,
+          `${process.env.PROGRAMFILES}\\TradingView\\TradingView.exe`,
+          `${process.env['PROGRAMFILES(X86)']}\\TradingView\\TradingView.exe`,
+        ],
+        linux: [
+          '/opt/TradingView/tradingview',
+          '/opt/TradingView/TradingView',
+          `${process.env.HOME}/.local/share/TradingView/TradingView`,
+          '/usr/bin/tradingview',
+          '/snap/tradingview/current/tradingview',
+        ],
+      };
+      const paths = pathsByPlatform[process.platform] || [];
+      let found = paths.some(p => existsSync(p));
+      // Windows also installs via the Microsoft Store as an MSIX package.
+      if (!found && process.platform === 'win32') {
+        try {
+          const out = execSync(
+            'powershell -NoProfile -Command "if (Get-AppxPackage -Name TradingView.Desktop -ErrorAction SilentlyContinue) { \'YES\' } else { \'NO\' }"',
+            { timeout: 5000 }
+          ).toString().trim();
+          if (out.includes('YES')) found = true;
+        } catch { /* ignore */ }
+      }
+      assert.ok(found, 'TradingView binary found on disk (or MSIX on Windows)');
     });
   });
 

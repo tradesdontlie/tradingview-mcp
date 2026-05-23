@@ -2,8 +2,10 @@
  * Core health/discovery/launch logic.
  */
 import { getClient, getTargetInfo, evaluate } from '../connection.js';
-import { existsSync } from 'fs';
+import { existsSync, writeFileSync, unlinkSync } from 'fs';
 import { execSync, spawn } from 'child_process';
+import { tmpdir } from 'os';
+import { join } from 'path';
 
 export async function healthCheck() {
   await getClient();
@@ -159,10 +161,100 @@ export async function uiState() {
   return { success: true, ...state };
 }
 
+async function waitForCdp(cdpPort) {
+  for (let i = 0; i < 15; i++) {
+    await new Promise(r => setTimeout(r, 1000));
+    try {
+      const http = await import('http');
+      const ready = await new Promise((resolve) => {
+        http.get(`http://localhost:${cdpPort}/json/version`, (res) => {
+          let data = '';
+          res.on('data', (chunk) => data += chunk);
+          res.on('end', () => resolve(data));
+        }).on('error', () => resolve(null));
+      });
+      if (ready) return JSON.parse(ready);
+    } catch { /* retry */ }
+  }
+  return null;
+}
+
+// Launch TradingView Desktop installed as an MSIX/Microsoft Store package.
+// The exe lives under WindowsApps (ACL-locked), so spawn() fails with EACCES.
+// IApplicationActivationManager is Windows' supported way to pass arguments
+// (here: --remote-debugging-port) to packaged apps. Returns null if not MSIX.
+export function tryLaunchMsixWindows(cdpPort, killFirst, _execSync = execSync) {
+  const ps = `
+$ErrorActionPreference = 'Stop'
+$pkg = Get-AppxPackage -Name TradingView.Desktop -ErrorAction SilentlyContinue
+if (-not $pkg) { Write-Output 'NOT_INSTALLED'; exit 0 }
+$manifest = [xml](Get-Content (Join-Path $pkg.InstallLocation 'AppxManifest.xml') -Raw)
+$appId = $manifest.Package.Applications.Application.Id
+$aumid = "$($pkg.PackageFamilyName)!$appId"
+if (${killFirst ? '$true' : '$false'}) {
+  Get-Process TradingView -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  Start-Sleep -Milliseconds 1500
+}
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+using System.Runtime.CompilerServices;
+[Guid("2e941141-7f97-4756-ba1d-9decde894a3d"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+public interface IApplicationActivationManager {
+  IntPtr ActivateApplication([In] String aumid, [In] String args, [In] int opts, [Out] out UInt32 pid);
+}
+[ComImport, Guid("45BA127D-10A8-46EA-8AB7-56EA9078943C")]
+public class ApplicationActivationManager : IApplicationActivationManager {
+  [MethodImpl(MethodImplOptions.InternalCall, MethodCodeType=MethodCodeType.Runtime)]
+  public extern IntPtr ActivateApplication([In] String aumid, [In] String args, [In] int opts, [Out] out UInt32 pid);
+}
+"@
+$mgr = New-Object ApplicationActivationManager
+$procId = 0
+[void]$mgr.ActivateApplication($aumid, "--remote-debugging-port=${cdpPort}", 0, [ref]$procId)
+Write-Output "OK $procId $aumid"
+`;
+  const scriptPath = join(tmpdir(), `tv-msix-launch-${process.pid}-${Date.now()}.ps1`);
+  writeFileSync(scriptPath, ps, 'utf8');
+  try {
+    const out = _execSync(
+      `powershell -NoProfile -ExecutionPolicy Bypass -File "${scriptPath}"`,
+      { timeout: 15000 }
+    ).toString().trim();
+    if (out.includes('NOT_INSTALLED')) return null;
+    const m = out.match(/^OK\s+(\d+)\s+(\S+)/m);
+    if (!m) return null;
+    return { pid: parseInt(m[1], 10), aumid: m[2] };
+  } catch {
+    return null;
+  } finally {
+    try { unlinkSync(scriptPath); } catch { /* ignore */ }
+  }
+}
+
 export async function launch({ port, kill_existing } = {}) {
   const cdpPort = port || 9222;
   const killFirst = kill_existing !== false;
   const platform = process.platform;
+
+  if (platform === 'win32') {
+    const msix = tryLaunchMsixWindows(cdpPort, killFirst);
+    if (msix) {
+      const info = await waitForCdp(cdpPort);
+      if (info) {
+        return {
+          success: true, platform, binary: `msix:${msix.aumid}`, pid: msix.pid,
+          cdp_port: cdpPort, cdp_url: `http://localhost:${cdpPort}`,
+          browser: info.Browser, user_agent: info['User-Agent'],
+        };
+      }
+      return {
+        success: true, platform, binary: `msix:${msix.aumid}`, pid: msix.pid,
+        cdp_port: cdpPort, cdp_ready: false,
+        warning: 'TradingView (MSIX) launched but CDP not responding yet. It may still be loading. Try tv_health_check in a few seconds.',
+      };
+    }
+  }
 
   const pathMap = {
     darwin: [
@@ -208,7 +300,10 @@ export async function launch({ port, kill_existing } = {}) {
   }
 
   if (!tvPath) {
-    throw new Error(`TradingView not found on ${platform}. Searched: ${candidates.join(', ')}. Launch manually with: /path/to/TradingView --remote-debugging-port=${cdpPort}`);
+    const hint = platform === 'win32'
+      ? ` If installed from the Microsoft Store, the MSIX detection above should have caught it — open an issue at https://github.com/tradesdontlie/tradingview-mcp/issues with the output of "Get-AppxPackage TradingView.Desktop".`
+      : '';
+    throw new Error(`TradingView not found on ${platform}. Searched: ${candidates.join(', ')}. Launch manually with: /path/to/TradingView --remote-debugging-port=${cdpPort}.${hint}`);
   }
 
   if (killFirst) {
@@ -222,26 +317,13 @@ export async function launch({ port, kill_existing } = {}) {
   const child = spawn(tvPath, [`--remote-debugging-port=${cdpPort}`], { detached: true, stdio: 'ignore' });
   child.unref();
 
-  for (let i = 0; i < 15; i++) {
-    await new Promise(r => setTimeout(r, 1000));
-    try {
-      const http = await import('http');
-      const ready = await new Promise((resolve) => {
-        http.get(`http://localhost:${cdpPort}/json/version`, (res) => {
-          let data = '';
-          res.on('data', (chunk) => data += chunk);
-          res.on('end', () => resolve(data));
-        }).on('error', () => resolve(null));
-      });
-      if (ready) {
-        const info = JSON.parse(ready);
-        return {
-          success: true, platform, binary: tvPath, pid: child.pid,
-          cdp_port: cdpPort, cdp_url: `http://localhost:${cdpPort}`,
-          browser: info.Browser, user_agent: info['User-Agent'],
-        };
-      }
-    } catch { /* retry */ }
+  const info = await waitForCdp(cdpPort);
+  if (info) {
+    return {
+      success: true, platform, binary: tvPath, pid: child.pid,
+      cdp_port: cdpPort, cdp_url: `http://localhost:${cdpPort}`,
+      browser: info.Browser, user_agent: info['User-Agent'],
+    };
   }
 
   return {
