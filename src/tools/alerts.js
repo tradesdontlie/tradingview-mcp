@@ -17,6 +17,20 @@ export function registerAlertTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
+  server.tool('alert_enable', 'Enable (restart) one or more alerts by id via pricealerts API', {
+    alert_ids: z.array(z.union([z.string(), z.number()])).min(1).describe('Array of alert_id values to enable'),
+  }, async ({ alert_ids }) => {
+    try { return jsonResult(await core.enable({ alert_ids })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('alert_disable', 'Disable (stop) one or more alerts by id via pricealerts API', {
+    alert_ids: z.array(z.union([z.string(), z.number()])).min(1).describe('Array of alert_id values to disable'),
+  }, async ({ alert_ids }) => {
+    try { return jsonResult(await core.disable({ alert_ids })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
   server.tool('alert_delete', 'Delete all alerts or open context menu for deletion', {
     delete_all: z.coerce.boolean().optional().describe('Delete all alerts'),
   }, async ({ delete_all }) => {
