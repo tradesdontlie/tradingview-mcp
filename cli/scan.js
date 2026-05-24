@@ -195,7 +195,7 @@ async function main() {
   }
 
   // ── Run engine pipeline ───────────────────────────────────────────────────
-  const engineOutputs = runEngines(ohlcvByTimeframe);
+  const engineOutputs = runEngines(ohlcvByTimeframe, undefined, rules, Date.now());
   const signal        = buildSignal({ symbol, engineOutputs, rules, timestamp: ts });
 
   const currentPrice = quote?.last ?? quote?.close ?? quote?.price ?? null;

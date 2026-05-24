@@ -58,3 +58,26 @@ export function detectReclaim(bars, sweepBarIndex, levelPrice, direction, window
   }
   return { reclaimed: false, reclaimBarIndex: null, candlesToReclaim: null };
 }
+
+/**
+ * Scans bars for the most recent (latest) sweep of a session level within a window.
+ *
+ * Searches newest-first so the most recent sweep is returned instead of the
+ * first historical one. Only considers the last `windowBars` completed bars.
+ *
+ * @param {Array<{low:number,high:number}>} bars
+ * @param {number} levelPrice
+ * @param {"low"|"high"} direction
+ * @param {number} [tolerance=0]
+ * @param {number} [windowBars=12] - look-back window in completed bars
+ * @returns {SweepResult}
+ */
+export function detectLatestSweep(bars, levelPrice, direction, tolerance = 0, windowBars = 12) {
+  const windowStart = Math.max(0, bars.length - windowBars);
+  for (let i = bars.length - 1; i >= windowStart; i--) {
+    const b = bars[i];
+    if (direction === 'low'  && b.low  < levelPrice - tolerance) return { swept: true, sweepBarIndex: i };
+    if (direction === 'high' && b.high > levelPrice + tolerance) return { swept: true, sweepBarIndex: i };
+  }
+  return { swept: false, sweepBarIndex: null };
+}
