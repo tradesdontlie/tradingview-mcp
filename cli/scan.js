@@ -26,7 +26,7 @@ import { fileURLToPath }           from 'url';
 import { join, dirname }           from 'path';
 import { McpDataProvider }         from '../data/mcpDataProvider.js';
 import { runEngines, buildSignal } from '../strategies/mtfSessionLiquidityTrap.js';
-import { validate }                from '../risk/riskManager.js';
+import { validate, checkStaleness, rejectToWait } from '../risk/riskManager.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -198,18 +198,30 @@ async function main() {
   const engineOutputs = runEngines(ohlcvByTimeframe);
   const signal        = buildSignal({ symbol, engineOutputs, rules, timestamp: ts });
 
-  // Risk validation (only meaningful for LONG/SHORT decisions)
+  const currentPrice = quote?.last ?? quote?.close ?? quote?.price ?? null;
+
+  // ── Staleness / risk validation ───────────────────────────────────────────
+  // For LONG/SHORT: check stale/chase first (requires current price), then
+  // validate against hard risk rules. Either failure converts the signal to a
+  // schema-complete WAIT — the original candidate is preserved under
+  // _meta.rejected_candidate for audit.
+  let finalSignal = signal;
+
   if (signal.decision !== 'WAIT') {
-    const { approved, rejection_reason } = validate(signal, rules);
-    if (!approved && rejection_reason) {
-      signal.reasons = [...(signal.reasons ?? []), rejection_reason];
+    const staleReason = checkStaleness(signal, currentPrice);
+    if (staleReason) {
+      finalSignal = rejectToWait(signal, staleReason, 'expired');
+    } else {
+      const { approved, rejection_reason } = validate(signal, rules);
+      if (!approved) {
+        finalSignal = rejectToWait(signal, rejection_reason ?? 'risk_validation_failed', 'pending');
+      }
     }
   }
 
-  // Attach metadata
-  const currentPrice = quote?.last ?? quote?.close ?? quote?.price ?? null;
-  signal._meta = {
-    ...(signal._meta ?? {}),
+  // Attach metadata (spread preserves _meta.rejected_candidate set by rejectToWait)
+  finalSignal._meta = {
+    ...(finalSignal._meta ?? {}),
     strategy:             rules?.strategy?.name            ?? null,
     live_trading_enabled: rules?.risk?.live_trading_enabled ?? false,
     bars_collected: {
@@ -221,7 +233,7 @@ async function main() {
     ...(currentPrice != null ? { current_price: currentPrice } : {}),
   };
 
-  emit(signal);
+  emit(finalSignal);
 }
 
 // Safety net — always emit valid JSON even on unexpected throws
