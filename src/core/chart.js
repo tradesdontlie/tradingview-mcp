@@ -116,6 +116,7 @@ export async function manageIndicator({ action, indicator, entity_id, inputs: in
 }
 
 export async function getVisibleRange() {
+  const { evaluate } = _resolve();
   const result = await evaluate(`
     (function() {
       var chart = ${CHART_API};
@@ -158,6 +159,7 @@ export async function setVisibleRange({ from, to, _deps }) {
 }
 
 export async function scrollToDate({ date }) {
+  const { evaluate } = _resolve();
   let timestamp;
   if (/^\d+$/.test(date)) timestamp = Number(date);
   else timestamp = Math.floor(new Date(date).getTime() / 1000);
@@ -197,6 +199,7 @@ export async function scrollToDate({ date }) {
 }
 
 export async function symbolInfo() {
+  const { evaluate } = _resolve();
   const result = await evaluate(`
     (function() {
       var chart = ${CHART_API};

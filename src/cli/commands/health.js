@@ -6,6 +6,11 @@ register('status', {
   handler: () => core.healthCheck(),
 });
 
+register('targets', {
+  description: 'List all TradingView CDP targets/windows',
+  handler: () => core.targets(),
+});
+
 register('launch', {
   description: 'Launch TradingView with CDP enabled',
   options: {

@@ -308,6 +308,19 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 | `layout_list` / `layout_switch` | Manage saved layouts |
 | `ui_open_panel` / `ui_click` / `ui_evaluate` | UI automation |
 | `tv_launch` / `tv_health_check` / `tv_discover` | Connection management |
+| `target_list` / `target_switch` | List and switch between TradingView Desktop CDP windows/targets |
+
+### Multiple Windows and Monitors
+
+TradingView Desktop exposes each chart window/tab as a CDP target. When you run separate chart windows across multiple monitors, MCP commands operate on the currently connected target only.
+
+- `tv_health_check` now returns `cdp_targets`, including every available target id, URL, title, chart id, and whether it is the connected target.
+- `target_list` returns the same target inventory without reading chart state.
+- `target_switch` reconnects MCP to a specific `target_id`, so follow-up tools such as `chart_get_state`, `indicator_set_inputs`, `pine_set_source`, and `pine_smart_compile` run against that window.
+- Chart, Pine, indicator, and screenshot tools also accept optional `target_id`, so you can route a single command to a specific window without changing the default target. This enables parallel commands against separate TradingView targets.
+- `tab_switch` also reconnects MCP to the activated tab target.
+
+Use this workflow for multi-monitor setups: run `target_list`, identify the left-screen chart by title or chart URL, then either pass that `target_id` to one command or call `target_switch` to make it the default for follow-up commands.
 
 ## Context Management
 
@@ -351,7 +364,7 @@ npm test
 Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  TradingView Desktop (Electron)
 ```
 
-- **Transport**: MCP over stdio (78 tools) + CLI (`tv` command, 30 commands with 66 subcommands)
+- **Transport**: MCP over stdio (80 tools) + CLI (`tv` command, 31 commands with 66 subcommands)
 - **Connection**: Chrome DevTools Protocol on localhost:9222
 - **Streaming**: Poll-and-diff loop with deduplication, JSONL output to stdout
 - **No dependencies** beyond `@modelcontextprotocol/sdk` and `chrome-remote-interface`

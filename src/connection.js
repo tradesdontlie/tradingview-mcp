@@ -1,7 +1,10 @@
 import CDP from 'chrome-remote-interface';
+import { AsyncLocalStorage } from 'node:async_hooks';
 
-let client = null;
-let targetInfo = null;
+const clients = new Map();
+const targetInfos = new Map();
+let activeTargetId = null;
+const targetContext = new AsyncLocalStorage();
 const CDP_HOST = 'localhost';
 const CDP_PORT = 9222;
 const MAX_RETRIES = 5;
@@ -47,35 +50,93 @@ export function requireFinite(value, name) {
   return n;
 }
 
-export async function getClient() {
-  if (client) {
-    try {
-      // Quick liveness check
-      await client.Runtime.evaluate({ expression: '1', returnByValue: true });
-      return client;
-    } catch {
-      client = null;
-      targetInfo = null;
-    }
-  }
-  return connect();
+function currentTargetId(explicitTargetId) {
+  return explicitTargetId || targetContext.getStore()?.targetId || activeTargetId;
 }
 
-export async function connect() {
+export function targetDeps(targetId) {
+  return {
+    evaluate: (expression, opts = {}) => evaluate(expression, { ...opts, targetId }),
+    evaluateAsync: (expression, opts = {}) => evaluate(expression, { ...opts, awaitPromise: true, targetId }),
+    getClient: () => getClient({ targetId }),
+  };
+}
+
+export async function withTarget(targetId, fn) {
+  if (!targetId) return fn();
+  return targetContext.run({ targetId }, fn);
+}
+
+export async function getClient({ targetId } = {}) {
+  const resolvedTargetId = currentTargetId(targetId);
+  const existing = resolvedTargetId ? clients.get(resolvedTargetId) : null;
+  if (existing) {
+    try {
+      // Quick liveness check
+      await existing.Runtime.evaluate({ expression: '1', returnByValue: true });
+      return existing;
+    } catch {
+      clients.delete(resolvedTargetId);
+      targetInfos.delete(resolvedTargetId);
+      if (activeTargetId === resolvedTargetId) activeTargetId = null;
+    }
+  }
+
+  if (!resolvedTargetId) {
+    const firstExisting = clients.get(activeTargetId);
+    if (firstExisting) {
+      try {
+        await firstExisting.Runtime.evaluate({ expression: '1', returnByValue: true });
+        return firstExisting;
+      } catch {
+        clients.delete(activeTargetId);
+        targetInfos.delete(activeTargetId);
+        activeTargetId = null;
+      }
+    }
+  }
+
+  // Per-command target (from withTarget) must not change the global default.
+  // Only an explicit switchTarget() should activate.
+  const fromContext = !!targetContext.getStore()?.targetId;
+  return connect({ targetId: resolvedTargetId, activate: !fromContext });
+}
+
+export async function connect({ targetId, activate = true } = {}) {
   let lastError;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
-      const target = await findChartTarget();
+      const target = targetId ? await findTargetById(targetId) : await findChartTarget();
       if (!target) {
-        throw new Error('No TradingView chart target found. Is TradingView open with a chart?');
+        throw new Error(targetId
+          ? `No CDP target found for id: ${targetId}`
+          : 'No TradingView chart target found. Is TradingView open with a chart?');
       }
-      targetInfo = target;
-      client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: target.id });
+
+      const existing = clients.get(target.id);
+      if (existing) {
+        try {
+          await existing.Runtime.evaluate({ expression: '1', returnByValue: true });
+          if (activate) activeTargetId = target.id;
+          targetInfos.set(target.id, target);
+          return existing;
+        } catch {
+          try { await existing.close(); } catch {}
+          clients.delete(target.id);
+          targetInfos.delete(target.id);
+        }
+      }
+
+      const client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: target.id });
 
       // Enable required domains
       await client.Runtime.enable();
       await client.Page.enable();
       await client.DOM.enable();
+
+      clients.set(target.id, client);
+      targetInfos.set(target.id, target);
+      if (activate) activeTargetId = target.id;
 
       return client;
     } catch (err) {
@@ -87,29 +148,61 @@ export async function connect() {
   throw new Error(`CDP connection failed after ${MAX_RETRIES} attempts: ${lastError?.message}`);
 }
 
-async function findChartTarget() {
+export async function listTargets() {
   const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
   const targets = await resp.json();
+  const contextTargetId = currentTargetId();
+  return targets.map((t, i) => ({
+    index: i,
+    id: t.id,
+    type: t.type,
+    title: t.title || '',
+    url: t.url || '',
+    chart_id: t.url?.match(/\/chart\/([^/?]+)/)?.[1] || null,
+    is_chart: t.type === 'page' && /tradingview\.com\/chart/i.test(t.url || ''),
+    is_tradingview: /tradingview/i.test(`${t.title || ''} ${t.url || ''}`),
+    connected: contextTargetId === t.id,
+    has_client: clients.has(t.id),
+  }));
+}
+
+async function findTargetById(targetId) {
+  const targets = await listTargets();
+  return targets.find(t => t.id === targetId) || null;
+}
+
+async function findChartTarget() {
+  const targets = await listTargets();
   // Prefer targets with tradingview.com/chart in the URL
   return targets.find(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
     || targets.find(t => t.type === 'page' && /tradingview/i.test(t.url))
     || null;
 }
 
-export async function getTargetInfo() {
-  if (!targetInfo) {
-    await getClient();
+export async function switchTarget(targetId) {
+  if (!targetId) throw new Error('target_id is required');
+  const c = await connect({ targetId });
+  return { client: c, target: targetInfos.get(targetId) };
+}
+
+export async function getTargetInfo({ targetId } = {}) {
+  const resolvedTargetId = currentTargetId(targetId);
+  if (resolvedTargetId && targetInfos.has(resolvedTargetId)) {
+    return targetInfos.get(resolvedTargetId);
   }
-  return targetInfo;
+  await getClient({ targetId: resolvedTargetId });
+  const current = currentTargetId(resolvedTargetId);
+  return current ? targetInfos.get(current) : null;
 }
 
 export async function evaluate(expression, opts = {}) {
-  const c = await getClient();
+  const { targetId, ...runtimeOpts } = opts;
+  const c = await getClient({ targetId });
   const result = await c.Runtime.evaluate({
     expression,
     returnByValue: true,
-    awaitPromise: opts.awaitPromise ?? false,
-    ...opts,
+    awaitPromise: runtimeOpts.awaitPromise ?? false,
+    ...runtimeOpts,
   });
   if (result.exceptionDetails) {
     const msg = result.exceptionDetails.exception?.description
@@ -120,16 +213,25 @@ export async function evaluate(expression, opts = {}) {
   return result.result?.value;
 }
 
-export async function evaluateAsync(expression) {
-  return evaluate(expression, { awaitPromise: true });
+export async function evaluateAsync(expression, opts = {}) {
+  return evaluate(expression, { ...opts, awaitPromise: true });
 }
 
-export async function disconnect() {
-  if (client) {
-    try { await client.close(); } catch {}
-    client = null;
-    targetInfo = null;
+export async function disconnect({ targetId } = {}) {
+  if (targetId) {
+    const client = clients.get(targetId);
+    if (client) try { await client.close(); } catch {}
+    clients.delete(targetId);
+    targetInfos.delete(targetId);
+    if (activeTargetId === targetId) activeTargetId = null;
+    return;
   }
+  for (const c of clients.values()) {
+    try { await c.close(); } catch {}
+  }
+  clients.clear();
+  targetInfos.clear();
+  activeTargetId = null;
 }
 
 // --- Direct API path helpers ---

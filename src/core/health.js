@@ -1,13 +1,14 @@
 /**
  * Core health/discovery/launch logic.
  */
-import { getClient, getTargetInfo, evaluate } from '../connection.js';
+import { getClient, getTargetInfo, evaluate, listTargets, switchTarget } from '../connection.js';
 import { existsSync } from 'fs';
 import { execSync, spawn } from 'child_process';
 
 export async function healthCheck() {
   await getClient();
   const target = await getTargetInfo();
+  const targets = await listTargets();
 
   const state = await evaluate(`
     (function() {
@@ -39,6 +40,30 @@ export async function healthCheck() {
     chart_resolution: state?.resolution || 'unknown',
     chart_type: state?.chartType ?? null,
     api_available: state?.apiAvailable ?? false,
+    cdp_target_count: targets.length,
+    cdp_targets: targets,
+  };
+}
+
+export async function targets() {
+  const allTargets = await listTargets();
+  return {
+    success: true,
+    target_count: allTargets.length,
+    chart_target_count: allTargets.filter(t => t.is_chart).length,
+    targets: allTargets,
+  };
+}
+
+export async function targetSwitch({ target_id }) {
+  const { target } = await switchTarget(target_id);
+  return {
+    success: true,
+    action: 'target_switched',
+    target_id: target.id,
+    target_url: target.url,
+    target_title: target.title,
+    chart_id: target.chart_id ?? null,
   };
 }
 
