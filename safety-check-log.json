@@ -1,0 +1,198 @@
+[
+  {
+    "timestamp": "2026-04-07T00:00:00Z",
+    "symbol": "BINANCE:BTCUSDT",
+    "timeframe": "4H",
+    "indicators": {
+      "price": 68334.79,
+      "ema_21": 68314.99,
+      "ema_50": 67981.18,
+      "ema_200": 69116.13,
+      "rsi_14": 51.95,
+      "macd_line": 385.87,
+      "signal_line": 421.52,
+      "macd_histogram": -35.65
+    },
+    "conditions": {
+      "price_above_ema200": {
+        "required": true,
+        "actual": false,
+        "result": "FAIL"
+      },
+      "ema21_above_ema50": {
+        "required": true,
+        "actual": true,
+        "result": "PASS"
+      },
+      "price_in_ema21_50_zone": {
+        "required": true,
+        "actual": false,
+        "result": "FAIL"
+      },
+      "rsi_35_to_58": {
+        "required": true,
+        "actual": true,
+        "result": "PASS"
+      },
+      "macd_above_signal": {
+        "required": true,
+        "actual": false,
+        "result": "FAIL"
+      }
+    },
+    "verdict": "BLOCKED",
+    "blocked_reasons": [
+      "Price below EMA 200 (68334 < 69116) — no longs against macro trend",
+      "Price above EMA 21-50 zone — no pullback entry available",
+      "MACD bearish (385.87 < 421.52) — momentum fading"
+    ],
+    "orderPlaced": false
+  },
+  {
+    "tick": 1,
+    "timestamp": "2026-04-07T14:41:41.675Z",
+    "price": 1.3001,
+    "side": "buy",
+    "size": "7.0745",
+    "label": "BUY XRP with $7.0745 USDT",
+    "orderId": "1425421555869495297",
+    "orderPlaced": true,
+    "response": {
+      "code": "00000",
+      "msg": "success",
+      "requestTime": 1775572902637,
+      "data": {
+        "orderId": "1425421555869495297",
+        "clientOid": "cee1fed1-1b60-466e-9583-a7db21f82711"
+      }
+    }
+  },
+  {
+    "tick": 2,
+    "timestamp": "2026-04-07T14:41:52.759Z",
+    "price": 1.3,
+    "side": "sell",
+    "size": "5.4361",
+    "label": "SELL 5.4361 XRP → USDT",
+    "orderId": "0.0001111305XRP can be used at most",
+    "orderPlaced": false,
+    "response": {
+      "code": "12001",
+      "msg": "0.0001111305XRP can be used at most",
+      "requestTime": 1775572913620,
+      "data": null
+    }
+  },
+  {
+    "tick": 3,
+    "timestamp": "2026-04-07T14:42:03.718Z",
+    "price": 1.2998,
+    "side": "sell",
+    "size": "5.4361",
+    "label": "SELL 5.4361 XRP → USDT",
+    "orderId": "0.0001111305XRP can be used at most",
+    "orderPlaced": false,
+    "response": {
+      "code": "12001",
+      "msg": "0.0001111305XRP can be used at most",
+      "requestTime": 1775572924541,
+      "data": null
+    }
+  },
+  {
+    "tick": 4,
+    "timestamp": "2026-04-07T14:42:14.707Z",
+    "price": 1.2998,
+    "side": "sell",
+    "size": "5.4361",
+    "label": "SELL 5.4361 XRP → USDT",
+    "orderId": "0.0001111305XRP can be used at most",
+    "orderPlaced": false,
+    "response": {
+      "code": "12001",
+      "msg": "0.0001111305XRP can be used at most",
+      "requestTime": 1775572935517,
+      "data": null
+    }
+  },
+  {
+    "tick": 5,
+    "timestamp": "2026-04-07T14:42:25.619Z",
+    "price": 1.2999,
+    "side": "sell",
+    "size": "5.4361",
+    "label": "SELL 5.4361 XRP → USDT",
+    "orderId": "0.0001111305XRP can be used at most",
+    "orderPlaced": false,
+    "response": {
+      "code": "12001",
+      "msg": "0.0001111305XRP can be used at most",
+      "requestTime": 1775572946426,
+      "data": null
+    }
+  },
+  {
+    "tick": 6,
+    "timestamp": "2026-04-07T14:42:36.533Z",
+    "price": 1.2999,
+    "side": "sell",
+    "size": "5.4361",
+    "label": "SELL 5.4361 XRP → USDT",
+    "orderId": "0.0001111305XRP can be used at most",
+    "orderPlaced": false,
+    "response": {
+      "code": "12001",
+      "msg": "0.0001111305XRP can be used at most",
+      "requestTime": 1775572957307,
+      "data": null
+    }
+  },
+  {
+    "tick": 1,
+    "timestamp": "2026-04-07T14:44:05.883Z",
+    "price": 1.2991,
+    "side": "skip",
+    "reason": "balance too low",
+    "orderPlaced": false
+  },
+  {
+    "tick": 2,
+    "timestamp": "2026-04-07T14:44:16.746Z",
+    "price": 1.2991,
+    "side": "skip",
+    "reason": "balance too low",
+    "orderPlaced": false
+  },
+  {
+    "tick": 3,
+    "timestamp": "2026-04-07T14:44:27.448Z",
+    "price": 1.2996,
+    "side": "skip",
+    "reason": "balance too low",
+    "orderPlaced": false
+  },
+  {
+    "tick": 4,
+    "timestamp": "2026-04-07T14:44:38.140Z",
+    "price": 1.2991,
+    "side": "skip",
+    "reason": "balance too low",
+    "orderPlaced": false
+  },
+  {
+    "tick": 5,
+    "timestamp": "2026-04-07T14:44:48.846Z",
+    "price": 1.2991,
+    "side": "skip",
+    "reason": "balance too low",
+    "orderPlaced": false
+  },
+  {
+    "tick": 6,
+    "timestamp": "2026-04-07T14:44:59.488Z",
+    "price": 1.299,
+    "side": "skip",
+    "reason": "balance too low",
+    "orderPlaced": false
+  }
+]

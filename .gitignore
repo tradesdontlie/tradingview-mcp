@@ -4,3 +4,11 @@ scripts/current.pine
 temp_*
 *.log
 discovery-log.json
+
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+
+# Install-time symlink created by the one-shot setup
+AGENTS.md

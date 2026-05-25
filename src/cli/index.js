@@ -10,22 +10,23 @@
  */
 
 // Register all commands
-import './commands/health.js';
-import './commands/chart.js';
-import './commands/data.js';
-import './commands/pine.js';
-import './commands/capture.js';
-import './commands/replay.js';
-import './commands/drawing.js';
-import './commands/alerts.js';
-import './commands/watchlist.js';
-import './commands/layout.js';
-import './commands/indicator.js';
-import './commands/ui.js';
-import './commands/pane.js';
-import './commands/tab.js';
-import './commands/stream.js';
+import "./commands/health.js";
+import "./commands/chart.js";
+import "./commands/data.js";
+import "./commands/pine.js";
+import "./commands/capture.js";
+import "./commands/replay.js";
+import "./commands/drawing.js";
+import "./commands/alerts.js";
+import "./commands/watchlist.js";
+import "./commands/layout.js";
+import "./commands/indicator.js";
+import "./commands/ui.js";
+import "./commands/pane.js";
+import "./commands/tab.js";
+import "./commands/stream.js";
+import "./commands/morning.js";
 
 // Run
-import { run } from './router.js';
+import { run } from "./router.js";
 await run(process.argv);

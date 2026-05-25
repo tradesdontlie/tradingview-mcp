@@ -1,0 +1,223 @@
+{
+  "strategy": {
+    "name": "MTF Session Liquidity Trap Scalper",
+    "version": "0.1",
+    "status": "research",
+    "description": "Multi-timeframe session liquidity sweep + reclaim + MSS signal copilot for MNQ/MES. Manual execution only. No live broker integration."
+  },
+
+  "symbols": {
+    "primary": ["MNQ1!", "MES1!"],
+    "full_size_reference": ["NQ1!", "ES1!"],
+    "note": "Validate on MNQ first. MES second. Full-size only after extensive MNQ walk-forward validation."
+  },
+
+  "timeframes": {
+    "macro_bias": "240",
+    "session_context": "60",
+    "setup": "15",
+    "execution": "5",
+    "trigger": "1",
+    "note": "4H sets regime. 1H grants session permission. 15m identifies setup. 5m confirms entry. 1m is optional microscalp refinement only — never used alone."
+  },
+
+  "risk": {
+    "live_trading_enabled": false,
+    "max_trades_per_day": 3,
+    "max_daily_loss_r": 2,
+    "min_reward_risk": 1.5,
+    "signal_expiry_candles": 3,
+    "max_stop_ticks": {
+      "MNQ1!": 40,
+      "MES1!": 40,
+      "note": "MNQ tick = $0.50, MES tick = $1.25. Reject if stop exceeds this width."
+    },
+    "no_averaging_down": true,
+    "require_stop_before_signal": true,
+    "require_target_before_signal": true
+  },
+
+  "news_lockout": {
+    "enabled": true,
+    "minutes_before_release": 5,
+    "minutes_after_release": 2,
+    "events": [
+      "NFP",
+      "CPI",
+      "FOMC",
+      "GDP",
+      "PCE",
+      "PPI",
+      "Jobless Claims",
+      "Retail Sales",
+      "ISM",
+      "PMI",
+      "FOMC Minutes",
+      "Fed Chair Speech"
+    ]
+  },
+
+  "session_levels": {
+    "required": [
+      "asia_high",
+      "asia_low",
+      "london_high",
+      "london_low",
+      "ny_open_range_high",
+      "ny_open_range_low",
+      "prior_day_high",
+      "prior_day_low"
+    ],
+    "optional": [
+      "asia_poc",
+      "london_poc",
+      "session_vwap",
+      "fixed_range_vah",
+      "fixed_range_val",
+      "fixed_range_poc"
+    ]
+  },
+
+  "setup_requirements": {
+    "long": {
+      "htf_bias_required": ["bullish", "neutral_bullish"],
+      "timeframes_must_align": ["4H", "1H", "15m"],
+      "sweep_targets": [
+        "asia_low",
+        "london_low",
+        "prior_day_low",
+        "ny_open_range_low"
+      ],
+      "reclaim_candle_window": 5,
+      "execution_confirmations": [
+        "5m_bullish_mss_or_choch",
+        "displacement_candle_with_volume"
+      ],
+      "entry_types": [
+        "fvg_retest",
+        "ifvg_retest",
+        "poc_reclaim",
+        "structure_retest"
+      ],
+      "stop_placement": "below_sweep_low",
+      "tp1_minimum_r": 1.5,
+      "tp2": "next_liquidity_or_session_extreme"
+    },
+    "short": {
+      "htf_bias_required": ["bearish", "neutral_bearish"],
+      "timeframes_must_align": ["4H", "1H", "15m"],
+      "sweep_targets": [
+        "asia_high",
+        "london_high",
+        "prior_day_high",
+        "ny_open_range_high"
+      ],
+      "reclaim_candle_window": 5,
+      "execution_confirmations": [
+        "5m_bearish_mss_or_choch",
+        "displacement_candle_with_volume"
+      ],
+      "entry_types": [
+        "fvg_retest",
+        "ifvg_retest",
+        "poc_rejection",
+        "structure_retest"
+      ],
+      "stop_placement": "above_sweep_high",
+      "tp1_minimum_r": 1.5,
+      "tp2": "next_liquidity_or_session_extreme"
+    }
+  },
+
+  "confidence_grades": {
+    "A+": {
+      "conditions": [
+        "4H_1H_15m_all_aligned",
+        "clean_wick_sweep",
+        "strong_reclaim_within_3_candles",
+        "confirmed_5m_mss",
+        "volume_expansion_on_displacement",
+        "clean_fvg_or_poc_at_entry"
+      ],
+      "description": "All confluences present. Highest conviction. Full standard size."
+    },
+    "A": {
+      "conditions": [
+        "4H_1H_aligned",
+        "sweep_confirmed",
+        "reclaim_confirmed",
+        "5m_mss_confirmed"
+      ],
+      "missing_allowed": "One minor confluence (FVG/POC or volume).",
+      "description": "Strong setup. One minor confluence missing. Standard size."
+    },
+    "B": {
+      "conditions": [
+        "2_of_3_htf_aligned",
+        "sweep_confirmed",
+        "reclaim_confirmed"
+      ],
+      "missing_allowed": "Volume expansion or FVG/POC context.",
+      "description": "Acceptable setup. Reduce size. Monitor closely."
+    },
+    "C": {
+      "conditions": [
+        "sweep_confirmed",
+        "partial_reclaim"
+      ],
+      "description": "Weak setup. Log and skip or paper trade only. No live execution."
+    },
+    "Reject": {
+      "conditions": [
+        "htf_bias_conflict",
+        "no_sweep_present",
+        "no_reclaim",
+        "reclaim_window_expired",
+        "no_5m_mss",
+        "stop_too_wide",
+        "r_below_1.5",
+        "news_lockout_active",
+        "signal_expired_3_candles",
+        "duplicate_active_signal"
+      ],
+      "description": "Hard reject. Do not take. Log rejection reason for review."
+    }
+  },
+
+  "output": {
+    "format": "LONG / SHORT / WAIT",
+    "required_fields": [
+      "Decision",
+      "Symbol",
+      "Timeframe",
+      "Bias",
+      "Setup",
+      "Entry",
+      "Stop",
+      "TP1",
+      "TP2",
+      "R",
+      "Confidence",
+      "Reasons",
+      "Invalidation",
+      "What would change decision"
+    ],
+    "auto_execution": false,
+    "note": "Signal is for manual execution only. Bot outputs LONG/SHORT/WAIT. Human decides to execute."
+  },
+
+  "validation": {
+    "workflow": ["Research", "Backtest", "Incubate"],
+    "min_trades_before_paper_trading": 100,
+    "backtest_rules": [
+      "no_lookahead_bias",
+      "no_same_bar_impossible_fills",
+      "include_commission_and_slippage",
+      "out_of_sample_walk_forward_split",
+      "no_single_day_creates_majority_of_profit"
+    ],
+    "paper_trade_weeks_before_live": 4,
+    "primary_instrument": "MNQ1!",
+    "secondary_instrument": "MES1!"
+  }
+}

@@ -127,3 +127,13 @@ Claude Code ←→ MCP Server (stdio) ←→ CDP (localhost:9222) ←→ Trading
 ```
 
 Pine graphics path: `study._graphics._primitivesCollection.dwglines.get('lines').get(false)._primitivesDataById`
+
+## Futures AI Copilot Operating Rules
+
+- Be concise.
+- Use data-first, visual-second. Prefer MCP OHLCV / quote / Pine objects over screenshots.
+- Screenshots are confirmation only — never the primary signal source.
+- Never auto-execute trades. Output LONG / SHORT / WAIT for manual execution only.
+- Never edit `src/` without explicit user permission.
+- Keep all trading outputs in the required compact signal format (Decision / Symbol / Timeframe / Bias / Setup / Entry / Stop / TP1 / TP2 / R / Confidence / Reasons / Invalidation / What would change decision).
+- After any chart symbol, timeframe, or layout change — verify scaling is correct before starting analysis.

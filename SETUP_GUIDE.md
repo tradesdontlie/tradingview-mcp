@@ -5,14 +5,24 @@ This file is a step-by-step guide for Claude Code (or any LLM agent) to install 
 ## Step 1: Clone and Install
 
 ```bash
-git clone https://github.com/tradesdontlie/tradingview-mcp.git ~/tradingview-mcp
-cd ~/tradingview-mcp
+git clone https://github.com/LewisWJackson/tradingview-mcp-jackson.git ~/tradingview-mcp-jackson
+cd ~/tradingview-mcp-jackson
 npm install
 ```
 
-If the user specifies a different install path, use that instead of `~/tradingview-mcp`.
+If the user specifies a different install path, use that instead of `~/tradingview-mcp-jackson`.
 
-## Step 2: Add to MCP Config
+## Step 2: Set Up Rules
+
+Copy the example rules file and open it for the user to fill in:
+
+```bash
+cp ~/tradingview-mcp-jackson/rules.example.json ~/tradingview-mcp-jackson/rules.json
+```
+
+Tell the user: "Open `rules.json` and fill in your watchlist (the symbols you trade), your bias criteria (what makes something bullish/bearish for you), and your risk rules. This is what the morning brief uses every day."
+
+## Step 3: Add to MCP Config
 
 Add the server to the user's Claude Code MCP configuration. The config file is at `~/.claude/.mcp.json` (global) or `.mcp.json` (project-level).
 
@@ -21,17 +31,17 @@ Add the server to the user's Claude Code MCP configuration. The config file is a
   "mcpServers": {
     "tradingview": {
       "command": "node",
-      "args": ["<INSTALL_PATH>/src/server.js"]
+      "args": ["/Users/YOUR_USERNAME/tradingview-mcp-jackson/src/server.js"]
     }
   }
 }
 ```
 
-Replace `<INSTALL_PATH>` with the actual path where the repo was cloned (e.g., `/Users/username/tradingview-mcp`).
+Replace `YOUR_USERNAME` with the user's actual system username. Run `echo $USER` (Mac/Linux) or `echo %USERNAME%` (Windows) to find it.
 
 If the config file already exists and has other servers, merge the `tradingview` entry into the existing `mcpServers` object. Do not overwrite other servers.
 
-## Step 3: Launch TradingView Desktop
+## Step 4: Launch TradingView Desktop
 
 TradingView Desktop must be running with Chrome DevTools Protocol enabled.
 
@@ -56,7 +66,7 @@ Linux:
 # or: tradingview --remote-debugging-port=9222
 ```
 
-## Step 4: Restart Claude Code
+## Step 5: Restart Claude Code
 
 The MCP server only loads when Claude Code starts. After adding the config:
 
@@ -64,7 +74,7 @@ The MCP server only loads when Claude Code starts. After adding the config:
 2. Relaunch Claude Code
 3. The tradingview MCP server should connect automatically
 
-## Step 5: Verify Connection
+## Step 6: Verify Connection
 
 Use the `tv_health_check` tool. Expected response:
 
@@ -79,12 +89,22 @@ Use the `tv_health_check` tool. Expected response:
 
 If `cdp_connected: false`, TradingView is not running with `--remote-debugging-port=9222`.
 
-## Step 6: Install CLI (Optional)
+## Step 7: Run Your First Morning Brief
+
+Ask Claude: *"Run morning_brief and give me my session bias"*
+
+Claude will scan your watchlist, read your indicators, apply your `rules.json` criteria, and print your bias for each symbol.
+
+To save it: *"Save this brief using session_save"*
+
+To retrieve tomorrow: *"Get yesterday's session using session_get"*
+
+## Step 8: Install CLI (Optional)
 
 To use the `tv` CLI command globally:
 
 ```bash
-cd ~/tradingview-mcp
+cd ~/tradingview-mcp-jackson
 npm link
 ```
 
@@ -103,6 +123,7 @@ Then `tv status`, `tv quote`, `tv pine compile`, etc. work from anywhere.
 
 ## What to Read Next
 
+- `rules.json` — Your personal trading rules (fill this in before using morning_brief)
 - `CLAUDE.md` — Decision tree for which tool to use when (auto-loaded by Claude Code)
-- `README.md` — Full tool reference (78 MCP tools, 30 CLI commands)
+- `README.md` — Full tool reference including morning brief workflow
 - `RESEARCH.md` — Research context and open questions
