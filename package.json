@@ -25,6 +25,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
     "chrome-remote-interface": "^0.33.2",
+    "rss-parser": "^3.13.0",
     "yahoo-finance2": "^3.14.1"
   }
 }
