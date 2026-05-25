@@ -6,7 +6,7 @@
 // MCP resource publishing for live push is left to a follow-up commit
 // (server-push needs MCP 2025-06 resource subscription support in the SDK).
 
-import { appendFileSync, mkdirSync } from 'node:fs';
+import { appendFile, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { evaluateRule, validateRule } from './dsl.js';
@@ -29,9 +29,9 @@ function ensureDir() {
 
 function persist(entry) {
   ensureDir();
-  try {
-    appendFileSync(SIGNAL_LOG, JSON.stringify(entry) + '\n');
-  } catch { /* skip persistence failure */ }
+  appendFile(SIGNAL_LOG, JSON.stringify(entry) + '\n', () => {
+    // Swallow IO error — persistence is best-effort. Active list still tracks.
+  });
 }
 
 function tick() {

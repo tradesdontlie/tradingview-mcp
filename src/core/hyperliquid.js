@@ -75,12 +75,12 @@ export async function getTicker(coin) {
   const ctx = ctxs[idx] || {};
   return {
     coin,
-    mark_price: Number(ctx.markPx ?? 'NaN'),
-    oracle_price: Number(ctx.oraclePx ?? 'NaN'),
-    funding: Number(ctx.funding ?? 'NaN'),
-    open_interest: Number(ctx.openInterest ?? 'NaN'),
-    day_volume: Number(ctx.dayNtlVlm ?? 'NaN'),
-    prev_day_px: Number(ctx.prevDayPx ?? 'NaN'),
+    mark_price: (ctx.markPx != null ? Number(ctx.markPx) : null),
+    oracle_price: (ctx.oraclePx != null ? Number(ctx.oraclePx) : null),
+    funding: (ctx.funding != null ? Number(ctx.funding) : null),
+    open_interest: (ctx.openInterest != null ? Number(ctx.openInterest) : null),
+    day_volume: (ctx.dayNtlVlm != null ? Number(ctx.dayNtlVlm) : null),
+    prev_day_px: (ctx.prevDayPx != null ? Number(ctx.prevDayPx) : null),
     impact_pxs: ctx.impactPxs,
     timestamp: new Date().toISOString(),
   };

@@ -80,11 +80,11 @@ export function registerHyperliquidTools(server) {
         const [meta, ctxs] = r;
         const rows = (meta?.universe || []).map((u, i) => ({
           coin: u.name,
-          mark_price: Number(ctxs[i]?.markPx ?? 'NaN'),
-          oracle_price: Number(ctxs[i]?.oraclePx ?? 'NaN'),
-          funding: Number(ctxs[i]?.funding ?? 'NaN'),
-          open_interest: Number(ctxs[i]?.openInterest ?? 'NaN'),
-          day_volume: Number(ctxs[i]?.dayNtlVlm ?? 'NaN'),
+          mark_price: ctxs[i]?.markPx != null ? Number(ctxs[i].markPx) : null,
+          oracle_price: ctxs[i]?.oraclePx != null ? Number(ctxs[i].oraclePx) : null,
+          funding: ctxs[i]?.funding != null ? Number(ctxs[i].funding) : null,
+          open_interest: ctxs[i]?.openInterest != null ? Number(ctxs[i].openInterest) : null,
+          day_volume: ctxs[i]?.dayNtlVlm != null ? Number(ctxs[i].dayNtlVlm) : null,
         }));
         return jsonResult({ count: rows.length, rows });
       } catch (err) {

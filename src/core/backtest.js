@@ -134,6 +134,7 @@ function simulate({ bars, signals, initial_capital = 10_000, commission_pct = 0.
   let cash = initial_capital;
   let position = 0;
   let entryPrice = null;
+  let entryDate = null;
   const trades = [];
   const equityCurve = [];
 
@@ -149,13 +150,14 @@ function simulate({ bars, signals, initial_capital = 10_000, commission_pct = 0.
       if (position > 0) {
         cash -= position * fillPrice * (1 + c);
         entryPrice = fillPrice;
+        entryDate = bar.date.toISOString().slice(0, 10);
       }
     } else if (sig === -1 && position > 0) {
       const fillPrice = bar.close * (1 - s);
       const proceeds = position * fillPrice * (1 - c);
       cash += proceeds;
       trades.push({
-        entry_date: trades.length > 0 ? null : null, // best-effort, dates omitted for brevity
+        entry_date: entryDate,
         entry_price: entryPrice,
         exit_date: bar.date.toISOString().slice(0, 10),
         exit_price: fillPrice,
@@ -164,6 +166,7 @@ function simulate({ bars, signals, initial_capital = 10_000, commission_pct = 0.
       });
       position = 0;
       entryPrice = null;
+      entryDate = null;
     }
     const equity = cash + position * bar.close;
     equityCurve.push({ date: bar.date.toISOString().slice(0, 10), equity });
@@ -176,6 +179,7 @@ function simulate({ bars, signals, initial_capital = 10_000, commission_pct = 0.
     const proceeds = position * fillPrice * (1 - c);
     cash += proceeds;
     trades.push({
+      entry_date: entryDate,
       entry_price: entryPrice,
       exit_date: last.date.toISOString().slice(0, 10),
       exit_price: fillPrice,
@@ -184,6 +188,7 @@ function simulate({ bars, signals, initial_capital = 10_000, commission_pct = 0.
       forced_close: true,
     });
     position = 0;
+    entryDate = null;
   }
 
   const totalReturnPct = ((cash - initial_capital) / initial_capital) * 100;

@@ -6,20 +6,29 @@ import { get, requireKeys } from '../secrets.js';
 
 const BASE = 'https://api.upstox.com/v2';
 
+const TIMEOUT_MS = 15_000;
+
 async function authed(path) {
   const { UPSTOX_ACCESS_TOKEN } = requireKeys(['UPSTOX_ACCESS_TOKEN']);
-  const r = await fetch(`${BASE}${path}`, {
-    headers: {
-      Authorization: `Bearer ${UPSTOX_ACCESS_TOKEN}`,
-      Accept: 'application/json',
-    },
-  });
-  if (!r.ok) {
-    let detail = '';
-    try { detail = await r.text(); } catch {}
-    throw new Error(`Upstox ${r.status}: ${detail.slice(0, 200)}`);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+  try {
+    const r = await fetch(`${BASE}${path}`, {
+      headers: {
+        Authorization: `Bearer ${UPSTOX_ACCESS_TOKEN}`,
+        Accept: 'application/json',
+      },
+      signal: ctrl.signal,
+    });
+    if (!r.ok) {
+      let detail = '';
+      try { detail = await r.text(); } catch {}
+      throw new Error(`Upstox ${r.status}: ${detail.slice(0, 200)}`);
+    }
+    return r.json();
+  } finally {
+    clearTimeout(timer);
   }
-  return r.json();
 }
 
 export async function holdings() { return authed('/portfolio/long-term-holdings'); }

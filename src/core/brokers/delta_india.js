@@ -4,8 +4,20 @@
 import crypto from 'node:crypto';
 import { get, requireKeys } from '../secrets.js';
 
+const TIMEOUT_MS = 15_000;
+
 function baseUrl() {
   return get('DELTA_INDIA_BASE_URL') || 'https://api.india.delta.exchange';
+}
+
+async function withTimeout(promiseFn) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+  try {
+    return await promiseFn(ctrl.signal);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function sign(secret, payload) {
@@ -25,26 +37,31 @@ async function signedGet(pathAndQuery) {
   const payload = 'GET' + ts + requestPath + queryString + '';
   const signature = sign(DELTA_INDIA_API_SECRET, payload);
 
-  const r = await fetch(url.toString(), {
-    headers: {
-      'api-key': DELTA_INDIA_API_KEY,
-      timestamp: ts,
-      signature,
-      Accept: 'application/json',
-    },
+  return withTimeout(async (signal) => {
+    const r = await fetch(url.toString(), {
+      headers: {
+        'api-key': DELTA_INDIA_API_KEY,
+        timestamp: ts,
+        signature,
+        Accept: 'application/json',
+      },
+      signal,
+    });
+    if (!r.ok) {
+      let detail = '';
+      try { detail = await r.text(); } catch {}
+      throw new Error(`Delta India ${r.status}: ${detail.slice(0, 200)}`);
+    }
+    return r.json();
   });
-  if (!r.ok) {
-    let detail = '';
-    try { detail = await r.text(); } catch {}
-    throw new Error(`Delta India ${r.status}: ${detail.slice(0, 200)}`);
-  }
-  return r.json();
 }
 
 async function publicGet(pathAndQuery) {
-  const r = await fetch(new URL(pathAndQuery, baseUrl()));
-  if (!r.ok) throw new Error(`Delta India ${r.status}`);
-  return r.json();
+  return withTimeout(async (signal) => {
+    const r = await fetch(new URL(pathAndQuery, baseUrl()), { signal });
+    if (!r.ok) throw new Error(`Delta India ${r.status}`);
+    return r.json();
+  });
 }
 
 export async function products() { return publicGet('/v2/products'); }
