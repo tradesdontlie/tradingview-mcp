@@ -38,6 +38,24 @@ export function registerSnapshotTools(server) {
   );
 
   server.tool(
+    'stock_options_unusual_activity',
+    'Rank options contracts by today volume / standing open-interest ratio across the soonest N expirations. Flags strikes where today V is a multiple of OI — classic institutional positioning signal. Filters illiquid noise via min_volume. Returns top_n unusual contracts with V/OI, IV, strike-vs-spot %, plus aggregate put/call totals.',
+    {
+      symbol: z.string().describe('US stock symbol'),
+      top_n: z.number().int().min(1).max(50).default(10).describe('How many top strikes to return'),
+      min_volume: z.number().int().min(1).default(100).describe('Min volume floor to filter illiquid noise'),
+      expiries: z.number().int().min(1).max(10).default(4).describe('How many soonest expirations to scan'),
+    },
+    async ({ symbol, top_n, min_volume, expiries }) => {
+      try {
+        return jsonResult(await options.getUnusualOptionsActivity(symbol, { top_n, min_volume, expiries }));
+      } catch (err) {
+        return jsonResult({ success: false, error: err.message }, true);
+      }
+    }
+  );
+
+  server.tool(
     'stock_options_chain',
     'Full options chain (calls + puts) for a US stock symbol and one expiry. If expiry omitted, uses the nearest. Each contract: strike, last, bid, ask, volume, open_interest, IV, in_the_money, expiration.',
     {

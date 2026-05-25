@@ -36,6 +36,18 @@ test('getPrice — invalid symbol returns error block, not throws', async () => 
   assert.ok('error' in result || result.price == null);
 });
 
+test('getUnusualOptionsActivity — ranks contracts by V/OI for AAPL', async () => {
+  const result = await options.getUnusualOptionsActivity('AAPL', { top_n: 5, min_volume: 50, expiries: 2 });
+  assert.equal(result.symbol, 'AAPL');
+  if (!result.error) {
+    assert.ok(Array.isArray(result.unusual));
+    assert.ok(Array.isArray(result.expiries_scanned));
+    if (result.unusual.length > 1) {
+      assert.ok(result.unusual[0].v_oi_ratio >= result.unusual[1].v_oi_ratio, 'sorted desc by v_oi_ratio');
+    }
+  }
+});
+
 test('getOptionsChain — returns chain shape for AAPL', async () => {
   const result = await options.getOptionsChain('AAPL');
   assert.equal(result.symbol, 'AAPL');
