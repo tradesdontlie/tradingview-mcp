@@ -1024,65 +1024,164 @@ export async function deployStrategy({ source, name, replace_existing = true, wa
     };
   }
 
-  // 1. Inject source
-  const escaped = JSON.stringify(source);
-  const set = await evaluate(`(function(){var m=${FIND_MONACO};if(!m)return false;m.editor.setValue(${escaped});return true;})()`);
-  if (!set) throw new Error('Monaco editor not found. Open Pine Editor first.');
-
-  // 2. Save with name (handles Save Script modal)
-  await new Promise(r => setTimeout(r, 400));
-  const saved = await saveAs({ name });
-
-  // 3. Click Add to chart (or Update on chart if replace_existing and a same-name study exists)
-  const studiesBefore = await _countStudies();
-  const clicked = await evaluate(`
-    (function() {
-      var norm = ${NORM};
-      var btns = document.querySelectorAll('button');
-      var addBtn = null, updBtn = null;
-      for (var i = 0; i < btns.length; i++) {
-        if (btns[i].offsetParent === null) continue;
-        var text = norm(btns[i].textContent);
-        if (!addBtn && /^add to chart$/i.test(text)) addBtn = btns[i];
-        if (!updBtn && /^update on chart$/i.test(text)) updBtn = btns[i];
-      }
-      var pick = (${replace_existing ? 'updBtn || addBtn' : 'addBtn || updBtn'});
-      if (pick) { pick.click(); return norm(pick.textContent); }
-      return null;
-    })()
-  `);
-
-  // 4. Wait for the study to appear on the chart
-  const deadline = Date.now() + wait_ms;
+  // C8 / A1-F8 / A2-F2: track step state so we can return rich diagnostics on
+  // partial failure (instead of a generic success:false the operator session
+  // had to debug with 3+ follow-up tool calls — CC TV MCP.txt:277-292).
+  let step_completed = null;
+  let step_failed = null;
+  let saved = null;
+  let clicked = null;
   let studyId = null;
-  while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, 250));
-    const studies = await evaluate(`
-      (function() {
-        try { return window.TradingViewApi._activeChartWidgetWV.value().getAllStudies().map(function(s){return {id:s.id,name:s.name||s.title||''};}); }
-        catch(e) { return []; }
-      })()
-    `);
-    if (Array.isArray(studies) && studies.length > (studiesBefore || 0)) {
-      const match = studies.find(s => s.name && s.name.toLowerCase().includes(String(name).toLowerCase().slice(0, 20)));
-      studyId = (match && match.id) || studies[studies.length - 1]?.id || null;
-      break;
+  let compile_errors = [];
+  let ui_diagnostic = null;
+
+  try {
+    // 1. Inject source
+    const escaped = JSON.stringify(source);
+    const set = await evaluate(`(function(){var m=${FIND_MONACO};if(!m)return false;m.editor.setValue(${escaped});return true;})()`);
+    if (!set) {
+      step_failed = 'set_source';
+      ui_diagnostic = 'Monaco editor not found in DOM. Open Pine Editor (bottom panel) first.';
+    } else {
+      step_completed = 'set_source';
     }
+
+    // 2. Save with name (handles Save Script modal)
+    if (!step_failed) {
+      await new Promise(r => setTimeout(r, 400));
+      try {
+        saved = await saveAs({ name });
+        if (saved && saved.success === false) {
+          step_failed = 'save';
+          ui_diagnostic = `saveAs returned error: ${saved.detail?.error || 'unknown'}`;
+        } else {
+          step_completed = 'save';
+        }
+      } catch (e) {
+        step_failed = 'save';
+        ui_diagnostic = `save threw: ${e.message}`;
+      }
+    }
+
+    // 3. Click Add to chart (or Update on chart)
+    let studiesBefore = null;
+    if (!step_failed) {
+      studiesBefore = await _countStudies();
+      try {
+        clicked = await evaluate(`
+          (function() {
+            var norm = ${NORM};
+            var btns = document.querySelectorAll('button');
+            var addBtn = null, updBtn = null;
+            for (var i = 0; i < btns.length; i++) {
+              if (btns[i].offsetParent === null) continue;
+              var text = norm(btns[i].textContent);
+              if (!addBtn && /^add to chart$/i.test(text)) addBtn = btns[i];
+              if (!updBtn && /^update on chart$/i.test(text)) updBtn = btns[i];
+            }
+            var pick = (${replace_existing ? 'updBtn || addBtn' : 'addBtn || updBtn'});
+            if (pick) { pick.click(); return norm(pick.textContent); }
+            return null;
+          })()
+        `);
+        if (!clicked) {
+          step_failed = 'add_to_chart_button_click';
+          // diagnose WHY no clickable button — modal blocking, button hidden, etc.
+          const diag = await evaluate(`
+            (function(){
+              var btns = document.querySelectorAll('button');
+              var addVisible = false, updVisible = false;
+              for (var i=0;i<btns.length;i++){
+                if (btns[i].offsetParent === null) continue;
+                var t = (btns[i].textContent||'').replace(/\\s+/g,' ').trim();
+                if (/^add to chart/i.test(t)) addVisible = true;
+                if (/^update on chart/i.test(t)) updVisible = true;
+              }
+              var dlg = document.querySelector('[role="dialog"]') || document.querySelector('[class*="dialog-"]');
+              var modalOpen = !!(dlg && dlg.offsetParent !== null);
+              var modalTitle = modalOpen ? ((dlg.querySelector('[class*="title"]')||{}).textContent||'').trim() : null;
+              return { add_to_chart_button_visible: addVisible, update_on_chart_button_visible: updVisible, blocking_modal_open: modalOpen, blocking_modal_title: modalTitle };
+            })()
+          `);
+          ui_diagnostic = {
+            ...diag,
+            remediation: diag?.blocking_modal_open
+              ? `A modal "${diag.blocking_modal_title || '?'}" is blocking. Call pine_dismiss_dialog({accept:true, expected_dialog_kinds:["save_and_add_to_chart"]}) and retry.`
+              : (!diag?.add_to_chart_button_visible && !diag?.update_on_chart_button_visible)
+                ? 'Neither "Add to chart" nor "Update on chart" is visible. The Pine editor may be collapsed or the panel may need re-opening.'
+                : 'Button was visible but click did not fire. Re-attempt may succeed; otherwise call pine_smart_compile.',
+          };
+        } else {
+          step_completed = 'add_to_chart_button_click';
+        }
+      } catch (e) {
+        step_failed = 'add_to_chart_button_click';
+        ui_diagnostic = `button-click eval threw: ${e.message}`;
+      }
+    }
+
+    // 4. Wait for the study to appear on the chart
+    if (!step_failed) {
+      const deadline = Date.now() + wait_ms;
+      while (Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 250));
+        const studies = await evaluate(`
+          (function() {
+            try { return window.TradingViewApi._activeChartWidgetWV.value().getAllStudies().map(function(s){return {id:s.id,name:s.name||s.title||''};}); }
+            catch(e) { return []; }
+          })()
+        `);
+        if (Array.isArray(studies) && studies.length > (studiesBefore || 0)) {
+          const match = studies.find(s => s.name && s.name.toLowerCase().includes(String(name).toLowerCase().slice(0, 20)));
+          studyId = (match && match.id) || studies[studies.length - 1]?.id || null;
+          step_completed = 'study_added';
+          break;
+        }
+      }
+      if (!studyId) {
+        step_failed = 'study_added';
+        // pull compile errors to make the failure self-explanatory
+        try {
+          const errsRaw = await evaluate(`
+            (function(){
+              var m = ${FIND_MONACO};
+              if (!m) return [];
+              var model = m.editor.getModel();
+              if (!model) return [];
+              var markers = m.env.editor.getModelMarkers({ resource: model.uri });
+              return (markers||[]).map(function(mk){return {line:mk.startLineNumber, column:mk.startColumn, message:mk.message, severity:mk.severity};});
+            })()
+          `);
+          compile_errors = Array.isArray(errsRaw) ? errsRaw : [];
+        } catch (e) { /* graceful */ }
+        ui_diagnostic = compile_errors.length > 0
+          ? `Click registered but study did not appear. ${compile_errors.length} compile error(s) — see compile_errors[].`
+          : 'Click registered but study did not appear within wait_ms and no compile errors. Check pine_get_errors + pine_get_console; chart may be on a delayed feed and slow to render.';
+      }
+    }
+  } catch (e) {
+    if (!step_failed) step_failed = 'unknown';
+    ui_diagnostic = `Unexpected error after step "${step_completed || 'start'}": ${e.message}`;
   }
 
   const mutation_id = recordChartMutation({ kind: 'pine_deploy_strategy', hash: _hashSource(source) });
-  return {
+  const baseResult = {
     success: studyId !== null,
     strategy_name: name,
     script_name: name,
     study_id: studyId,
     button_clicked: clicked,
-    save_action: saved.action,
+    save_action: saved?.action ?? null,
     mutation_id,
-    note: studyId
-      ? 'Script deployed. Use strategy_get_report to fetch metrics (strategies) or chart_get_state to confirm (indicators).'
-      : 'Click registered but study did not appear within wait_ms. Check pine_get_errors and pine_get_console.',
+    step_completed,
+    step_failed,
+    compile_errors,
+    ui_diagnostic,
   };
+  baseResult.note = studyId
+    ? 'Script deployed. Use strategy_get_report to fetch metrics (strategies) or chart_get_state to confirm (indicators).'
+    : `Deploy failed at step "${step_failed || 'unknown'}". See ui_diagnostic + compile_errors.`;
+  return baseResult;
 }
 
 /**
