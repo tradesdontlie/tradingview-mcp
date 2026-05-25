@@ -7,8 +7,10 @@ const MUTATES   = { readOnlyHint: false, destructiveHint: false, idempotentHint:
 const NETWORK   = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true };
 
 export function registerChartTools(server) {
-  server.tool('chart_get_state', 'Get current chart state: symbol, timeframe, chart type, all studies with entity IDs, delayed_feed flag (true if TradingView is serving _DLY data), and is_strategy per study.', {}, async () => {
-    try { return jsonResult(await core.getState()); }
+  server.tool('chart_get_state', 'Get current chart state: symbol, timeframe, chart type, studies with entity IDs, delayed_feed flag, is_strategy per study. With verify_against_feed=true (default) also returns coherent/coherence_errors/data_symbol/data_resolution/last_chart_mutation_id; success=false + error=CHART_DATA_STATE_MISMATCH if reported state disagrees with the live feed (audit C1/A1-F4/A2-F1).', {
+    verify_against_feed: z.coerce.boolean().optional().describe('Cross-check reported symbol/resolution against mainSeries() live feed. Default true. Set false for legacy snapshot-only behavior.'),
+  }, async ({ verify_against_feed }) => {
+    try { return jsonResult(await core.getState({ verify_against_feed: verify_against_feed !== false })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   }, READ_ONLY);
 

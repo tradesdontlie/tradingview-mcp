@@ -15,7 +15,7 @@ function _resolve(deps) {
   };
 }
 
-export async function getState({ _deps } = {}) {
+export async function getState({ _deps, verify_against_feed = true } = {}) {
   const { evaluate } = _resolve(_deps);
   const state = await evaluate(`
     (function() {
@@ -47,16 +47,79 @@ export async function getState({ _deps } = {}) {
         });
       } catch(e) {}
       var sym = chart.symbol();
+      // C1: coherence — read the actual data-feed symbol/resolution from mainSeries()
+      var data_symbol = null;
+      var data_resolution = null;
+      try {
+        var widget = chart._chartWidget;
+        var series = widget.model().mainSeries();
+        try {
+          var info = (typeof series.symbolInfo === 'function') ? series.symbolInfo() : null;
+          if (info) data_symbol = info.full_name || info.symbol || info.ticker || null;
+        } catch(e) {}
+        try {
+          var iv = (typeof series.interval === 'function') ? series.interval() : null;
+          if (iv != null) data_resolution = String(iv);
+        } catch(e) {}
+      } catch(e) {}
       return {
         symbol: sym,
         resolution: chart.resolution(),
         chartType: chart.chartType(),
         delayed_feed: /_DLY[:_]/i.test(sym || ''),
         studies: studies,
+        _data_symbol: data_symbol,
+        _data_resolution: data_resolution,
       };
     })()
   `);
-  return { success: true, ...state };
+  // C1 / A1-F4 / A2-F1: coherence check between reported state and live feed
+  const coherence = _computeCoherence(state, verify_against_feed);
+  const mutation_id = currentMutationId();
+  const out = {
+    success: coherence.coherent !== false,
+    symbol: state.symbol,
+    resolution: state.resolution,
+    chartType: state.chartType,
+    delayed_feed: state.delayed_feed,
+    studies: state.studies,
+    data_symbol: state._data_symbol,
+    data_resolution: state._data_resolution,
+    coherent: coherence.coherent,
+    coherence_errors: coherence.errors,
+    last_chart_mutation_id: mutation_id,
+    last_data_refresh_at: new Date().toISOString(),
+    mutation_id,
+  };
+  if (coherence.coherent === false) {
+    out.error = 'CHART_DATA_STATE_MISMATCH';
+    out.remediation = 'chart_get_state.symbol/resolution disagree with the live data feed. Likely a stale browser session; reload the TradingView tab or call chart_ensure_symbol again.';
+  }
+  return out;
+}
+
+/**
+ * C1 coherence helper. Returns {coherent: true|false|null, errors: string[]}.
+ * coherent === null when verify_against_feed=false or the feed symbol/resolution
+ * could not be read (graceful degradation, not a mismatch).
+ */
+export function _computeCoherence(state, verify_against_feed) {
+  if (!verify_against_feed) return { coherent: null, errors: [] };
+  const errors = [];
+  const stateSym = String(state.symbol || '').toUpperCase().replace(/_DLY/i, '');
+  const feedSym = String(state._data_symbol || '').toUpperCase().replace(/_DLY/i, '');
+  if (state._data_symbol == null && state._data_resolution == null) {
+    return { coherent: null, errors: [] };
+  }
+  if (feedSym && stateSym && !feedSym.includes(stateSym) && !stateSym.includes(feedSym)) {
+    errors.push(`chart_get_state.symbol="${state.symbol}" != mainSeries.symbol="${state._data_symbol}"`);
+  }
+  const stateRes = String(state.resolution || '');
+  const feedRes = String(state._data_resolution || '');
+  if (feedRes && stateRes && feedRes !== stateRes) {
+    errors.push(`chart_get_state.resolution="${stateRes}" != mainSeries.interval="${feedRes}"`);
+  }
+  return { coherent: errors.length === 0, errors };
 }
 
 /**
