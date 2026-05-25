@@ -14,12 +14,14 @@
   "scripts": {
     "start": "node src/server.js",
     "tv": "node src/cli/index.js",
-    "test": "node --test tests/e2e.test.js tests/pine_analyze.test.js",
+    "test": "node --test --test-concurrency=1 tests/e2e.test.js tests/pine_analyze.test.js tests/cli.test.js tests/unit/*.test.js",
     "test:e2e": "node --test tests/e2e.test.js",
-    "test:unit": "node --test tests/pine_analyze.test.js tests/cli.test.js",
+    "test:unit": "node --test tests/pine_analyze.test.js tests/cli.test.js tests/unit/*.test.js",
     "test:cli": "node --test tests/cli.test.js",
-    "test:all": "node --test tests/e2e.test.js tests/pine_analyze.test.js tests/cli.test.js",
-    "test:verbose": "node --test --test-reporter=spec tests/e2e.test.js tests/pine_analyze.test.js",
+    "test:offline": "node --test tests/pine_analyze.test.js tests/cli.test.js tests/unit/*.test.js",
+    "test:integration": "node --test tests/integration/*.test.js",
+    "test:all": "node --test --test-concurrency=1 tests/e2e.test.js tests/pine_analyze.test.js tests/cli.test.js tests/unit/*.test.js tests/integration/*.test.js",
+    "test:verbose": "node --test --test-reporter=spec tests/e2e.test.js tests/pine_analyze.test.js tests/unit/*.test.js",
     "test:count": "node --test --test-reporter=spec tests/e2e.test.js 2>&1 | tail -5",
     "test:parity": "node --test --test-reporter=spec tests/parity/parity.test.mjs"
   },

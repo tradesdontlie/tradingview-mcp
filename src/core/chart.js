@@ -3,6 +3,7 @@
  */
 import { evaluate as _evaluate, evaluateAsync as _evaluateAsync, safeString, requireFinite } from '../connection.js';
 import { waitForChartReady as _waitForChartReady } from '../wait.js';
+import { recordChartMutation, currentMutationId } from './_mutation_ledger.js';
 
 const CHART_API = 'window.TradingViewApi._activeChartWidgetWV.value()';
 
@@ -88,6 +89,7 @@ export async function ensureSymbol({ symbol, _deps }) {
   const actualBase = String(after.symbol || '').replace(/_DLY/i, '').toUpperCase();
   const matched = actualBase.includes(requestedBase) || requestedBase.includes(actualBase);
   const delayed = /_DLY[:_]/i.test(after.symbol || '');
+  const mutation_id = recordChartMutation({ kind: 'ensureSymbol', symbol: after.symbol });
   return {
     success: matched,
     requested: symbol,
@@ -97,6 +99,7 @@ export async function ensureSymbol({ symbol, _deps }) {
     type: after.type,
     delayed_feed: delayed,
     chart_ready: ready,
+    mutation_id,
     warning: delayed && !/_DLY/i.test(symbol)
       ? 'Realtime feed unavailable for this account; chart fell back to delayed data (_DLY).'
       : (!matched ? `Resolved symbol "${after.symbol}" doesn't match requested "${symbol}".` : undefined),
@@ -163,7 +166,8 @@ export async function setSymbol({ symbol, _deps }) {
     })()
   `);
   const ready = await waitForChartReady(symbol);
-  return { success: true, symbol, chart_ready: ready };
+  const mutation_id = recordChartMutation({ kind: 'setSymbol', symbol });
+  return { success: true, symbol, chart_ready: ready, mutation_id };
 }
 
 export async function setTimeframe({ timeframe, _deps }) {
@@ -175,7 +179,8 @@ export async function setTimeframe({ timeframe, _deps }) {
     })()
   `);
   const ready = await waitForChartReady(null, timeframe);
-  return { success: true, timeframe, chart_ready: ready };
+  const mutation_id = recordChartMutation({ kind: 'setTimeframe', timeframe });
+  return { success: true, timeframe, chart_ready: ready, mutation_id };
 }
 
 export async function setType({ chart_type, _deps }) {

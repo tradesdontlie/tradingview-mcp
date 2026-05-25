@@ -4,6 +4,12 @@
  * They throw on error (callers catch and format).
  */
 import { evaluate, evaluateAsync, getClient } from '../connection.js';
+import { recordChartMutation } from './_mutation_ledger.js';
+import { createHash } from 'node:crypto';
+
+function _hashSource(source) {
+  return createHash('sha256').update(String(source || ''), 'utf8').digest('hex').slice(0, 16);
+}
 import { jsNormaliseLabel } from './_helpers.js';
 import { V6_BUILTINS, MIGRATION_RULES, ERROR_EXPLANATIONS, lookupBuiltin, listAllBuiltins } from './v6_reference.js';
 
@@ -284,7 +290,8 @@ export async function setSource({ source }) {
   `);
 
   if (!set) throw new Error('Monaco found but setValue() failed.');
-  return { success: true, lines_set: source.split('\n').length };
+  const mutation_id = recordChartMutation({ kind: 'pine_set_source', hash: _hashSource(source) });
+  return { success: true, lines_set: source.split('\n').length, mutation_id };
 }
 
 export async function compile() {
@@ -329,12 +336,14 @@ export async function compile() {
   const studiesAfter = await _countStudies();
   const studyAdded = (studiesBefore !== null && studiesAfter !== null) ? studiesAfter > studiesBefore : null;
   const blocker = !studyAdded ? await _detectBlockingDialog() : null;
+  const mutation_id = recordChartMutation({ kind: 'pine_compile' });
 
   return {
     success: true,
     button_clicked: clicked || 'keyboard_shortcut',
     study_added: studyAdded,
     blocked_by: blocker?.title || null,
+    mutation_id,
     suggestion: blocker
       ? (blocker.title === 'Save script'
           ? 'Call pine_save_as({ name: "..." }) to dismiss the modal, then retry pine_compile.'
@@ -554,6 +563,7 @@ export async function smartCompile() {
 
   const studyAdded = (studiesBefore !== null && studiesAfter !== null) ? studiesAfter > studiesBefore : null;
   const blocker = !studyAdded ? await _detectBlockingDialog() : null;
+  const mutation_id = recordChartMutation({ kind: 'pine_smart_compile' });
 
   return {
     success: true,
@@ -562,6 +572,7 @@ export async function smartCompile() {
     errors: errors || [],
     study_added: studyAdded,
     blocked_by: blocker?.title || null,
+    mutation_id,
     suggestion: blocker
       ? (blocker.title === 'Save script'
           ? 'Call pine_save_as({ name: "..." }) to dismiss the modal, then retry pine_smart_compile.'
@@ -694,7 +705,8 @@ export async function saveAs({ name }) {
   `);
 
   await new Promise(r => setTimeout(r, 800));
-  return { success: !result?.error, name, dialog_handled: result?.dialog === true, action: result?.dialog === true ? 'saved_as_new' : 'no_dialog_overwrite_attempted', detail: result };
+  const mutation_id = recordChartMutation({ kind: 'pine_save_as', hash: name });
+  return { success: !result?.error, name, dialog_handled: result?.dialog === true, action: result?.dialog === true ? 'saved_as_new' : 'no_dialog_overwrite_attempted', detail: result, mutation_id };
 }
 
 /**
@@ -786,6 +798,7 @@ export async function deployStrategy({ source, name, replace_existing = true, wa
     }
   }
 
+  const mutation_id = recordChartMutation({ kind: 'pine_deploy_strategy', hash: _hashSource(source) });
   return {
     success: studyId !== null,
     strategy_name: name,
@@ -793,6 +806,7 @@ export async function deployStrategy({ source, name, replace_existing = true, wa
     study_id: studyId,
     button_clicked: clicked,
     save_action: saved.action,
+    mutation_id,
     note: studyId
       ? 'Script deployed. Use strategy_get_report to fetch metrics (strategies) or chart_get_state to confirm (indicators).'
       : 'Click registered but study did not appear within wait_ms. Check pine_get_errors and pine_get_console.',
