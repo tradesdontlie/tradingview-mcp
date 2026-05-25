@@ -83,4 +83,17 @@ export function registerDataTools(server) {
     try { return jsonResult(await core.getStudyValues()); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
+
+  server.tool('data_get_candles',
+    'Get historical OHLCV bars for a specific date/time range. Scrolls the chart to load that period, then reads candle-by-candle data. Optionally includes per-bar indicator values (EMA, VWAP, Volume, etc.) for every candle.',
+    {
+      from_date: z.string().describe('Start date/time in ISO format, e.g. "2025-04-17T10:30:00+05:30" or "2025-04-17 10:30" (assumed IST/local)'),
+      to_date:   z.string().optional().describe('End date/time in ISO format. Defaults to 1 hour after from_date.'),
+      include_indicators: z.coerce.boolean().optional().describe('Also return per-bar values for all visible chart indicators (EMA, VWAP, CVD, etc.). Default false.'),
+    },
+    async ({ from_date, to_date, include_indicators }) => {
+      try { return jsonResult(await core.getCandles({ from_date, to_date, include_indicators })); }
+      catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+    }
+  );
 }

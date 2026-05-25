@@ -14,6 +14,17 @@ import { registerWatchlistTools } from './tools/watchlist.js';
 import { registerUiTools } from './tools/ui.js';
 import { registerPaneTools } from './tools/pane.js';
 import { registerTabTools } from './tools/tab.js';
+import { registerSnapshotTools } from './tools/snapshots.js';
+import { registerNewsSentimentTools } from './tools/news_sentiment.js';
+import { registerTvAnalysisTools } from './tools/tv_analysis.js';
+import { registerScreenerTools } from './tools/screener.js';
+import { registerComposedTools } from './tools/composed.js';
+import { registerEgxTools } from './tools/egx.js';
+import { registerBacktestTools } from './tools/backtest_tools.js';
+import { registerHyperliquidTools } from './tools/hyperliquid_tools.js';
+import { registerBrokerTools } from './tools/brokers.js';
+import { registerStreamTools } from './tools/stream.js';
+import { registerSignalTools } from './tools/signal.js';
 
 const server = new McpServer(
   {
@@ -84,6 +95,17 @@ registerWatchlistTools(server);
 registerUiTools(server);
 registerPaneTools(server);
 registerTabTools(server);
+registerSnapshotTools(server);
+registerNewsSentimentTools(server);
+registerTvAnalysisTools(server);
+registerScreenerTools(server);
+registerComposedTools(server);
+registerEgxTools(server);
+registerBacktestTools(server);
+registerHyperliquidTools(server);
+registerBrokerTools(server);
+registerStreamTools(server);
+registerSignalTools(server);
 
 // Startup notice (stderr so it doesn't interfere with MCP stdio protocol)
 process.stderr.write('⚠  tradingview-mcp  |  Unofficial tool. Not affiliated with TradingView Inc. or Anthropic.\n');

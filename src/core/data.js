@@ -452,3 +452,97 @@ export async function getPineBoxes({ study_filter, verbose } = {}) {
   });
   return { success: true, study_count: studies.length, studies };
 }
+
+/**
+ * Get historical OHLCV bars for a specific date/time range.
+ * Scrolls the chart to load bars for that period, then reads them.
+ * Optionally reads indicator values (EMA, VWAP, Volume etc.) per bar.
+ */
+export async function getCandles({ from_date, to_date, include_indicators }) {
+  const fromTs = Math.floor(new Date(from_date).getTime() / 1000);
+  const toTs   = to_date
+    ? Math.floor(new Date(to_date).getTime() / 1000)
+    : fromTs + 3600;
+
+  if (isNaN(fromTs)) throw new Error(`Cannot parse from_date: ${from_date}`);
+  if (isNaN(toTs))   throw new Error(`Cannot parse to_date: ${to_date}`);
+
+  // Ask TradingView to load historical bars up to fromTs.
+  await evaluate(`
+    (function() {
+      var ms = ${BARS_PATH.replace('.bars()', '')};
+      if (ms && ms.loadDataTo) ms.loadDataTo(${fromTs});
+    })()
+  `);
+
+  // Poll until fromTs is within loaded range (max 6s).
+  const deadline = Date.now() + 6000;
+  while (Date.now() < deadline) {
+    const firstTime = await evaluate(`
+      (function() {
+        var bars = ${BARS_PATH};
+        if (!bars || typeof bars.firstIndex !== 'function') return null;
+        var v = bars.valueAt(bars.firstIndex());
+        return v ? v[0] : null;
+      })()
+    `);
+    if (firstTime !== null && firstTime <= fromTs) break;
+    await new Promise(r => setTimeout(r, 300));
+  }
+
+  const bars = await evaluate(`
+    (function() {
+      var bars = ${BARS_PATH};
+      if (!bars || typeof bars.firstIndex !== 'function') return [];
+      var result = [];
+      var start = bars.firstIndex();
+      var end   = bars.lastIndex();
+      for (var i = start; i <= end; i++) {
+        var v = bars.valueAt(i);
+        if (v && v[0] >= ${fromTs} && v[0] <= ${toTs}) {
+          result.push({ time: v[0], open: v[1], high: v[2], low: v[3], close: v[4], volume: v[5] || 0 });
+        }
+      }
+      return result;
+    })()
+  `);
+
+  const result = { success: true, from: from_date, to: to_date || null, bar_count: bars.length, bars };
+
+  if (include_indicators && bars.length > 0) {
+    const indicatorData = await evaluate(`
+      (function() {
+        var chart = ${CHART_API}._chartWidget;
+        var model  = chart.model();
+        var series = model.mainSeries();
+        var mainBars = series.bars();
+        var sources = model.model().dataSources();
+        var fromTs = ${fromTs}, toTs = ${toTs};
+        var out = {};
+        for (var si = 0; si < sources.length; si++) {
+          var s = sources[si];
+          if (!s.metaInfo) continue;
+          var meta; try { meta = s.metaInfo(); } catch(e) { continue; }
+          var name = meta.description || meta.shortDescription || '';
+          if (!name) continue;
+          var sBars; try { sBars = s.bars ? s.bars() : null; } catch(e) { continue; }
+          if (!sBars || typeof sBars.valueAt !== 'function') continue;
+          var rows = [];
+          var start = sBars.firstIndex(), end = sBars.lastIndex();
+          for (var i = start; i <= end; i++) {
+            var mb = mainBars.valueAt(i);
+            if (!mb || mb[0] < fromTs || mb[0] > toTs) continue;
+            var sv = sBars.valueAt(i);
+            if (!sv) continue;
+            rows.push({ time: mb[0], values: Array.isArray(sv) ? sv.slice(1) : sv });
+          }
+          if (rows.length > 0) out[name] = rows;
+        }
+        return out;
+      })()
+    `).catch(() => null);
+    if (indicatorData) result.indicators = indicatorData;
+  }
+
+  return result;
+}
