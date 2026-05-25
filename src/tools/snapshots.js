@@ -6,6 +6,7 @@ import { jsonResult } from './_format.js';
 import * as yahoo from '../core/yahoo.js';
 import * as btcMarket from '../core/bitcoin_market.js';
 import * as extendedHours from '../core/extended_hours.js';
+import * as options from '../core/options.js';
 
 export function registerSnapshotTools(server) {
   server.tool(
@@ -30,6 +31,22 @@ export function registerSnapshotTools(server) {
     async () => {
       try {
         return jsonResult(await yahoo.getMarketSnapshot());
+      } catch (err) {
+        return jsonResult({ success: false, error: err.message }, true);
+      }
+    }
+  );
+
+  server.tool(
+    'stock_options_chain',
+    'Full options chain (calls + puts) for a US stock symbol and one expiry. If expiry omitted, uses the nearest. Each contract: strike, last, bid, ask, volume, open_interest, IV, in_the_money, expiration.',
+    {
+      symbol: z.string().describe('US stock symbol (e.g. AAPL, TSLA, SPY)'),
+      expiry: z.string().optional().describe('Optional ISO date YYYY-MM-DD'),
+    },
+    async ({ symbol, expiry }) => {
+      try {
+        return jsonResult(await options.getOptionsChain(symbol, expiry));
       } catch (err) {
         return jsonResult({ success: false, error: err.message }, true);
       }
