@@ -20,4 +20,17 @@ export function registerSnapshotTools(server) {
       }
     }
   );
+
+  server.tool(
+    'market_snapshot',
+    'Snapshot of major global markets: indices (S&P500, Dow, NASDAQ, VIX), crypto (BTC, ETH, SOL, BNB), FX (EUR/GBP/JPY USD), ETFs (SPY, QQQ, GLD). One call returns symbol/price/change_pct/currency per group.',
+    {},
+    async () => {
+      try {
+        return jsonResult(await yahoo.getMarketSnapshot());
+      } catch (err) {
+        return jsonResult({ success: false, error: err.message }, true);
+      }
+    }
+  );
 }

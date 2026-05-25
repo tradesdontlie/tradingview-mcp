@@ -32,3 +32,13 @@ test('getPrice — invalid symbol returns error block, not throws', async () => 
   assert.equal(result.symbol, 'NOTAREALTICKER_XYZ_123');
   assert.ok('error' in result || result.price == null);
 });
+
+test('getMarketSnapshot — returns grouped market data', async () => {
+  const result = await yahoo.getMarketSnapshot();
+  assert.ok('indices' in result);
+  assert.ok('crypto' in result);
+  assert.ok('fx' in result);
+  assert.ok('etfs' in result);
+  assert.ok(Array.isArray(result.indices));
+  assert.ok(typeof result.timestamp === 'string');
+});
