@@ -4,6 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as yahoo from '../src/core/yahoo.js';
+import * as btcMarket from '../src/core/bitcoin_market.js';
 
 test('getPrice — known stock returns expected shape', async () => {
   const result = await yahoo.getPrice('AAPL');
@@ -31,6 +32,20 @@ test('getPrice — invalid symbol returns error block, not throws', async () => 
   const result = await yahoo.getPrice('NOTAREALTICKER_XYZ_123');
   assert.equal(result.symbol, 'NOTAREALTICKER_XYZ_123');
   assert.ok('error' in result || result.price == null);
+});
+
+test('getBitcoinMarketPulse — returns macro context + assessment', async () => {
+  const result = await btcMarket.getBitcoinMarketPulse();
+  assert.equal(result.source, 'CoinGecko');
+  assert.equal(result.tool, 'bitcoin_market_pulse');
+  if (!result.error) {
+    assert.ok('bitcoin' in result);
+    assert.ok('dominance' in result);
+    assert.ok('total_market' in result);
+    assert.ok('assessment' in result);
+    assert.ok(typeof result.assessment.label === 'string');
+    assert.ok(typeof result.assessment.summary === 'string');
+  }
 });
 
 test('getMarketSnapshot — returns grouped market data', async () => {

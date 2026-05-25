@@ -4,6 +4,7 @@
 import { z } from 'zod';
 import { jsonResult } from './_format.js';
 import * as yahoo from '../core/yahoo.js';
+import * as btcMarket from '../core/bitcoin_market.js';
 
 export function registerSnapshotTools(server) {
   server.tool(
@@ -28,6 +29,19 @@ export function registerSnapshotTools(server) {
     async () => {
       try {
         return jsonResult(await yahoo.getMarketSnapshot());
+      } catch (err) {
+        return jsonResult({ success: false, error: err.message }, true);
+      }
+    }
+  );
+
+  server.tool(
+    'bitcoin_market_pulse',
+    'Single-call BTC macro context: price + 24h change, BTC/ETH dominance, total crypto market cap, and a labeled risk assessment (HIGH_RISK / OPPORTUNITY_WITH_CAUTION / ALT_RISK / ALT_FAVORABLE / NEUTRAL) for alt-coin decisions. Source: CoinGecko public API. No key needed.',
+    {},
+    async () => {
+      try {
+        return jsonResult(await btcMarket.getBitcoinMarketPulse());
       } catch (err) {
         return jsonResult({ success: false, error: err.message }, true);
       }
