@@ -163,7 +163,7 @@ export async function scrollToDate({ date }) {
   else timestamp = Math.floor(new Date(date).getTime() / 1000);
   if (isNaN(timestamp)) throw new Error(`Could not parse date: ${date}. Use ISO format (2024-01-15) or unix timestamp.`);
 
-  const resolution = await evaluate(`${CHART_API}.resolution()`);
+  const resolution = await _evaluate(`${CHART_API}.resolution()`);
   let secsPerBar = 60;
   const res = String(resolution);
   if (res === 'D' || res === '1D') secsPerBar = 86400;
@@ -175,7 +175,7 @@ export async function scrollToDate({ date }) {
   const from = timestamp - halfWindow;
   const to = timestamp + halfWindow;
 
-  await evaluate(`
+  await _evaluate(`
     (function() {
       var chart = ${CHART_API};
       var m = chart._chartWidget.model();
