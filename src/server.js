@@ -21,6 +21,7 @@ import { registerScreenerTools } from './tools/screener.js';
 import { registerComposedTools } from './tools/composed.js';
 import { registerEgxTools } from './tools/egx.js';
 import { registerBacktestTools } from './tools/backtest_tools.js';
+import { registerHyperliquidTools } from './tools/hyperliquid_tools.js';
 
 const server = new McpServer(
   {
@@ -98,6 +99,7 @@ registerScreenerTools(server);
 registerComposedTools(server);
 registerEgxTools(server);
 registerBacktestTools(server);
+registerHyperliquidTools(server);
 
 // Startup notice (stderr so it doesn't interfere with MCP stdio protocol)
 process.stderr.write('⚠  tradingview-mcp  |  Unofficial tool. Not affiliated with TradingView Inc. or Anthropic.\n');
