@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as yahoo from '../src/core/yahoo.js';
 import * as btcMarket from '../src/core/bitcoin_market.js';
+import * as extendedHours from '../src/core/extended_hours.js';
 
 test('getPrice — known stock returns expected shape', async () => {
   const result = await yahoo.getPrice('AAPL');
@@ -32,6 +33,17 @@ test('getPrice — invalid symbol returns error block, not throws', async () => 
   const result = await yahoo.getPrice('NOTAREALTICKER_XYZ_123');
   assert.equal(result.symbol, 'NOTAREALTICKER_XYZ_123');
   assert.ok('error' in result || result.price == null);
+});
+
+test('getExtendedHoursPrice — returns session breakdown for AAPL', async () => {
+  const result = await extendedHours.getExtendedHoursPrice('AAPL');
+  assert.equal(result.symbol, 'AAPL');
+  if (!result.error) {
+    assert.ok('previous_close' in result);
+    assert.ok('pre_market' in result);
+    assert.ok('regular' in result);
+    assert.ok('post_market' in result);
+  }
 });
 
 test('getBitcoinMarketPulse — returns macro context + assessment', async () => {

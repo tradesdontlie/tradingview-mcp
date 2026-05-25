@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { jsonResult } from './_format.js';
 import * as yahoo from '../core/yahoo.js';
 import * as btcMarket from '../core/bitcoin_market.js';
+import * as extendedHours from '../core/extended_hours.js';
 
 export function registerSnapshotTools(server) {
   server.tool(
@@ -29,6 +30,21 @@ export function registerSnapshotTools(server) {
     async () => {
       try {
         return jsonResult(await yahoo.getMarketSnapshot());
+      } catch (err) {
+        return jsonResult({ success: false, error: err.message }, true);
+      }
+    }
+  );
+
+  server.tool(
+    'stock_extended_hours',
+    'Latest pre-market / regular / post-market prices for a US stock symbol. Returns separate blocks per session with timestamps + change % vs previous close. Walks 1m candles from Yahoo includePrePost=true. Returns null per session when no print exists.',
+    {
+      symbol: z.string().describe('US stock symbol (e.g. AAPL, NVDA, SPY)'),
+    },
+    async ({ symbol }) => {
+      try {
+        return jsonResult(await extendedHours.getExtendedHoursPrice(symbol));
       } catch (err) {
         return jsonResult({ success: false, error: err.message }, true);
       }
