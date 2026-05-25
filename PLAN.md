@@ -145,6 +145,22 @@ Port EGX static data (sector lists, index constituents) + screener wrappers.
 
 Port Python bar-by-bar simulator to JS using `technicalindicators` or `talib-binding` for indicator calcs.
 
+## Phase 1.5 — Hyperliquid crypto data layer (add-on)
+
+[Hyperliquid](https://api.hyperliquid.xyz/info) — decentralized perps exchange with **public, key-free REST + WebSocket API**. Coverage: BTC, ETH, SOL, ARB + 100+ perps with live tickers, orderbook depth, funding rates, OI, OHLCV.
+
+**Tools to add:**
+- `hyperliquid_meta` → list all perps + leverage/margin tables (single call)
+- `hyperliquid_ticker(coin)` → mark price, oracle price, funding, OI, day volume
+- `hyperliquid_orderbook(coin, n_levels?)` → L2 book snapshot
+- `hyperliquid_candles(coin, interval, lookback_hours)` → OHLCV (1m/5m/15m/1h/4h/1d)
+- `hyperliquid_funding(coin)` → funding rate history
+- `hyperliquid_open_interest_history(coin)` → OI series
+
+Use cases: BTC/ETH perp screener (funding extremes), OI divergence detector, alt regime detection vs spot.
+
+Effort: ~0.5 day (pure REST + WS, no auth).
+
 ## Phase 2 — India broker ecosystem
 
 | Broker | Type | Implementation | Status |
