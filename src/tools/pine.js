@@ -42,25 +42,34 @@ export function registerPineTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   }, MUTATES);
 
-  server.tool('pine_deploy_strategy', 'ONE-SHOT WORKFLOW: set source → save with name → add to chart → wait for study → return study_id. Replaces the 5-8 call sequence (pine_set_source + pine_save_as + pine_compile + chart_get_state + polling). Use this whenever you have a complete Pine script ready to backtest.', {
+  server.tool('pine_deploy_strategy', 'ONE-SHOT WORKFLOW: set source → save with name → add to chart → wait for study → return study_id. By default REFUSES with code=EDITOR_HOLDS_DIFFERENT_SAVED_SCRIPT if the editor is bound to a different saved script (audit C2/A1-F5/A2-F2 — without this guard, "Add to chart" silently adds stale bytecode under the wrong name). Pass force_overwrite_editor=true to save-as the new name and rebind.', {
     source: z.string().describe('Complete Pine Script source code (must include strategy() or indicator() declaration)'),
     name: z.string().optional().describe('Display name for the script. Auto-derived from strategy()/indicator() title if omitted.'),
     replace_existing: z.coerce.boolean().optional().describe('If a study with the same name exists, click "Update on chart" instead of "Add to chart" (default true)'),
     wait_ms: z.coerce.number().int().min(500).max(60000).optional().describe('Milliseconds to wait for the study to appear on the chart (default 8000)'),
-  }, async ({ source, name, replace_existing, wait_ms }) => {
-    try { return jsonResult(await core.deployStrategy({ source, name, replace_existing, wait_ms })); }
+    force_overwrite_editor: z.coerce.boolean().optional().describe('If the editor currently has a DIFFERENT saved script bound, default behavior refuses to deploy (would add stale bytecode under that name). Set true to save-as the requested name and rebind the editor first. Default false.'),
+  }, async ({ source, name, replace_existing, wait_ms, force_overwrite_editor }) => {
+    try { return jsonResult(await core.deployStrategy({ source, name, replace_existing, wait_ms, force_overwrite_editor })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   }, MUTATES);
 
-  server.tool('pine_deploy_indicator', 'ONE-SHOT WORKFLOW for INDICATORS (overlay=true or pane studies): set source → save with name → add to chart → wait for study → return study_id. Identical core path to pine_deploy_strategy but named so indicator-flavoured workflows (event overlays, custom plots) discover it. Use when your source begins with indicator(...).', {
+  server.tool('pine_deploy_indicator', 'ONE-SHOT WORKFLOW for INDICATORS (overlay=true or pane studies): set source → save with name → add to chart → wait for study → return study_id. Same EDITOR_HOLDS_DIFFERENT_SAVED_SCRIPT preflight as pine_deploy_strategy (audit C2). Use when your source begins with indicator(...).', {
     source: z.string().describe('Complete Pine Script source code (must include indicator() declaration)'),
     name: z.string().optional().describe('Display name for the script. Auto-derived from indicator() title if omitted.'),
     replace_existing: z.coerce.boolean().optional().describe('If a study with the same name exists, click "Update on chart" instead of "Add to chart" (default true)'),
     wait_ms: z.coerce.number().int().min(500).max(60000).optional().describe('Milliseconds to wait for the study to appear on the chart (default 8000)'),
-  }, async ({ source, name, replace_existing, wait_ms }) => {
-    try { return jsonResult(await core.deployStrategy({ source, name, replace_existing, wait_ms })); }
+    force_overwrite_editor: z.coerce.boolean().optional().describe('If editor currently bound to a different saved script, default refuses; true rebinds via save-as. Default false.'),
+  }, async ({ source, name, replace_existing, wait_ms, force_overwrite_editor }) => {
+    try { return jsonResult(await core.deployStrategy({ source, name, replace_existing, wait_ms, force_overwrite_editor })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   }, MUTATES);
+
+  server.tool('pine_get_editor_state', 'Read Pine Editor state WITHOUT mutating it: {panel_open, script_name, dirty, source_hash, action_button, modal, compile_errors}. Use BEFORE pine_deploy_* to verify the editor is in the expected state (audit C2/A1-F5/A2-F2).', {
+    include_source_hash: z.coerce.boolean().optional().describe('Compute and return SHA-256 (16-hex-char prefix) of the editor source. Default true.'),
+  }, async ({ include_source_hash }) => {
+    try { return jsonResult(await core.getEditorState({ include_source_hash: include_source_hash !== false })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  }, READ_ONLY);
 
   server.tool('pine_get_console', 'Read Pine Script console/log output (compile messages, log.info(), errors)', {}, async () => {
     try { return jsonResult(await core.getConsole()); }

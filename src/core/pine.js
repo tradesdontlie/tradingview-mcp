@@ -3,12 +3,26 @@
  * All functions accept plain options objects and return plain JS objects.
  * They throw on error (callers catch and format).
  */
-import { evaluate, evaluateAsync, getClient } from '../connection.js';
+import { evaluate as _evaluate, evaluateAsync as _evaluateAsync, getClient } from '../connection.js';
 import { recordChartMutation } from './_mutation_ledger.js';
 import { createHash } from 'node:crypto';
 
+// Module-level evaluate/evaluateAsync — most pine.js functions still call these
+// directly (legacy). New audit-fix functions (getEditorState, deployStrategy
+// preflight) accept _deps for testability.
+const evaluate = _evaluate;
+const evaluateAsync = _evaluateAsync;
+
 function _hashSource(source) {
   return createHash('sha256').update(String(source || ''), 'utf8').digest('hex').slice(0, 16);
+}
+
+function _resolvePineDeps(deps) {
+  return {
+    evaluate: deps?.evaluate || _evaluate,
+    evaluateAsync: deps?.evaluateAsync || _evaluateAsync,
+    ensurePineEditorOpen: deps?.ensurePineEditorOpen || ensurePineEditorOpen,
+  };
 }
 import { jsNormaliseLabel } from './_helpers.js';
 import { V6_BUILTINS, MIGRATION_RULES, ERROR_EXPLANATIONS, lookupBuiltin, listAllBuiltins } from './v6_reference.js';
@@ -742,7 +756,107 @@ export async function dismissDialog({ accept = false } = {}) {
  * chart → wait for the study to appear → return its entity_id. Collapses
  * what used to be 5-8 separate tool calls.
  */
-export async function deployStrategy({ source, name, replace_existing = true, wait_ms = 8000 }) {
+/**
+ * C2 / A1-F5 / A2-F2 — read editor state without mutating it. Returns enough
+ * for callers (and deployStrategy's preflight) to know whether deploying
+ * would overwrite a different saved script.
+ */
+export async function getEditorState({ include_source_hash = true, _deps } = {}) {
+  const { evaluate, ensurePineEditorOpen: _ensure } = _resolvePineDeps(_deps);
+  const editorReady = await _ensure();
+  if (!editorReady) return { success: false, panel_open: false, dirty: false, action_button: null, modal: { present: false }, compile_errors: [] };
+  const raw = await evaluate(`
+    (function() {
+      var m = ${FIND_MONACO};
+      var panel_open = !!m;
+      var source = null;
+      var script_name = null;
+      var dirty = false;
+      var compile_errors = [];
+      try {
+        if (m) {
+          source = m.editor.getValue();
+          try {
+            var model = m.editor.getModel();
+            if (model) {
+              var markers = m.env.editor.getModelMarkers({ resource: model.uri });
+              compile_errors = (markers || []).map(function(mk) {
+                return { line: mk.startLineNumber, column: mk.startColumn, message: mk.message, severity: mk.severity };
+              });
+            }
+          } catch(e) {}
+        }
+      } catch(e) {}
+      // Editor tab title — TradingView shows the active saved script's name here
+      try {
+        var titleEl = document.querySelector('[data-name="header-title-name"]')
+          || document.querySelector('[class*="pine-editor"] [class*="title"]')
+          || document.querySelector('[class*="scriptTitle"]')
+          || document.querySelector('[class*="script-title"]');
+        if (titleEl) script_name = titleEl.textContent.trim().replace(/\\s+/g, ' ');
+      } catch(e) {}
+      // Dirty indicator — TV shows a "*" or unsaved-marker badge
+      try {
+        if (script_name && /\\*$/.test(script_name)) { dirty = true; script_name = script_name.replace(/\\*$/, '').trim(); }
+        var dirtyEl = document.querySelector('[class*="unsavedIndicator"]')
+          || document.querySelector('[data-name="unsaved-marker"]')
+          || document.querySelector('[class*="modified-indicator"]');
+        if (dirtyEl && dirtyEl.offsetParent !== null) dirty = true;
+      } catch(e) {}
+      // Detect visible action button (Add to chart / Update on chart / Save)
+      var action_button = null;
+      try {
+        var btns = document.querySelectorAll('button');
+        for (var i = 0; i < btns.length; i++) {
+          var b = btns[i];
+          if (b.offsetParent === null) continue;
+          var t = (b.textContent || '').replace(/\\s+/g, ' ').trim();
+          if (/^add to chart/i.test(t)) { action_button = 'add_to_chart'; break; }
+          if (/^update on chart/i.test(t)) { action_button = 'update_on_chart'; break; }
+          if (/^save and add to chart/i.test(t)) { action_button = 'save_and_add_to_chart'; break; }
+          if (/^save$/i.test(t) && action_button == null) action_button = 'save';
+        }
+      } catch(e) {}
+      // Detect blocking modal
+      var modal = { present: false, title: null, primary_label: null, secondary_label: null };
+      try {
+        var dlg = document.querySelector('[role="dialog"]') || document.querySelector('[class*="dialog-"]');
+        if (dlg && dlg.offsetParent !== null) {
+          modal.present = true;
+          var t = dlg.querySelector('[class*="title"]') || dlg.querySelector('h1,h2,h3,h4');
+          modal.title = t ? (t.textContent || '').trim() : null;
+          var btns = dlg.querySelectorAll('button');
+          var visible = [];
+          for (var i = 0; i < btns.length; i++) { if (btns[i].offsetParent !== null) visible.push((btns[i].textContent || '').trim()); }
+          modal.primary_label = visible[visible.length - 1] || null;
+          modal.secondary_label = visible[0] && visible[0] !== modal.primary_label ? visible[0] : null;
+        }
+      } catch(e) {}
+      return { panel_open: panel_open, source: source, script_name: script_name, dirty: dirty, action_button: action_button, modal: modal, compile_errors: compile_errors };
+    })()
+  `);
+  const source_hash = include_source_hash && raw && raw.source != null ? _hashSource(raw.source) : null;
+  return {
+    success: true,
+    panel_open: !!raw?.panel_open,
+    script_name: raw?.script_name || null,
+    dirty: !!raw?.dirty,
+    source_hash,
+    action_button: raw?.action_button || null,
+    modal: raw?.modal || { present: false, title: null, primary_label: null, secondary_label: null },
+    compile_errors: raw?.compile_errors || [],
+  };
+}
+
+/**
+ * Normalize editor script_name for "same script?" comparison: lowercase,
+ * strip trailing star, collapse whitespace, drop the trailing " * " suffix.
+ */
+function _normScriptName(s) {
+  return String(s || '').toLowerCase().replace(/\*+$/, '').replace(/\s+/g, ' ').trim();
+}
+
+export async function deployStrategy({ source, name, replace_existing = true, wait_ms = 8000, force_overwrite_editor = false, _deps }) {
   if (!source) throw new Error('source is required');
   if (!name) {
     // Auto-derive name from strategy() / indicator() title in the source
@@ -750,7 +864,27 @@ export async function deployStrategy({ source, name, replace_existing = true, wa
     name = (m && m[1]) || 'untitled_script';
   }
 
-  await ensurePineEditorOpen();
+  const { evaluate, ensurePineEditorOpen: _ensure } = _resolvePineDeps(_deps);
+  await _ensure();
+
+  // C2 preflight (A1-F5 / A2-F2): refuse if the editor currently holds a
+  // DIFFERENT saved-script binding. Without this guard, "Add to chart"
+  // silently adds the editor's stale bytecode under that other name.
+  const preflight = await getEditorState({ include_source_hash: false, _deps });
+  const requestedNorm = _normScriptName(name);
+  const editorNorm = _normScriptName(preflight.script_name);
+  const editorEmpty = !editorNorm || /^untitled/i.test(editorNorm);
+  const sameScript = editorNorm && requestedNorm && (editorNorm === requestedNorm
+    || editorNorm.includes(requestedNorm) || requestedNorm.includes(editorNorm));
+  if (!force_overwrite_editor && !editorEmpty && !sameScript) {
+    return {
+      success: false,
+      code: 'EDITOR_HOLDS_DIFFERENT_SAVED_SCRIPT',
+      editor_saved_script_name: preflight.script_name,
+      requested_script_name: name,
+      remediation: `The Pine editor currently has "${preflight.script_name}" bound. Deploying would add the stale bytecode under that name, not your new source. Pass force_overwrite_editor=true to save-as "${name}" first, OR call pine_new() to clear the editor.`,
+    };
+  }
 
   // 1. Inject source
   const escaped = JSON.stringify(source);
