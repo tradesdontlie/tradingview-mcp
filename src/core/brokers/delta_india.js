@@ -18,9 +18,10 @@ async function signedGet(pathAndQuery) {
   ]);
   const ts = Math.floor(Date.now() / 1000).toString();
   // signature_data = method + timestamp + requestPath + queryString + body
+  // queryString must NOT include the leading '?' per Delta India v2 spec.
   const url = new URL(pathAndQuery, baseUrl());
   const requestPath = url.pathname;
-  const queryString = url.search; // includes leading '?'
+  const queryString = url.search ? url.search.slice(1) : '';
   const payload = 'GET' + ts + requestPath + queryString + '';
   const signature = sign(DELTA_INDIA_API_SECRET, payload);
 
