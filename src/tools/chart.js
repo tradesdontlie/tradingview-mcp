@@ -2,32 +2,43 @@ import { z } from 'zod';
 import { jsonResult } from './_format.js';
 import * as core from '../core/chart.js';
 
+const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
+const MUTATES   = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
+const NETWORK   = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true };
+
 export function registerChartTools(server) {
-  server.tool('chart_get_state', 'Get current chart state (symbol, timeframe, chart type, indicators)', {}, async () => {
+  server.tool('chart_get_state', 'Get current chart state: symbol, timeframe, chart type, all studies with entity IDs, delayed_feed flag (true if TradingView is serving _DLY data), and is_strategy per study.', {}, async () => {
     try { return jsonResult(await core.getState()); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
-  });
+  }, READ_ONLY);
 
-  server.tool('chart_set_symbol', 'Change the chart symbol', {
-    symbol: z.string().describe('Symbol to set (e.g., BTCUSD, AAPL, ES1!, NYMEX:CL1!)'),
+  server.tool('chart_set_symbol', 'Change the chart symbol. NOTE: TradingView may silently fall back to a delayed feed (_DLY) if realtime is not entitled. Use chart_ensure_symbol if you need that confirmed.', {
+    symbol: z.string().describe('Symbol to set (e.g., BTCUSD, AAPL, ES1!, NYMEX:CL1!, TADAWUL:6015)'),
   }, async ({ symbol }) => {
     try { return jsonResult(await core.setSymbol({ symbol })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
-  });
+  }, MUTATES);
+
+  server.tool('chart_ensure_symbol', 'Set symbol, wait for the chart to settle, and report whether TradingView quietly downgraded the realtime feed to delayed (e.g. TADAWUL → TADAWUL_DLY). Returns the resolved canonical symbol + delayed_feed flag. Prefer this over chart_set_symbol when accuracy matters.', {
+    symbol: z.string().describe('Symbol to set (with or without exchange prefix)'),
+  }, async ({ symbol }) => {
+    try { return jsonResult(await core.ensureSymbol({ symbol })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  }, MUTATES);
 
   server.tool('chart_set_timeframe', 'Change the chart timeframe/resolution', {
-    timeframe: z.string().describe('Timeframe (e.g., 1, 5, 15, 60, D, W, M)'),
+    timeframe: z.string().describe('Timeframe (e.g., 1, 5, 15, 60, 240, D, W, M)'),
   }, async ({ timeframe }) => {
     try { return jsonResult(await core.setTimeframe({ timeframe })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
-  });
+  }, MUTATES);
 
   server.tool('chart_set_type', 'Change chart type', {
     chart_type: z.string().describe('Chart type: Bars(0), Candles(1), Line(2), Area(3), Renko(4), Kagi(5), PointAndFigure(6), LineBreak(7), HeikinAshi(8), HollowCandles(9) — pass name or number'),
   }, async ({ chart_type }) => {
     try { return jsonResult(await core.setType({ chart_type })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
-  });
+  }, MUTATES);
 
   server.tool('chart_manage_indicator', 'Add or remove an indicator/study on the chart', {
     action: z.enum(['add', 'remove']).describe('Action: add or remove'),
@@ -37,12 +48,12 @@ export function registerChartTools(server) {
   }, async ({ action, indicator, entity_id, inputs }) => {
     try { return jsonResult(await core.manageIndicator({ action, indicator, entity_id, inputs })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
-  });
+  }, MUTATES);
 
   server.tool('chart_get_visible_range', 'Get the visible date range (unix timestamps) and bars range on the chart', {}, async () => {
     try { return jsonResult(await core.getVisibleRange()); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
-  });
+  }, READ_ONLY);
 
   server.tool('chart_set_visible_range', 'Zoom the chart to a specific date range (unix timestamps)', {
     from: z.coerce.number().describe('Start of range (unix timestamp in seconds)'),
@@ -50,25 +61,33 @@ export function registerChartTools(server) {
   }, async ({ from, to }) => {
     try { return jsonResult(await core.setVisibleRange({ from, to })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
-  });
+  }, MUTATES);
 
   server.tool('chart_scroll_to_date', 'Jump the chart view to center on a specific date', {
     date: z.string().describe('ISO date string (e.g., "2024-01-15") or unix timestamp as a string'),
   }, async ({ date }) => {
     try { return jsonResult(await core.scrollToDate({ date })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
-  });
+  }, MUTATES);
 
   server.tool('symbol_info', 'Get detailed metadata about the current symbol (name, exchange, type, description)', {}, async () => {
     try { return jsonResult(await core.symbolInfo()); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
-  });
+  }, READ_ONLY);
 
-  server.tool('symbol_search', 'Search for symbols by name or keyword', {
+  server.tool('symbol_search', 'Search for symbols by name or keyword. Returns up to 15 raw matches — use symbol_resolve if you just want the single best match.', {
     query: z.string().describe('Search query (e.g., "AAPL", "crude oil", "ES")'),
     type: z.string().optional().describe('Filter by type (e.g., "stock", "futures", "crypto", "forex")'),
   }, async ({ query, type }) => {
     try { return jsonResult(await core.symbolSearch({ query, type })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
-  });
+  }, NETWORK);
+
+  server.tool('symbol_resolve', 'Resolve a free-text query (e.g., "6015 Americana", "AAPL") to the single best-match canonical symbol. Ranks by exact-ticker > preferred exchange > stock type. Returns up to 4 alternatives.', {
+    query: z.string().describe('Free-text symbol query (ticker, name, or fragment)'),
+    prefer_exchange: z.string().optional().describe('Exchange code to prefer in ranking (e.g., "TADAWUL", "NASDAQ", "BINANCE")'),
+  }, async ({ query, prefer_exchange }) => {
+    try { return jsonResult(await core.resolveSymbol({ query, prefer_exchange })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  }, NETWORK);
 }

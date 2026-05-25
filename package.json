@@ -20,7 +20,8 @@
     "test:cli": "node --test tests/cli.test.js",
     "test:all": "node --test tests/e2e.test.js tests/pine_analyze.test.js tests/cli.test.js",
     "test:verbose": "node --test --test-reporter=spec tests/e2e.test.js tests/pine_analyze.test.js",
-    "test:count": "node --test --test-reporter=spec tests/e2e.test.js 2>&1 | tail -5"
+    "test:count": "node --test --test-reporter=spec tests/e2e.test.js 2>&1 | tail -5",
+    "test:parity": "node --test --test-reporter=spec tests/parity/parity.test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",

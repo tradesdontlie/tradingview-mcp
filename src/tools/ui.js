@@ -85,10 +85,22 @@ export function registerUiTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('ui_evaluate', 'Execute JavaScript code in the TradingView page context for advanced automation', {
+  server.tool('ui_evaluate', 'Execute JavaScript code in the TradingView page context for advanced automation. Use sparingly — most needs are met by purpose-built tools.', {
     expression: z.string().describe('JavaScript expression to evaluate in the page context. Wrap in IIFE for complex logic.'),
   }, async ({ expression }) => {
     try { return jsonResult(await core.uiEvaluate({ expression })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
-  });
+  }, { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false });
+
+  server.tool('ui_dismiss_toasts', 'Close all visible toast notifications (ads, promo banners, account warnings) that clutter the UI between tool calls. Returns count closed. Cheap to call at the start of any complex flow.', {}, async () => {
+    try { return jsonResult(await core.dismissToasts()); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  }, { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false });
+
+  server.tool('ui_dismiss_dialog', 'Detect and dismiss the currently-open modal/dialog. accept=true clicks the primary action (Save/OK/Confirm); accept=false (default) clicks Cancel/Discard. Use after pine_compile or pine_smart_compile reports blocked_by.', {
+    accept: z.coerce.boolean().optional().describe('true = click primary action; false (default) = click Cancel/Discard.'),
+  }, async ({ accept }) => {
+    try { return jsonResult(await core.dialogDismiss({ accept })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  }, { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false });
 }

@@ -22,19 +22,133 @@ export async function getState({ _deps } = {}) {
       var studies = [];
       try {
         var allStudies = chart.getAllStudies();
+        // Look up which data sources back these studies so we can flag strategies.
+        var stratIds = {};
+        try {
+          var widget = chart._chartWidget;
+          var sources = widget.model().model().dataSources();
+          for (var si = 0; si < sources.length; si++) {
+            var s = sources[si];
+            if (s.reportData && (s.ordersData || s.tradesData)) {
+              var sid = (s.id && (typeof s.id === 'function' ? s.id() : s.id))
+                || (s._id && (typeof s._id === 'function' ? s._id() : s._id))
+                || null;
+              if (sid) stratIds[sid] = true;
+            }
+          }
+        } catch(e) {}
         studies = allStudies.map(function(s) {
-          return { id: s.id, name: s.name || s.title || 'unknown' };
+          return {
+            id: s.id,
+            name: s.name || s.title || 'unknown',
+            is_strategy: !!stratIds[s.id],
+          };
         });
       } catch(e) {}
+      var sym = chart.symbol();
       return {
-        symbol: chart.symbol(),
+        symbol: sym,
         resolution: chart.resolution(),
         chartType: chart.chartType(),
+        delayed_feed: /_DLY[:_]/i.test(sym || ''),
         studies: studies,
       };
     })()
   `);
   return { success: true, ...state };
+}
+
+/**
+ * Set symbol, wait for chart to settle, and warn if TradingView quietly
+ * downgraded the realtime feed to delayed (e.g. TADAWUL → TADAWUL_DLY).
+ * Returns the canonical resolved symbol plus a `delayed_feed` boolean.
+ */
+export async function ensureSymbol({ symbol, _deps }) {
+  const { evaluate, evaluateAsync, waitForChartReady } = _resolve(_deps);
+  await evaluateAsync(`
+    (function() {
+      var chart = ${CHART_API};
+      return new Promise(function(resolve) {
+        chart.setSymbol(${safeString(symbol)}, {});
+        setTimeout(resolve, 500);
+      });
+    })()
+  `);
+  const ready = await waitForChartReady(symbol);
+  const after = await evaluate(`
+    (function() {
+      var chart = ${CHART_API};
+      var sym = chart.symbol();
+      var ext = {};
+      try { ext = chart.symbolExt() || {}; } catch(e) {}
+      return { symbol: sym, exchange: ext.exchange || null, description: ext.description || null, type: ext.type || null };
+    })()
+  `);
+  const requestedBase = String(symbol).replace(/_DLY/i, '').toUpperCase();
+  const actualBase = String(after.symbol || '').replace(/_DLY/i, '').toUpperCase();
+  const matched = actualBase.includes(requestedBase) || requestedBase.includes(actualBase);
+  const delayed = /_DLY[:_]/i.test(after.symbol || '');
+  return {
+    success: matched,
+    requested: symbol,
+    resolved_symbol: after.symbol,
+    exchange: after.exchange,
+    description: after.description,
+    type: after.type,
+    delayed_feed: delayed,
+    chart_ready: ready,
+    warning: delayed && !/_DLY/i.test(symbol)
+      ? 'Realtime feed unavailable for this account; chart fell back to delayed data (_DLY).'
+      : (!matched ? `Resolved symbol "${after.symbol}" doesn't match requested "${symbol}".` : undefined),
+  };
+}
+
+/**
+ * Resolve a free-text query to the best-match canonical symbol on TradingView.
+ * Wraps symbolSearch with smart ranking (exact ticker, then exchange-prefixed).
+ */
+export async function resolveSymbol({ query, prefer_exchange }) {
+  if (!query) throw new Error('query is required');
+  // Use TradingView's public symbol search REST API
+  const params = new URLSearchParams({
+    text: query, hl: '1', exchange: prefer_exchange || '', lang: 'en', search_type: '', domain: 'production',
+  });
+  const resp = await fetch(`https://symbol-search.tradingview.com/symbol_search/v3/?${params}`, {
+    headers: { 'Origin': 'https://www.tradingview.com', 'Referer': 'https://www.tradingview.com/' },
+  });
+  if (!resp.ok) throw new Error(`Symbol search API returned ${resp.status}`);
+  const data = await resp.json();
+  const strip = s => (s || '').replace(/<\/?em>/g, '');
+  const all = (data.symbols || data || []).map(r => ({
+    symbol: strip(r.symbol),
+    description: strip(r.description),
+    exchange: r.exchange || r.prefix || '',
+    type: r.type || '',
+    full_name: r.exchange ? `${r.exchange}:${strip(r.symbol)}` : strip(r.symbol),
+  }));
+  if (all.length === 0) {
+    throw new Error(`No symbols matched "${query}". Try a different ticker or include the exchange prefix.`);
+  }
+  // Rank: exact ticker match > preferred exchange match > stock type > first result.
+  const q = query.toUpperCase();
+  const scored = all.map(r => {
+    let s = 0;
+    if (r.symbol.toUpperCase() === q) s += 100;
+    if (prefer_exchange && r.exchange.toUpperCase() === String(prefer_exchange).toUpperCase()) s += 50;
+    if (r.type === 'stock') s += 5;
+    return { ...r, score: s };
+  }).sort((a, b) => b.score - a.score);
+  const best = scored[0];
+  return {
+    success: true,
+    query,
+    resolved: best.full_name,
+    symbol: best.symbol,
+    exchange: best.exchange,
+    description: best.description,
+    type: best.type,
+    alternatives: scored.slice(1, 5).map(({ score, ...rest }) => rest),
+  };
 }
 
 export async function setSymbol({ symbol, _deps }) {
@@ -115,7 +229,8 @@ export async function manageIndicator({ action, indicator, entity_id, inputs: in
   }
 }
 
-export async function getVisibleRange() {
+export async function getVisibleRange({ _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
   const result = await evaluate(`
     (function() {
       var chart = ${CHART_API};
@@ -157,7 +272,8 @@ export async function setVisibleRange({ from, to, _deps }) {
   return { success: true, requested: { from, to }, actual: actual || { from: 0, to: 0 } };
 }
 
-export async function scrollToDate({ date }) {
+export async function scrollToDate({ date, _deps }) {
+  const { evaluate } = _resolve(_deps);
   let timestamp;
   if (/^\d+$/.test(date)) timestamp = Number(date);
   else timestamp = Math.floor(new Date(date).getTime() / 1000);
@@ -196,7 +312,8 @@ export async function scrollToDate({ date }) {
   return { success: true, date, centered_on: timestamp, resolution, window: { from, to } };
 }
 
-export async function symbolInfo() {
+export async function symbolInfo({ _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
   const result = await evaluate(`
     (function() {
       var chart = ${CHART_API};
