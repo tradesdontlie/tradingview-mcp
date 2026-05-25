@@ -2,9 +2,9 @@
 // atilaahmettaner/sentiment_service.py.
 // Zero deps. Built-in fetch. Keyword scoring (bullish/bearish lexicon).
 
-const USER_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
-  '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+// Honest UA — Reddit's public JSON API serves anonymous reads with sane UA.
+// Browser-spoofing UA risks anti-bot flags and is dishonest about origin.
+const USER_AGENT = 'tradingview-mcp/1.0 (+https://github.com/asat2094/tradingview-mcp)';
 const TIMEOUT_MS = 10_000;
 
 const BULLISH = [

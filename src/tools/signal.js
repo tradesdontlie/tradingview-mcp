@@ -4,19 +4,29 @@ import { z } from 'zod';
 import { jsonResult } from './_format.js';
 import * as engine from '../core/signals/engine.js';
 
+const METRIC_ENUM = z.enum(['close', 'price', 'rsi', 'ema', 'sma', 'atr']);
+const OP_ENUM = z.enum(['<', '>', '<=', '>=', '==', '!=']);
+
+const Operand = z.union([
+  z.object({ const: z.number() }).strict(),
+  z.object({ metric: METRIC_ENUM, period: z.number().int().min(1).max(500).optional() }).strict(),
+]);
+
+const Condition = z.object({
+  left: Operand,
+  op: OP_ENUM,
+  right: Operand,
+}).strict();
+
 export function registerSignalTools(server) {
   server.tool(
     'signal_register',
-    'Register a JSON DSL rule that evaluates against a streaming subscription buffer (created via subscribe_ticker). Engine polls every 2s; fires when conditions match. See PLAN.md for DSL examples.',
+    'Register a JSON DSL rule that evaluates against a streaming subscription buffer (created via subscribe_ticker). Engine polls every 2s; fires when conditions match. Operand: { const: number } OR { metric: close|price|rsi|ema|sma|atr, period?: int }. Op: < > <= >= == !=.',
     {
       rule: z.object({
-        name: z.string(),
-        sub_id: z.string(),
-        conditions: z.array(z.object({
-          left: z.record(z.any()),
-          op: z.string(),
-          right: z.record(z.any()),
-        })).min(1),
+        name: z.string().min(1),
+        sub_id: z.string().min(1),
+        conditions: z.array(Condition).min(1),
         require: z.enum(['all', 'any']).optional(),
         cooldown_ms: z.number().int().min(0).optional(),
       }),
