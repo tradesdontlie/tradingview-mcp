@@ -16,44 +16,92 @@ function makeId(prefix) {
   return `${prefix}_${(nextId++).toString(36)}`;
 }
 
+// Generic reconnect-on-close helper. Attempts to re-open the underlying WS
+// with exponential backoff (1s → 2s → 4s → 8s → cap 30s) on close/error.
+// Drops the timer if the entry is removed via unsubscribe().
+function attachReconnect(entry, opener) {
+  let attempt = 0;
+  let timer = null;
+  let stopped = false;
+
+  function schedule() {
+    if (stopped || subs.get(entry.sub_id) !== entry) return;
+    const delay = Math.min(30_000, 1_000 * 2 ** Math.min(attempt, 5));
+    attempt++;
+    timer = setTimeout(() => {
+      if (subs.get(entry.sub_id) !== entry) return;
+      try {
+        const newWs = opener();
+        entry.ws = newWs;
+        entry.last_reconnect_at = new Date().toISOString();
+        entry.reconnect_count = (entry.reconnect_count || 0) + 1;
+      } catch {
+        schedule();
+      }
+    }, delay);
+  }
+
+  entry.stopReconnect = () => {
+    stopped = true;
+    if (timer) clearTimeout(timer);
+  };
+  return { schedule };
+}
+
 // Hyperliquid trades subscribe ── sends { method: 'subscribe', subscription:{ type:'trades', coin } }
 function hyperliquidSubscribe({ coin }) {
   const sub_id = makeId('hl');
   const ring = new RingBuffer(2000);
-  const ws = new WebSocket(HL_WS);
   let alive = false;
+  let currentWs;
 
-  ws.on('open', () => {
-    alive = true;
-    ws.send(JSON.stringify({ method: 'subscribe', subscription: { type: 'trades', coin } }));
-  });
-  ws.on('message', (raw) => {
-    try {
-      const msg = JSON.parse(raw.toString());
-      if (msg.channel === 'trades' && Array.isArray(msg.data)) {
-        for (const t of msg.data) {
-          ring.push({
-            ts: t.time,
-            price: Number(t.px),
-            size: Number(t.sz),
-            side: t.side,
-            tid: t.tid,
-          });
+  function bind(ws) {
+    ws.on('open', () => {
+      alive = true;
+      ws.send(JSON.stringify({ method: 'subscribe', subscription: { type: 'trades', coin } }));
+    });
+    ws.on('message', (raw) => {
+      try {
+        const msg = JSON.parse(raw.toString());
+        if (msg.channel === 'trades' && Array.isArray(msg.data)) {
+          for (const t of msg.data) {
+            ring.push({
+              ts: t.time,
+              price: Number(t.px),
+              size: Number(t.sz),
+              side: t.side,
+              tid: t.tid,
+            });
+          }
         }
-      }
-    } catch { /* skip bad frames */ }
-  });
-  ws.on('close', () => { alive = false; });
-  ws.on('error', () => { alive = false; });
+      } catch { /* skip bad frames */ }
+    });
+    ws.on('close', () => { alive = false; reconnector?.schedule(); });
+    ws.on('error', () => { alive = false; reconnector?.schedule(); });
+    return ws;
+  }
+
+  currentWs = bind(new WebSocket(HL_WS));
 
   const entry = {
+    sub_id,
     source: 'hyperliquid',
     coin,
     ring,
-    ws,
+    ws: currentWs,
     started_at: new Date().toISOString(),
+    reconnect_count: 0,
+    last_reconnect_at: null,
     get alive() { return alive; },
   };
+
+  // Wire reconnect helper after entry exists so it can read entry.sub_id.
+  const reconnector = attachReconnect(entry, () => {
+    const fresh = bind(new WebSocket(HL_WS));
+    currentWs = fresh;
+    return fresh;
+  });
+
   subs.set(sub_id, entry);
   return { sub_id, source: 'hyperliquid', coin };
 }
@@ -63,47 +111,59 @@ function hyperliquidSubscribe({ coin }) {
 function deltaIndiaSubscribe({ coin: symbol }) {
   const sub_id = makeId('di');
   const ring = new RingBuffer(2000);
-  const ws = new WebSocket(DELTA_INDIA_WS);
   let alive = false;
+  let currentWs;
 
-  ws.on('open', () => {
-    alive = true;
-    ws.send(JSON.stringify({
-      type: 'subscribe',
-      payload: {
-        channels: [{ name: 'v2/ticker', symbols: [symbol] }],
-      },
-    }));
-  });
-  ws.on('message', (raw) => {
-    try {
-      const msg = JSON.parse(raw.toString());
-      // v2/ticker frames carry mark_price + close + high/low + funding etc.
-      if (msg.type === 'v2/ticker' && msg.symbol === symbol) {
-        ring.push({
-          ts: msg.timestamp,
-          price: Number(msg.mark_price ?? msg.close),
-          mark: Number(msg.mark_price),
-          close: Number(msg.close),
-          high: Number(msg.high),
-          low: Number(msg.low),
-          volume: Number(msg.volume),
-          funding_rate: Number(msg.mark_basis ?? 0),
-        });
-      }
-    } catch { /* skip bad frames */ }
-  });
-  ws.on('close', () => { alive = false; });
-  ws.on('error', () => { alive = false; });
+  function bind(ws) {
+    ws.on('open', () => {
+      alive = true;
+      ws.send(JSON.stringify({
+        type: 'subscribe',
+        payload: { channels: [{ name: 'v2/ticker', symbols: [symbol] }] },
+      }));
+    });
+    ws.on('message', (raw) => {
+      try {
+        const msg = JSON.parse(raw.toString());
+        if (msg.type === 'v2/ticker' && msg.symbol === symbol) {
+          ring.push({
+            ts: msg.timestamp,
+            price: Number(msg.mark_price ?? msg.close),
+            mark: Number(msg.mark_price),
+            close: Number(msg.close),
+            high: Number(msg.high),
+            low: Number(msg.low),
+            volume: Number(msg.volume),
+            funding_rate: Number(msg.mark_basis ?? 0),
+          });
+        }
+      } catch { /* skip bad frames */ }
+    });
+    ws.on('close', () => { alive = false; reconnector?.schedule(); });
+    ws.on('error', () => { alive = false; reconnector?.schedule(); });
+    return ws;
+  }
+
+  currentWs = bind(new WebSocket(DELTA_INDIA_WS));
 
   const entry = {
+    sub_id,
     source: 'delta_india',
     coin: symbol,
     ring,
-    ws,
+    ws: currentWs,
     started_at: new Date().toISOString(),
+    reconnect_count: 0,
+    last_reconnect_at: null,
     get alive() { return alive; },
   };
+
+  const reconnector = attachReconnect(entry, () => {
+    const fresh = bind(new WebSocket(DELTA_INDIA_WS));
+    currentWs = fresh;
+    return fresh;
+  });
+
   subs.set(sub_id, entry);
   return { sub_id, source: 'delta_india', coin: symbol };
 }
@@ -117,6 +177,7 @@ export function subscribe({ source, coin }) {
 export function unsubscribe(sub_id) {
   const e = subs.get(sub_id);
   if (!e) return { sub_id, found: false };
+  try { e.stopReconnect?.(); } catch {}
   try { e.ws?.close(); } catch {}
   subs.delete(sub_id);
   return { sub_id, found: true };
@@ -130,6 +191,8 @@ export function list() {
     started_at: e.started_at,
     alive: e.alive,
     buffer_size: e.ring.size(),
+    reconnect_count: e.reconnect_count || 0,
+    last_reconnect_at: e.last_reconnect_at,
   }));
 }
 
