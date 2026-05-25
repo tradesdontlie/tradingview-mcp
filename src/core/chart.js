@@ -277,6 +277,69 @@ export async function setType({ chart_type, _deps }) {
   return { success: true, chart_type, type_num: typeNum };
 }
 
+/**
+ * C13 / A1-F13 — clear all studies on the active chart, optionally
+ * preserving a name allowlist. Use to put the chart into a known-clean
+ * state before deploying a workflow indicator (operator session
+ * CC TV MCP.txt:721-742 had to iterate chart_manage_indicator(remove)
+ * per study).
+ *
+ * BUILT_IN_DEFAULTS: TradingView's default Volume + price-display studies
+ * are preserved when except_built_ins=true (most workflows don't want to
+ * touch these).
+ */
+const _BUILT_IN_STUDY_NAMES = ['Volume', 'Volume Profile', 'Sessions'];
+
+export async function clearStudies({ except_names = [], except_built_ins = true, dry_run = false, _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
+  const exceptSet = new Set([
+    ...(Array.isArray(except_names) ? except_names : []).map(n => String(n).toLowerCase()),
+    ...(except_built_ins ? _BUILT_IN_STUDY_NAMES.map(n => n.toLowerCase()) : []),
+  ]);
+  const studies = await evaluate(`
+    (function() {
+      try {
+        return ${CHART_API}.getAllStudies().map(function(s){return {id:s.id, name:(s.name||s.title||'')};});
+      } catch(e) { return []; }
+    })()
+  `);
+  const all = Array.isArray(studies) ? studies : [];
+  const toRemove = all.filter(s => !exceptSet.has(String(s.name).toLowerCase()));
+  const removed = [];
+  const errors = [];
+  if (dry_run) {
+    return {
+      success: true,
+      dry_run: true,
+      total_studies: all.length,
+      would_remove: toRemove.map(s => ({ id: s.id, name: s.name })),
+      preserved: all.filter(s => exceptSet.has(String(s.name).toLowerCase())).map(s => ({ id: s.id, name: s.name })),
+    };
+  }
+  for (const s of toRemove) {
+    try {
+      await evaluate(`
+        (function() {
+          try { ${CHART_API}.removeEntity(${safeString(s.id)}); return true; }
+          catch(e) { return e.message; }
+        })()
+      `);
+      removed.push({ id: s.id, name: s.name });
+    } catch (e) {
+      errors.push({ id: s.id, name: s.name, error: e.message });
+    }
+  }
+  const mutation_id = recordChartMutation({ kind: 'chart_clear_studies', hash: removed.map(r => r.id).join(',') });
+  return {
+    success: errors.length === 0,
+    total_studies_before: all.length,
+    removed,
+    preserved: all.filter(s => exceptSet.has(String(s.name).toLowerCase())).map(s => ({ id: s.id, name: s.name })),
+    errors,
+    mutation_id,
+  };
+}
+
 export async function manageIndicator({ action, indicator, entity_id, inputs: inputsRaw, _deps }) {
   const { evaluate } = _resolve(_deps);
   const inputs = inputsRaw ? (typeof inputsRaw === 'string' ? JSON.parse(inputsRaw) : inputsRaw) : undefined;

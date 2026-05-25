@@ -44,6 +44,15 @@ export function registerChartTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   }, MUTATES);
 
+  server.tool('chart_clear_studies', 'Remove ALL studies on the active chart, optionally preserving an allowlist by name. Use to put the chart into a known-clean state before deploying a workflow indicator (audit C13/A1-F13). Returns removed + preserved arrays. Pass dry_run=true to preview.', {
+    except_names: z.array(z.string()).optional().describe('Names to preserve (case-insensitive). Example ["EarnsExtractor"].'),
+    except_built_ins: z.coerce.boolean().optional().describe('Preserve TradingView built-in studies (Volume, etc.). Default true.'),
+    dry_run: z.coerce.boolean().optional().describe('Return what would be removed without actually removing. Default false.'),
+  }, async ({ except_names, except_built_ins, dry_run }) => {
+    try { return jsonResult(await core.clearStudies({ except_names, except_built_ins: except_built_ins !== false, dry_run })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  }, { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false });
+
   server.tool('chart_manage_indicator', 'Add or remove an indicator/study on the chart', {
     action: z.enum(['add', 'remove']).describe('Action: add or remove'),
     indicator: z.string().describe('Full indicator name: "Relative Strength Index", "MACD", "Volume", "Moving Average", "Bollinger Bands", "Moving Average Exponential". Short names like RSI/EMA do NOT work.'),
