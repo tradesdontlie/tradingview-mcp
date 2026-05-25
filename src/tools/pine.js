@@ -71,6 +71,18 @@ export function registerPineTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   }, READ_ONLY);
 
+  server.tool('pine_wait_for_output', 'Block until a Pine study emits >= min_count items of the requested emit kind, OR (when expected_for_symbol is set) until the chart is on that symbol AND items are present, OR timeout. Replaces ad-hoc Bash sleep loops (audit C5/A1-F6: 47 manual sleeps reproduced). Returns the same payload as data_get_pine_<emit> once the condition is met, plus polls/wait_ms_elapsed; on timeout returns success:false + code:"PINE_WAIT_TIMEOUT" with last_result for diagnosis.', {
+    study_filter: z.string().describe('Substring matching the study name (e.g. "EarnsExtractor")'),
+    emit: z.enum(['labels', 'lines', 'boxes', 'tables']).optional().describe('Which Pine output type to poll. Default "labels".'),
+    min_count: z.coerce.number().int().min(0).optional().describe('Minimum items required before returning. 0 = wait only for the study to be present. Default 1.'),
+    expected_for_symbol: z.string().optional().describe('Optional. Reject reads that are stale for the requested symbol; keep polling until the chart is on the expected symbol. Use this after chart_ensure_symbol to make wait_for_output also gate on symbol-correctness.'),
+    timeout_s: z.coerce.number().min(1).max(60).optional().describe('Total wait deadline in seconds. Default 10.'),
+    poll_interval_ms: z.coerce.number().int().min(50).max(5000).optional().describe('Poll cadence in ms. Default 250.'),
+  }, async ({ study_filter, emit, min_count, expected_for_symbol, timeout_s, poll_interval_ms }) => {
+    try { return jsonResult(await core.waitForOutput({ study_filter, emit, min_count, expected_for_symbol, timeout_s, poll_interval_ms })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  }, READ_ONLY);
+
   server.tool('pine_get_console', 'Read Pine Script console/log output (compile messages, log.info(), errors)', {}, async () => {
     try { return jsonResult(await core.getConsole()); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }

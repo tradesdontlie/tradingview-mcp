@@ -757,6 +757,86 @@ export async function dismissDialog({ accept = false } = {}) {
  * what used to be 5-8 separate tool calls.
  */
 /**
+ * C5 / A1-F6 — block until a Pine study emits the expected output, or timeout.
+ * Replaces the 47 `Bash(sleep N)` calls from the audit operator session.
+ *
+ * Polls the appropriate data.getPine{Labels|Lines|Boxes|Tables} (via dynamic
+ * import to avoid circular deps) every `poll_interval_ms` until:
+ *   1) study_filter matches AND total items >= min_count
+ *   2) expected_for_symbol is satisfied (chart_symbol matches)
+ *   3) timeout_s elapses → returns {success:false, code:'PINE_WAIT_TIMEOUT'}
+ */
+export async function waitForOutput({
+  study_filter,
+  emit = 'labels',
+  min_count = 1,
+  expected_for_symbol = null,
+  timeout_s = 10,
+  poll_interval_ms = 250,
+  _deps,
+} = {}) {
+  if (!study_filter) throw new Error('study_filter is required');
+  const validEmit = ['labels', 'lines', 'boxes', 'tables'];
+  if (!validEmit.includes(emit)) {
+    throw new Error(`emit must be one of ${JSON.stringify(validEmit)}, got "${emit}"`);
+  }
+  const data = await import('./data.js');
+  const reader = {
+    labels: data.getPineLabels,
+    lines: data.getPineLines,
+    boxes: data.getPineBoxes,
+    tables: data.getPineTables,
+  }[emit];
+  const start = Date.now();
+  const deadline = start + Math.max(1, Math.min(60, Number(timeout_s) || 10)) * 1000;
+  const pollMs = Math.max(50, Math.min(5000, Number(poll_interval_ms) || 250));
+  let polls = 0;
+  let lastResult = null;
+  while (Date.now() < deadline) {
+    polls += 1;
+    const args = { study_filter, _deps };
+    if (expected_for_symbol) args.expected_for_symbol = expected_for_symbol;
+    if (emit === 'labels') args.max_labels = Math.max(1, min_count);
+    lastResult = await reader(args);
+    if (lastResult?.success === false && lastResult?.error === 'PINE_OUTPUT_STALE_AFTER_SYMBOL_CHANGE') {
+      // Not yet on the expected symbol — keep polling
+      await new Promise(r => setTimeout(r, pollMs));
+      continue;
+    }
+    const studies = lastResult?.studies || [];
+    const totalCount = studies.reduce((sum, s) => {
+      const c = s.total_labels ?? s.total_lines ?? s.total_boxes ?? (s.tables ? s.tables.length : 0) ?? 0;
+      return sum + (typeof c === 'number' ? c : 0);
+    }, 0);
+    if (studies.length > 0 && totalCount >= min_count) {
+      return {
+        success: true,
+        emit,
+        study_filter,
+        wait_ms_elapsed: Date.now() - start,
+        polls,
+        total_count: totalCount,
+        ...lastResult,
+      };
+    }
+    await new Promise(r => setTimeout(r, pollMs));
+  }
+  return {
+    success: false,
+    code: 'PINE_WAIT_TIMEOUT',
+    emit,
+    study_filter,
+    expected_for_symbol,
+    min_count,
+    timeout_s,
+    wait_ms_elapsed: Date.now() - start,
+    polls,
+    last_result: lastResult,
+    remediation: `Polled ${polls}× over ${Date.now() - start}ms; study "${study_filter}" did not emit ${min_count} ${emit}${expected_for_symbol ? ` for ${expected_for_symbol}` : ''}. Check pine_get_errors, then chart_get_state.studies[] for the study presence.`,
+  };
+}
+
+/**
  * C2 / A1-F5 / A2-F2 — read editor state without mutating it. Returns enough
  * for callers (and deployStrategy's preflight) to know whether deploying
  * would overwrite a different saved script.
