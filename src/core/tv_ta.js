@@ -40,7 +40,7 @@ const BASE_COLUMNS = [
   'close', 'open', 'high', 'low', 'volume', 'change',
   'RSI', 'RSI[1]',
   'MACD.macd', 'MACD.signal',
-  'BB.upper', 'BB.lower', 'BB.lower',
+  'BB.upper', 'BB.lower',
   'SMA10', 'SMA20', 'SMA30', 'SMA50', 'SMA100', 'SMA200',
   'EMA10', 'EMA20', 'EMA30', 'EMA50', 'EMA100', 'EMA200',
   'Stoch.K', 'Stoch.D',
