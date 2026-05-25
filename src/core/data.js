@@ -841,7 +841,49 @@ export async function getPineTables({ study_filter, expected_for_symbol, _deps }
     return { success: false, error: 'PINE_OUTPUT_STALE_AFTER_SYMBOL_CHANGE', study_count: 0, studies: [], ...prov, ...stale };
   }
   const raw = await _eval(buildGraphicsJS('dwgtablecells', 'tableCells', filter));
-  if (!raw || raw.length === 0) return { success: true, study_count: 0, studies: [], ...prov, ...stale };
+  // C9 / A1-F9 / A2-F5 — when no tables, differentiate "study not found" from
+  // "study found but no table render on current bar".
+  if (!raw || raw.length === 0) {
+    let studiesSeen = [];
+    try {
+      const allStudies = await _eval(`
+        (function(){
+          try { return ${CHART_API}.getAllStudies().map(function(s){return {id:s.id, name:(s.name||s.title||'')};}); }
+          catch(e) { return []; }
+        })()
+      `);
+      const f = String(filter || '').toLowerCase();
+      studiesSeen = (Array.isArray(allStudies) ? allStudies : [])
+        .filter(s => !f || (s.name && s.name.toLowerCase().includes(f)))
+        .map(s => s.name);
+    } catch (_) { studiesSeen = []; }
+    if (studiesSeen.length === 0) {
+      // No matching study at all — call site might be using wrong filter
+      return {
+        success: true,
+        study_count: 0,
+        studies: [],
+        studies_seen: [],
+        diagnostic: filter
+          ? `No on-chart study matches study_filter="${filter}". Use chart_get_state.studies[].name to confirm the active study name.`
+          : 'No studies are on the chart.',
+        ...prov, ...stale,
+      };
+    }
+    // Studies exist but no tables emitted — typical cause is the table
+    // is gated on barstate.islast and the last bar isn't currently rendered.
+    return {
+      success: false,
+      error: 'NO_PINE_TABLES_EXTRACTED',
+      study_count: 0,
+      studies: [],
+      studies_seen: studiesSeen,
+      has_table_calls: null, // we can't tell from outside the runtime
+      tables_in_last_bar: 0,
+      diagnostic: `Studies present (${studiesSeen.join(', ')}) but no table.new output was extractable on the last rendered bar. Common causes: (a) the table draw is gated by 'if barstate.islast' and the last bar isn't reached, (b) chart visible range excludes the last bar, (c) Pine uses table.new but never calls table.cell(). Try: chart_scroll_to_date('last') OR read labels via data_get_pine_labels.`,
+      ...prov, ...stale,
+    };
+  }
 
   const studies = raw.map(s => {
     const tables = {};
