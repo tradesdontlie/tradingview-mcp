@@ -252,12 +252,47 @@ export const ERROR_EXPLANATIONS = [
 ];
 
 /** Lookup a builtin's signature by name (with or without namespace prefix). */
+/**
+ * C12 / A1-F12 — Enum members for builtin functions whose `simple string`
+ * parameters in V6_BUILTINS are actually closed enums in Pine v6.
+ * Augments lookupBuiltin() responses with valid enum values + common
+ * mistakes (e.g. earnings.actual_period does NOT exist; use earnings.actual).
+ */
+export const V6_ENUM_MEMBERS = {
+  'request.earnings': {
+    field: {
+      valid: ['earnings.actual', 'earnings.estimate', 'earnings.standardized'],
+      common_mistakes: [
+        {
+          tried: 'earnings.actual_period',
+          fix: "No 'actual_period' constant exists in Pine v6. For fiscal-period labels, derive from time(time, '3M') or call request.financial(symbol, 'EARNINGS', period='FQ').",
+        },
+        {
+          tried: 'earnings.eps',
+          fix: "Use 'earnings.actual' (reported EPS). 'eps' is not a valid Pine v6 earnings constant.",
+        },
+      ],
+    },
+  },
+  'request.dividends': {
+    field: {
+      valid: ['dividends.gross', 'dividends.net'],
+      common_mistakes: [
+        { tried: 'dividends.amount', fix: "Use 'dividends.gross' or 'dividends.net'." },
+      ],
+    },
+  },
+};
+
 export function lookupBuiltin(name) {
   const q = String(name).trim();
   for (const [ns, table] of Object.entries(V6_BUILTINS)) {
     for (const [key, sig] of Object.entries(table)) {
       if (key === q || key.endsWith('.' + q) || key === ns + '.' + q) {
-        return { found: true, name: key, namespace: ns, signature: sig };
+        const out = { found: true, name: key, namespace: ns, signature: sig };
+        const enums = V6_ENUM_MEMBERS[key];
+        if (enums) out.enums = enums;
+        return out;
       }
     }
   }
