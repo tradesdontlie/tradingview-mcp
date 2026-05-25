@@ -127,7 +127,7 @@ export function _computeCoherence(state, verify_against_feed) {
  * downgraded the realtime feed to delayed (e.g. TADAWUL → TADAWUL_DLY).
  * Returns the canonical resolved symbol plus a `delayed_feed` boolean.
  */
-export async function ensureSymbol({ symbol, _deps }) {
+export async function ensureSymbol({ symbol, require_ready = true, ready_timeout_ms = 10000, _deps }) {
   const { evaluate, evaluateAsync, waitForChartReady } = _resolve(_deps);
   await evaluateAsync(`
     (function() {
@@ -138,7 +138,8 @@ export async function ensureSymbol({ symbol, _deps }) {
       });
     })()
   `);
-  const ready = await waitForChartReady(symbol);
+  const timeoutSec = Math.max(1, Math.min(60, Math.round((ready_timeout_ms || 10000) / 1000)));
+  const ready = await waitForChartReady(symbol, null, timeoutSec * 1000);
   const after = await evaluate(`
     (function() {
       var chart = ${CHART_API};
@@ -153,7 +154,7 @@ export async function ensureSymbol({ symbol, _deps }) {
   const matched = actualBase.includes(requestedBase) || requestedBase.includes(actualBase);
   const delayed = /_DLY[:_]/i.test(after.symbol || '');
   const mutation_id = recordChartMutation({ kind: 'ensureSymbol', symbol: after.symbol });
-  return {
+  const result = {
     success: matched,
     requested: symbol,
     resolved_symbol: after.symbol,
@@ -167,6 +168,16 @@ export async function ensureSymbol({ symbol, _deps }) {
       ? 'Realtime feed unavailable for this account; chart fell back to delayed data (_DLY).'
       : (!matched ? `Resolved symbol "${after.symbol}" doesn't match requested "${symbol}".` : undefined),
   };
+  // C11 / A1-F11 / A2-F4: hard-stop default — when require_ready=true (default)
+  // and the chart did not become ready within ready_timeout_ms, return
+  // success:false + error:"CHART_NOT_READY" so callers don't read stale
+  // labels/quotes/ohlcv.
+  if (require_ready && ready !== true) {
+    result.success = false;
+    result.error = 'CHART_NOT_READY';
+    result.next_action = `Chart did not become ready within ${timeoutSec}s. Re-run chart_ensure_symbol with a higher ready_timeout_ms, OR call chart_get_state to verify before reading data. Set require_ready=false to opt out of this hard-stop (legacy behaviour).`;
+  }
+  return result;
 }
 
 /**

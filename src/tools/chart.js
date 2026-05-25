@@ -21,10 +21,12 @@ export function registerChartTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   }, MUTATES);
 
-  server.tool('chart_ensure_symbol', 'Set symbol, wait for the chart to settle, and report whether TradingView quietly downgraded the realtime feed to delayed (e.g. TADAWUL → TADAWUL_DLY). Returns the resolved canonical symbol + delayed_feed flag. Prefer this over chart_set_symbol when accuracy matters.', {
+  server.tool('chart_ensure_symbol', 'Set symbol, wait for the chart to settle (audit C11/A1-F11/A2-F4: hard-stop default — require_ready=true returns success:false + error:CHART_NOT_READY if not ready), and report delayed_feed. Returns mutation_id + resolved canonical symbol. Prefer this over chart_set_symbol.', {
     symbol: z.string().describe('Symbol to set (with or without exchange prefix)'),
-  }, async ({ symbol }) => {
-    try { return jsonResult(await core.ensureSymbol({ symbol })); }
+    require_ready: z.coerce.boolean().optional().describe('Hard-stop when chart not ready. Default true (audit C11). Set false for legacy "fire-and-forget" behaviour where chart_ready:false is silently tolerated.'),
+    ready_timeout_ms: z.coerce.number().int().min(1000).max(60000).optional().describe('How long to wait for chart_ready. Default 10000.'),
+  }, async ({ symbol, require_ready, ready_timeout_ms }) => {
+    try { return jsonResult(await core.ensureSymbol({ symbol, require_ready: require_ready !== false, ready_timeout_ms })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   }, MUTATES);
 
