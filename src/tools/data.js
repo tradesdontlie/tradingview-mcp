@@ -74,35 +74,39 @@ export function registerDataTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message, hint: 'Open the DOM panel in TradingView before using this tool.' }, true); }
   }, READ_ONLY);
 
-  server.tool('data_get_pine_lines', 'Read horizontal price levels drawn by Pine Script indicators (line.new). Returns deduplicated price levels per study. Use study_filter to target a specific indicator.', {
+  server.tool('data_get_pine_lines', 'Read horizontal price levels drawn by Pine indicators (line.new). Returns price levels per study with freshness provenance: chart_symbol, chart_resolution, last_chart_mutation_id. When expected_for_symbol is set and differs from chart_symbol, returns success=false + error=PINE_OUTPUT_STALE_AFTER_SYMBOL_CHANGE (audit C3/A1-F3/A2-F3).', {
     study_filter: z.string().optional().describe('Substring to match study name (e.g., "Profiler", "NY Levels"). Omit for all.'),
     verbose: z.coerce.boolean().optional().describe('Return raw line data with IDs, coordinates, colors (default false — returns only unique price levels)'),
-  }, async ({ study_filter, verbose }) => {
-    try { return jsonResult(await core.getPineLines({ study_filter, verbose })); }
+    expected_for_symbol: z.string().optional().describe('If set, reject the read with PINE_OUTPUT_STALE_AFTER_SYMBOL_CHANGE when the current chart symbol does not match. Use this after chart_ensure_symbol to make stale reads fail loudly.'),
+  }, async ({ study_filter, verbose, expected_for_symbol }) => {
+    try { return jsonResult(await core.getPineLines({ study_filter, verbose, expected_for_symbol })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   }, READ_ONLY);
 
-  server.tool('data_get_pine_labels', 'Read text labels drawn by Pine Script indicators (label.new). Returns text and price pairs. Use study_filter to target a specific indicator.', {
+  server.tool('data_get_pine_labels', 'Read text labels drawn by Pine indicators (label.new). Returns text+price pairs with freshness provenance: chart_symbol, chart_resolution, last_chart_mutation_id. When expected_for_symbol is set and differs from chart_symbol, returns success=false + error=PINE_OUTPUT_STALE_AFTER_SYMBOL_CHANGE (audit C3/A1-F3/A2-F3).', {
     study_filter: z.string().optional().describe('Substring to match study name. Omit for all.'),
     max_labels: z.coerce.number().optional().describe('Max labels per study (default 50). Set higher if you need all.'),
     verbose: z.coerce.boolean().optional().describe('Return raw label data with IDs, colors, positions (default false — returns only text + price)'),
-  }, async ({ study_filter, max_labels, verbose }) => {
-    try { return jsonResult(await core.getPineLabels({ study_filter, max_labels, verbose })); }
+    expected_for_symbol: z.string().optional().describe('If set, reject the read with PINE_OUTPUT_STALE_AFTER_SYMBOL_CHANGE when the current chart symbol does not match. Use this after chart_ensure_symbol to make stale reads fail loudly.'),
+  }, async ({ study_filter, max_labels, verbose, expected_for_symbol }) => {
+    try { return jsonResult(await core.getPineLabels({ study_filter, max_labels, verbose, expected_for_symbol })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   }, READ_ONLY);
 
-  server.tool('data_get_pine_tables', 'Read table data drawn by Pine Script indicators (table.new). Returns formatted text rows per table. Use study_filter to target a specific indicator.', {
+  server.tool('data_get_pine_tables', 'Read table data drawn by Pine indicators (table.new). Returns formatted text rows per table with freshness provenance. expected_for_symbol enforces non-stale reads (audit C3/A1-F3/A2-F3).', {
     study_filter: z.string().optional().describe('Substring to match study name. Omit for all.'),
-  }, async ({ study_filter }) => {
-    try { return jsonResult(await core.getPineTables({ study_filter })); }
+    expected_for_symbol: z.string().optional().describe('If set, reject the read with PINE_OUTPUT_STALE_AFTER_SYMBOL_CHANGE when the current chart symbol does not match.'),
+  }, async ({ study_filter, expected_for_symbol }) => {
+    try { return jsonResult(await core.getPineTables({ study_filter, expected_for_symbol })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   }, READ_ONLY);
 
-  server.tool('data_get_pine_boxes', 'Read box/zone boundaries drawn by Pine Script indicators (box.new). Returns deduplicated {high, low} price zones. Use study_filter to target a specific indicator.', {
+  server.tool('data_get_pine_boxes', 'Read box/zone boundaries drawn by Pine indicators (box.new). Returns {high, low} zones with freshness provenance. expected_for_symbol enforces non-stale reads (audit C3/A1-F3/A2-F3).', {
     study_filter: z.string().optional().describe('Substring to match study name. Omit for all.'),
     verbose: z.coerce.boolean().optional().describe('Return all boxes with IDs and coordinates (default false — returns unique price zones)'),
-  }, async ({ study_filter, verbose }) => {
-    try { return jsonResult(await core.getPineBoxes({ study_filter, verbose })); }
+    expected_for_symbol: z.string().optional().describe('If set, reject the read with PINE_OUTPUT_STALE_AFTER_SYMBOL_CHANGE when the current chart symbol does not match.'),
+  }, async ({ study_filter, verbose, expected_for_symbol }) => {
+    try { return jsonResult(await core.getPineBoxes({ study_filter, verbose, expected_for_symbol })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   }, READ_ONLY);
 

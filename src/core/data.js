@@ -1,11 +1,17 @@
 /**
  * Core data access logic.
  */
-import { evaluate, evaluateAsync, KNOWN_PATHS, safeString } from '../connection.js';
+import { evaluate as _evaluate, evaluateAsync, KNOWN_PATHS, safeString } from '../connection.js';
 import { STRATEGY_FIND_JS, buildFieldsFilter, summariseReport, pickFields } from './_helpers.js';
+import { currentMutationId, lastMutationFor } from './_mutation_ledger.js';
 import { writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+
+// Module-level evaluate. Audit C3 functions (getPineLabels/Tables/Lines/Boxes)
+// accept _deps for unit testability while legacy data.js functions still use
+// the imported binding directly.
+const evaluate = _evaluate;
 
 const __dirname_data = dirname(fileURLToPath(import.meta.url));
 const EXPORTS_DIR = join(dirname(dirname(__dirname_data)), 'exports');
@@ -724,10 +730,62 @@ export async function getStudyValues() {
   return { success: true, study_count: data?.length || 0, studies: data || [] };
 }
 
-export async function getPineLines({ study_filter, verbose } = {}) {
+/**
+ * C3 / A1-F3 / A2-F3 — read live chart symbol + resolution + ledger mutation_id
+ * so Pine drawing reads can return freshness provenance and detect staleness.
+ * Returns { chart_symbol, chart_resolution, last_chart_mutation_id }.
+ */
+async function _readChartProvenance(_eval = evaluate) {
+  let chart_symbol = null;
+  let chart_resolution = null;
+  try {
+    const out = await _eval(`
+      (function(){
+        try { var c = ${CHART_API}; return { symbol: c.symbol(), resolution: c.resolution() }; }
+        catch(e) { return { symbol: null, resolution: null }; }
+      })()
+    `);
+    chart_symbol = out?.symbol || null;
+    chart_resolution = out?.resolution != null ? String(out.resolution) : null;
+  } catch (_) { /* graceful */ }
+  return {
+    chart_symbol,
+    chart_resolution,
+    last_chart_mutation_id: currentMutationId(),
+  };
+}
+
+/**
+ * Decide stale + reason for a Pine-output read.
+ * - If expected_for_symbol is given and differs from chart_symbol → stale.
+ * - Otherwise stale = false, reason = null.
+ * Tolerates _DLY normalization (TADAWUL_DLY:2222 ~ TADAWUL:2222).
+ */
+function _computeStaleness({ expected_for_symbol, chart_symbol }) {
+  if (!expected_for_symbol) return { stale: false, stale_reason: null };
+  const norm = s => String(s || '').toUpperCase().replace(/_DLY/i, '');
+  const expN = norm(expected_for_symbol);
+  const chartN = norm(chart_symbol);
+  if (!chartN) return { stale: false, stale_reason: null };
+  if (chartN.includes(expN) || expN.includes(chartN)) {
+    return { stale: false, stale_reason: null };
+  }
+  return {
+    stale: true,
+    stale_reason: `Pine output is for chart_symbol="${chart_symbol}" but caller expected expected_for_symbol="${expected_for_symbol}".`,
+  };
+}
+
+export async function getPineLines({ study_filter, verbose, expected_for_symbol, _deps } = {}) {
+  const _eval = _deps?.evaluate || evaluate;
   const filter = study_filter || '';
-  const raw = await evaluate(buildGraphicsJS('dwglines', 'lines', filter));
-  if (!raw || raw.length === 0) return { success: true, study_count: 0, studies: [] };
+  const prov = await _readChartProvenance(_eval);
+  const stale = _computeStaleness({ expected_for_symbol, chart_symbol: prov.chart_symbol });
+  if (stale.stale) {
+    return { success: false, error: 'PINE_OUTPUT_STALE_AFTER_SYMBOL_CHANGE', study_count: 0, studies: [], ...prov, ...stale };
+  }
+  const raw = await _eval(buildGraphicsJS('dwglines', 'lines', filter));
+  if (!raw || raw.length === 0) return { success: true, study_count: 0, studies: [], ...prov, ...stale };
 
   const studies = raw.map(s => {
     const hLevels = [];
@@ -745,13 +803,19 @@ export async function getPineLines({ study_filter, verbose } = {}) {
     if (verbose) result.all_lines = allLines;
     return result;
   });
-  return { success: true, study_count: studies.length, studies };
+  return { success: true, study_count: studies.length, studies, ...prov, ...stale };
 }
 
-export async function getPineLabels({ study_filter, max_labels, verbose } = {}) {
+export async function getPineLabels({ study_filter, max_labels, verbose, expected_for_symbol, _deps } = {}) {
+  const _eval = _deps?.evaluate || evaluate;
   const filter = study_filter || '';
-  const raw = await evaluate(buildGraphicsJS('dwglabels', 'labels', filter));
-  if (!raw || raw.length === 0) return { success: true, study_count: 0, studies: [] };
+  const prov = await _readChartProvenance(_eval);
+  const stale = _computeStaleness({ expected_for_symbol, chart_symbol: prov.chart_symbol });
+  if (stale.stale) {
+    return { success: false, error: 'PINE_OUTPUT_STALE_AFTER_SYMBOL_CHANGE', study_count: 0, studies: [], ...prov, ...stale };
+  }
+  const raw = await _eval(buildGraphicsJS('dwglabels', 'labels', filter));
+  if (!raw || raw.length === 0) return { success: true, study_count: 0, studies: [], ...prov, ...stale };
 
   const limit = max_labels || 50;
   const studies = raw.map(s => {
@@ -765,13 +829,19 @@ export async function getPineLabels({ study_filter, max_labels, verbose } = {}) 
     if (labels.length > limit) labels = labels.slice(-limit);
     return { name: s.name, total_labels: s.count, showing: labels.length, labels };
   });
-  return { success: true, study_count: studies.length, studies };
+  return { success: true, study_count: studies.length, studies, ...prov, ...stale };
 }
 
-export async function getPineTables({ study_filter } = {}) {
+export async function getPineTables({ study_filter, expected_for_symbol, _deps } = {}) {
+  const _eval = _deps?.evaluate || evaluate;
   const filter = study_filter || '';
-  const raw = await evaluate(buildGraphicsJS('dwgtablecells', 'tableCells', filter));
-  if (!raw || raw.length === 0) return { success: true, study_count: 0, studies: [] };
+  const prov = await _readChartProvenance(_eval);
+  const stale = _computeStaleness({ expected_for_symbol, chart_symbol: prov.chart_symbol });
+  if (stale.stale) {
+    return { success: false, error: 'PINE_OUTPUT_STALE_AFTER_SYMBOL_CHANGE', study_count: 0, studies: [], ...prov, ...stale };
+  }
+  const raw = await _eval(buildGraphicsJS('dwgtablecells', 'tableCells', filter));
+  if (!raw || raw.length === 0) return { success: true, study_count: 0, studies: [], ...prov, ...stale };
 
   const studies = raw.map(s => {
     const tables = {};
@@ -793,13 +863,19 @@ export async function getPineTables({ study_filter } = {}) {
     });
     return { name: s.name, tables: tableList };
   });
-  return { success: true, study_count: studies.length, studies };
+  return { success: true, study_count: studies.length, studies, ...prov, ...stale };
 }
 
-export async function getPineBoxes({ study_filter, verbose } = {}) {
+export async function getPineBoxes({ study_filter, verbose, expected_for_symbol, _deps } = {}) {
+  const _eval = _deps?.evaluate || evaluate;
   const filter = study_filter || '';
-  const raw = await evaluate(buildGraphicsJS('dwgboxes', 'boxes', filter));
-  if (!raw || raw.length === 0) return { success: true, study_count: 0, studies: [] };
+  const prov = await _readChartProvenance(_eval);
+  const stale = _computeStaleness({ expected_for_symbol, chart_symbol: prov.chart_symbol });
+  if (stale.stale) {
+    return { success: false, error: 'PINE_OUTPUT_STALE_AFTER_SYMBOL_CHANGE', study_count: 0, studies: [], ...prov, ...stale };
+  }
+  const raw = await _eval(buildGraphicsJS('dwgboxes', 'boxes', filter));
+  if (!raw || raw.length === 0) return { success: true, study_count: 0, studies: [], ...prov, ...stale };
 
   const studies = raw.map(s => {
     const zones = [];
@@ -817,7 +893,7 @@ export async function getPineBoxes({ study_filter, verbose } = {}) {
     if (verbose) result.all_boxes = allBoxes;
     return result;
   });
-  return { success: true, study_count: studies.length, studies };
+  return { success: true, study_count: studies.length, studies, ...prov, ...stale };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
