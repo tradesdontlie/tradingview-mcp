@@ -165,7 +165,7 @@ Effort: ~0.5 day (pure REST + WS, no auth).
 
 | Broker | Type | Implementation | Status |
 |---|---|---|---|
-| **Zerodha Kite** | NSE/BSE equities + F&O | Delegate to `mcp.kite.trade` (separate MCP user installs) | Documented in README |
+| **Zerodha Kite** | NSE/BSE equities + F&O | Delegate to `mcp.kite.trade` (separate MCP user installs) — locked default | ✅ Documented; no native code |
 | **Upstox** | NSE/BSE equities + F&O | `upstox-js-sdk` wrapper. OAuth flow. Read-only first. | Code in `src/core/brokers/upstox.js` |
 | **Delta Exchange India** | Crypto F&O | Hand-port REST + WS (HMAC API key) | `src/core/brokers/delta_india.js` |
 | **CoinDCX** | Indian crypto spot | Hand-port REST + WS (HMAC API key) | `src/core/brokers/coindcx.js` |
@@ -180,6 +180,16 @@ Effort: ~0.5 day (pure REST + WS, no auth).
 **Execution is OUT OF SCOPE for phase 2.** Signal-first. Order placement defer to phase 3 with explicit user gate.
 
 **Secrets:** `.env` file at `~/.tradingview-mcp/.env` with broker keys. Schema-validated on startup via `dotenv` + `zod`.
+
+## WS adapter status (current)
+
+| Source | Status | Auth | Notes |
+|---|---|---|---|
+| Hyperliquid | ✅ wired | none | trades stream, public |
+| Delta India | ✅ wired | none | v2/ticker public; covers India crypto F&O (BTCUSD/ETHUSD perps + BTC_FUT) |
+| CoinDCX | ❌ deferred | required | socket.io protocol; needs `socket.io-client` dep |
+| Upstox | ❌ deferred | required | V2 binary WebSocket; needs OAuth + protobuf decoder |
+| Kite | n/a | n/a | Delegated to mcp.kite.trade |
 
 ## Phase 3 — WS streaming + signal engine
 
