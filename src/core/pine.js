@@ -724,28 +724,86 @@ export async function saveAs({ name }) {
 }
 
 /**
- * Detect and dismiss any modal/dialog currently open. Pass `accept: true` to
- * click the primary action (Save/OK/Confirm), false to cancel.
+ * C7 / A1-F7 — dialog-kind enum. Maps each kind to its DOM selector + the
+ * button to click. Exported for tests.
  */
-export async function dismissDialog({ accept = false } = {}) {
+export const DIALOG_KINDS = {
+  unsaved_changes:        { test: /unsaved (changes|version)|don'?t save/i, primary: /^(save|save and add|don'?t save|discard)$/i },
+  save_and_add_to_chart:  { test: /save and add to chart|save script/i,     primary: /^(save and add to chart|save)$/i },
+  overwrite_existing_study:{ test: /overwrite|already exists/i,              primary: /^(overwrite|yes|confirm)$/i },
+  save_as_new:            { test: /save (as|script)/i,                       primary: /^(save|save as|ok)$/i },
+  compile_error_modal:    { test: /compil(e|ation) (error|failed)/i,         primary: /^(close|ok|dismiss)$/i },
+};
+
+/**
+ * Detect and dismiss any modal/dialog currently open. C7/A1-F7: when
+ * expected_dialog_kinds is provided, match the dialog text against those
+ * kinds and click the kind-specific primary button (e.g. the
+ * "Save and add to chart" button rather than the generic "Save"); returns
+ * matched_dialog_kind + action so the caller can verify.
+ *
+ * accept:true clicks the primary action; accept:false clicks cancel/discard.
+ */
+export async function dismissDialog({ accept = false, expected_dialog_kinds } = {}) {
+  const kindsJson = expected_dialog_kinds && expected_dialog_kinds.length > 0
+    ? JSON.stringify(expected_dialog_kinds)
+    : 'null';
+  const kindMap = {};
+  for (const [k, v] of Object.entries(DIALOG_KINDS)) {
+    kindMap[k] = { test: v.test.source, flags: v.test.flags, primary: v.primary.source, primaryFlags: v.primary.flags };
+  }
+  const kindMapJson = JSON.stringify(kindMap);
   const result = await evaluate(`
     (function() {
       var accept = ${accept ? 'true' : 'false'};
+      var kinds = ${kindsJson};
+      var kindMap = ${kindMapJson};
       var dlg = document.querySelector('[role="dialog"]') || document.querySelector('[class*="dialog-"]');
-      if (!dlg || dlg.offsetParent === null) return { found: false };
-      var title = (dlg.querySelector('[class*="title"]')||{}).textContent || '';
+      if (!dlg || dlg.offsetParent === null) {
+        // Fallback: the "Save and add to chart" prompt sometimes attaches as a
+        // floating button, not a [role="dialog"]. Try the data-name selector
+        // from CC TV MCP.txt:325.
+        var floatBtn = document.querySelector('[data-name="submit-button-save-and-add-to-chart"]');
+        if (floatBtn && floatBtn.offsetParent !== null && accept) {
+          floatBtn.click();
+          return { found: true, matched_dialog_kind: 'save_and_add_to_chart', action: 'accepted', title: 'Save and add to chart', clicked: 'Save and add to chart' };
+        }
+        return { found: false, matched_dialog_kind: null, action: 'no_dialog_present' };
+      }
+      var titleText = (dlg.querySelector('[class*="title"]')||{}).textContent || '';
+      var bodyText = dlg.textContent || '';
+      // C7: detect the dialog kind, prioritising explicit expected_dialog_kinds.
+      var matched = null;
+      var allowed = kinds || Object.keys(kindMap);
+      for (var i = 0; i < allowed.length; i++) {
+        var entry = kindMap[allowed[i]];
+        if (!entry) continue;
+        var re = new RegExp(entry.test, entry.flags);
+        if (re.test(bodyText) || re.test(titleText)) { matched = allowed[i]; break; }
+      }
       var buttons = [];
       dlg.querySelectorAll('button').forEach(function(b) { if (b.offsetParent !== null) buttons.push(b); });
       var target = null;
-      var primaryRe = /^(save|ok|confirm|yes|accept|continue|open anyway|apply)$/i;
-      var cancelRe = /^(cancel|no|discard|close|dismiss|don'?t save)$/i;
-      var re = accept ? primaryRe : cancelRe;
-      for (var i = 0; i < buttons.length; i++) {
-        if (re.test(buttons[i].textContent.trim())) { target = buttons[i]; break; }
+      if (matched && accept) {
+        var primary = new RegExp(kindMap[matched].primary, kindMap[matched].primaryFlags);
+        for (var j = 0; j < buttons.length; j++) {
+          if (primary.test((buttons[j].textContent || '').trim())) { target = buttons[j]; break; }
+        }
+      }
+      if (!target) {
+        var primaryRe = /^(save and add to chart|save|ok|confirm|yes|accept|continue|open anyway|apply)$/i;
+        var cancelRe = /^(cancel|no|discard|close|dismiss|don'?t save)$/i;
+        var re = accept ? primaryRe : cancelRe;
+        for (var k = 0; k < buttons.length; k++) {
+          if (re.test((buttons[k].textContent || '').trim())) { target = buttons[k]; break; }
+        }
       }
       if (!target && buttons.length > 0) target = accept ? buttons[buttons.length - 1] : buttons[0];
-      if (target) { target.click(); return { found: true, title: title.trim(), clicked: target.textContent.trim(), accepted: accept }; }
-      return { found: true, title: title.trim(), clicked: null };
+      if (target) {
+        target.click();
+        return { found: true, matched_dialog_kind: matched, action: accept ? 'accepted' : 'cancelled', title: titleText.trim(), clicked: (target.textContent || '').trim() };
+      }
+      return { found: true, matched_dialog_kind: matched, action: 'no_clickable_button', title: titleText.trim(), clicked: null };
     })()
   `);
   return { success: true, ...(result || { found: false }) };

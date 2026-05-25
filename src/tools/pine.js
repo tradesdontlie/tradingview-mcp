@@ -141,10 +141,11 @@ export function registerPineTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   }, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false });
 
-  server.tool('pine_dismiss_dialog', 'Dismiss the modal dialog blocking the Pine Editor (Save script, Confirm overwrite, etc.). Use after pine_compile reports blocked_by.', {
+  server.tool('pine_dismiss_dialog', 'Dismiss the modal dialog blocking the Pine Editor (Save script, Confirm overwrite, Save and add to chart, etc.). Audit C7/A1-F7: when expected_dialog_kinds is set, matches the specific dialog kind and clicks the kind-specific primary button (e.g. the "Save and add to chart" button rather than generic "Save"); falls back to a floating [data-name="submit-button-save-and-add-to-chart"] selector when no [role="dialog"] is present. Returns matched_dialog_kind + action.', {
     accept: z.coerce.boolean().optional().describe('true = click the primary button (Save/OK/Confirm); false = click Cancel/Discard (default false)'),
-  }, async ({ accept }) => {
-    try { return jsonResult(await core.dismissDialog({ accept })); }
+    expected_dialog_kinds: z.array(z.enum(['unsaved_changes', 'save_and_add_to_chart', 'overwrite_existing_study', 'save_as_new', 'compile_error_modal'])).optional().describe('Restrict dismissal to specific dialog kinds. Default: match any of the known kinds. Use ["save_and_add_to_chart"] to ONLY dismiss the post-Add-to-chart save modal.'),
+  }, async ({ accept, expected_dialog_kinds }) => {
+    try { return jsonResult(await core.dismissDialog({ accept, expected_dialog_kinds })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   }, MUTATES);
 
