@@ -4,12 +4,12 @@ import { z } from 'zod';
 import { jsonResult } from './_format.js';
 import * as mgr from '../core/streaming/manager.js';
 
-const SOURCES = z.enum(['hyperliquid']);
+const SOURCES = z.enum(['hyperliquid', 'delta_india']);
 
 export function registerStreamTools(server) {
   server.tool(
     'subscribe_ticker',
-    'Start a background WS subscription. Currently supports Hyperliquid (trades stream, public). Returns sub_id for polling.',
+    'Start a background WS subscription. Supports hyperliquid (trades stream, public) and delta_india (v2/ticker, public). Returns sub_id for polling. Signal engine evaluates rules against any subscription. Indian crypto F&O perps come via delta_india.',
     {
       source: SOURCES.default('hyperliquid'),
       coin: z.string().describe('e.g. BTC, ETH, SOL'),

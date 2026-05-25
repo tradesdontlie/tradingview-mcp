@@ -1,11 +1,13 @@
-// WS subscription manager. Pluggable per-source adapter. Today ships with
-// a Hyperliquid adapter (public WS, no auth). Future commits add Delta /
-// CoinDCX / Upstox adapters.
+// WS subscription manager. Pluggable per-source adapter.
+//   hyperliquid  — public, trades stream by coin
+//   delta_india  — public, v2/ticker stream for India perps + futures
+//   (upstox + coindcx adapters deferred — different auth + protocols)
 
 import { WebSocket } from 'ws';
 import { RingBuffer } from './ring.js';
 
 const HL_WS = 'wss://api.hyperliquid.xyz/ws';
+const DELTA_INDIA_WS = 'wss://socket.india.delta.exchange';
 
 const subs = new Map(); // sub_id -> { source, coin, ring, ws, started_at }
 let nextId = 1;
@@ -56,9 +58,60 @@ function hyperliquidSubscribe({ coin }) {
   return { sub_id, source: 'hyperliquid', coin };
 }
 
+// Delta India: public ticker channel (no auth) for market data. Subscribes
+// to v2/ticker.{symbol}. Symbol examples: BTCUSD, ETHUSD perps, BTC_FUT.
+function deltaIndiaSubscribe({ coin: symbol }) {
+  const sub_id = makeId('di');
+  const ring = new RingBuffer(2000);
+  const ws = new WebSocket(DELTA_INDIA_WS);
+  let alive = false;
+
+  ws.on('open', () => {
+    alive = true;
+    ws.send(JSON.stringify({
+      type: 'subscribe',
+      payload: {
+        channels: [{ name: 'v2/ticker', symbols: [symbol] }],
+      },
+    }));
+  });
+  ws.on('message', (raw) => {
+    try {
+      const msg = JSON.parse(raw.toString());
+      // v2/ticker frames carry mark_price + close + high/low + funding etc.
+      if (msg.type === 'v2/ticker' && msg.symbol === symbol) {
+        ring.push({
+          ts: msg.timestamp,
+          price: Number(msg.mark_price ?? msg.close),
+          mark: Number(msg.mark_price),
+          close: Number(msg.close),
+          high: Number(msg.high),
+          low: Number(msg.low),
+          volume: Number(msg.volume),
+          funding_rate: Number(msg.mark_basis ?? 0),
+        });
+      }
+    } catch { /* skip bad frames */ }
+  });
+  ws.on('close', () => { alive = false; });
+  ws.on('error', () => { alive = false; });
+
+  const entry = {
+    source: 'delta_india',
+    coin: symbol,
+    ring,
+    ws,
+    started_at: new Date().toISOString(),
+    get alive() { return alive; },
+  };
+  subs.set(sub_id, entry);
+  return { sub_id, source: 'delta_india', coin: symbol };
+}
+
 export function subscribe({ source, coin }) {
   if (source === 'hyperliquid') return hyperliquidSubscribe({ coin });
-  throw new Error(`unknown source ${source}. supported: hyperliquid`);
+  if (source === 'delta_india') return deltaIndiaSubscribe({ coin });
+  throw new Error(`unknown source ${source}. supported: hyperliquid, delta_india`);
 }
 
 export function unsubscribe(sub_id) {
