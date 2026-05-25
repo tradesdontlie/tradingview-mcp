@@ -101,6 +101,29 @@ export async function ensurePineEditorOpen() {
 
 // ── Pure / offline functions ──
 
+/**
+ * Strip Pine string literals ("..." and '...') and line comments (// ...)
+ * so we can count parens without false positives. Returns the cleaned line.
+ */
+function _stripStringsAndComments(line) {
+  let out = '';
+  let i = 0;
+  let inStr = null;
+  while (i < line.length) {
+    const ch = line[i];
+    if (inStr) {
+      if (ch === '\\' && i + 1 < line.length) { i += 2; continue; }
+      if (ch === inStr) { inStr = null; i += 1; continue; }
+      i += 1; continue;
+    }
+    if (ch === '"' || ch === "'") { inStr = ch; i += 1; continue; }
+    if (ch === '/' && line[i + 1] === '/') break; // rest is comment
+    out += ch;
+    i += 1;
+  }
+  return out;
+}
+
 export function analyze({ source }) {
   const lines = source.split('\n');
   const diagnostics = [];
@@ -186,6 +209,41 @@ export function analyze({ source }) {
           severity: 'error',
         });
         break;
+      }
+    }
+  }
+
+  // C10 / A1-F10 — Pine v6 multi-line `+` operator must be wrapped in
+  // parentheses; "implicit line continuation across +" is a v6 error.
+  // CC TV MCP.txt:335 reproduction: "Mismatched input '+' expecting end of
+  // line at line 14" — diagnosed only via user-supplied screenshot.
+  {
+    let parenDepth = 0;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmed = line.trim();
+      // Track paren depth across lines (only when the depth is non-zero is
+      // the `+` continuation legal).
+      // Compute net (open - close) parens on this line, ignoring string
+      // literals and comments.
+      const stripped = _stripStringsAndComments(line);
+      // Detect leading-+ on a continuation line
+      if (parenDepth === 0 && /^\+[^+]/.test(trimmed) && i > 0) {
+        // Previous line must not have ended with an operator that already
+        // induces continuation (-, *, /, , (, => ) or a comma/(...
+        const prev = lines[i - 1].replace(/\/\/.*$/, '').replace(/\s+$/, '');
+        const prevEndsOk = /[,(\[+\-*/\\?:=]$/.test(prev) || /=>$/.test(prev);
+        if (!prevEndsOk) {
+          diagnostics.push({
+            line: i + 1, column: line.indexOf('+') + 1,
+            message: '[v6-multi-line-plus] Pine v6 does not support implicit line continuation across the `+` operator. Wrap the multi-line expression in `(` ... `)`, OR use `:=` reassignment per line. Audit C10/A1-F10.',
+            severity: 'error',
+          });
+        }
+      }
+      for (const ch of stripped) {
+        if (ch === '(' || ch === '[' || ch === '{') parenDepth++;
+        else if (ch === ')' || ch === ']' || ch === '}') parenDepth = Math.max(0, parenDepth - 1);
       }
     }
   }
