@@ -7,6 +7,7 @@ import * as yahoo from '../core/yahoo.js';
 import * as btcMarket from '../core/bitcoin_market.js';
 import * as extendedHours from '../core/extended_hours.js';
 import * as options from '../core/options.js';
+import * as exchangesCore from '../core/exchanges.js';
 
 export function registerSnapshotTools(server) {
   server.tool(
@@ -31,6 +32,19 @@ export function registerSnapshotTools(server) {
     async () => {
       try {
         return jsonResult(await yahoo.getMarketSnapshot());
+      } catch (err) {
+        return jsonResult({ success: false, error: err.message }, true);
+      }
+    }
+  );
+
+  server.tool(
+    'exchanges_list',
+    'List TradingView-supported exchanges, grouped by category (crypto, india_equities, india_derivatives, india_crypto, global_equities, asia_equities, middle_east, australia). Returns by_category + flat all + count.',
+    {},
+    async () => {
+      try {
+        return jsonResult(exchangesCore.listExchanges());
       } catch (err) {
         return jsonResult({ success: false, error: err.message }, true);
       }

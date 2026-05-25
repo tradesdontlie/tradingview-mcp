@@ -7,6 +7,7 @@ import * as yahoo from '../src/core/yahoo.js';
 import * as btcMarket from '../src/core/bitcoin_market.js';
 import * as extendedHours from '../src/core/extended_hours.js';
 import * as options from '../src/core/options.js';
+import * as exchangesCore from '../src/core/exchanges.js';
 
 test('getPrice — known stock returns expected shape', async () => {
   const result = await yahoo.getPrice('AAPL');
@@ -34,6 +35,16 @@ test('getPrice — invalid symbol returns error block, not throws', async () => 
   const result = await yahoo.getPrice('NOTAREALTICKER_XYZ_123');
   assert.equal(result.symbol, 'NOTAREALTICKER_XYZ_123');
   assert.ok('error' in result || result.price == null);
+});
+
+test('listExchanges — returns categorized exchange list including India', () => {
+  const result = exchangesCore.listExchanges();
+  assert.ok('by_category' in result);
+  assert.ok(Array.isArray(result.all));
+  assert.ok(result.all.includes('NSE'));
+  assert.ok(result.all.includes('BSE'));
+  assert.ok(result.all.includes('COINDCX'));
+  assert.ok(result.count > 0);
 });
 
 test('getUnusualOptionsActivity — ranks contracts by V/OI for AAPL', async () => {
