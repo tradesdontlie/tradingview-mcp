@@ -2,6 +2,8 @@ import CDP from 'chrome-remote-interface';
 
 let client = null;
 let targetInfo = null;
+let lastPopupCheck = 0;
+const POPUP_CHECK_INTERVAL = 3000;
 const CDP_HOST = 'localhost';
 const CDP_PORT = 9222;
 const MAX_RETRIES = 5;
@@ -103,8 +105,41 @@ export async function getTargetInfo() {
   return targetInfo;
 }
 
+async function dismissBlockingPopups(c) {
+  try {
+    await c.Runtime.evaluate({
+      expression: `(function() {
+        var clicked = 0;
+        // Session disconnected / reconnect — click reconnect first if visible
+        var reconnect = document.querySelector(
+          'button[data-name="reconnect"], [class*="reconnect"] button, ' +
+          '[class*="sessionExpired"] button, [class*="session-expired"] button, ' +
+          '[class*="disconnected"] button'
+        );
+        if (reconnect && reconnect.offsetParent !== null) { reconnect.click(); clicked++; }
+        // Generic dialog / modal close buttons
+        document.querySelectorAll(
+          '.tv-dialog__close, button[data-name="close"], [class*="dialog__close"], ' +
+          '[class*="modal__close"], button[data-name="notice-close"], ' +
+          'button[aria-label="Close"], button[aria-label="Dismiss"]'
+        ).forEach(function(b) {
+          if (b.offsetParent !== null) { try { b.click(); clicked++; } catch(e) {} }
+        });
+        return clicked;
+      })()`,
+      returnByValue: true,
+      awaitPromise: false,
+    });
+  } catch {}
+}
+
 export async function evaluate(expression, opts = {}) {
   const c = await getClient();
+  const now = Date.now();
+  if (now - lastPopupCheck > POPUP_CHECK_INTERVAL) {
+    lastPopupCheck = now;
+    await dismissBlockingPopups(c);
+  }
   const result = await c.Runtime.evaluate({
     expression,
     returnByValue: true,
