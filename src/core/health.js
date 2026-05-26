@@ -207,6 +207,20 @@ export async function launch({ port, kill_existing } = {}) {
     } catch { /* ignore */ }
   }
 
+  // Windows: TradingView is distributed as MSIX (UWP) only; resolve the per-version
+  // install location dynamically via Get-AppxPackage. The exe runs FullTrust so
+  // spawning it directly with --remote-debugging-port works.
+  if (!tvPath && platform === 'win32') {
+    try {
+      const cmd = 'powershell.exe -NoProfile -NonInteractive -Command "(Get-AppxPackage -Name TradingView.Desktop).InstallLocation"';
+      const installLocation = execSync(cmd, { timeout: 5000 }).toString().trim();
+      if (installLocation) {
+        const candidate = `${installLocation}\\TradingView.exe`;
+        if (existsSync(candidate)) tvPath = candidate;
+      }
+    } catch { /* ignore */ }
+  }
+
   if (!tvPath) {
     throw new Error(`TradingView not found on ${platform}. Searched: ${candidates.join(', ')}. Launch manually with: /path/to/TradingView --remote-debugging-port=${cdpPort}`);
   }
