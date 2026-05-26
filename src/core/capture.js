@@ -13,14 +13,34 @@ const SCREENSHOT_DIR = join(dirname(dirname(__dirname)), 'screenshots');
 export async function captureScreenshot({ region, filename, method, date } = {}) {
   mkdirSync(SCREENSHOT_DIR, { recursive: true });
 
+  let zoomMeta = null;
   if (date) {
     const d = new Date(date);
     if (isNaN(d.getTime())) throw new Error(`Invalid date: ${date}. Use ISO format e.g. "2025-01-15".`);
-    d.setUTCHours(0, 0, 0, 0);
-    const from = Math.floor(d.getTime() / 1000);
-    const to = from + 86400;
-    await setVisibleRange({ from, to });
+
+    const resolution = await evaluate(`
+      (function() {
+        try { return window.TradingViewApi._activeChartWidgetWV.value().resolution(); } catch(e) { return '5'; }
+      })()
+    `);
+
+    // Center on noon UTC, expand window based on timeframe
+    d.setUTCHours(12, 0, 0, 0);
+    const center = Math.floor(d.getTime() / 1000);
+    const res = String(resolution).toUpperCase();
+    let halfWindow;
+    if (res === 'D' || res === '1D')       halfWindow = 15 * 86400;   // ±15 days → 1-month view
+    else if (res === 'W' || res === '1W')  halfWindow = 91 * 86400;   // ±91 days → 6-month view
+    else if (res === 'M' || res === '1M')  halfWindow = 182 * 86400;  // ±182 days → 1-year view
+    else {
+      const mins = parseInt(res, 10) || 5;
+      if (mins >= 60) halfWindow = 2 * 86400;   // hourly → ±2 days
+      else            halfWindow = 12 * 3600;    // intraday → just that day
+    }
+
+    await setVisibleRange({ from: center - halfWindow, to: center + halfWindow });
     await new Promise(r => setTimeout(r, 600));
+    zoomMeta = { date, resolution, window_seconds: halfWindow * 2 };
   }
 
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
@@ -79,5 +99,6 @@ export async function captureScreenshot({ region, filename, method, date } = {})
   return {
     success: true, method: 'cdp', file_path: filePath, region,
     size_bytes: buf.length,
+    ...(zoomMeta && { zoom: zoomMeta }),
   };
 }
