@@ -152,11 +152,20 @@ const DIAGNOSTIC_SNAPSHOT = `
   })()
 `;
 
-// Pine Editor is "ready" only when BOTH conditions hold:
+// Pine Editor is "ready" when BOTH hold:
 //   1. Monaco's React fiber tree contains a live editor instance, AND
-//   2. The footer's Pine Editor tab is the active widget — otherwise the
-//      'Add to chart' / 'Save' buttons that compile()/save() click are not
-//      rendered in the DOM.
+//   2. the .pine-editor-monaco container is actually VISIBLE (offsetParent),
+//      so the editor's action buttons (Add to chart / Save) are rendered.
+//
+// We deliberately do NOT require a data-qa-id="scripteditor" footer tab.
+// TradingView has (at least) two Pine layouts:
+//   - footer-tab layout: Pine is a bottom-panel tab with data-qa-id.
+//   - toolbar layout: Pine opens from the top toolbar [aria-label="Pine"]
+//     button and mounts Monaco WITHOUT ever creating a footer tab.
+// [verified live 2026-05-27 — chart fU7D519k] the toolbar layout mounts a
+// fully usable Monaco with no scripteditor footer tab. A footer-tab
+// requirement here was an over-correction that rejected working Monaco.
+// Container visibility is the layout-agnostic signal.
 //
 // IMPORTANT: ${FIND_MONACO} must be wrapped in parens. FIND_MONACO begins
 // with a newline, and without the parens JavaScript's automatic semicolon
@@ -168,16 +177,8 @@ const READY_CHECK = `
   (function() {
     var monaco = (${FIND_MONACO});
     if (!monaco) return false;
-    // Footer button states (verified live on TV Desktop 3.1.0):
-    //   - data-qa-id="scripteditor"          → button exists for the Pine tab
-    //   - data-active="true"                  → that tab is currently selected
-    // Both attributes are language-independent so this works across locales.
-    var activeTab = document.querySelector('button[data-qa-id="scripteditor"][data-active="true"]');
-    if (!activeTab) return false;
-    // Reject collapsed bottom panel — clicking the tab while collapsed
-    // expands it, so the only way to reach this state is a transient race.
-    if (document.querySelector('#footer-chart-panel button[aria-label="Open panel"][data-active="true"]')) return false;
-    return true;
+    var container = document.querySelector('.monaco-editor.pine-editor-monaco');
+    return !!(container && container.offsetParent !== null);
   })()
 `;
 
@@ -190,14 +191,15 @@ async function pollUntilReady(maxIterations) {
 }
 
 /**
- * Activates and opens the Pine Editor panel, waiting for both Monaco and
- * the footer tab to reach a usable state.
+ * Activates and opens the Pine Editor, waiting until Monaco is both present
+ * in the React fiber tree and visible (so its action buttons are rendered).
+ * Works across TV's footer-tab and toolbar Pine layouts.
  *
  * @returns {Promise<{ready: boolean, diagnostic: object|null, strategy: string|null}>}
- *   ready=true means Monaco is accessible AND the Pine Editor tab is the
- *   active footer widget. On false, diagnostic carries the live TV state
- *   fingerprint and strategy records what (if anything) was clicked.
- *   Callers throw via pineEditorError(diagnostic).
+ *   ready=true means Monaco is accessible and the editor is visible. On
+ *   false, diagnostic carries the live TV state fingerprint and strategy
+ *   records what (if anything) was clicked. Callers throw via
+ *   pineEditorError(diagnostic).
  */
 export async function ensurePineEditorOpen() {
   if (await evaluate(READY_CHECK)) return { ready: true, diagnostic: null, strategy: 'already-ready' };
