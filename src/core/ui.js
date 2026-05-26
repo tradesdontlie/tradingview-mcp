@@ -2,6 +2,7 @@
  * Core UI automation logic.
  */
 import { evaluate, evaluateAsync, getClient } from '../connection.js';
+import { ensurePineEditorOpen } from './pine.js';
 
 export async function click({ by, value }) {
   const escaped = JSON.stringify(value);
@@ -31,32 +32,102 @@ export async function click({ by, value }) {
 export async function openPanel({ panel, action }) {
   const isBottomPanel = panel === 'pine-editor' || panel === 'strategy-tester';
   if (isBottomPanel) {
-    const widgetName = panel === 'pine-editor' ? 'pine-editor' : 'backtesting';
-    const result = await evaluate(`
+    // bottomWidgetBar's legacy API (activateScriptEditorTab / showWidget /
+    // hideWidget) was removed in the current TV build. Drive the footer tab
+    // buttons directly. The footer tab carries data-qa-id ONLY after the
+    // widget has been instantiated once; on a cold layout only the localized
+    // aria-label exists. So both open and close need a fallback chain, not a
+    // bare data-qa-id lookup.
+    const qaId = panel === 'pine-editor' ? 'scripteditor' : 'backtesting';
+    const openAria = panel === 'pine-editor' ? 'Open Pine Editor' : 'Open strategy report';
+    const closeAria = panel === 'pine-editor' ? 'Close Pine Editor' : 'Close strategy report';
+    const scanTerm = panel === 'pine-editor' ? 'pine' : 'strateg';
+
+    // "Open" detection is layout-agnostic. For Pine Editor the definitive
+    // signal is a VISIBLE Monaco container — it holds on both the footer-tab
+    // and toolbar Pine layouts. The footer-tab/aria checks are a fallback for
+    // Strategy Tester (no Monaco) and for the footer layout.
+    const isOpen = !!(await evaluate(`
       (function() {
-        var bwb = window.TradingView && window.TradingView.bottomWidgetBar;
-        if (!bwb) return { error: 'bottomWidgetBar not available' };
-        var panel = ${JSON.stringify(panel)};
-        var widgetName = ${JSON.stringify(widgetName)};
-        var action = ${JSON.stringify(action)};
-        var bottomArea = document.querySelector('[class*="layout__area--bottom"]');
-        var isOpen = !!(bottomArea && bottomArea.offsetHeight > 50);
-        if (panel === 'pine-editor') { var monacoEl = document.querySelector('.monaco-editor.pine-editor-monaco'); isOpen = isOpen && !!monacoEl; }
-        if (panel === 'strategy-tester') { var stratPanel = document.querySelector('[data-name="backtesting"]') || document.querySelector('[class*="strategyReport"]'); isOpen = isOpen && !!(stratPanel && stratPanel.offsetParent); }
-        var performed = 'none';
-        if (action === 'open' || (action === 'toggle' && !isOpen)) {
-          if (panel === 'pine-editor') { if (typeof bwb.activateScriptEditorTab === 'function') bwb.activateScriptEditorTab(); else if (typeof bwb.showWidget === 'function') bwb.showWidget(widgetName); }
-          else { if (typeof bwb.showWidget === 'function') bwb.showWidget(widgetName); }
-          performed = 'opened';
-        } else if (action === 'close' || (action === 'toggle' && isOpen)) {
-          if (typeof bwb.hideWidget === 'function') bwb.hideWidget(widgetName);
-          performed = 'closed';
+        if (${JSON.stringify(panel)} === 'pine-editor') {
+          var c = document.querySelector('.monaco-editor.pine-editor-monaco');
+          if (c && c.offsetParent !== null) return true;
         }
-        return { was_open: isOpen, performed: performed };
+        var active = !!document.querySelector('button[data-qa-id="' + ${JSON.stringify(qaId)} + '"][data-active="true"]')
+          || !!document.querySelector('#footer-chart-panel button[aria-label="' + ${JSON.stringify(closeAria)} + '"]');
+        var collapsed = !!document.querySelector('#footer-chart-panel button[aria-label="Open panel"][data-active="true"]');
+        return active && !collapsed;
       })()
-    `);
-    if (result && result.error) throw new Error(result.error);
-    return { success: true, panel, action, was_open: result?.was_open ?? false, performed: result?.performed ?? 'unknown' };
+    `));
+
+    const wantOpen = action === 'open' || (action === 'toggle' && !isOpen);
+    const wantClose = action === 'close' || (action === 'toggle' && isOpen);
+
+    if (wantOpen) {
+      // Pine Editor has a fully-verified opener with its own fallback chain
+      // (data-qa-id → aria-label → footer scan → legacy). Reuse it instead of
+      // duplicating a weaker version here.
+      if (panel === 'pine-editor') {
+        const r = await ensurePineEditorOpen();
+        if (!r.ready) throw new Error('Could not open Pine Editor. Diagnostic: ' + JSON.stringify(r.diagnostic || {}));
+        return { success: true, panel, action, was_open: isOpen, performed: isOpen ? 'already_open' : 'opened' };
+      }
+      // Strategy Tester: same fallback order — qa-id, then aria, then footer scan.
+      const opened = await evaluate(`
+        (function() {
+          function clk(el) { if (!el) return false; var r = el.getBoundingClientRect(); if (r.width <= 0 || r.height <= 0) return false; try { el.click(); return true; } catch (e) { return false; } }
+          if (clk(document.querySelector('button[data-qa-id="' + ${JSON.stringify(qaId)} + '"]'))) return 'qa-id';
+          if (clk(document.querySelector('button[aria-label="' + ${JSON.stringify(openAria)} + '"]'))) return 'aria';
+          var footer = document.querySelector('#footer-chart-panel') || document.querySelector('[class*="footerPanel"]');
+          if (footer) {
+            var bs = footer.querySelectorAll('button');
+            for (var i = 0; i < bs.length; i++) {
+              var a = (bs[i].getAttribute('aria-label') || '').toLowerCase();
+              var t = (bs[i].textContent || '').toLowerCase();
+              if (a.indexOf(${JSON.stringify(scanTerm)}) >= 0 || t.indexOf(${JSON.stringify(scanTerm)}) >= 0) { if (clk(bs[i])) return 'scan'; }
+            }
+          }
+          return null;
+        })()
+      `);
+      if (!opened) throw new Error('Could not open ' + panel + ': no footer tab found via data-qa-id, aria-label, or scan. Open it manually once so TV instantiates the widget.');
+      return { success: true, panel, action, was_open: isOpen, performed: 'opened' };
+    }
+
+    if (wantClose) {
+      // Close handles are footer-only: the active-tab toggle (data-qa-id) or
+      // the localized "Close …" aria. The toolbar [aria-label="Pine"] button
+      // is open-ONLY (verified live — re-clicking it does not close), so it is
+      // deliberately NOT used here; using it would re-open instead of close.
+      const clicked = await evaluate(`
+        (function() {
+          function clk(el) { if (!el) return false; try { el.click(); return true; } catch (e) { return false; } }
+          if (clk(document.querySelector('button[data-qa-id="' + ${JSON.stringify(qaId)} + '"][data-active="true"]'))) return 'qa-active';
+          if (clk(document.querySelector('#footer-chart-panel button[aria-label="' + ${JSON.stringify(closeAria)} + '"]'))) return 'aria-close';
+          return null;
+        })()
+      `);
+      // Report honestly: for Pine, confirm Monaco actually went away. On the
+      // toolbar layout there is no known close handle, so performed stays
+      // 'none' rather than a false 'closed'.
+      let stillOpen = isOpen;
+      if (clicked) {
+        await new Promise(r => setTimeout(r, 500));
+        stillOpen = !!(await evaluate(`
+          (function() {
+            if (${JSON.stringify(panel)} === 'pine-editor') {
+              var c = document.querySelector('.monaco-editor.pine-editor-monaco');
+              return !!(c && c.offsetParent !== null);
+            }
+            return !!document.querySelector('button[data-qa-id="' + ${JSON.stringify(qaId)} + '"][data-active="true"]');
+          })()
+        `));
+      }
+      const performed = clicked && !stillOpen ? 'closed' : 'none';
+      return { success: true, panel, action, was_open: isOpen, performed };
+    }
+
+    return { success: true, panel, action, was_open: isOpen, performed: isOpen ? 'already_open' : 'already_closed' };
   } else {
     const selectorMap = {
       'watchlist': { dataName: 'base-watchlist-widget-button', ariaLabel: 'Watchlist' },
