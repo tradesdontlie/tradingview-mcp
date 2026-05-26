@@ -31,26 +31,33 @@ export async function click({ by, value }) {
 export async function openPanel({ panel, action }) {
   const isBottomPanel = panel === 'pine-editor' || panel === 'strategy-tester';
   if (isBottomPanel) {
-    const widgetName = panel === 'pine-editor' ? 'pine-editor' : 'backtesting';
+    // bottomWidgetBar's legacy API (activateScriptEditorTab / showWidget /
+    // hideWidget) was removed in the current TV build — open/close/show/hide
+    // on the new bwb only toggle panel visibility, not individual widgets.
+    // Drive the footer tab buttons directly instead. data-qa-id is
+    // language-agnostic and reflects bwb's internal widget name.
+    const qaId = panel === 'pine-editor' ? 'scripteditor' : 'backtesting';
     const result = await evaluate(`
       (function() {
-        var bwb = window.TradingView && window.TradingView.bottomWidgetBar;
-        if (!bwb) return { error: 'bottomWidgetBar not available' };
         var panel = ${JSON.stringify(panel)};
-        var widgetName = ${JSON.stringify(widgetName)};
+        var qaId = ${JSON.stringify(qaId)};
         var action = ${JSON.stringify(action)};
-        var bottomArea = document.querySelector('[class*="layout__area--bottom"]');
-        var isOpen = !!(bottomArea && bottomArea.offsetHeight > 50);
-        if (panel === 'pine-editor') { var monacoEl = document.querySelector('.monaco-editor.pine-editor-monaco'); isOpen = isOpen && !!monacoEl; }
-        if (panel === 'strategy-tester') { var stratPanel = document.querySelector('[data-name="backtesting"]') || document.querySelector('[class*="strategyReport"]'); isOpen = isOpen && !!(stratPanel && stratPanel.offsetParent); }
+        var tab = document.querySelector('button[data-qa-id="' + qaId + '"]');
+        if (!tab) return { error: 'Footer tab button not found for widget: ' + qaId + '. Open the panel manually once so TV instantiates the widget.' };
+        var isActive = tab.getAttribute('data-active') === 'true';
+        var collapsed = !!document.querySelector('#footer-chart-panel button[aria-label="Open panel"][data-active="true"]');
+        var isOpen = isActive && !collapsed;
         var performed = 'none';
         if (action === 'open' || (action === 'toggle' && !isOpen)) {
-          if (panel === 'pine-editor') { if (typeof bwb.activateScriptEditorTab === 'function') bwb.activateScriptEditorTab(); else if (typeof bwb.showWidget === 'function') bwb.showWidget(widgetName); }
-          else { if (typeof bwb.showWidget === 'function') bwb.showWidget(widgetName); }
+          // Clicking the tab opens the panel + activates the widget in one shot.
+          tab.click();
           performed = 'opened';
         } else if (action === 'close' || (action === 'toggle' && isOpen)) {
-          if (typeof bwb.hideWidget === 'function') bwb.hideWidget(widgetName);
-          performed = 'closed';
+          // Click the active tab's matching close button if present, else
+          // re-click the tab to deactivate it.
+          var close = document.querySelector('button[data-qa-id="' + qaId + '"][data-active="true"]');
+          if (close) { close.click(); performed = 'closed'; }
+          else { tab.click(); performed = 'closed'; }
         }
         return { was_open: isOpen, performed: performed };
       })()

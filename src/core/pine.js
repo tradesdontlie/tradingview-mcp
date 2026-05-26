@@ -35,185 +35,179 @@ const FIND_MONACO = `
   })()
 `;
 
-/**
- * Opens the Pine Editor panel and waits for Monaco to become available.
- * Returns true if editor is accessible, false on timeout.
- */
-export async function ensurePineEditorOpen() {
-  const already = await evaluate(`
-    (function() {
-      var m = ${FIND_MONACO};
-      return m !== null;
-    })()
-  `);
-  if (already) return true;
+// Build the error thrown by every Pine-tool when ensurePineEditorOpen fails.
+// Keep one site so message format stays consistent and 9 call-sites stay terse.
+function pineEditorError(diagnostic) {
+  return new Error('Could not open Pine Editor. Diagnostic: ' + JSON.stringify(diagnostic || {}));
+}
 
-  // Strategy 1: official bottomWidgetBar API (works on most TV layouts)
-  await evaluate(`
-    (function() {
-      var bwb = window.TradingView && window.TradingView.bottomWidgetBar;
-      if (!bwb) return;
-      if (typeof bwb.activateScriptEditorTab === 'function') bwb.activateScriptEditorTab();
-      else if (typeof bwb.showWidget === 'function') bwb.showWidget('pine-editor');
-    })()
-  `);
-
-  // Strategy 2: legacy "Pine" button selectors
-  await evaluate(`
-    (function() {
-      var btn = document.querySelector('[aria-label="Pine"]')
-        || document.querySelector('[data-name="pine-dialog-button"]');
-      if (btn) btn.click();
-    })()
-  `);
-
-  // Strategy 3 (NEW): bottom-bar tab-list scan. TV's redesigned chart layout
-  // ships the Pine Editor as a tab in the bottom widget bar with localized
-  // labels — search visible bottom-tab buttons by aria-label / data-name /
-  // textContent so we don't rely on a single selector that TV may rename.
-  await evaluate(`
-    (function() {
-      var bottomBar = document.querySelector('[class*="bottomWidgetBar"]')
-        || document.querySelector('[class*="layout__area--bottom"]');
-      var scope = bottomBar || document;
-      var candidates = scope.querySelectorAll('button, [role="tab"], [role="button"], [data-name]');
-      for (var i = 0; i < candidates.length; i++) {
-        var el = candidates[i];
-        var lbl = ((el.getAttribute && (el.getAttribute('data-name') || el.getAttribute('aria-label') || el.getAttribute('title'))) || el.textContent || '').toString().toLowerCase();
-        if (/^pine([\\s_-]editor)?$/.test(lbl) || /pine[\\s_-]editor/.test(lbl) || lbl === 'pine') {
-          try { el.click(); return true; } catch (e) {}
-        }
-      }
-      return false;
-    })()
-  `);
-
-  // Strategy 4: TradingView keyboard shortcut for Pine Editor toggle
-  // (Ctrl+` / Cmd+`). Synthetic keyboard event to document.
-  await evaluate(`
-    (function() {
-      var isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform);
-      var ev = new KeyboardEvent('keydown', {
-        key: '\`', code: 'Backquote',
-        ctrlKey: !isMac, metaKey: isMac,
-        bubbles: true, cancelable: true,
-      });
-      document.dispatchEvent(ev);
-      return true;
-    })()
-  `);
-
-  // Poll between strategies so faster wins don't pay the full 10s timeout.
-  for (let i = 0; i < 15; i++) {
-    await new Promise(r => setTimeout(r, 200));
-    const ready = await evaluate(`(function() { return ${FIND_MONACO} !== null; })()`);
-    if (ready) return true;
-  }
-
-  // Strategy 5 (NEW): the bottom widget bar uses an indexed tab strip
-  // ([data-name="light-tab-0"], [data-name="light-tab-1"], ...). When TV's
-  // localized labels and activateScriptEditorTab no longer expose Pine
-  // Editor by name, iterate every tab, click it, and poll for Monaco. The
-  // first tab that mounts Monaco is the Pine Editor.
-  for (let tabIdx = 0; tabIdx < 8; tabIdx++) {
-    const clicked = await evaluate(`
-      (function() {
-        var t = document.querySelector('[data-name="light-tab-' + ${tabIdx} + '"]');
-        if (!t) return false;
-        t.click();
-        return true;
-      })()
-    `);
-    if (!clicked) break;
-    for (let i = 0; i < 10; i++) {
-      await new Promise(r => setTimeout(r, 200));
-      const ready = await evaluate(`(function() { return ${FIND_MONACO} !== null; })()`);
-      if (ready) return true;
+// Click strategies, in order of confidence. Each strategy is a small DOM
+// script that returns a tag describing what (if anything) it clicked. The
+// surrounding TS loop polls FIND_MONACO between strategies so a fast win
+// short-circuits the rest.
+//
+// Verified live against TV Desktop 3.1.0 / Chrome 140:
+//
+// • Pine Editor lives in the footer panel (#footer-chart-panel) as a
+//   tab-strip button. When the widget is NOT yet instantiated, the only
+//   stable attribute is aria-label="Open <Widget Name>" (English locale).
+//   data-qa-id appears only after the widget is opened once.
+// • bwb.open() / show() in the new API take NO widget argument — they only
+//   expand/visible the panel. The legacy bwb.activateScriptEditorTab and
+//   bwb.showWidget('pine-editor') methods no longer exist.
+// • The widget config name is 'scripteditor' (one word), not 'pine_editor'.
+// • Synthetic Ctrl/Cmd+` does NOT trigger Pine Editor — no such hotkey.
+const OPEN_PINE_STRATEGIES = `
+  (function openPineEditor() {
+    function clickIfVisible(el, tag) {
+      if (!el) return null;
+      var r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) return null;
+      try { el.click(); return tag; } catch (e) { return null; }
     }
-  }
 
-  // Strategy 6 (NEW): TV's modern bottom panel emits widget-named tabs via
-  // [data-widget-name="pine_editor"] or aria attrs on the tab role. Search
-  // the document scope (not just bottomBar) for any tab whose attrs match.
-  await evaluate(`
-    (function() {
-      var sels = [
-        '[data-widget-name="pine_editor"]',
-        '[data-widget-name="pine-editor"]',
-        '[data-name="pine_editor"]',
-        '[data-tab="pine_editor"]',
-      ];
-      for (var i = 0; i < sels.length; i++) {
-        var el = document.querySelector(sels[i]);
-        if (el) { try { el.click(); return sels[i]; } catch(e) {} }
-      }
-      // Last-ditch: any tab with widget metadata referencing pine
-      var tabs = document.querySelectorAll('[role="tab"], [data-name^="tab-"], [data-tab-name]');
-      for (var j = 0; j < tabs.length; j++) {
-        var t = tabs[j];
-        var attrs = (t.outerHTML || '').toLowerCase();
-        if (attrs.indexOf('pine_editor') >= 0 || attrs.indexOf('pine-editor') >= 0 || attrs.indexOf('pineeditor') >= 0) {
-          try { t.click(); return 'attr-match'; } catch(e) {}
+    // 1. Footer "Pine Editor" tab — qa-id is the most stable selector once
+    //    the widget has been opened at least once in this session.
+    var qa = document.querySelector('button[data-qa-id="scripteditor"]');
+    var r = clickIfVisible(qa, 'data-qa-id=scripteditor'); if (r) return r;
+
+    // 2. English aria-label — works on a fresh layout where Pine Editor
+    //    has never been opened. Both "Open" (closed) and "Close" (already
+    //    active) variants are valid click targets.
+    r = clickIfVisible(document.querySelector('button[aria-label="Open Pine Editor"]'), 'aria=Open Pine Editor'); if (r) return r;
+    r = clickIfVisible(document.querySelector('button[aria-label="Close Pine Editor"]'), 'aria=Close Pine Editor'); if (r) return r;
+
+    // 3. Localised aria-label fallback — TV translates aria-label per
+    //    locale. Scan the footer for any visible button whose aria-label or
+    //    textContent contains "pine" (case-insensitive). data-qa-id text
+    //    'scripteditor' isn't localised so prefer that when present.
+    var footer = document.querySelector('#footer-chart-panel') || document.querySelector('[class*="footerPanel"]');
+    if (footer) {
+      var btns = footer.querySelectorAll('button');
+      for (var i = 0; i < btns.length; i++) {
+        var b = btns[i];
+        var aria = (b.getAttribute('aria-label') || '').toLowerCase();
+        var txt = (b.textContent || '').toLowerCase();
+        var qaid = (b.getAttribute('data-qa-id') || '').toLowerCase();
+        if (qaid === 'scripteditor' || aria.indexOf('pine') >= 0 || /(^|\\s)pine($|\\s)/.test(txt)) {
+          var tag = clickIfVisible(b, 'footer-scan[' + (qaid || aria || txt.slice(0,20)) + ']');
+          if (tag) return tag;
         }
       }
-      return false;
-    })()
-  `);
+    }
 
-  for (let i = 0; i < 25; i++) {
+    // 4. Legacy bottomWidgetBar selectors — kept for older TV builds where
+    //    the Pine button is rendered outside the footerPanel container.
+    r = clickIfVisible(document.querySelector('[aria-label="Pine"]'), 'legacy-aria=Pine'); if (r) return r;
+    r = clickIfVisible(document.querySelector('[data-name="pine-dialog-button"]'), 'legacy-data-name=pine-dialog-button'); if (r) return r;
+
+    return null;
+  })()
+`;
+
+// Snapshot what TV exposes so the caller's error message contains an
+// actionable fingerprint of the failure mode. Keeps body lean — only what
+// we need to distinguish "widget not enabled" from "API renamed".
+const DIAGNOSTIC_SNAPSHOT = `
+  (function() {
+    var bwb = window.TradingView && window.TradingView.bottomWidgetBar;
+    var footer = document.querySelector('#footer-chart-panel') || document.querySelector('[class*="footerPanel"]');
+    var footerButtons = [];
+    if (footer) {
+      var btns = footer.querySelectorAll('button');
+      for (var i = 0; i < btns.length && footerButtons.length < 12; i++) {
+        var b = btns[i];
+        var rect = b.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) continue;
+        footerButtons.push({
+          aria: (b.getAttribute('aria-label') || '').slice(0, 40),
+          text: (b.textContent || '').trim().slice(0, 40),
+          qa_id: b.getAttribute('data-qa-id') || '',
+          active: b.getAttribute('data-active') === 'true',
+        });
+      }
+    }
+    var enabled = null, widgets = null, configKeys = null;
+    if (bwb) {
+      try { enabled = bwb._enabledWidgetsWV && typeof bwb._enabledWidgetsWV.value === 'function' ? bwb._enabledWidgetsWV.value() : null; } catch (e) {}
+      try { widgets = bwb._widgets ? Object.keys(bwb._widgets) : null; } catch (e) {}
+      try { configKeys = bwb._config ? Object.keys(bwb._config) : null; } catch (e) {}
+    }
+    var scripteditorEnabled = Array.isArray(enabled) && enabled.indexOf('scripteditor') >= 0;
+    var scripteditorInstantiated = Array.isArray(widgets) && widgets.indexOf('scripteditor') >= 0;
+    return {
+      bwb_present: !!bwb,
+      bwb_methods: bwb ? Object.keys(bwb).filter(function(k) { return typeof bwb[k] === 'function' && !k.startsWith('_'); }) : [],
+      footer_present: !!footer,
+      footer_buttons: footerButtons,
+      bwb_enabled_widgets: enabled,
+      bwb_instantiated_widgets: widgets,
+      bwb_config_widgets: configKeys,
+      scripteditor_in_config: Array.isArray(configKeys) && configKeys.indexOf('scripteditor') >= 0,
+      scripteditor_enabled: scripteditorEnabled,
+      scripteditor_instantiated: scripteditorInstantiated,
+      origin: location.origin,
+      pathname: (location.pathname || '').split('/').slice(0, 3).join('/'),
+    };
+  })()
+`;
+
+// Pine Editor is "ready" only when BOTH conditions hold:
+//   1. Monaco's React fiber tree contains a live editor instance, AND
+//   2. The footer's Pine Editor tab is the active widget — otherwise the
+//      'Add to chart' / 'Save' buttons that compile()/save() click are not
+//      rendered in the DOM.
+//
+// IMPORTANT: ${FIND_MONACO} must be wrapped in parens. FIND_MONACO begins
+// with a newline, and without the parens JavaScript's automatic semicolon
+// insertion terminates `return` so the IIFE returns undefined. The
+// original implementation had this bug — every Monaco poll evaluated to
+// undefined, falsy, and timed out, which is why only the already-open
+// path ever worked.
+const READY_CHECK = `
+  (function() {
+    var monaco = (${FIND_MONACO});
+    if (!monaco) return false;
+    // Footer button states (verified live on TV Desktop 3.1.0):
+    //   - data-qa-id="scripteditor"          → button exists for the Pine tab
+    //   - data-active="true"                  → that tab is currently selected
+    // Both attributes are language-independent so this works across locales.
+    var activeTab = document.querySelector('button[data-qa-id="scripteditor"][data-active="true"]');
+    if (!activeTab) return false;
+    // Reject collapsed bottom panel — clicking the tab while collapsed
+    // expands it, so the only way to reach this state is a transient race.
+    if (document.querySelector('#footer-chart-panel button[aria-label="Open panel"][data-active="true"]')) return false;
+    return true;
+  })()
+`;
+
+async function pollUntilReady(maxIterations) {
+  for (let i = 0; i < maxIterations; i++) {
     await new Promise(r => setTimeout(r, 200));
-    const ready = await evaluate(`(function() { return ${FIND_MONACO} !== null; })()`);
-    if (ready) return true;
+    if (await evaluate(READY_CHECK)) return true;
   }
-
-  // Final diagnostic snapshot — surface what we tried and what TV exposes
-  // so the caller's error message helps the user identify the failure mode.
-  const diag = await evaluate(`
-    (function() {
-      var bwb = window.TradingView && window.TradingView.bottomWidgetBar;
-      var bottomBar = document.querySelector('[class*="bottomWidgetBar"]')
-        || document.querySelector('[class*="layout__area--bottom"]');
-      var visibleTabs = [];
-      if (bottomBar) {
-        var els = bottomBar.querySelectorAll('button, [role="tab"], [data-name]');
-        for (var i = 0; i < els.length && visibleTabs.length < 20; i++) {
-          var r = els[i].getBoundingClientRect();
-          if (r.width <= 0 || r.height <= 0) continue;
-          var lbl = (els[i].getAttribute('data-name') || els[i].getAttribute('aria-label') || els[i].textContent || '').toString().trim().slice(0, 40);
-          if (lbl) visibleTabs.push(lbl);
-        }
-      }
-      // Enumerate every light-tab on the page so the user can see what tabs
-      // exist (and which we should have hit). Each entry shows the inner
-      // text + active state so we can tell which is currently selected.
-      var lightTabs = [];
-      var lts = document.querySelectorAll('[data-name^="light-tab-"]');
-      for (var k = 0; k < lts.length && k < 12; k++) {
-        var lt = lts[k];
-        var aria = lt.getAttribute('aria-label') || '';
-        var txt = (lt.textContent || '').trim().slice(0, 40);
-        var widget = lt.getAttribute('data-widget-name') || lt.getAttribute('data-tab-name') || '';
-        var active = (lt.className || '').indexOf('active') >= 0 || lt.getAttribute('aria-selected') === 'true';
-        lightTabs.push({ name: lt.getAttribute('data-name'), widget: widget, aria: aria, text: txt, active: active });
-      }
-      return {
-        bwb_available: !!bwb,
-        bwb_has_activate: !!(bwb && typeof bwb.activateScriptEditorTab === 'function'),
-        bwb_has_show: !!(bwb && typeof bwb.showWidget === 'function'),
-        bottom_bar_present: !!bottomBar,
-        visible_tabs: visibleTabs,
-        light_tabs: lightTabs,
-        href: location.href,
-      };
-    })()
-  `);
-  // Stash on module so callers / users can inspect what TV exposes.
-  globalThis.__lastPineEditorDiagnostic__ = diag;
   return false;
 }
 
-export function getLastPineEditorDiagnostic() {
-  return globalThis.__lastPineEditorDiagnostic__ || null;
+/**
+ * Activates and opens the Pine Editor panel, waiting for both Monaco and
+ * the footer tab to reach a usable state.
+ *
+ * @returns {Promise<{ready: boolean, diagnostic: object|null, strategy: string|null}>}
+ *   ready=true means Monaco is accessible AND the Pine Editor tab is the
+ *   active footer widget. On false, diagnostic carries the live TV state
+ *   fingerprint and strategy records what (if anything) was clicked.
+ *   Callers throw via pineEditorError(diagnostic).
+ */
+export async function ensurePineEditorOpen() {
+  if (await evaluate(READY_CHECK)) return { ready: true, diagnostic: null, strategy: 'already-ready' };
+
+  const strategy = await evaluate(OPEN_PINE_STRATEGIES);
+  if (await pollUntilReady(50)) return { ready: true, diagnostic: null, strategy };
+
+  const diagnostic = await evaluate(DIAGNOSTIC_SNAPSHOT);
+  if (diagnostic && typeof diagnostic === 'object') diagnostic.attempted_strategy = strategy;
+  return { ready: false, diagnostic, strategy };
 }
 
 // ── Pure / offline functions ──
@@ -388,8 +382,8 @@ export async function check({ source }) {
 // ── Functions requiring TradingView connection ──
 
 export async function getSource() {
-  const editorReady = await ensurePineEditorOpen();
-  if (!editorReady) throw new Error('Could not open Pine Editor or Monaco not found in React fiber tree.');
+  const editor = await ensurePineEditorOpen();
+  if (!editor.ready) throw pineEditorError(editor.diagnostic);
 
   const source = await evaluate(`
     (function() {
@@ -407,8 +401,8 @@ export async function getSource() {
 }
 
 export async function setSource({ source }) {
-  const editorReady = await ensurePineEditorOpen();
-  if (!editorReady) throw new Error('Could not open Pine Editor. Diagnostic: ' + JSON.stringify(globalThis.__lastPineEditorDiagnostic__ || {}));
+  const editor = await ensurePineEditorOpen();
+  if (!editor.ready) throw pineEditorError(editor.diagnostic);
 
   const escaped = JSON.stringify(source);
   const set = await evaluate(`
@@ -425,8 +419,8 @@ export async function setSource({ source }) {
 }
 
 export async function compile() {
-  const editorReady = await ensurePineEditorOpen();
-  if (!editorReady) throw new Error('Could not open Pine Editor. Diagnostic: ' + JSON.stringify(globalThis.__lastPineEditorDiagnostic__ || {}));
+  const editor = await ensurePineEditorOpen();
+  if (!editor.ready) throw pineEditorError(editor.diagnostic);
 
   const clicked = await evaluate(`
     (function() {
@@ -463,8 +457,8 @@ export async function compile() {
 }
 
 export async function getErrors() {
-  const editorReady = await ensurePineEditorOpen();
-  if (!editorReady) throw new Error('Could not open Pine Editor. Diagnostic: ' + JSON.stringify(globalThis.__lastPineEditorDiagnostic__ || {}));
+  const editor = await ensurePineEditorOpen();
+  if (!editor.ready) throw pineEditorError(editor.diagnostic);
 
   const errors = await evaluate(`
     (function() {
@@ -488,8 +482,8 @@ export async function getErrors() {
 }
 
 export async function save() {
-  const editorReady = await ensurePineEditorOpen();
-  if (!editorReady) throw new Error('Could not open Pine Editor. Diagnostic: ' + JSON.stringify(globalThis.__lastPineEditorDiagnostic__ || {}));
+  const editor = await ensurePineEditorOpen();
+  if (!editor.ready) throw pineEditorError(editor.diagnostic);
 
   const c = await getClient();
   await c.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: 2, key: 's', code: 'KeyS', windowsVirtualKeyCode: 83 });
@@ -520,8 +514,8 @@ export async function save() {
 }
 
 export async function getConsole() {
-  const editorReady = await ensurePineEditorOpen();
-  if (!editorReady) throw new Error('Could not open Pine Editor. Diagnostic: ' + JSON.stringify(globalThis.__lastPineEditorDiagnostic__ || {}));
+  const editor = await ensurePineEditorOpen();
+  if (!editor.ready) throw pineEditorError(editor.diagnostic);
 
   const entries = await evaluate(`
     (function() {
@@ -570,8 +564,8 @@ export async function getConsole() {
 }
 
 export async function smartCompile() {
-  const editorReady = await ensurePineEditorOpen();
-  if (!editorReady) throw new Error('Could not open Pine Editor. Diagnostic: ' + JSON.stringify(globalThis.__lastPineEditorDiagnostic__ || {}));
+  const editor = await ensurePineEditorOpen();
+  if (!editor.ready) throw pineEditorError(editor.diagnostic);
 
   const studiesBefore = await evaluate(`
     (function() {
@@ -649,8 +643,8 @@ export async function smartCompile() {
 }
 
 export async function newScript({ type }) {
-  const editorReady = await ensurePineEditorOpen();
-  if (!editorReady) throw new Error('Could not open Pine Editor. Diagnostic: ' + JSON.stringify(globalThis.__lastPineEditorDiagnostic__ || {}));
+  const editor = await ensurePineEditorOpen();
+  if (!editor.ready) throw pineEditorError(editor.diagnostic);
 
   const typeMap = { indicator: 'indicator', strategy: 'strategy', library: 'library' };
   const templates = {
@@ -678,8 +672,8 @@ export async function newScript({ type }) {
 }
 
 export async function openScript({ name }) {
-  const editorReady = await ensurePineEditorOpen();
-  if (!editorReady) throw new Error('Could not open Pine Editor. Diagnostic: ' + JSON.stringify(globalThis.__lastPineEditorDiagnostic__ || {}));
+  const editor = await ensurePineEditorOpen();
+  if (!editor.ready) throw pineEditorError(editor.diagnostic);
 
   const escapedName = JSON.stringify(name.toLowerCase());
 
