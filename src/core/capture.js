@@ -13,7 +13,7 @@ export async function captureScreenshot({ region, filename, method } = {}) {
   mkdirSync(SCREENSHOT_DIR, { recursive: true });
 
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
-  const fname = (filename || `tv_${region}_${ts}`).replace(/[\/\\]/g, '_');
+  const fname = (filename || `tv_${region || 'full'}_${ts}`).replace(/[\/\\]/g, '_');
   const filePath = join(SCREENSHOT_DIR, `${fname}.png`);
 
   if (method === 'api') {
@@ -61,10 +61,11 @@ export async function captureScreenshot({ region, filename, method } = {}) {
   if (clip) params.clip = clip;
 
   const { data } = await client.Page.captureScreenshot(params);
-  writeFileSync(filePath, Buffer.from(data, 'base64'));
+  const buf = Buffer.from(data, 'base64');
+  writeFileSync(filePath, buf);
 
   return {
     success: true, method: 'cdp', file_path: filePath, region,
-    size_bytes: Buffer.from(data, 'base64').length,
+    size_bytes: buf.length,
   };
 }

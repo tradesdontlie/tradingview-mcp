@@ -35,10 +35,9 @@ export function registerDataTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('quote_get', 'Get real-time quote data for a symbol (price, OHLC, volume)', {
-    symbol: z.string().optional().describe('Symbol to quote (blank = current chart symbol)'),
-  }, async ({ symbol }) => {
-    try { return jsonResult(await core.getQuote({ symbol })); }
+  server.tool('quote_get', 'Get real-time quote data for the current chart symbol (price, OHLC, volume). Use chart_set_symbol first to switch symbols.', {
+  }, async () => {
+    try { return jsonResult(await core.getQuote()); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 

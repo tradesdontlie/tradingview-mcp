@@ -38,7 +38,7 @@ export async function getState({ _deps } = {}) {
 }
 
 export async function setSymbol({ symbol, _deps }) {
-  const { evaluateAsync, waitForChartReady } = _resolve(_deps);
+  const { evaluate, evaluateAsync, waitForChartReady } = _resolve(_deps);
   await evaluateAsync(`
     (function() {
       var chart = ${CHART_API};
@@ -49,7 +49,15 @@ export async function setSymbol({ symbol, _deps }) {
     })()
   `);
   const ready = await waitForChartReady(symbol);
-  return { success: true, symbol, chart_ready: ready };
+  const actualSymbol = await evaluate(`
+    (function() {
+      try { return ${CHART_API}.symbol(); } catch(e) { return ''; }
+    })()
+  `);
+  const requested = symbol.split(':').pop().toUpperCase();
+  const actual = (actualSymbol || '').split(':').pop().toUpperCase();
+  const switched = actual.includes(requested) || requested.includes(actual);
+  return { success: switched, symbol: actualSymbol || symbol, chart_ready: ready };
 }
 
 export async function setTimeframe({ timeframe, _deps }) {
