@@ -88,7 +88,7 @@ export async function ensurePineEditorOpen() {
     })()
   `);
 
-  // Strategy 4 (NEW): TradingView keyboard shortcut for Pine Editor toggle
+  // Strategy 4: TradingView keyboard shortcut for Pine Editor toggle
   // (Ctrl+` / Cmd+`). Synthetic keyboard event to document.
   await evaluate(`
     (function() {
@@ -103,7 +103,64 @@ export async function ensurePineEditorOpen() {
     })()
   `);
 
-  for (let i = 0; i < 50; i++) {
+  // Poll between strategies so faster wins don't pay the full 10s timeout.
+  for (let i = 0; i < 15; i++) {
+    await new Promise(r => setTimeout(r, 200));
+    const ready = await evaluate(`(function() { return ${FIND_MONACO} !== null; })()`);
+    if (ready) return true;
+  }
+
+  // Strategy 5 (NEW): the bottom widget bar uses an indexed tab strip
+  // ([data-name="light-tab-0"], [data-name="light-tab-1"], ...). When TV's
+  // localized labels and activateScriptEditorTab no longer expose Pine
+  // Editor by name, iterate every tab, click it, and poll for Monaco. The
+  // first tab that mounts Monaco is the Pine Editor.
+  for (let tabIdx = 0; tabIdx < 8; tabIdx++) {
+    const clicked = await evaluate(`
+      (function() {
+        var t = document.querySelector('[data-name="light-tab-' + ${tabIdx} + '"]');
+        if (!t) return false;
+        t.click();
+        return true;
+      })()
+    `);
+    if (!clicked) break;
+    for (let i = 0; i < 10; i++) {
+      await new Promise(r => setTimeout(r, 200));
+      const ready = await evaluate(`(function() { return ${FIND_MONACO} !== null; })()`);
+      if (ready) return true;
+    }
+  }
+
+  // Strategy 6 (NEW): TV's modern bottom panel emits widget-named tabs via
+  // [data-widget-name="pine_editor"] or aria attrs on the tab role. Search
+  // the document scope (not just bottomBar) for any tab whose attrs match.
+  await evaluate(`
+    (function() {
+      var sels = [
+        '[data-widget-name="pine_editor"]',
+        '[data-widget-name="pine-editor"]',
+        '[data-name="pine_editor"]',
+        '[data-tab="pine_editor"]',
+      ];
+      for (var i = 0; i < sels.length; i++) {
+        var el = document.querySelector(sels[i]);
+        if (el) { try { el.click(); return sels[i]; } catch(e) {} }
+      }
+      // Last-ditch: any tab with widget metadata referencing pine
+      var tabs = document.querySelectorAll('[role="tab"], [data-name^="tab-"], [data-tab-name]');
+      for (var j = 0; j < tabs.length; j++) {
+        var t = tabs[j];
+        var attrs = (t.outerHTML || '').toLowerCase();
+        if (attrs.indexOf('pine_editor') >= 0 || attrs.indexOf('pine-editor') >= 0 || attrs.indexOf('pineeditor') >= 0) {
+          try { t.click(); return 'attr-match'; } catch(e) {}
+        }
+      }
+      return false;
+    })()
+  `);
+
+  for (let i = 0; i < 25; i++) {
     await new Promise(r => setTimeout(r, 200));
     const ready = await evaluate(`(function() { return ${FIND_MONACO} !== null; })()`);
     if (ready) return true;
@@ -126,12 +183,26 @@ export async function ensurePineEditorOpen() {
           if (lbl) visibleTabs.push(lbl);
         }
       }
+      // Enumerate every light-tab on the page so the user can see what tabs
+      // exist (and which we should have hit). Each entry shows the inner
+      // text + active state so we can tell which is currently selected.
+      var lightTabs = [];
+      var lts = document.querySelectorAll('[data-name^="light-tab-"]');
+      for (var k = 0; k < lts.length && k < 12; k++) {
+        var lt = lts[k];
+        var aria = lt.getAttribute('aria-label') || '';
+        var txt = (lt.textContent || '').trim().slice(0, 40);
+        var widget = lt.getAttribute('data-widget-name') || lt.getAttribute('data-tab-name') || '';
+        var active = (lt.className || '').indexOf('active') >= 0 || lt.getAttribute('aria-selected') === 'true';
+        lightTabs.push({ name: lt.getAttribute('data-name'), widget: widget, aria: aria, text: txt, active: active });
+      }
       return {
         bwb_available: !!bwb,
         bwb_has_activate: !!(bwb && typeof bwb.activateScriptEditorTab === 'function'),
         bwb_has_show: !!(bwb && typeof bwb.showWidget === 'function'),
         bottom_bar_present: !!bottomBar,
         visible_tabs: visibleTabs,
+        light_tabs: lightTabs,
         href: location.href,
       };
     })()
