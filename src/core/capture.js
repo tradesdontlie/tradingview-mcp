@@ -67,9 +67,11 @@ export async function captureScreenshot({ region, filename, method, date, timefr
   if (region === 'chart') {
     const bounds = await evaluate(`
       (function() {
-        var el = document.querySelector('[data-name="pane-canvas"]')
-          || document.querySelector('[class*="chart-container"]')
-          || document.querySelector('canvas');
+        // layout__area--center wraps canvas + price axis (right) + time axis (bottom)
+        var el = document.querySelector('.layout__area--center')
+          || document.querySelector('.chart-container-border')
+          || document.querySelector('.chart-container')
+          || document.querySelector('[class*="chart-widget"]');
         if (!el) return null;
         var rect = el.getBoundingClientRect();
         return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
