@@ -10,7 +10,7 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCREENSHOT_DIR = join(dirname(dirname(__dirname)), 'screenshots');
 
-export async function captureScreenshot({ region, filename, method, date } = {}) {
+export async function captureScreenshot({ region, filename, method, date, timeframe } = {}) {
   mkdirSync(SCREENSHOT_DIR, { recursive: true });
 
   let zoomMeta = null;
@@ -18,7 +18,7 @@ export async function captureScreenshot({ region, filename, method, date } = {})
     const d = new Date(date);
     if (isNaN(d.getTime())) throw new Error(`Invalid date: ${date}. Use ISO format e.g. "2025-01-15".`);
 
-    const resolution = await evaluate(`
+    const chartResolution = timeframe || await evaluate(`
       (function() {
         try { return window.TradingViewApi._activeChartWidgetWV.value().resolution(); } catch(e) { return '5'; }
       })()
@@ -27,7 +27,7 @@ export async function captureScreenshot({ region, filename, method, date } = {})
     // Center on noon UTC, expand window based on timeframe
     d.setUTCHours(12, 0, 0, 0);
     const center = Math.floor(d.getTime() / 1000);
-    const res = String(resolution).toUpperCase();
+    const res = String(chartResolution).toUpperCase();
     let halfWindow;
     if (res === 'D' || res === '1D')       halfWindow = 15 * 86400;   // ±15 days → 1-month view
     else if (res === 'W' || res === '1W')  halfWindow = 91 * 86400;   // ±91 days → 6-month view
@@ -40,7 +40,7 @@ export async function captureScreenshot({ region, filename, method, date } = {})
 
     await setVisibleRange({ from: center - halfWindow, to: center + halfWindow });
     await new Promise(r => setTimeout(r, 600));
-    zoomMeta = { date, resolution, window_seconds: halfWindow * 2 };
+    zoomMeta = { date, resolution: res, window_seconds: halfWindow * 2 };
   }
 
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
