@@ -102,8 +102,9 @@ tests don't need a live TV. New core functions that hit CDP should follow it.
 
 ## Tier 3 — Bridge (`src/connection.js`)
 
-One module owns all CDP I/O. Everything else calls `evaluate()`. Covered in
-[[cdp-connection]] and [[evaluate-and-known-paths]]. Key responsibilities:
+One module owns all CDP I/O ([[connection]]). Everything else calls `evaluate()`.
+Covered in [[cdp-connection]] and [[evaluate-and-known-paths]]. Key
+responsibilities:
 
 - Connect to the chart target and memoize the client (singleton).
 - `evaluate()` — the universal "run JS in TV, return value" primitive.

@@ -15,8 +15,8 @@ related:
 # Chart-ready polling
 
 Mutations like `chart_set_symbol` are async in TV — the call returns before bars
-load. `waitForChartReady()` (`src/wait.js:6`) polls the DOM until the chart
-settles, so downstream reads see fresh data.
+load. `waitForChartReady()` (`src/wait.js:6`, module page [[wait]]) polls the DOM
+until the chart settles, so downstream reads see fresh data.
 
 ## What it polls
 

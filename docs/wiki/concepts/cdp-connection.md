@@ -16,7 +16,7 @@ related:
 # CDP connection
 
 All communication with TradingView goes through one CDP client, memoized in
-module scope in `src/connection.js`.
+module scope in `src/connection.js` — see [[connection]] for the file-level map.
 
 ## Attach flow
 
