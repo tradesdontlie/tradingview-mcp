@@ -64,8 +64,11 @@ the tab in one action — even from a collapsed panel.
 - `ensurePineEditorOpen()` (`src/core/pine.js:202`, via `OPEN_PINE_STRATEGIES`
   `:60` / `READY_CHECK` `:167`) clicks `data-qa-id="scripteditor"` first, then English aria
   fallback, then a locale-tolerant footer scan, then legacy selectors for old
-  builds. Readiness = Monaco-in-fiber AND footer tab active AND panel not
-  collapsed. See [[core-pine]].
+  builds. Readiness = Monaco in the React fiber tree AND the
+  `.pine-editor-monaco` container visible — **layout-agnostic**, so it also
+  passes on the toolbar Pine layout that never creates a footer tab. (An
+  earlier revision required an active footer tab; that wrongly rejected the
+  toolbar layout and was relaxed.) See [[core-pine]].
 - `openPanel()` (`src/core/ui.js:31`) drives the same footer tabs by
   `data-qa-id` (`scripteditor` / `backtesting`) instead of the dead `bwb` methods.
 

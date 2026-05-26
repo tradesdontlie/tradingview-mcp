@@ -21,16 +21,26 @@ Backs the `ui_*` tool group.
 Opens/closes/toggles bottom panels (`pine-editor`, `strategy-tester`) and right
 sidebars (`watchlist`, `alerts`, `trading`).
 
-For the **bottom** panels it drives footer tab buttons by `data-qa-id`
-(`scripteditor` / `backtesting`) — **not** the old `bwb.activateScriptEditorTab` /
-`showWidget` / `hideWidget`, which TV removed. See [[bottom-widget-bar]]. State
-is read from `data-active` + an "Open panel"/"Collapse panel" check.
+For the **bottom** panels it no longer uses the removed
+`bwb.activateScriptEditorTab` / `showWidget` / `hideWidget`. Instead:
+- **pine-editor open** delegates to the verified `ensurePineEditorOpen()`
+  ([[core-pine]]) — full fallback chain incl. the toolbar `[aria-label="Pine"]`
+  button, so it works on both Pine layouts ([[bottom-widget-bar]]).
+- **strategy-tester open** uses a `data-qa-id` → aria-label → footer-scan chain.
+- **is-open** for Pine is read from **visible Monaco** (layout-agnostic), not a
+  footer tab.
+- **close** uses footer handles only and **verifies the editor actually went
+  away**, reporting `performed:'none'` honestly when it can't (the toolbar Pine
+  button is open-only — re-clicking does not close, verified live).
 
-> The `ui_open_panel` e2e test was failing on `bwb.hideWidget is not a function`
-> until this was rewritten to footer-tab clicks.
+> The `ui_open_panel` e2e test had been failing on `bwb.hideWidget is not a
+> function`; the rewrite removed the dead API.
 
 For the **right** panels it clicks by `data-name`/`aria-label` from a small
-selector map (`src/core/ui.js:61` region) and checks the right sidebar width.
+selector map. **[unverified / likely stale]** those selectors
+(`base-watchlist-widget-button`, etc.) miss on the current TV build —
+`openPanel('watchlist')` throws "Button not found". Pre-existing, unchanged by
+the Pine fix; flagged for a future ingest.
 
 ## Generic interaction functions
 

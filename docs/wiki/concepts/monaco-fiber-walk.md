@@ -56,5 +56,6 @@ open.
 
 Every Pine tool that needs the editor model: `getSource`, `setSource`, `compile`,
 `getErrors`, `save`, `getConsole`, `smartCompile`, `newScript`, `openScript` —
-all gate on `ensurePineEditorOpen()` which now requires the fiber walk to succeed
-**and** the footer tab to be active. See [[core-pine]] and [[bottom-widget-bar]].
+all gate on `ensurePineEditorOpen()`, whose readiness check requires the fiber
+walk to succeed **and** the `.pine-editor-monaco` container to be visible
+(layout-agnostic). See [[core-pine]] and [[bottom-widget-bar]].

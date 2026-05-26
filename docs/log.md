@@ -26,6 +26,19 @@ so `grep "^## \[" docs/log.md | tail -5` lists recent activity. See
   external/analysis groups. Version/tool-count inconsistencies flagged in
   overview.
 
+## [2026-05-27] ingest | Toolbar Pine layout — READY_CHECK relaxed
+- Live verification on a 2nd chart (fU7D519k) exposed a regression: the
+  footer-tab READY_CHECK rejected the toolbar Pine layout, where Monaco mounts
+  via the toolbar [aria-label="Pine"] button with no footer tab. Relaxed to
+  Monaco-in-fiber + container-visible (layout-agnostic).
+- ui.openPanel rewritten: pine open delegates to ensurePineEditorOpen; is-open
+  uses visible-Monaco; close verifies the editor actually closed and reports
+  honestly (toolbar Pine button is open-only — does not toggle closed).
+- Updated pages: monaco-fiber-walk, bottom-widget-bar, core-pine, core-ui.
+- New [verified live] facts: open works on both layouts; setSource/getSource
+  roundtrip + smartCompile succeed. Pre-existing gaps recorded: openPanel
+  right-sidebar selectors stale; strategy-tester needs a footer entry.
+
 ## [2026-05-27] lint | Initial coverage note
 - Coverage gaps enumerated in index.md. No contradictions yet (first pass).
 - Citation freshness: all `path:line` cites taken against working tree at

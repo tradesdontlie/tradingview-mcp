@@ -23,19 +23,23 @@ Also a pure offline analyzer.
 Every editor-touching function first calls `ensurePineEditorOpen()`
 (`src/core/pine.js:202`). It returns `{ ready, diagnostic, strategy }`:
 
-- **READY_CHECK** (`src/core/pine.js:167`) requires three things at once: Monaco found via the fiber walk
-  ([[monaco-fiber-walk]]), the footer Pine tab active (`data-qa-id="scripteditor"`
-  + `data-active="true"`), and the panel not collapsed.
+- **READY_CHECK** (`src/core/pine.js:167`) is layout-agnostic: Monaco found via
+  the fiber walk ([[monaco-fiber-walk]]) AND the `.pine-editor-monaco` container
+  visible (`offsetParent !== null`) so the editor's action buttons are rendered.
+  It deliberately does NOT require a footer tab — TV's toolbar Pine layout mounts
+  Monaco without one. See [[bottom-widget-bar]].
 - **OPEN_PINE_STRATEGIES** (`src/core/pine.js:60`) clicks, in confidence order: `data-qa-id="scripteditor"`
   → English `aria-label="Open/Close Pine Editor"` → locale-tolerant footer scan →
-  legacy selectors. Every click is visibility-gated. See [[bottom-widget-bar]].
+  legacy `[aria-label="Pine"]` toolbar button. Every click is visibility-gated.
 - On failure it returns a **diagnostic snapshot** (bwb methods, footer buttons,
   enabled/instantiated widgets, config keys, origin) so the thrown error is
   actionable. Call sites throw via the shared `pineEditorError(diagnostic)`
   helper (`src/core/pine.js:40`, deduped across 9 sites).
 
-**[verified live 2026-05-27]** cold-open ≈ 220ms; already-ready ≈ 4ms; works from
-collapsed-panel and backtesting-active states.
+**[verified live 2026-05-27]** works on BOTH the footer-tab layout (chart
+Lh6IArQ8: already-ready ≈ 4ms, cold ≈ 220ms) and the toolbar Pine layout (chart
+fU7D519k: open ≈ 300–500ms via the legacy `[aria-label="Pine"]` strategy).
+setSource/getSource roundtrip and smartCompile confirmed working after open.
 
 > Historical bug: the readiness poll suffered the ASI `undefined` bug
 > ([[evaluate-and-known-paths]]) and the old open-strategies called the removed
