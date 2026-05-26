@@ -48,6 +48,7 @@ export async function ensurePineEditorOpen() {
   `);
   if (already) return true;
 
+  // Strategy 1: official bottomWidgetBar API (works on most TV layouts)
   await evaluate(`
     (function() {
       var bwb = window.TradingView && window.TradingView.bottomWidgetBar;
@@ -57,6 +58,7 @@ export async function ensurePineEditorOpen() {
     })()
   `);
 
+  // Strategy 2: legacy "Pine" button selectors
   await evaluate(`
     (function() {
       var btn = document.querySelector('[aria-label="Pine"]')
@@ -65,12 +67,82 @@ export async function ensurePineEditorOpen() {
     })()
   `);
 
+  // Strategy 3 (NEW): bottom-bar tab-list scan. TV's redesigned chart layout
+  // ships the Pine Editor as a tab in the bottom widget bar with localized
+  // labels — search visible bottom-tab buttons by aria-label / data-name /
+  // textContent so we don't rely on a single selector that TV may rename.
+  await evaluate(`
+    (function() {
+      var bottomBar = document.querySelector('[class*="bottomWidgetBar"]')
+        || document.querySelector('[class*="layout__area--bottom"]');
+      var scope = bottomBar || document;
+      var candidates = scope.querySelectorAll('button, [role="tab"], [role="button"], [data-name]');
+      for (var i = 0; i < candidates.length; i++) {
+        var el = candidates[i];
+        var lbl = ((el.getAttribute && (el.getAttribute('data-name') || el.getAttribute('aria-label') || el.getAttribute('title'))) || el.textContent || '').toString().toLowerCase();
+        if (/^pine([\\s_-]editor)?$/.test(lbl) || /pine[\\s_-]editor/.test(lbl) || lbl === 'pine') {
+          try { el.click(); return true; } catch (e) {}
+        }
+      }
+      return false;
+    })()
+  `);
+
+  // Strategy 4 (NEW): TradingView keyboard shortcut for Pine Editor toggle
+  // (Ctrl+` / Cmd+`). Synthetic keyboard event to document.
+  await evaluate(`
+    (function() {
+      var isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform);
+      var ev = new KeyboardEvent('keydown', {
+        key: '\`', code: 'Backquote',
+        ctrlKey: !isMac, metaKey: isMac,
+        bubbles: true, cancelable: true,
+      });
+      document.dispatchEvent(ev);
+      return true;
+    })()
+  `);
+
   for (let i = 0; i < 50; i++) {
     await new Promise(r => setTimeout(r, 200));
     const ready = await evaluate(`(function() { return ${FIND_MONACO} !== null; })()`);
     if (ready) return true;
   }
+
+  // Final diagnostic snapshot — surface what we tried and what TV exposes
+  // so the caller's error message helps the user identify the failure mode.
+  const diag = await evaluate(`
+    (function() {
+      var bwb = window.TradingView && window.TradingView.bottomWidgetBar;
+      var bottomBar = document.querySelector('[class*="bottomWidgetBar"]')
+        || document.querySelector('[class*="layout__area--bottom"]');
+      var visibleTabs = [];
+      if (bottomBar) {
+        var els = bottomBar.querySelectorAll('button, [role="tab"], [data-name]');
+        for (var i = 0; i < els.length && visibleTabs.length < 20; i++) {
+          var r = els[i].getBoundingClientRect();
+          if (r.width <= 0 || r.height <= 0) continue;
+          var lbl = (els[i].getAttribute('data-name') || els[i].getAttribute('aria-label') || els[i].textContent || '').toString().trim().slice(0, 40);
+          if (lbl) visibleTabs.push(lbl);
+        }
+      }
+      return {
+        bwb_available: !!bwb,
+        bwb_has_activate: !!(bwb && typeof bwb.activateScriptEditorTab === 'function'),
+        bwb_has_show: !!(bwb && typeof bwb.showWidget === 'function'),
+        bottom_bar_present: !!bottomBar,
+        visible_tabs: visibleTabs,
+        href: location.href,
+      };
+    })()
+  `);
+  // Stash on module so callers / users can inspect what TV exposes.
+  globalThis.__lastPineEditorDiagnostic__ = diag;
   return false;
+}
+
+export function getLastPineEditorDiagnostic() {
+  return globalThis.__lastPineEditorDiagnostic__ || null;
 }
 
 // ── Pure / offline functions ──
@@ -265,7 +337,7 @@ export async function getSource() {
 
 export async function setSource({ source }) {
   const editorReady = await ensurePineEditorOpen();
-  if (!editorReady) throw new Error('Could not open Pine Editor.');
+  if (!editorReady) throw new Error('Could not open Pine Editor. Diagnostic: ' + JSON.stringify(globalThis.__lastPineEditorDiagnostic__ || {}));
 
   const escaped = JSON.stringify(source);
   const set = await evaluate(`
@@ -283,7 +355,7 @@ export async function setSource({ source }) {
 
 export async function compile() {
   const editorReady = await ensurePineEditorOpen();
-  if (!editorReady) throw new Error('Could not open Pine Editor.');
+  if (!editorReady) throw new Error('Could not open Pine Editor. Diagnostic: ' + JSON.stringify(globalThis.__lastPineEditorDiagnostic__ || {}));
 
   const clicked = await evaluate(`
     (function() {
@@ -321,7 +393,7 @@ export async function compile() {
 
 export async function getErrors() {
   const editorReady = await ensurePineEditorOpen();
-  if (!editorReady) throw new Error('Could not open Pine Editor.');
+  if (!editorReady) throw new Error('Could not open Pine Editor. Diagnostic: ' + JSON.stringify(globalThis.__lastPineEditorDiagnostic__ || {}));
 
   const errors = await evaluate(`
     (function() {
@@ -346,7 +418,7 @@ export async function getErrors() {
 
 export async function save() {
   const editorReady = await ensurePineEditorOpen();
-  if (!editorReady) throw new Error('Could not open Pine Editor.');
+  if (!editorReady) throw new Error('Could not open Pine Editor. Diagnostic: ' + JSON.stringify(globalThis.__lastPineEditorDiagnostic__ || {}));
 
   const c = await getClient();
   await c.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: 2, key: 's', code: 'KeyS', windowsVirtualKeyCode: 83 });
@@ -378,7 +450,7 @@ export async function save() {
 
 export async function getConsole() {
   const editorReady = await ensurePineEditorOpen();
-  if (!editorReady) throw new Error('Could not open Pine Editor.');
+  if (!editorReady) throw new Error('Could not open Pine Editor. Diagnostic: ' + JSON.stringify(globalThis.__lastPineEditorDiagnostic__ || {}));
 
   const entries = await evaluate(`
     (function() {
@@ -428,7 +500,7 @@ export async function getConsole() {
 
 export async function smartCompile() {
   const editorReady = await ensurePineEditorOpen();
-  if (!editorReady) throw new Error('Could not open Pine Editor.');
+  if (!editorReady) throw new Error('Could not open Pine Editor. Diagnostic: ' + JSON.stringify(globalThis.__lastPineEditorDiagnostic__ || {}));
 
   const studiesBefore = await evaluate(`
     (function() {
@@ -507,7 +579,7 @@ export async function smartCompile() {
 
 export async function newScript({ type }) {
   const editorReady = await ensurePineEditorOpen();
-  if (!editorReady) throw new Error('Could not open Pine Editor.');
+  if (!editorReady) throw new Error('Could not open Pine Editor. Diagnostic: ' + JSON.stringify(globalThis.__lastPineEditorDiagnostic__ || {}));
 
   const typeMap = { indicator: 'indicator', strategy: 'strategy', library: 'library' };
   const templates = {
@@ -536,7 +608,7 @@ export async function newScript({ type }) {
 
 export async function openScript({ name }) {
   const editorReady = await ensurePineEditorOpen();
-  if (!editorReady) throw new Error('Could not open Pine Editor.');
+  if (!editorReady) throw new Error('Could not open Pine Editor. Diagnostic: ' + JSON.stringify(globalThis.__lastPineEditorDiagnostic__ || {}));
 
   const escapedName = JSON.stringify(name.toLowerCase());
 
