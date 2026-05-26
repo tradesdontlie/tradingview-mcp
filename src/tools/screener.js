@@ -9,6 +9,7 @@ import {
   baseColumns,
   changeKey,
   intervalSuffix,
+  gapScreener,
 } from '../core/tv_screener.js';
 
 function bbwSignalForRow(values) {
@@ -399,6 +400,38 @@ export function registerScreenerTools(server) {
           exchange, base_timeframe, pattern_length, min_size_increase,
           count: hits.length, rows: hits,
         });
+      } catch (err) {
+        return jsonResult({ success: false, error: err.message }, true);
+      }
+    }
+  );
+
+  // ── screener_gap ──────────────────────────────────────────────
+  server.tool(
+    'screener_gap',
+    'Screen for gap-up and/or gap-down stocks (open vs prev close) with market-cap and relative-volume filters. Each row is bucketed: held (gap up + green), faded (gap up + red — trap), sold (gap down + red), reversed (gap down + green — bullish flip). Defaults to NSE/India. Pass index="NIFTY 500" to restrict to an index.',
+    {
+      direction: z.enum(['up', 'down', 'both']).default('both').describe('Which gaps to return'),
+      min_gap_pct: z.number().default(0.5).describe('Absolute gap threshold in % (e.g. 2 = gaps of at least ±2%)'),
+      min_market_cap_cr: z.number().default(0).describe('Minimum market cap in crore (e.g. 5000)'),
+      min_rel_volume: z.number().default(0).describe('Minimum relative volume vs 10-day avg (1 = trading at average, >1 = above)'),
+      index: z.string().optional().describe('Restrict to an index: "NIFTY 50" / "NIFTY 100" / "NIFTY 200" / "NIFTY 500", or a raw TV symbolset id'),
+      exchange: z.string().default('NSE').describe('Exchange (default NSE)'),
+      screener: z.string().default('india').describe('TV screener region (default india)'),
+      limit: z.number().int().min(1).max(300).default(100).describe('Max rows per direction (before dedup)'),
+    },
+    async ({ direction, min_gap_pct, min_market_cap_cr, min_rel_volume, index, exchange, screener, limit }) => {
+      try {
+        return jsonResult(await gapScreener({
+          direction,
+          minGapPct: min_gap_pct,
+          minMarketCapCr: min_market_cap_cr,
+          minRelVol: min_rel_volume,
+          index,
+          exchange,
+          screener,
+          limit,
+        }));
       } catch (err) {
         return jsonResult({ success: false, error: err.message }, true);
       }

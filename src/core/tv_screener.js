@@ -51,9 +51,13 @@ export async function screenerQuery({
   filter = [],
   sort,
   range = [0, 100],
+  symbols,
 }) {
+  // When restricting to an index/symbol set (symbols.symbolset), do NOT also
+  // pin exchange — the symbolset already scopes the universe and an extra
+  // exchange equality can return zero rows for dual-listed members.
   const allFilters = [
-    ...(exchange ? [{ left: 'exchange', operation: 'equal', right: exchange }] : []),
+    ...(exchange && !symbols ? [{ left: 'exchange', operation: 'equal', right: exchange }] : []),
     ...filter,
   ];
 
@@ -62,6 +66,7 @@ export async function screenerQuery({
     filter: allFilters,
     range,
     ...(sort ? { sort } : {}),
+    ...(symbols ? { symbols } : {}),
   };
 
   const ctrl = new AbortController();
@@ -112,4 +117,119 @@ export function baseColumns(timeframe) {
 
 export function changeKey(timeframe) {
   return 'change' + intervalSuffix(timeframe);
+}
+
+// ── Gap screener ──────────────────────────────────────────────────
+// Friendly index name → TV symbolset id (proname suffix after the exchange).
+const INDEX_SYMBOLSET = {
+  'NIFTY 50': 'NIFTY',
+  'NIFTY50': 'NIFTY',
+  'NIFTY 100': 'CNX100',
+  'NIFTY100': 'CNX100',
+  'NIFTY 200': 'CNX200',
+  'NIFTY200': 'CNX200',
+  'NIFTY 500': 'CNX500',
+  'NIFTY500': 'CNX500',
+};
+
+const GAP_COLUMNS = [
+  'name', 'description', 'open', 'close', 'gap', 'change',
+  'volume', 'relative_volume_10d_calc', 'market_cap_basic',
+];
+
+// Classify a row by crossing gap sign against intraday change sign — the core
+// insight: a gap is the OPEN event, change is where price is NOW.
+//   up + green  = held (gap stuck / extended)
+//   up + red    = faded (gap sold into — trap)
+//   down + red  = sold (gap-down continued — bearish)
+//   down + green = reversed (gap-down bought back — bullish flip)
+function classifyGap(gap, change) {
+  if (gap >= 0) return change >= 0 ? 'held' : 'faded';
+  return change <= 0 ? 'sold' : 'reversed';
+}
+
+// Takes the { symbol, values } row from screenerQuery and shapes it.
+function mapGapRow({ symbol, values: v }) {
+  return {
+    symbol,
+    name: v.name,
+    description: v.description,
+    open: v.open,
+    ltp: v.close,
+    gap_pct: v.gap,
+    change_pct: v.change,
+    volume: v.volume,
+    rel_volume: v.relative_volume_10d_calc,
+    market_cap_cr: v.market_cap_basic != null ? Math.round(v.market_cap_basic / 1e7) : null,
+    bucket: classifyGap(v.gap ?? 0, v.change ?? 0),
+  };
+}
+
+// Dedup dual listings (NSE + BSE return the same name) — keep highest volume.
+function dedupByName(rows) {
+  const best = new Map();
+  for (const r of rows) {
+    const cur = best.get(r.name);
+    if (!cur || (r.volume ?? 0) > (cur.volume ?? 0)) best.set(r.name, r);
+  }
+  return [...best.values()];
+}
+
+/**
+ * Screen for gap-up and/or gap-down stocks with market-cap and volume filters.
+ *
+ * @param {object} opts
+ * @param {string}  [opts.screener='india']
+ * @param {string}  [opts.exchange='NSE']
+ * @param {'up'|'down'|'both'} [opts.direction='both']
+ * @param {number}  [opts.minGapPct=0.5]      absolute gap threshold (%)
+ * @param {number}  [opts.minMarketCapCr=0]   minimum market cap in crore
+ * @param {number}  [opts.minRelVol=0]        minimum relative_volume_10d (1 = avg)
+ * @param {string}  [opts.index]              e.g. "NIFTY 500" or a symbolset id like "CNX500"
+ * @param {number}  [opts.limit=100]          rows per direction (pre-dedup)
+ * @returns {Promise<{filters:object, up:object[], down:object[], counts:object}>}
+ */
+export async function gapScreener({
+  screener = 'india',
+  exchange = 'NSE',
+  direction = 'both',
+  minGapPct = 0.5,
+  minMarketCapCr = 0,
+  minRelVol = 0,
+  index = null,
+  limit = 100,
+} = {}) {
+  const mcapRupees = Number(minMarketCapCr) > 0 ? Number(minMarketCapCr) * 1e7 : 0;
+  const symbolsetId = index ? (INDEX_SYMBOLSET[index] || index) : null;
+  const symbols = symbolsetId ? { symbolset: [`SYML:${exchange};${symbolsetId}`] } : undefined;
+
+  async function runDir(dir) {
+    const gapFilter = dir === 'up'
+      ? { left: 'gap', operation: 'greater', right: minGapPct }
+      : { left: 'gap', operation: 'less', right: -minGapPct };
+    const filter = [gapFilter];
+    if (mcapRupees > 0) filter.push({ left: 'market_cap_basic', operation: 'greater', right: mcapRupees });
+    if (Number(minRelVol) > 0) filter.push({ left: 'relative_volume_10d_calc', operation: 'egreater', right: Number(minRelVol) });
+
+    const { rows } = await screenerQuery({
+      screener,
+      exchange,
+      columns: GAP_COLUMNS,
+      filter,
+      symbols,
+      sort: { sortBy: 'gap', sortOrder: dir === 'up' ? 'desc' : 'asc' },
+      range: [0, limit],
+    });
+    return dedupByName(rows.map(mapGapRow));
+  }
+
+  const up = direction === 'down' ? [] : await runDir('up');
+  const down = direction === 'up' ? [] : await runDir('down');
+
+  return {
+    filters: { screener, exchange, direction, minGapPct, minMarketCapCr, minRelVol, index: index || null, limit },
+    counts: { up: up.length, down: down.length },
+    up,
+    down,
+  };
 }
