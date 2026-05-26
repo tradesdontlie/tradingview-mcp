@@ -81,16 +81,37 @@ Ground-truth list of registered MCP tools, grouped by `register*Tools` module
 - `ui_open_panel`, `ui_click`, `ui_mouse_click`, `ui_hover`, `ui_type_text`,
   `ui_keyboard`, `ui_scroll`, `ui_find_element`, `ui_fullscreen`, `ui_evaluate`
 
-## External data & analysis (non-CDP satellites)
+## Screeners — `tools/screener.js` → `core/tv_screener.js`
+TradingView server-side scanner (`scanner.tradingview.com`), no coinlist needed.
+**Non-CDP — independent of the live desktop chart**, so these work regardless of
+chart/replay state.
+- `top_gainers`, `top_losers` — ranked by change% on a timeframe (optional BBW squeeze filter)
+- `bollinger_scan` — Bollinger Band squeeze detector (low normalized band width)
+- `rating_filter` — filter by BB rating ladder (−3..+3)
+- `volume_breakout_scanner`, `smart_volume_scanner` — volume-driven scans
+- `consecutive_candles_scan`, `advanced_candle_pattern` — candle structure scans
+- `screener_gap` — **gap-up / gap-down screener**. Params: `direction`
+  (up/down/both), `min_gap_pct`, `min_market_cap_cr`, `min_rel_volume`, optional
+  `index` ("NIFTY 50/100/200/500" via TV symbolset), `exchange`, `limit`. Dedups
+  NSE+BSE dual listings (keeps higher-volume row) and **buckets** each row by
+  crossing gap sign × intraday change sign: `held` (up+green), `faded` (up+red —
+  trap), `sold` (down+red), `reversed` (down+green — bullish flip). CLI mirror:
+  `tv gap`. Backed by `gapScreener()` in `core/tv_screener.js`. **[verified live
+  2026-05-27]** matches raw scanner queries exactly (NSE, gap>0.5%, mcap>5000cr,
+  relvol≥1 → 77 up / 18 down, 0 value mismatches). The gap metric is TV's `gap`
+  column = (open − prevClose)/prevClose; pairing it with `change` (intraday) is
+  what powers the bucketing.
+
+## Other external / analysis (non-CDP satellites)
 Registered groups in `src/server.js` whose core fns hit external APIs or compute
 locally rather than driving TV:
-- `tools/news_sentiment.js`, `tools/tv_analysis.js`, `tools/screener.js`,
-  `tools/snapshots.js`, `tools/composed.js`, `tools/egx.js`,
-  `tools/backtest_tools.js`, `tools/hyperliquid_tools.js`, `tools/brokers.js`,
-  `tools/stream.js`, `tools/signal.js`
-- These back data sources (Yahoo, Hyperliquid, brokers, screeners, RSS news) and
-  the local signal DSL/engine. **[unverified]** exact per-tool names — not yet
-  enumerated here; expand on next ingest.
+- `tools/news_sentiment.js`, `tools/tv_analysis.js`, `tools/snapshots.js`,
+  `tools/composed.js`, `tools/egx.js`, `tools/backtest_tools.js`,
+  `tools/hyperliquid_tools.js`, `tools/brokers.js`, `tools/stream.js`,
+  `tools/signal.js`
+- These back data sources (Yahoo, Hyperliquid, brokers, RSS news) and the local
+  signal DSL/engine. **[unverified]** exact per-tool names — not yet enumerated
+  here; expand on next ingest.
 
 ## Conventions (all tools)
 - Every tool returns `{ success: true/false, ... }`; errors are caught and

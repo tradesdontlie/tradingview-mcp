@@ -39,6 +39,17 @@ so `grep "^## \[" docs/log.md | tail -5` lists recent activity. See
   roundtrip + smartCompile succeed. Pre-existing gaps recorded: openPanel
   right-sidebar selectors stale; strategy-tester needs a footer entry.
 
+## [2026-05-27] ingest | screener_gap tool (branch feat/screener-gap)
+- Documented the new gap-up/down screener: `screener_gap` MCP tool + `tv gap`
+  CLI, backed by `gapScreener()` in `core/tv_screener.js`. Added a dedicated
+  "Screeners" section to the tool catalog and enumerated the screener group's
+  tools (previously only listed as a file).
+- Bucketing logic recorded: held / faded / sold / reversed (gap sign × change
+  sign). NSE+BSE dual-listing dedup noted.
+- Code lives on branch feat/screener-gap (separate PR to develop), not in this
+  docs branch's lineage — catalog entry is forward-looking; no path:line cites
+  added for it to avoid cross-branch drift until merge.
+
 ## [2026-05-27] lint | Initial coverage note
 - Coverage gaps enumerated in index.md. No contradictions yet (first pass).
 - Citation freshness: all `path:line` cites taken against working tree at
