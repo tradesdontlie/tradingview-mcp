@@ -2,6 +2,7 @@
  * Core screenshot/capture logic.
  */
 import { getClient, evaluate, getChartCollection } from '../connection.js';
+import { setVisibleRange } from './chart.js';
 import { writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -9,11 +10,22 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCREENSHOT_DIR = join(dirname(dirname(__dirname)), 'screenshots');
 
-export async function captureScreenshot({ region, filename, method } = {}) {
+export async function captureScreenshot({ region, filename, method, date } = {}) {
   mkdirSync(SCREENSHOT_DIR, { recursive: true });
 
+  if (date) {
+    const d = new Date(date);
+    if (isNaN(d.getTime())) throw new Error(`Invalid date: ${date}. Use ISO format e.g. "2025-01-15".`);
+    d.setUTCHours(0, 0, 0, 0);
+    const from = Math.floor(d.getTime() / 1000);
+    const to = from + 86400;
+    await setVisibleRange({ from, to });
+    await new Promise(r => setTimeout(r, 600));
+  }
+
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
-  const fname = (filename || `tv_${region || 'full'}_${ts}`).replace(/[\/\\]/g, '_');
+  const datePart = date ? `_${date}` : '';
+  const fname = (filename || `tv_${region || 'full'}${datePart}_${ts}`).replace(/[\/\\]/g, '_');
   const filePath = join(SCREENSHOT_DIR, `${fname}.png`);
 
   if (method === 'api') {
