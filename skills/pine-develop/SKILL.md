@@ -40,11 +40,50 @@ For strategies, include:
 
 ## Step 4: Push and Compile
 
+### Audit C2 preflight (mandatory before pine_deploy_*)
+
+Before deploying, call `pine_get_editor_state` to verify the editor is
+NOT bound to a different saved script:
+
+```
+pine_get_editor_state()
+  → { script_name: <bound_name_or_null>, dirty, action_button, modal }
+```
+
+If `script_name` is set AND differs from your script's name, either:
+- Call `pine_new(type='indicator')` to clear the editor, OR
+- Pass `force_overwrite_editor:true` on the deploy.
+
+Without this preflight, `pine_deploy_*` will refuse with
+`code:"EDITOR_HOLDS_DIFFERENT_SAVED_SCRIPT"` (audit C2/A1-F5/A2-F2).
+
+### Audit C10 lint (mandatory before deploy)
+
+Always `pine_lint(source=...)` BEFORE `pine_deploy_*`. Look for
+`v6-multi-line-plus` errors — Pine v6 does not support implicit line
+continuation across the `+` operator. Wrap the offending expression in
+`(` ... `)`.
+
+### Then deploy
+
 ```bash
 node scripts/pine_push.js
 ```
 
 This injects the code into TradingView's Pine Editor, clicks compile, and reports any errors.
+
+### Audit C8 — deploy failure diagnosis
+
+If the response is `success:false`, ALWAYS read `step_failed` +
+`ui_diagnostic` FIRST. The diagnostic tells you whether the modal needs
+dismissing, the source needs fixing, or the panel needs re-opening.
+Common cases:
+- `step_failed:"set_source"` → editor panel closed. Call `pine_new()`.
+- `step_failed:"add_to_chart_button_click"` + `blocking_modal_open:true`
+  → call `pine_dismiss_dialog({accept:true, expected_dialog_kinds:["save_and_add_to_chart"]})`
+  (audit C7/A1-F7).
+- `step_failed:"study_added"` + non-empty `compile_errors` →  fix the
+  source per the listed errors.
 
 ## Step 5: Fix Errors
 

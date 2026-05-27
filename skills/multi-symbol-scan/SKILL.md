@@ -32,13 +32,46 @@ timeframes: ["D"]
 action: "screenshot"
 ```
 
+### For Per-Symbol Pine Output Extraction (audit C6/A1-F1)
+**Use `pine_extract_per_symbol`** for any sweep >5 symbols reading Pine
+labels/tables/lines/boxes. This single call replaces the manual loop
+that shipped 8/244 tickers in the original audit session
+(CC TV MCP.txt:431, 1337):
+
+```
+pine_extract_per_symbol({
+  study_filter: "EarnsExtractor",
+  symbols: ["TADAWUL:2222", "TADAWUL:1120", "TADAWUL:1031", ...],
+  emit: ["labels"],
+  wait_after_switch_s: 8,
+  verify_with_known_good: "TADAWUL:2222",  // fail-fast on broken pipeline
+  abort_after_consecutive_empty: 5,         // bail if Pine state degrades
+})
+```
+
 ### For Custom Analysis (per-symbol)
-Loop through symbols manually:
-1. `chart_set_symbol` + `chart_set_timeframe`
-2. `chart_manage_indicator` — add the study
+Loop through symbols manually ONLY when `pine_extract_per_symbol` cannot
+express the read (e.g. needing OHLCV per symbol, not Pine output):
+1. `chart_ensure_symbol(symbol, require_ready=true)` — hard-stops on
+   not-ready (audit C11)
+2. `pine_wait_for_output(study_filter, expected_for_symbol=symbol)` —
+   NEVER use `Bash(sleep N)` to wait for TV state (audit C5)
 3. `data_get_ohlcv` — pull price data
 4. `data_get_indicator` — read indicator values
 5. Analyze and record findings
+
+### Pre-flight + cadence (audit C4/A1-F2/A2-F6)
+Before any sweep:
+1. Ask the user to close the **TradingView Desktop app**. Desktop +
+   browser-tab sessions on the same account silently freeze Pine
+   evaluation across symbol switches.
+2. Call `tv_health_check` — verify `possible_session_contention:false`
+   AND `api_available:true`.
+
+During the sweep:
+- Re-probe `tv_health_check` every ~10 symbols. Stop on
+  `possible_session_contention:true` and ask the user to close the
+  contending session.
 
 ## Step 3: Compile Results
 

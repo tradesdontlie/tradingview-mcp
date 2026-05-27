@@ -3,8 +3,10 @@ import { jsonResult } from './_format.js';
 import * as core from '../core/health.js';
 
 export function registerHealthTools(server) {
-  server.tool('tv_health_check', 'Check CDP connection to TradingView and return current chart state', {}, async () => {
-    try { return jsonResult(await core.healthCheck()); }
+  server.tool('tv_health_check', 'Check CDP connection + chart state + multi-session contention (audit C4/A1-F2/A2-F6). Returns cdp_connected, target_*, chart_*, api_available, pine_evaluation_live, study_count, last_bar_time, tv_chart_tab_count, possible_session_contention, contention_warning, last_chart_mutation_id, probed_at. With probe_pine_evaluation=true (default) also counts concurrent tradingview.com/chart CDP targets — >1 surfaces a hard warning (TradingView Desktop app or other browser tabs silently freeze Pine eval).', {
+    probe_pine_evaluation: z.coerce.boolean().optional().describe('Run the contention + pine-eval-liveness probe. Default true. Set false for a minimal heartbeat check.'),
+  }, async ({ probe_pine_evaluation }) => {
+    try { return jsonResult(await core.healthCheck({ probe_pine_evaluation: probe_pine_evaluation !== false })); }
     catch (err) { return jsonResult({ success: false, error: err.message, hint: 'TradingView is not running with CDP enabled. Use the tv_launch tool to start it automatically.' }, true); }
   });
 

@@ -1,11 +1,41 @@
 /**
  * Core health/discovery/launch logic.
  */
-import { getClient, getTargetInfo, evaluate } from '../connection.js';
+import { getClient, getTargetInfo, evaluate as _evaluate } from '../connection.js';
+import { currentMutationId } from './_mutation_ledger.js';
 import { existsSync } from 'fs';
 import { execSync, spawn } from 'child_process';
 
-export async function healthCheck() {
+const evaluate = _evaluate;
+
+function _resolveHealthDeps(deps) {
+  return {
+    evaluate: deps?.evaluate || _evaluate,
+    listTargets: deps?.listTargets || null,
+  };
+}
+
+/**
+ * C4 / A1-F2 / A2-F6 — count distinct tradingview.com/chart CDP targets and
+ * surface multi-session-contention warning. Multiple Chrome tabs or another
+ * client (Desktop app) on the same account can silently freeze Pine eval.
+ */
+async function _countTvChartTargets(deps) {
+  const { listTargets } = _resolveHealthDeps(deps);
+  if (listTargets) return await listTargets();
+  // Default path: query CDP /json over the HTTP endpoint
+  try {
+    const res = await fetch('http://127.0.0.1:9222/json', { signal: AbortSignal.timeout(2000) });
+    if (!res.ok) return null;
+    const arr = await res.json();
+    return (arr || []).filter(t => /tradingview\.com\/chart/i.test(t.url || ''));
+  } catch (_) {
+    return null;
+  }
+}
+
+export async function healthCheck({ probe_pine_evaluation = true, _deps } = {}) {
+  const { evaluate } = _resolveHealthDeps(_deps);
   await getClient();
   const target = await getTargetInfo();
 
@@ -18,6 +48,29 @@ export async function healthCheck() {
         result.resolution = chart.resolution();
         result.chartType = chart.chartType();
         result.apiAvailable = true;
+        // Probe pine_evaluation_live + stale-eval detection (C4 / A2-F6)
+        try {
+          var widget = chart._chartWidget;
+          var series = widget.model().mainSeries();
+          var lastBarTs = null;
+          try {
+            var bars = series.bars();
+            if (bars && typeof bars.lastIndex === 'function') {
+              var li = bars.lastIndex();
+              var v = bars.valueAt(li);
+              if (v && v[0]) lastBarTs = v[0];
+            }
+          } catch(e) {}
+          result.last_bar_time = lastBarTs;
+          // Crude pine_evaluation_live: chart has at least one study AND the
+          // page has not thrown a recent error. We can't measure "study
+          // evaluator heartbeat" from outside the widget reliably, so this
+          // is a heuristic — combined with target-count it catches the
+          // common contention cases.
+          var studies = (typeof chart.getAllStudies === 'function') ? chart.getAllStudies() : [];
+          result.study_count = studies.length;
+          result.pine_evaluation_live = studies.length > 0 ? true : null;
+        } catch(e) { result.pine_eval_probe_error = e.message; }
       } catch(e) {
         result.symbol = 'unknown';
         result.resolution = 'unknown';
@@ -29,7 +82,22 @@ export async function healthCheck() {
     })()
   `);
 
-  return {
+  // C4: contention detection — count distinct tradingview.com/chart targets
+  let tv_chart_tab_count = null;
+  let possible_session_contention = false;
+  let contention_warning = null;
+  if (probe_pine_evaluation) {
+    const tabs = await _countTvChartTargets(_deps);
+    if (Array.isArray(tabs)) {
+      tv_chart_tab_count = tabs.length;
+      if (tabs.length > 1) {
+        possible_session_contention = true;
+        contention_warning = `Detected ${tabs.length} concurrent TradingView chart tabs on this CDP endpoint. Multiple sessions on the same TradingView account silently freeze Pine evaluation across symbol switches (audit C4). Close the extra tab(s) AND ensure the TradingView Desktop app is not running on the same account.`;
+      }
+    }
+  }
+
+  const out = {
     success: true,
     cdp_connected: true,
     target_id: target.id,
@@ -39,7 +107,17 @@ export async function healthCheck() {
     chart_resolution: state?.resolution || 'unknown',
     chart_type: state?.chartType ?? null,
     api_available: state?.apiAvailable ?? false,
+    // C4 additions
+    pine_evaluation_live: state?.pine_evaluation_live ?? null,
+    last_bar_time: state?.last_bar_time ?? null,
+    study_count: state?.study_count ?? null,
+    tv_chart_tab_count,
+    possible_session_contention,
+    contention_warning,
+    last_chart_mutation_id: currentMutationId(),
+    probed_at: new Date().toISOString(),
   };
+  return out;
 }
 
 export async function discover() {

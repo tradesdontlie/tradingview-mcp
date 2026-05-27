@@ -127,3 +127,15 @@ Claude Code ←→ MCP Server (stdio) ←→ CDP (localhost:9222) ←→ Trading
 ```
 
 Pine graphics path: `study._graphics._primitivesCollection.dwglines.get('lines').get(false)._primitivesDataById`
+
+## Windows setup on this machine (IMPORTANT — read before using any tool)
+
+On this Windows machine the CDP target is **Chrome running the TradingView web app**, not TradingView Desktop. TradingView Desktop on Windows is MSIX-only, and MSIX blocks CDP no matter how it's launched (see repo issues #14/#42/#75/#81). The web app exposes the same `window.TradingViewApi`, so every tool above works unchanged.
+
+**Before using any `tv_*` / `chart_*` / `data_*` tool**, make sure the CDP endpoint is up:
+
+```powershell
+pwsh -File C:\Users\User\tradingview-mcp\scripts\launch_chrome_cdp.ps1
+```
+
+This launches Chrome with `--remote-debugging-port=9222` + an isolated profile (`%LOCALAPPDATA%\tradingview-cdp-profile`) on `https://www.tradingview.com/chart/`. Re-running is safe — it no-ops if CDP is already live. Do **NOT** use `tv_launch` on this machine; it targets TradingView Desktop, which can't expose CDP here. Then verify with `tv_health_check` (expect `cdp_connected: true`).

@@ -284,6 +284,22 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 | `pine_analyze` | Offline static analysis (no chart needed) |
 | `pine_check` | Server-side compile check (no chart needed) |
 
+## Known Issues / Operator Gotchas
+
+Before running multi-symbol Pine workflows, read
+[`docs/AUDIT_LOCAL_MITIGATIONS.md`](docs/AUDIT_LOCAL_MITIGATIONS.md) —
+prompt conventions that complement the schema-level fixes in the
+2026-05-26 audit (consolidated findings C1–C13). Most important:
+
+- **Close the TradingView Desktop app** before any MCP loop. Desktop +
+  browser tab on the same account silently freezes Pine evaluation.
+- **Never use `Bash(sleep N)`** to wait for TV state — use
+  `pine_wait_for_output` instead.
+- **Always `pine_get_editor_state`** before `pine_deploy_*` to avoid
+  the "stale bytecode under wrong name" pitfall.
+- For any per-symbol sweep >5 symbols, use **`pine_extract_per_symbol`**
+  not a manual loop.
+
 ### Replay Mode
 
 | Tool | Step |

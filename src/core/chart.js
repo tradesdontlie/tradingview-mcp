@@ -3,6 +3,7 @@
  */
 import { evaluate as _evaluate, evaluateAsync as _evaluateAsync, safeString, requireFinite } from '../connection.js';
 import { waitForChartReady as _waitForChartReady } from '../wait.js';
+import { recordChartMutation, currentMutationId } from './_mutation_ledger.js';
 
 const CHART_API = 'window.TradingViewApi._activeChartWidgetWV.value()';
 
@@ -14,7 +15,7 @@ function _resolve(deps) {
   };
 }
 
-export async function getState({ _deps } = {}) {
+export async function getState({ _deps, verify_against_feed = true } = {}) {
   const { evaluate } = _resolve(_deps);
   const state = await evaluate(`
     (function() {
@@ -22,19 +23,209 @@ export async function getState({ _deps } = {}) {
       var studies = [];
       try {
         var allStudies = chart.getAllStudies();
+        // Look up which data sources back these studies so we can flag strategies.
+        var stratIds = {};
+        try {
+          var widget = chart._chartWidget;
+          var sources = widget.model().model().dataSources();
+          for (var si = 0; si < sources.length; si++) {
+            var s = sources[si];
+            if (s.reportData && (s.ordersData || s.tradesData)) {
+              var sid = (s.id && (typeof s.id === 'function' ? s.id() : s.id))
+                || (s._id && (typeof s._id === 'function' ? s._id() : s._id))
+                || null;
+              if (sid) stratIds[sid] = true;
+            }
+          }
+        } catch(e) {}
         studies = allStudies.map(function(s) {
-          return { id: s.id, name: s.name || s.title || 'unknown' };
+          return {
+            id: s.id,
+            name: s.name || s.title || 'unknown',
+            is_strategy: !!stratIds[s.id],
+          };
         });
       } catch(e) {}
+      var sym = chart.symbol();
+      // C1: coherence — read the actual data-feed symbol/resolution from mainSeries()
+      var data_symbol = null;
+      var data_resolution = null;
+      try {
+        var widget = chart._chartWidget;
+        var series = widget.model().mainSeries();
+        try {
+          var info = (typeof series.symbolInfo === 'function') ? series.symbolInfo() : null;
+          if (info) data_symbol = info.full_name || info.symbol || info.ticker || null;
+        } catch(e) {}
+        try {
+          var iv = (typeof series.interval === 'function') ? series.interval() : null;
+          if (iv != null) data_resolution = String(iv);
+        } catch(e) {}
+      } catch(e) {}
       return {
-        symbol: chart.symbol(),
+        symbol: sym,
         resolution: chart.resolution(),
         chartType: chart.chartType(),
+        delayed_feed: /_DLY[:_]/i.test(sym || ''),
         studies: studies,
+        _data_symbol: data_symbol,
+        _data_resolution: data_resolution,
       };
     })()
   `);
-  return { success: true, ...state };
+  // C1 / A1-F4 / A2-F1: coherence check between reported state and live feed
+  const coherence = _computeCoherence(state, verify_against_feed);
+  const mutation_id = currentMutationId();
+  const out = {
+    success: coherence.coherent !== false,
+    symbol: state.symbol,
+    resolution: state.resolution,
+    chartType: state.chartType,
+    delayed_feed: state.delayed_feed,
+    studies: state.studies,
+    data_symbol: state._data_symbol,
+    data_resolution: state._data_resolution,
+    coherent: coherence.coherent,
+    coherence_errors: coherence.errors,
+    last_chart_mutation_id: mutation_id,
+    last_data_refresh_at: new Date().toISOString(),
+    mutation_id,
+  };
+  if (coherence.coherent === false) {
+    out.error = 'CHART_DATA_STATE_MISMATCH';
+    out.remediation = 'chart_get_state.symbol/resolution disagree with the live data feed. Likely a stale browser session; reload the TradingView tab or call chart_ensure_symbol again.';
+  }
+  return out;
+}
+
+/**
+ * C1 coherence helper. Returns {coherent: true|false|null, errors: string[]}.
+ * coherent === null when verify_against_feed=false or the feed symbol/resolution
+ * could not be read (graceful degradation, not a mismatch).
+ */
+export function _computeCoherence(state, verify_against_feed) {
+  if (!verify_against_feed) return { coherent: null, errors: [] };
+  const errors = [];
+  const stateSym = String(state.symbol || '').toUpperCase().replace(/_DLY/i, '');
+  const feedSym = String(state._data_symbol || '').toUpperCase().replace(/_DLY/i, '');
+  if (state._data_symbol == null && state._data_resolution == null) {
+    return { coherent: null, errors: [] };
+  }
+  if (feedSym && stateSym && !feedSym.includes(stateSym) && !stateSym.includes(feedSym)) {
+    errors.push(`chart_get_state.symbol="${state.symbol}" != mainSeries.symbol="${state._data_symbol}"`);
+  }
+  const stateRes = String(state.resolution || '');
+  const feedRes = String(state._data_resolution || '');
+  if (feedRes && stateRes && feedRes !== stateRes) {
+    errors.push(`chart_get_state.resolution="${stateRes}" != mainSeries.interval="${feedRes}"`);
+  }
+  return { coherent: errors.length === 0, errors };
+}
+
+/**
+ * Set symbol, wait for chart to settle, and warn if TradingView quietly
+ * downgraded the realtime feed to delayed (e.g. TADAWUL → TADAWUL_DLY).
+ * Returns the canonical resolved symbol plus a `delayed_feed` boolean.
+ */
+export async function ensureSymbol({ symbol, require_ready = true, ready_timeout_ms = 10000, _deps }) {
+  const { evaluate, evaluateAsync, waitForChartReady } = _resolve(_deps);
+  await evaluateAsync(`
+    (function() {
+      var chart = ${CHART_API};
+      return new Promise(function(resolve) {
+        chart.setSymbol(${safeString(symbol)}, {});
+        setTimeout(resolve, 500);
+      });
+    })()
+  `);
+  const timeoutSec = Math.max(1, Math.min(60, Math.round((ready_timeout_ms || 10000) / 1000)));
+  const ready = await waitForChartReady(symbol, null, timeoutSec * 1000);
+  const after = await evaluate(`
+    (function() {
+      var chart = ${CHART_API};
+      var sym = chart.symbol();
+      var ext = {};
+      try { ext = chart.symbolExt() || {}; } catch(e) {}
+      return { symbol: sym, exchange: ext.exchange || null, description: ext.description || null, type: ext.type || null };
+    })()
+  `);
+  const requestedBase = String(symbol).replace(/_DLY/i, '').toUpperCase();
+  const actualBase = String(after.symbol || '').replace(/_DLY/i, '').toUpperCase();
+  const matched = actualBase.includes(requestedBase) || requestedBase.includes(actualBase);
+  const delayed = /_DLY[:_]/i.test(after.symbol || '');
+  const mutation_id = recordChartMutation({ kind: 'ensureSymbol', symbol: after.symbol });
+  const result = {
+    success: matched,
+    requested: symbol,
+    resolved_symbol: after.symbol,
+    exchange: after.exchange,
+    description: after.description,
+    type: after.type,
+    delayed_feed: delayed,
+    chart_ready: ready,
+    mutation_id,
+    warning: delayed && !/_DLY/i.test(symbol)
+      ? 'Realtime feed unavailable for this account; chart fell back to delayed data (_DLY).'
+      : (!matched ? `Resolved symbol "${after.symbol}" doesn't match requested "${symbol}".` : undefined),
+  };
+  // C11 / A1-F11 / A2-F4: hard-stop default — when require_ready=true (default)
+  // and the chart did not become ready within ready_timeout_ms, return
+  // success:false + error:"CHART_NOT_READY" so callers don't read stale
+  // labels/quotes/ohlcv.
+  if (require_ready && ready !== true) {
+    result.success = false;
+    result.error = 'CHART_NOT_READY';
+    result.next_action = `Chart did not become ready within ${timeoutSec}s. Re-run chart_ensure_symbol with a higher ready_timeout_ms, OR call chart_get_state to verify before reading data. Set require_ready=false to opt out of this hard-stop (legacy behaviour).`;
+  }
+  return result;
+}
+
+/**
+ * Resolve a free-text query to the best-match canonical symbol on TradingView.
+ * Wraps symbolSearch with smart ranking (exact ticker, then exchange-prefixed).
+ */
+export async function resolveSymbol({ query, prefer_exchange }) {
+  if (!query) throw new Error('query is required');
+  // Use TradingView's public symbol search REST API
+  const params = new URLSearchParams({
+    text: query, hl: '1', exchange: prefer_exchange || '', lang: 'en', search_type: '', domain: 'production',
+  });
+  const resp = await fetch(`https://symbol-search.tradingview.com/symbol_search/v3/?${params}`, {
+    headers: { 'Origin': 'https://www.tradingview.com', 'Referer': 'https://www.tradingview.com/' },
+  });
+  if (!resp.ok) throw new Error(`Symbol search API returned ${resp.status}`);
+  const data = await resp.json();
+  const strip = s => (s || '').replace(/<\/?em>/g, '');
+  const all = (data.symbols || data || []).map(r => ({
+    symbol: strip(r.symbol),
+    description: strip(r.description),
+    exchange: r.exchange || r.prefix || '',
+    type: r.type || '',
+    full_name: r.exchange ? `${r.exchange}:${strip(r.symbol)}` : strip(r.symbol),
+  }));
+  if (all.length === 0) {
+    throw new Error(`No symbols matched "${query}". Try a different ticker or include the exchange prefix.`);
+  }
+  // Rank: exact ticker match > preferred exchange match > stock type > first result.
+  const q = query.toUpperCase();
+  const scored = all.map(r => {
+    let s = 0;
+    if (r.symbol.toUpperCase() === q) s += 100;
+    if (prefer_exchange && r.exchange.toUpperCase() === String(prefer_exchange).toUpperCase()) s += 50;
+    if (r.type === 'stock') s += 5;
+    return { ...r, score: s };
+  }).sort((a, b) => b.score - a.score);
+  const best = scored[0];
+  return {
+    success: true,
+    query,
+    resolved: best.full_name,
+    symbol: best.symbol,
+    exchange: best.exchange,
+    description: best.description,
+    type: best.type,
+    alternatives: scored.slice(1, 5).map(({ score, ...rest }) => rest),
+  };
 }
 
 export async function setSymbol({ symbol, _deps }) {
@@ -49,7 +240,8 @@ export async function setSymbol({ symbol, _deps }) {
     })()
   `);
   const ready = await waitForChartReady(symbol);
-  return { success: true, symbol, chart_ready: ready };
+  const mutation_id = recordChartMutation({ kind: 'setSymbol', symbol });
+  return { success: true, symbol, chart_ready: ready, mutation_id };
 }
 
 export async function setTimeframe({ timeframe, _deps }) {
@@ -61,7 +253,8 @@ export async function setTimeframe({ timeframe, _deps }) {
     })()
   `);
   const ready = await waitForChartReady(null, timeframe);
-  return { success: true, timeframe, chart_ready: ready };
+  const mutation_id = recordChartMutation({ kind: 'setTimeframe', timeframe });
+  return { success: true, timeframe, chart_ready: ready, mutation_id };
 }
 
 export async function setType({ chart_type, _deps }) {
@@ -82,6 +275,69 @@ export async function setType({ chart_type, _deps }) {
     })()
   `);
   return { success: true, chart_type, type_num: typeNum };
+}
+
+/**
+ * C13 / A1-F13 — clear all studies on the active chart, optionally
+ * preserving a name allowlist. Use to put the chart into a known-clean
+ * state before deploying a workflow indicator (operator session
+ * CC TV MCP.txt:721-742 had to iterate chart_manage_indicator(remove)
+ * per study).
+ *
+ * BUILT_IN_DEFAULTS: TradingView's default Volume + price-display studies
+ * are preserved when except_built_ins=true (most workflows don't want to
+ * touch these).
+ */
+const _BUILT_IN_STUDY_NAMES = ['Volume', 'Volume Profile', 'Sessions'];
+
+export async function clearStudies({ except_names = [], except_built_ins = true, dry_run = false, _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
+  const exceptSet = new Set([
+    ...(Array.isArray(except_names) ? except_names : []).map(n => String(n).toLowerCase()),
+    ...(except_built_ins ? _BUILT_IN_STUDY_NAMES.map(n => n.toLowerCase()) : []),
+  ]);
+  const studies = await evaluate(`
+    (function() {
+      try {
+        return ${CHART_API}.getAllStudies().map(function(s){return {id:s.id, name:(s.name||s.title||'')};});
+      } catch(e) { return []; }
+    })()
+  `);
+  const all = Array.isArray(studies) ? studies : [];
+  const toRemove = all.filter(s => !exceptSet.has(String(s.name).toLowerCase()));
+  const removed = [];
+  const errors = [];
+  if (dry_run) {
+    return {
+      success: true,
+      dry_run: true,
+      total_studies: all.length,
+      would_remove: toRemove.map(s => ({ id: s.id, name: s.name })),
+      preserved: all.filter(s => exceptSet.has(String(s.name).toLowerCase())).map(s => ({ id: s.id, name: s.name })),
+    };
+  }
+  for (const s of toRemove) {
+    try {
+      await evaluate(`
+        (function() {
+          try { ${CHART_API}.removeEntity(${safeString(s.id)}); return true; }
+          catch(e) { return e.message; }
+        })()
+      `);
+      removed.push({ id: s.id, name: s.name });
+    } catch (e) {
+      errors.push({ id: s.id, name: s.name, error: e.message });
+    }
+  }
+  const mutation_id = recordChartMutation({ kind: 'chart_clear_studies', hash: removed.map(r => r.id).join(',') });
+  return {
+    success: errors.length === 0,
+    total_studies_before: all.length,
+    removed,
+    preserved: all.filter(s => exceptSet.has(String(s.name).toLowerCase())).map(s => ({ id: s.id, name: s.name })),
+    errors,
+    mutation_id,
+  };
 }
 
 export async function manageIndicator({ action, indicator, entity_id, inputs: inputsRaw, _deps }) {
@@ -115,7 +371,8 @@ export async function manageIndicator({ action, indicator, entity_id, inputs: in
   }
 }
 
-export async function getVisibleRange() {
+export async function getVisibleRange({ _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
   const result = await evaluate(`
     (function() {
       var chart = ${CHART_API};
@@ -157,7 +414,8 @@ export async function setVisibleRange({ from, to, _deps }) {
   return { success: true, requested: { from, to }, actual: actual || { from: 0, to: 0 } };
 }
 
-export async function scrollToDate({ date }) {
+export async function scrollToDate({ date, _deps }) {
+  const { evaluate } = _resolve(_deps);
   let timestamp;
   if (/^\d+$/.test(date)) timestamp = Number(date);
   else timestamp = Math.floor(new Date(date).getTime() / 1000);
@@ -196,7 +454,8 @@ export async function scrollToDate({ date }) {
   return { success: true, date, centered_on: timestamp, resolution, window: { from, to } };
 }
 
-export async function symbolInfo() {
+export async function symbolInfo({ _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
   const result = await evaluate(`
     (function() {
       var chart = ${CHART_API};

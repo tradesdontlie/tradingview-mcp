@@ -291,3 +291,59 @@ export async function uiEvaluate({ expression }) {
   const result = await evaluate(expression);
   return { success: true, result };
 }
+
+/**
+ * Close all visible toast notifications (ads, promo banners, account-deletion
+ * warnings, etc.) that clutter the UI between tool calls. Returns count closed.
+ */
+export async function dismissToasts() {
+  const result = await evaluate(`
+    (function() {
+      var closed = 0;
+      // Toast close buttons follow the pattern data-name="toast-group-close-button-..."
+      var btns = document.querySelectorAll('[data-name^="toast-group-close-button"]');
+      for (var i = 0; i < btns.length; i++) {
+        try { if (btns[i].offsetParent !== null) { btns[i].click(); closed++; } } catch(e) {}
+      }
+      // Also handle generic toast close buttons
+      var toasts = document.querySelectorAll('[class*="toast"]');
+      for (var t = 0; t < toasts.length; t++) {
+        var close = toasts[t].querySelector('button[aria-label="Close"], button[aria-label*="lose"]');
+        if (close && close.offsetParent !== null) { try { close.click(); closed++; } catch(e) {} }
+      }
+      return closed;
+    })()
+  `);
+  return { success: true, closed: result || 0 };
+}
+
+/**
+ * Detect and dismiss a modal/dialog. `accept=true` clicks the primary
+ * Save/OK/Confirm button, accept=false clicks Cancel/Discard. Returns
+ * { found, title, clicked } so the agent can verify which dialog was handled.
+ */
+export async function dialogDismiss({ accept = false } = {}) {
+  const result = await evaluate(`
+    (function() {
+      var accept = ${accept ? 'true' : 'false'};
+      var dlg = document.querySelector('[role="dialog"]') || document.querySelector('[class*="dialog-"]');
+      if (!dlg || dlg.offsetParent === null) return { found: false };
+      var title = '';
+      var titleEl = dlg.querySelector('[class*="title"]');
+      if (titleEl) title = titleEl.textContent.trim();
+      var buttons = [];
+      dlg.querySelectorAll('button').forEach(function(b) { if (b.offsetParent !== null) buttons.push(b); });
+      var target = null;
+      var primaryRe = /^(save|ok|confirm|yes|accept|continue|open anyway|apply)$/i;
+      var cancelRe  = /^(cancel|no|discard|close|dismiss|don'?t save)$/i;
+      var re = accept ? primaryRe : cancelRe;
+      for (var i = 0; i < buttons.length; i++) {
+        if (re.test(buttons[i].textContent.trim())) { target = buttons[i]; break; }
+      }
+      if (!target && buttons.length > 0) target = accept ? buttons[buttons.length - 1] : buttons[0];
+      if (target) { target.click(); return { found: true, title: title, clicked: target.textContent.trim(), accepted: accept }; }
+      return { found: true, title: title, clicked: null };
+    })()
+  `);
+  return { success: true, ...(result || { found: false }) };
+}
