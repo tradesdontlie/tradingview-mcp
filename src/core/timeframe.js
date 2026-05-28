@@ -34,7 +34,10 @@ export function secPerBar(tf) {
 
 /** Pick the nearest defined key in `MIN_BARS_BY_TF` by sec-per-bar distance. */
 export function nearestTfKey(tf) {
-  const s = String(tf).toUpperCase().trim();
+  let s = String(tf).toUpperCase().trim();
+  // Normalize TV aliases ("1D" -> "D", "1W" -> "W", "1M" -> "M") so the
+  // fast-path direct hit works without falling through the slow scan.
+  if (s === '1D' || s === '1W' || s === '1M') s = s.slice(1);
   if (Object.prototype.hasOwnProperty.call(MIN_BARS_BY_TF, s)) return s;
   // Try numeric direct match for unsuffixed minutes
   const target = secPerBar(s);
@@ -66,5 +69,11 @@ export function expandRangeToMinBars({ from, to, timeframe, minBars }) {
   if (span >= minSpan) return { from, to, expanded: false, target, spanBars: Math.round(span / spb) };
   const need = minSpan - span;
   const half = Math.ceil(need / 2);
-  return { from: from - half, to: to + half, expanded: true, target, spanBars: target };
+  // Guard against pushing `from` below epoch — TV silently clamps negative
+  // timestamps which then causes waitForChartSettled to time out polling a
+  // range the chart will never report back. Anchor the floor, then derive
+  // `newTo` so span == minSpan regardless of how much the clamp shifted.
+  const newFrom = Math.max(0, from - half);
+  const newTo = newFrom + minSpan;
+  return { from: newFrom, to: newTo, expanded: true, target, spanBars: target };
 }

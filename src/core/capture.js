@@ -241,8 +241,16 @@ export async function ensureVisibleAndAutofit({ timeframe, minBars, settleMs = 1
     })()
   `);
 
-  let info = { resolution: timeframe || (state && state.resolution) || '5', expanded: false, autofitted: false };
-  if (state && Number.isFinite(state.from) && Number.isFinite(state.to)) {
+  // stateProbed=false means the TV-internal API path returned null; resolution
+  // and range fall back to caller-supplied values. Surface this so callers know
+  // the autofit ran without ground truth from the chart.
+  let info = {
+    resolution: timeframe || (state && state.resolution) || '5',
+    expanded: false,
+    autofitted: false,
+    stateProbed: !!(state && Number.isFinite(state.from) && Number.isFinite(state.to)),
+  };
+  if (info.stateProbed) {
     const tf = timeframe || state.resolution || '5';
     const exp = expandRangeToMinBars({ from: state.from, to: state.to, timeframe: tf, minBars });
     info = { ...info, from: exp.from, to: exp.to, expanded: exp.expanded, target: exp.target, spanBars: exp.spanBars, resolution: tf };
@@ -317,10 +325,12 @@ export async function captureScreenshot({ region, filename, method, date, timefr
 
   // Step 3.5: ensure ≥ min-bars visible for current timeframe + Y-axis autofit.
   // "More is OK, less is not" — only expands a tight range. auto_fit=false skips.
+  // Best-effort: a failure here should not block the screenshot, but the error
+  // is surfaced via `fit.error` so production debugging is not opaque.
   let fitMeta = null;
   if (auto_fit !== false) {
     try { fitMeta = await ensureVisibleAndAutofit({ timeframe, minBars: min_bars, _deps }); }
-    catch { /* best-effort — never fail capture because autofit hiccupped */ }
+    catch (e) { fitMeta = { error: e?.message || String(e) }; }
   }
 
   // Step 4: resolve clip — never silently fall back when a region is requested
