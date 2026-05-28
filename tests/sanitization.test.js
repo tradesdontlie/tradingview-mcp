@@ -8,7 +8,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { safeString, requireFinite } from '../src/connection.js';
 import { setSymbol, setTimeframe, setType, manageIndicator, setVisibleRange } from '../src/core/chart.js';
-import { drawShape } from '../src/core/drawing.js';
+import { drawShape, listDrawings, getProperties, removeOne, clearAll } from '../src/core/drawing.js';
 
 // ── Mock helpers ─────────────────────────────────────────────────────────
 
@@ -281,6 +281,44 @@ describe('drawing.js — sanitized evaluate calls', () => {
     const call = evaluate.calls.find(c => c.includes('createMultipointShape'));
     assert.ok(call, 'createMultipointShape called');
     assert.ok(call.includes('"trend_line"'), 'shape name via safeString');
+  });
+
+  // Regression guard: listDrawings/getProperties/removeOne/clearAll previously
+  // referenced bare `evaluate`/`getChartApi` identifiers that don't exist after
+  // the DI refactor aliased the imports — every call threw ReferenceError at
+  // runtime. These tests would have caught it.
+  it('listDrawings resolves DI deps and calls getAllShapes via apiPath', async () => {
+    const { _deps, evaluate } = mockDeps();
+    const result = await listDrawings({ _deps });
+    assert.equal(result.success, true);
+    const call = evaluate.calls.find(c => c.includes('getAllShapes'));
+    assert.ok(call, 'getAllShapes called');
+    assert.ok(call.includes('window.__api'), 'apiPath from injected getChartApi');
+  });
+
+  it('getProperties resolves DI deps and uses entity_id via safeString', async () => {
+    const { _deps, evaluate } = mockDeps();
+    await getProperties({ entity_id: 'abc123', _deps });
+    const call = evaluate.calls.find(c => c.includes('getShapeById'));
+    assert.ok(call, 'getShapeById called');
+    assert.ok(call.includes('"abc123"'), 'entity_id via safeString');
+  });
+
+  it('removeOne resolves DI deps and uses entity_id via safeString', async () => {
+    const { _deps, evaluate } = mockDeps();
+    await removeOne({ entity_id: 'abc123', _deps });
+    const call = evaluate.calls.find(c => c.includes('removeEntity'));
+    assert.ok(call, 'removeEntity callsite present');
+    assert.ok(call.includes('"abc123"'), 'entity_id via safeString');
+  });
+
+  it('clearAll resolves DI deps and calls removeAllShapes via apiPath', async () => {
+    const { _deps, evaluate } = mockDeps();
+    const result = await clearAll({ _deps });
+    assert.equal(result.success, true);
+    const call = evaluate.calls.find(c => c.includes('removeAllShapes'));
+    assert.ok(call, 'removeAllShapes called');
+    assert.ok(call.includes('window.__api'), 'apiPath from injected getChartApi');
   });
 });
 
