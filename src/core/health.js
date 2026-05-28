@@ -197,6 +197,16 @@ export async function launch({ port, kill_existing } = {}) {
     } catch { /* ignore */ }
   }
 
+  // Windows MSIX / Store install: Get-AppxPackage is the reliable way to locate
+  // it because C:\Program Files\WindowsApps is ACL-restricted for directory listing.
+  if (!tvPath && platform === 'win32') {
+    try {
+      const psCmd = 'powershell -NoProfile -NonInteractive -Command "$p = Get-AppxPackage -Name *TradingView* | Select-Object -First 1; if ($p) { Join-Path $p.InstallLocation \'TradingView.exe\' }"';
+      const out = execSync(psCmd, { timeout: 6000 }).toString().trim();
+      if (out && existsSync(out)) tvPath = out;
+    } catch { /* ignore */ }
+  }
+
   if (!tvPath && platform === 'darwin') {
     try {
       const found = execSync('mdfind "kMDItemFSName == TradingView.app" | head -1', { timeout: 5000 }).toString().trim();
