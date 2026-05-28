@@ -2,6 +2,33 @@
 
 68 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
 
+## Quick-Connect (This Machine)
+
+TradingView Desktop is installed as a **Microsoft Store (AppX) package**.
+Node.js is at `%LOCALAPPDATA%\Programs\nodejs`.
+
+To connect in one shot, run these PowerShell commands in sequence:
+
+```powershell
+# 1. Kill any existing instance (optional)
+Stop-Process -Name "TradingView" -Force -ErrorAction SilentlyContinue
+
+# 2. Launch with CDP enabled
+$tvExe = (Get-AppxPackage -Name '*TradingView*').InstallLocation + '\TradingView.exe'
+Start-Process -FilePath $tvExe -ArgumentList "--remote-debugging-port=9222"
+
+# 3. Wait for CDP to be ready (poll up to 15s)
+for ($i = 0; $i -lt 15; $i++) {
+  Start-Sleep -Seconds 1
+  try { Invoke-WebRequest -Uri "http://localhost:9222/json/version" -UseBasicParsing -TimeoutSec 2 | Out-Null; break } catch {}
+}
+
+# 4. Verify health check
+node -e "import('./src/core/health.js').then(m => m.healthCheck()).then(r => console.log(JSON.stringify(r, null, 2))).catch(e => console.error(e.message))"
+```
+
+The `tv_launch` tool also handles this automatically (including AppX detection).
+
 ## Decision Tree — Which Tool When
 
 ### "What's on my chart right now?"

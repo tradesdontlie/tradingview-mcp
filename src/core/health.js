@@ -189,6 +189,18 @@ export async function launch({ port, kill_existing } = {}) {
     if (p && existsSync(p)) { tvPath = p; break; }
   }
 
+  // Windows: detect Microsoft Store / AppX installations
+  if (!tvPath && platform === 'win32') {
+    try {
+      const psCmd = `powershell -NoProfile -Command "(Get-AppxPackage -Name '*TradingView*').InstallLocation"`;
+      const appxPath = execSync(psCmd, { timeout: 5000 }).toString().trim();
+      if (appxPath) {
+        const candidate = `${appxPath}\\TradingView.exe`;
+        if (existsSync(candidate)) tvPath = candidate;
+      }
+    } catch { /* ignore */ }
+  }
+
   if (!tvPath) {
     try {
       const cmd = platform === 'win32' ? 'where TradingView.exe' : 'which tradingview';
