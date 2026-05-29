@@ -223,7 +223,7 @@ Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project
 |------|------------|-------------|
 | `chart_get_state` | First call — get symbol, timeframe, all indicator names + IDs | ~500B |
 | `data_get_study_values` | Read current RSI, MACD, BB, EMA values from all indicators | ~500B |
-| `quote_get` | Get latest price, OHLC, volume | ~200B |
+| `quote_get` | Get latest price, OHLC, volume for **current chart symbol** (use `chart_set_symbol` first to switch) | ~200B |
 | `data_get_ohlcv` | Get price bars. **Use `summary: true`** for compact stats | 500B (summary) / 8KB (100 bars) |
 
 ### Custom Indicator Data (Pine Drawings)
@@ -243,7 +243,7 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 
 | Tool | What it does |
 |------|-------------|
-| `chart_set_symbol` | Change ticker (BTCUSD, AAPL, ES1!, NYMEX:CL1!) |
+| `chart_set_symbol` | Change ticker (BTCUSD, AAPL, ES1!, NYMEX:CL1!). Returns `success: false` if the switch didn't take — try without the exchange prefix (e.g. `NIFTY` instead of `NSE:NIFTY`) |
 | `chart_set_timeframe` | Change resolution (1, 5, 15, 60, D, W, M) |
 | `chart_set_type` | Change style (Candles, HeikinAshi, Line, Area, Renko) |
 | `chart_manage_indicator` | Add/remove indicators. **Use full names**: "Relative Strength Index" not "RSI" |
