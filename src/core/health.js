@@ -207,20 +207,62 @@ export async function launch({ port, kill_existing } = {}) {
     } catch { /* ignore */ }
   }
 
-  if (!tvPath) {
+  // Windows MSIX (Store) version — executable lives in a protected WindowsApps folder;
+  // must be activated via IApplicationActivationManager COM interface with args support.
+  let msixPid = null;
+  if (!tvPath && platform === 'win32') {
+    try {
+      const { execFileSync } = await import('child_process');
+      // PowerShell inline C# to activate the MSIX package with --remote-debugging-port
+      const ps = `
+Add-Type -TypeDefinition @'
+using System; using System.Runtime.InteropServices;
+public class _TvLauncher {
+  [ComImport, Guid("2e941141-7f97-4756-ba1d-9decde894a3d"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+  private interface IApplicationActivationManager {
+    int ActivateApplication([MarshalAs(UnmanagedType.LPWStr)] string appId, [MarshalAs(UnmanagedType.LPWStr)] string args, int opts, out uint pid);
+    int ActivateForFile([MarshalAs(UnmanagedType.LPWStr)] string appId, IntPtr items, [MarshalAs(UnmanagedType.LPWStr)] string verb, out uint pid);
+    int ActivateForProtocol([MarshalAs(UnmanagedType.LPWStr)] string appId, IntPtr items, out uint pid);
+  }
+  [ComImport, Guid("45BA127D-10A8-46EA-8AB7-56EA9078943C"), ClassInterface(ClassInterfaceType.None)]
+  private class CAppActivationManager {}
+  public static uint Launch(string appId, string args) {
+    IApplicationActivationManager mgr = (IApplicationActivationManager)new CAppActivationManager();
+    uint pid = 0; int hr = mgr.ActivateApplication(appId, args, 0, out pid);
+    if (hr != 0) throw new System.Runtime.InteropServices.COMException("ActivateApplication failed", hr);
+    return pid;
+  }
+}
+'@
+$p = [_TvLauncher]::Launch("TradingView.Desktop_n534cwy3pjxzj!TradingView.Desktop", "--remote-debugging-port=${cdpPort}")
+Write-Output $p
+`.trim();
+      const result = execFileSync('powershell.exe', ['-NonInteractive', '-Command', ps], { timeout: 15000 }).toString().trim();
+      msixPid = parseInt(result, 10) || null;
+    } catch (e) { /* MSIX launch failed, will throw below */ }
+  }
+
+  if (!tvPath && !msixPid) {
     throw new Error(`TradingView not found on ${platform}. Searched: ${candidates.join(', ')}. Launch manually with: /path/to/TradingView --remote-debugging-port=${cdpPort}`);
   }
 
-  if (killFirst) {
+  if (killFirst && !msixPid) {
     try {
       if (platform === 'win32') execSync('taskkill /F /IM TradingView.exe', { timeout: 5000 });
       else execSync('pkill -f TradingView', { timeout: 5000 });
       await new Promise(r => setTimeout(r, 1500));
     } catch { /* may not be running */ }
+  } else if (killFirst && msixPid === null) {
+    try { execSync('taskkill /F /IM TradingView.exe', { timeout: 5000 }); } catch { /* ignore */ }
   }
 
-  const child = spawn(tvPath, [`--remote-debugging-port=${cdpPort}`], { detached: true, stdio: 'ignore' });
-  child.unref();
+  let child = null;
+  if (tvPath) {
+    child = spawn(tvPath, [`--remote-debugging-port=${cdpPort}`], { detached: true, stdio: 'ignore' });
+    child.unref();
+  }
+
+  const launchedPid = child ? child.pid : msixPid;
 
   for (let i = 0; i < 15; i++) {
     await new Promise(r => setTimeout(r, 1000));
@@ -236,7 +278,9 @@ export async function launch({ port, kill_existing } = {}) {
       if (ready) {
         const info = JSON.parse(ready);
         return {
-          success: true, platform, binary: tvPath, pid: child.pid,
+          success: true, platform,
+          binary: tvPath || 'MSIX (Windows Store)',
+          pid: launchedPid,
           cdp_port: cdpPort, cdp_url: `http://localhost:${cdpPort}`,
           browser: info.Browser, user_agent: info['User-Agent'],
         };
@@ -245,7 +289,9 @@ export async function launch({ port, kill_existing } = {}) {
   }
 
   return {
-    success: true, platform, binary: tvPath, pid: child.pid, cdp_port: cdpPort, cdp_ready: false,
+    success: true, platform,
+    binary: tvPath || 'MSIX (Windows Store)',
+    pid: launchedPid, cdp_port: cdpPort, cdp_ready: false,
     warning: 'TradingView launched but CDP not responding yet. It may still be loading. Try tv_health_check in a few seconds.',
   };
 }
