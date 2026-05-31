@@ -246,8 +246,10 @@ export async function getQuote({ symbol } = {}) {
   const data = await evaluate(`
     (function() {
       var api = ${CHART_API};
-      var sym = ${safeString(symbol || '')};
-      if (!sym) { try { sym = api.symbol(); } catch(e) {} }
+      // quote_get reflects the ACTIVE chart only — always read the chart's true
+      // symbol (never the requested arg) so OHLC and label can never disagree.
+      var sym = '';
+      try { sym = api.symbol(); } catch(e) {}
       if (!sym) { try { sym = api.symbolExt().symbol; } catch(e) {} }
       var ext = {};
       try { ext = api.symbolExt() || {}; } catch(e) {}
@@ -274,6 +276,9 @@ export async function getQuote({ symbol } = {}) {
     })()
   `);
   if (!data || (!data.last && !data.close)) throw new Error('Could not retrieve quote. The chart may still be loading.');
+  if (symbol && data.symbol && symbol.trim().toUpperCase() !== String(data.symbol).trim().toUpperCase()) {
+    throw new Error(`quote_get reads the ACTIVE chart only. Requested "${symbol}" but the chart shows "${data.symbol}". Use chart_set_symbol first, then quote_get.`);
+  }
   return { success: true, ...data };
 }
 
