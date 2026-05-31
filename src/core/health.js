@@ -173,6 +173,8 @@ export async function launch({ port, kill_existing } = {}) {
       `${process.env.LOCALAPPDATA}\\TradingView\\TradingView.exe`,
       `${process.env.PROGRAMFILES}\\TradingView\\TradingView.exe`,
       `${process.env['PROGRAMFILES(X86)']}\\TradingView\\TradingView.exe`,
+      // Windows Store (MSIX) install path — detected via Get-AppxPackage
+      '__STORE__',
     ],
     linux: [
       '/opt/TradingView/tradingview',
@@ -187,6 +189,18 @@ export async function launch({ port, kill_existing } = {}) {
   const candidates = pathMap[platform] || pathMap.linux;
   for (const p of candidates) {
     if (p && existsSync(p)) { tvPath = p; break; }
+  }
+
+  // Resolve Windows Store (MSIX) app path via PowerShell
+  if (platform === 'win32' && (!tvPath || tvPath === '__STORE__')) {
+    tvPath = null;
+    try {
+      const storeExe = execSync(
+        'powershell -NoProfile -Command "(Get-AppxPackage | Where-Object { $_.Name -like \'*TradingView*\' } | Select-Object -First 1 -ExpandProperty InstallLocation) + \'\\TradingView.exe\'"',
+        { timeout: 8000 }
+      ).toString().trim();
+      if (storeExe && storeExe.endsWith('TradingView.exe')) tvPath = storeExe;
+    } catch { /* ignore */ }
   }
 
   if (!tvPath) {
@@ -219,8 +233,30 @@ export async function launch({ port, kill_existing } = {}) {
     } catch { /* may not be running */ }
   }
 
-  const child = spawn(tvPath, [`--remote-debugging-port=${cdpPort}`], { detached: true, stdio: 'ignore' });
-  child.unref();
+  // Windows Store (MSIX) apps can't be spawned directly — use PowerShell ApplicationActivationManager
+  const isStoreApp = platform === 'win32' && tvPath.includes('WindowsApps');
+  let child;
+  if (isStoreApp) {
+    try {
+      // Get AUMID for the Store app
+      const aumid = execSync(
+        'powershell -NoProfile -Command "(Get-AppxPackage | Where-Object { $_.Name -like \'*TradingView*\' } | Select-Object -First 1 | Get-AppxPackageManifest).Package.Applications.Application.Id | ForEach-Object { (Get-AppxPackage | Where-Object { $_.Name -like \'*TradingView*\' }).PackageFamilyName + \'!\' + $_ }"',
+        { timeout: 8000 }
+      ).toString().trim();
+      execSync(
+        `powershell -NoProfile -Command "$t=[Type]::GetTypeFromCLSID([Guid]'45BA127D-10A8-46EA-8AB7-56EA9078943C');$a=[Activator]::CreateInstance($t);$a.ActivateApplication('${aumid}','--remote-debugging-port=${cdpPort}',0,[ref]$null)"`,
+        { timeout: 8000 }
+      );
+      child = { pid: null, unref: () => {} };
+    } catch (e) {
+      // Fallback: launch via explorer shell (no flags, but gets app open)
+      execSync('explorer.exe shell:AppsFolder\\TradingView.Desktop_n534cwy3pjxzj!TradingView.Desktop', { timeout: 5000 });
+      child = { pid: null, unref: () => {} };
+    }
+  } else {
+    child = spawn(tvPath, [`--remote-debugging-port=${cdpPort}`], { detached: true, stdio: 'ignore' });
+    child.unref();
+  }
 
   for (let i = 0; i < 15; i++) {
     await new Promise(r => setTimeout(r, 1000));

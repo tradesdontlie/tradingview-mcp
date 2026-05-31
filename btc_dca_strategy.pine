@@ -1,0 +1,92 @@
+//@version=6
+strategy(title="BTC DCA Drop v7", shorttitle="BTC-DCA-v7", overlay=true, initial_capital=1000, currency=currency.USD, default_qty_type=strategy.fixed, default_qty_value=1, commission_type=strategy.commission.percent, commission_value=0.1, pyramiding=2, calc_on_every_tick=true)
+
+// ─── INPUTS ────────────────────────────────────────────────────
+grp1 = "الدخول / Entry"
+drop1   = input.float(2.5, "% هبوط الدخول الأول",  minval=0.1, maxval=20, step=0.1, group=grp1)
+drop2   = input.float(4.0, "% هبوط الدخول الثاني", minval=0.1, maxval=20, step=0.1, group=grp1)
+qty_pct = input.float(90,  "% حجم الصفقة من رأس المال", minval=10, maxval=100, step=5, group=grp1)
+
+grp2 = "الخروج / Exit"
+tp_pct  = input.float(5.0, "% جني الأرباح (TP)",         minval=0.1, maxval=50, step=0.1, group=grp2)
+sl_days = input.int(7,     "وقف الخسارة - أيام (قابل للتعديل)", minval=1, maxval=30, group=grp2)
+
+grp3 = "الفلاتر / Filters"
+use_ema200 = input.bool(true, "فلتر الاتجاه EMA 200 (لا تشتري في السوق الهابط)", group=grp3)
+
+// ─── CALCULATIONS ──────────────────────────────────────────────
+capital     = strategy.initial_capital
+candle_drop = (open - close) / open * 100
+ema200      = ta.ema(close, 200)
+
+above_ema200 = not use_ema200 or close > ema200
+
+entry_qty = (capital * qty_pct / 100) / close
+
+var float entry1_price = na
+var int   entry1_bar   = na
+var bool  entry2_taken = false
+
+in_trade  = strategy.position_size > 0
+avg_entry = strategy.position_avg_price
+
+// ─── ENTRY LOGIC ───────────────────────────────────────────────
+entry1_cond = candle_drop >= drop1 and not in_trade and above_ema200
+entry2_cond = in_trade and not entry2_taken and candle_drop >= drop2 and strategy.opentrades == 1
+
+if entry1_cond
+    strategy.entry("Entry1", strategy.long, qty=entry_qty, comment="E1 -" + str.tostring(math.round(candle_drop,1)) + "%")
+    entry1_price := close
+    entry1_bar   := bar_index
+    entry2_taken := false
+
+if entry2_cond
+    strategy.entry("Entry2", strategy.long, qty=entry_qty, comment="E2 DCA")
+    entry2_taken := true
+
+// ─── EXIT LOGIC ────────────────────────────────────────────────
+tp_price = avg_entry * (1 + tp_pct / 100)
+sl_bar   = not na(entry1_bar) ? entry1_bar + sl_days * 6 : na
+
+if in_trade and close >= tp_price
+    strategy.close_all(comment="TP +" + str.tostring(tp_pct) + "%")
+    entry1_price := na
+    entry1_bar   := na
+    entry2_taken := false
+
+if in_trade and not na(sl_bar) and bar_index >= sl_bar
+    strategy.close_all(comment="Time SL " + str.tostring(sl_days) + "d")
+    entry1_price := na
+    entry1_bar   := na
+    entry2_taken := false
+
+// ─── VISUALS ───────────────────────────────────────────────────
+plot(ema200, "EMA 200", color=color.orange, linewidth=2)
+plot(in_trade ? tp_price  : na, "Take Profit", color=color.lime,   linewidth=2, style=plot.style_linebr)
+plot(in_trade ? avg_entry : na, "Avg Entry",   color=color.yellow, linewidth=1, style=plot.style_linebr)
+
+plotshape(entry1_cond, location=location.belowbar, style=shape.triangleup, color=color.lime,  size=size.normal, text="E1")
+plotshape(entry2_cond, location=location.belowbar, style=shape.triangleup, color=color.green, size=size.normal, text="E2")
+bgcolor(in_trade ? color.new(color.green, 92) : na)
+
+// ─── INFO TABLE ────────────────────────────────────────────────
+var table info = table.new(position.top_right, 2, 8, border_width=1)
+if barstate.islast
+    table.cell(info, 0, 0, "BTC DCA Drop v7",            text_color=color.white,  bgcolor=color.navy,   text_size=size.normal)
+    table.cell(info, 1, 0, "الحالة",                      text_color=color.white,  bgcolor=color.navy,   text_size=size.normal)
+    table.cell(info, 0, 1, "الصفقات",                     text_color=color.silver, bgcolor=color.black,  text_size=size.small)
+    table.cell(info, 1, 1, str.tostring(strategy.closedtrades), text_color=color.white, bgcolor=color.black, text_size=size.small)
+    table.cell(info, 0, 2, "نسبة الفوز",                  text_color=color.silver, bgcolor=color.black,  text_size=size.small)
+    win_rate = strategy.closedtrades > 0 ? (strategy.wintrades / strategy.closedtrades * 100) : 0
+    table.cell(info, 1, 2, str.tostring(math.round(win_rate,1)) + "%", text_color=color.lime, bgcolor=color.black, text_size=size.small)
+    table.cell(info, 0, 3, "ربح / خسارة",                 text_color=color.silver, bgcolor=color.black,  text_size=size.small)
+    table.cell(info, 1, 3, str.tostring(math.round(strategy.wintrades)) + " / " + str.tostring(math.round(strategy.losstrades)), text_color=color.white, bgcolor=color.black, text_size=size.small)
+    table.cell(info, 0, 4, "صافي الربح",                  text_color=color.silver, bgcolor=color.black,  text_size=size.small)
+    table.cell(info, 1, 4, "$" + str.tostring(math.round(strategy.netprofit, 2)), text_color=strategy.netprofit >= 0 ? color.lime : color.red, bgcolor=color.black, text_size=size.small)
+    pnl_pct = strategy.netprofit / capital * 100
+    table.cell(info, 0, 5, "العائد الكلي",                 text_color=color.silver, bgcolor=color.black,  text_size=size.small)
+    table.cell(info, 1, 5, str.tostring(math.round(pnl_pct,1)) + "%", text_color=pnl_pct >= 0 ? color.lime : color.red, bgcolor=color.black, text_size=size.small)
+    table.cell(info, 0, 6, "فلتر EMA200",                  text_color=color.silver, bgcolor=color.black,  text_size=size.small)
+    table.cell(info, 1, 6, use_ema200 ? "✅ مفعّل" : "❌ معطّل", text_color=use_ema200 ? color.lime : color.red, bgcolor=color.black, text_size=size.small)
+    table.cell(info, 0, 7, "السعر vs EMA200",              text_color=color.silver, bgcolor=color.black,  text_size=size.small)
+    table.cell(info, 1, 7, above_ema200 ? "📈 فوق - شراء" : "📉 تحت - انتظار", text_color=above_ema200 ? color.lime : color.red, bgcolor=color.black, text_size=size.small)
