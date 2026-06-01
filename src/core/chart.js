@@ -177,30 +177,32 @@ export async function scrollToDate({ date, _deps } = {}) {
   const from = timestamp - halfWindow;
   const to = timestamp + halfWindow;
 
-  // Load historical bars until target timestamp is in memory (max 8 rounds).
-  // bars() only holds what TV has fetched so far — requestMoreData() triggers
-  // network fetches for older bars. Without this, scrolling to past dates is a no-op.
-  const loaded = await evaluate(`
-    (function() {
-      var m = window.TradingViewApi._activeChartWidgetWV.value()._chartWidget.model();
-      var bars = m.mainSeries().bars();
-      var ts = m.timeScale();
-      var target = ${timestamp};
-      var MAX_ROUNDS = 8;
-      for (var round = 0; round < MAX_ROUNDS; round++) {
+  // Load historical bars until target timestamp is in memory.
+  // requestMoreData() is async (triggers a network fetch). We must await in Node.js
+  // between rounds so TV has time to receive and store each chunk before we check again.
+  const MAX_ROUNDS = 20;
+  const ROUND_DELAY_MS = 1200;
+  let loaded = { firstDate: null, targetReached: false };
+  for (let round = 0; round < MAX_ROUNDS; round++) {
+    loaded = await evaluate(`
+      (function() {
+        var m = window.TradingViewApi._activeChartWidgetWV.value()._chartWidget.model();
+        var bars = m.mainSeries().bars();
         var fi = bars.firstIndex();
         var fv = bars.valueAt(fi);
-        if (fv && fv[0] <= target) break;
-        m.mainSeries().requestMoreData(5000);
-        ts.requestMoreHistoryPoints(5000);
-      }
-      var fi2 = bars.firstIndex();
-      var fv2 = bars.valueAt(fi2);
-      return { firstTs: fv2 ? fv2[0] : null, firstDate: fv2 ? new Date(fv2[0]*1000).toISOString().split('T')[0] : null, targetReached: fv2 ? fv2[0] <= target : false };
-    })()
-  `);
-
-  await new Promise(r => setTimeout(r, 800));
+        var firstTs = fv ? fv[0] : null;
+        var target = ${timestamp};
+        var reached = firstTs !== null && firstTs <= target;
+        if (!reached) {
+          m.mainSeries().requestMoreData(10000);
+          m.timeScale().requestMoreHistoryPoints(10000);
+        }
+        return { firstTs, firstDate: firstTs ? new Date(firstTs*1000).toISOString().split('T')[0] : null, targetReached: reached };
+      })()
+    `);
+    if (loaded?.targetReached) break;
+    await new Promise(r => setTimeout(r, ROUND_DELAY_MS));
+  }
 
   // If the feed doesn't reach the target date, report early without a bad scroll.
   if (!loaded?.targetReached) {
