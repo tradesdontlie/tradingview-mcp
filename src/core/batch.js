@@ -1,8 +1,9 @@
 /**
  * Core batch execution logic.
  */
-import { evaluate, evaluateAsync, getClient, getChartApi, getChartCollection, safeString } from '../connection.js';
+import { evaluate, getClient, getChartApi, getChartCollection, safeString } from '../connection.js';
 import { waitForChartReady } from '../wait.js';
+import { getOhlcv, getPineTables } from './data.js';
 import { writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -10,7 +11,7 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCREENSHOT_DIR = join(dirname(dirname(__dirname)), 'screenshots');
 
-export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_count }) {
+export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_count, study_filter }) {
   const tfs = timeframes && timeframes.length > 0 ? timeframes : [null];
   const delay = delay_ms || 2000;
   const results = [];
@@ -44,17 +45,10 @@ export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_co
           const filePath = join(SCREENSHOT_DIR, fname);
           writeFileSync(filePath, Buffer.from(data, 'base64'));
           actionResult = { file_path: filePath };
-        } else if (action === 'get_ohlcv' && apiPath) {
-          const limit = Math.min(ohlcv_count || 100, 500);
-          actionResult = await evaluateAsync(`
-            new Promise(function(resolve, reject) {
-              ${apiPath}.exportData({ includeTime: true, includeSeries: true, includeStudies: false })
-                .then(function(result) {
-                  var bars = (result.data || []).slice(-${limit});
-                  resolve({ bar_count: bars.length, last_bar: bars[bars.length - 1] || null });
-                }).catch(reject);
-            })
-          `);
+        } else if (action === 'get_ohlcv') {
+          actionResult = await getOhlcv({ count: ohlcv_count || 100, summary: true });
+        } else if (action === 'get_pine_tables') {
+          actionResult = await getPineTables({ study_filter: study_filter || '' });
         } else if (action === 'get_strategy_results') {
           await new Promise(r => setTimeout(r, 1000));
           actionResult = await evaluate(`
@@ -72,7 +66,7 @@ export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_co
             })()
           `);
         } else {
-          actionResult = { error: 'Unknown action or API not available: ' + action };
+          actionResult = { error: 'Unknown action: ' + action + '. Valid: screenshot, get_ohlcv, get_pine_tables, get_strategy_results' };
         }
         results.push({ ...combo, success: true, result: actionResult });
       } catch (err) {
