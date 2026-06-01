@@ -190,19 +190,29 @@ export async function scrollToDate({ date, _deps } = {}) {
       for (var round = 0; round < MAX_ROUNDS; round++) {
         var fi = bars.firstIndex();
         var fv = bars.valueAt(fi);
-        if (fv && fv[0] <= target) break; // target already in memory
+        if (fv && fv[0] <= target) break;
         m.mainSeries().requestMoreData(5000);
         ts.requestMoreHistoryPoints(5000);
       }
       var fi2 = bars.firstIndex();
       var fv2 = bars.valueAt(fi2);
-      return { firstTs: fv2 ? fv2[0] : null, firstDate: fv2 ? new Date(fv2[0]*1000).toISOString().split('T')[0] : null };
+      return { firstTs: fv2 ? fv2[0] : null, firstDate: fv2 ? new Date(fv2[0]*1000).toISOString().split('T')[0] : null, targetReached: fv2 ? fv2[0] <= target : false };
     })()
   `);
 
   await new Promise(r => setTimeout(r, 800));
 
-  // Navigate to target using bar indices now that data is in memory.
+  // If the feed doesn't reach the target date, report early without a bad scroll.
+  if (!loaded?.targetReached) {
+    return {
+      success: true, date, centered_on: timestamp, resolution,
+      data_loaded_from: loaded?.firstDate || null,
+      scrolled_to_target: false,
+      note: `Feed limit: oldest available bar is ${loaded?.firstDate}. Target ${date} is before the feed start.`,
+    };
+  }
+
+  // Target is in memory — find the bar index closest to timestamp and center on it.
   const scrolled = await evaluate(`
     (function() {
       var chart = window.TradingViewApi._activeChartWidgetWV.value();
@@ -211,16 +221,20 @@ export async function scrollToDate({ date, _deps } = {}) {
       var bars = m.mainSeries().bars();
       var startIdx = bars.firstIndex();
       var endIdx = bars.lastIndex();
-      var fromIdx = startIdx, toIdx = endIdx;
-      var from = ${from}, to = ${to};
+      var target = ${timestamp};
+      var halfBars = 25;
+      // Find last bar at or before target timestamp
+      var targetIdx = startIdx;
       for (var i = startIdx; i <= endIdx; i++) {
         var v = bars.valueAt(i);
-        if (v && v[0] >= from && fromIdx === startIdx) fromIdx = i;
-        if (v && v[0] <= to) toIdx = i;
+        if (v && v[0] <= target) targetIdx = i;
+        else if (v && v[0] > target) break;
       }
-      if (fromIdx !== startIdx || toIdx !== endIdx) ts.zoomToBarsRange(fromIdx, toIdx);
-      var fv = bars.valueAt(fromIdx);
-      return { scrolled: fromIdx !== startIdx, actualFrom: fv ? fv[0] : null };
+      var fromIdx = Math.max(startIdx, targetIdx - halfBars);
+      var toIdx = Math.min(endIdx, targetIdx + halfBars);
+      ts.zoomToBarsRange(fromIdx, toIdx);
+      var fv = bars.valueAt(targetIdx);
+      return { targetIdx: targetIdx, actualDate: fv ? new Date(fv[0]*1000).toISOString().split('T')[0] : null };
     })()
   `);
 
@@ -231,7 +245,8 @@ export async function scrollToDate({ date, _deps } = {}) {
     centered_on: timestamp,
     resolution,
     data_loaded_from: loaded?.firstDate || null,
-    scrolled_to_target: scrolled?.scrolled ?? false,
+    scrolled_to_target: true,
+    actual_date: scrolled?.actualDate || null,
     window: { from, to },
   };
 }
