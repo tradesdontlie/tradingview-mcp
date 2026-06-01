@@ -177,25 +177,63 @@ export async function scrollToDate({ date, _deps } = {}) {
   const from = timestamp - halfWindow;
   const to = timestamp + halfWindow;
 
-  await evaluate(`
+  // Load historical bars until target timestamp is in memory (max 8 rounds).
+  // bars() only holds what TV has fetched so far — requestMoreData() triggers
+  // network fetches for older bars. Without this, scrolling to past dates is a no-op.
+  const loaded = await evaluate(`
     (function() {
-      var chart = ${CHART_API};
+      var m = window.TradingViewApi._activeChartWidgetWV.value()._chartWidget.model();
+      var bars = m.mainSeries().bars();
+      var ts = m.timeScale();
+      var target = ${timestamp};
+      var MAX_ROUNDS = 8;
+      for (var round = 0; round < MAX_ROUNDS; round++) {
+        var fi = bars.firstIndex();
+        var fv = bars.valueAt(fi);
+        if (fv && fv[0] <= target) break; // target already in memory
+        m.mainSeries().requestMoreData(5000);
+        ts.requestMoreHistoryPoints(5000);
+      }
+      var fi2 = bars.firstIndex();
+      var fv2 = bars.valueAt(fi2);
+      return { firstTs: fv2 ? fv2[0] : null, firstDate: fv2 ? new Date(fv2[0]*1000).toISOString().split('T')[0] : null };
+    })()
+  `);
+
+  await new Promise(r => setTimeout(r, 800));
+
+  // Navigate to target using bar indices now that data is in memory.
+  const scrolled = await evaluate(`
+    (function() {
+      var chart = window.TradingViewApi._activeChartWidgetWV.value();
       var m = chart._chartWidget.model();
       var ts = m.timeScale();
       var bars = m.mainSeries().bars();
       var startIdx = bars.firstIndex();
       var endIdx = bars.lastIndex();
       var fromIdx = startIdx, toIdx = endIdx;
+      var from = ${from}, to = ${to};
       for (var i = startIdx; i <= endIdx; i++) {
         var v = bars.valueAt(i);
-        if (v && v[0] >= ${from} && fromIdx === startIdx) fromIdx = i;
-        if (v && v[0] <= ${to}) toIdx = i;
+        if (v && v[0] >= from && fromIdx === startIdx) fromIdx = i;
+        if (v && v[0] <= to) toIdx = i;
       }
-      ts.zoomToBarsRange(fromIdx, toIdx);
+      if (fromIdx !== startIdx || toIdx !== endIdx) ts.zoomToBarsRange(fromIdx, toIdx);
+      var fv = bars.valueAt(fromIdx);
+      return { scrolled: fromIdx !== startIdx, actualFrom: fv ? fv[0] : null };
     })()
   `);
-  await new Promise(r => setTimeout(r, 500));
-  return { success: true, date, centered_on: timestamp, resolution, window: { from, to } };
+
+  await new Promise(r => setTimeout(r, 300));
+  return {
+    success: true,
+    date,
+    centered_on: timestamp,
+    resolution,
+    data_loaded_from: loaded?.firstDate || null,
+    scrolled_to_target: scrolled?.scrolled ?? false,
+    window: { from, to },
+  };
 }
 
 export async function symbolInfo({ _deps } = {}) {
