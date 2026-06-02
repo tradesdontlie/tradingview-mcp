@@ -2,7 +2,16 @@
  * Core tab management logic.
  * Controls TradingView Desktop tabs via CDP and Electron keyboard shortcuts.
  */
-import { getClient, evaluate } from '../connection.js';
+import CDP from 'chrome-remote-interface';
+import { getClient, evaluate, setDedicatedTab, disconnect } from '../connection.js';
+
+function _resolve(deps) {
+  return {
+    CDP: deps?.CDP || CDP,
+    setDedicatedTab: deps?.setDedicatedTab || setDedicatedTab,
+    disconnect: deps?.disconnect || disconnect,
+  };
+}
 
 const CDP_HOST = 'localhost';
 const CDP_PORT = 9222;
@@ -83,10 +92,16 @@ export async function closeTab() {
 }
 
 /**
- * Switch to a tab by index. Reconnects CDP to the new target.
+ * Switch to a tab by index.
+ * Uses Page.bringToFront (not just HTTP /json/activate) so the painted foreground
+ * actually changes in Electron. Updates the dedicated tab singleton so subsequent
+ * getClient() calls reconnect to this tab.
  */
-export async function switchTab({ index }) {
-  const tabs = await list();
+export async function switchTab({ index, _deps } = {}) {
+  const { CDP: cdp, setDedicatedTab: setTab, disconnect: disc } = _resolve(_deps);
+
+  const listFn = _deps?.list || list;
+  const tabs = await listFn();
   const idx = Number(index);
 
   if (idx >= tabs.tab_count) {
@@ -95,12 +110,19 @@ export async function switchTab({ index }) {
 
   const target = tabs.tabs[idx];
 
-  // Use CDP Target.activateTarget to bring the tab to front
+  // Open a temporary CDP client for this target to call Page.bringToFront
+  const tempClient = await cdp({ host: CDP_HOST, port: CDP_PORT, target: target.id });
   try {
-    const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/activate/${target.id}`);
-    const text = await resp.text();
-    return { success: true, action: 'switched', index: idx, tab_id: target.id, chart_id: target.chart_id };
-  } catch (e) {
-    throw new Error(`Failed to activate tab ${idx}: ${e.message}`);
+    await tempClient.Page.enable();
+    await tempClient.Page.bringToFront();
+  } finally {
+    try { await tempClient.close(); } catch {}
   }
+
+  // Rebind the singleton so all subsequent evaluate/getClient calls target this tab
+  setTab(target.id);
+  // Force a reconnect on the next getClient() call
+  await disc();
+
+  return { success: true, action: 'switched', index: idx, tab_id: target.id, chart_id: target.chart_id };
 }

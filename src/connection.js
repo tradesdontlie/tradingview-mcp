@@ -2,6 +2,7 @@ import CDP from 'chrome-remote-interface';
 
 let client = null;
 let targetInfo = null;
+let dedicatedTabId = null;
 const CDP_HOST = 'localhost';
 const CDP_PORT = 9222;
 const MAX_RETRIES = 5;
@@ -88,12 +89,52 @@ export async function connect() {
 }
 
 async function findChartTarget() {
-  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
-  const targets = await resp.json();
-  // Prefer targets with tradingview.com/chart in the URL
-  return targets.find(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
-    || targets.find(t => t.type === 'page' && /tradingview/i.test(t.url))
-    || null;
+  // If we have a dedicated tab, verify it still exists and use it
+  if (dedicatedTabId) {
+    const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
+    const targets = await resp.json();
+    const existing = targets.find(t => t.id === dedicatedTabId);
+    if (existing) return existing;
+    // Tab no longer exists — fall through to create a new one
+    dedicatedTabId = null;
+  }
+  return createDedicatedTab();
+}
+
+async function createDedicatedTab() {
+  // Open a new TradingView chart tab via the CDP HTTP API
+  const newResp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/new?https://www.tradingview.com/chart/`);
+  const newTarget = await newResp.json();
+
+  // Poll /json/list until the new target is ready (up to 5 × 1 s)
+  for (let i = 0; i < 5; i++) {
+    await new Promise(r => setTimeout(r, 1000));
+    const listResp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
+    const targets = await listResp.json();
+    const found = targets.find(t => t.id === newTarget.id);
+    if (found) {
+      dedicatedTabId = found.id;
+      return found;
+    }
+  }
+
+  // Fallback: return whatever we got from /json/new even if not yet in /json/list
+  dedicatedTabId = newTarget.id;
+  return newTarget;
+}
+
+/**
+ * Update the dedicated tab id (called by switchTab when the user changes tabs).
+ */
+export function setDedicatedTab(id) {
+  dedicatedTabId = id;
+}
+
+/**
+ * Return the current dedicated tab id (null if not yet set).
+ */
+export function getDedicatedTabId() {
+  return dedicatedTabId;
 }
 
 export async function getTargetInfo() {
@@ -129,6 +170,7 @@ export async function disconnect() {
     try { await client.close(); } catch {}
     client = null;
     targetInfo = null;
+    // NOTE: dedicatedTabId is intentionally preserved so reconnect finds the same tab
   }
 }
 
