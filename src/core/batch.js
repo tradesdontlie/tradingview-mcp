@@ -1,8 +1,15 @@
 /**
  * Core batch execution logic.
  */
-import { evaluate, evaluateAsync, getClient, getChartApi, getChartCollection, safeString } from '../connection.js';
-import { waitForChartReady } from '../wait.js';
+import {
+  evaluate as _evaluate,
+  getClient as _getClient,
+  getChartApi as _getChartApi,
+  getChartCollection as _getChartCollection,
+  safeString,
+} from '../connection.js';
+import { waitForChartReady as _waitForChartReady } from '../wait.js';
+import { getOhlcv as _getOhlcv } from './data.js';
 import { writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -10,7 +17,21 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCREENSHOT_DIR = join(dirname(dirname(__dirname)), 'screenshots');
 
-export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_count }) {
+function _resolve(deps) {
+  return {
+    evaluate: deps?.evaluate || _evaluate,
+    getClient: deps?.getClient || _getClient,
+    getChartApi: deps?.getChartApi || _getChartApi,
+    getChartCollection: deps?.getChartCollection || _getChartCollection,
+    waitForChartReady: deps?.waitForChartReady || _waitForChartReady,
+    getOhlcv: deps?.getOhlcv || _getOhlcv,
+    writeFile: deps?.writeFile || writeFileSync,
+    mkdir: deps?.mkdir || ((p) => mkdirSync(p, { recursive: true })),
+  };
+}
+
+export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_count, _deps }) {
+  const { evaluate, getClient, getChartApi, getChartCollection, waitForChartReady, getOhlcv, writeFile, mkdir } = _resolve(_deps);
   const tfs = timeframes && timeframes.length > 0 ? timeframes : [null];
   const delay = delay_ms || 2000;
   const results = [];
@@ -36,25 +57,28 @@ export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_co
 
         let actionResult;
         if (action === 'screenshot') {
-          mkdirSync(SCREENSHOT_DIR, { recursive: true });
+          mkdir(SCREENSHOT_DIR);
           const client = await getClient();
+          // Match capture_screenshot: bring the connected tab to front so the
+          // painted surface matches the symbol we just set (see core/capture.js).
+          try { await client.Page.bringToFront(); } catch {}
           const { data } = await client.Page.captureScreenshot({ format: 'png' });
           const ts = new Date().toISOString().replace(/[:.]/g, '-');
           const fname = `batch_${symbol}_${tf || 'default'}_${ts}`.replace(/[\/\\]/g, '_') + '.png';
           const filePath = join(SCREENSHOT_DIR, fname);
-          writeFileSync(filePath, Buffer.from(data, 'base64'));
+          writeFile(filePath, Buffer.from(data, 'base64'));
           actionResult = { file_path: filePath };
-        } else if (action === 'get_ohlcv' && apiPath) {
+        } else if (action === 'get_ohlcv') {
+          // Reuse the proven direct-bars reader (core/data.js getOhlcv). The old
+          // path used the chart's async data-export API, which this TradingView
+          // Desktop build rejects with "Data export is not supported" — surfacing
+          // as the opaque "Uncaught (in promise)" CDP error for every symbol.
           const limit = Math.min(ohlcv_count || 100, 500);
-          actionResult = await evaluateAsync(`
-            new Promise(function(resolve, reject) {
-              ${apiPath}.exportData({ includeTime: true, includeSeries: true, includeStudies: false })
-                .then(function(result) {
-                  var bars = (result.data || []).slice(-${limit});
-                  resolve({ bar_count: bars.length, last_bar: bars[bars.length - 1] || null });
-                }).catch(reject);
-            })
-          `);
+          const ohlcv = await getOhlcv({ count: limit, summary: true });
+          // Compact per-symbol summary for screening: drop the success flag and
+          // the bulky last_5_bars array.
+          const { success, last_5_bars, ...summary } = ohlcv;
+          actionResult = summary;
         } else if (action === 'get_strategy_results') {
           await new Promise(r => setTimeout(r, 1000));
           actionResult = await evaluate(`
@@ -72,7 +96,7 @@ export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_co
             })()
           `);
         } else {
-          actionResult = { error: 'Unknown action or API not available: ' + action };
+          actionResult = { error: 'Unknown action: ' + action };
         }
         results.push({ ...combo, success: true, result: actionResult });
       } catch (err) {
