@@ -95,32 +95,30 @@ async function findChartTarget() {
     const targets = await resp.json();
     const existing = targets.find(t => t.id === dedicatedTabId);
     if (existing) return existing;
-    // Tab no longer exists — fall through to create a new one
+    // Tab no longer exists — fall through to adopt another open chart tab
     dedicatedTabId = null;
   }
   return createDedicatedTab();
 }
 
+// Claim a chart tab to use as the MCP's dedicated tab.
+//
+// NOTE: TradingView Desktop (Electron) does NOT allow opening tabs via CDP —
+// `GET /json/new` returns 405 ("unsafe HTTP verb"), `PUT /json/new` returns 500
+// ("Could not create new page"), and `Target.createTarget` reports "Not supported".
+// So "dedicated" means we adopt a chart tab the user already has open and pin to it
+// (remembered in dedicatedTabId; switchTab can repoint us). capture_screenshot then
+// calls Page.bringToFront() on this tab so the screenshot matches the data layer.
 async function createDedicatedTab() {
-  // Open a new TradingView chart tab via the CDP HTTP API
-  const newResp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/new?https://www.tradingview.com/chart/`);
-  const newTarget = await newResp.json();
-
-  // Poll /json/list until the new target is ready (up to 5 × 1 s)
-  for (let i = 0; i < 5; i++) {
-    await new Promise(r => setTimeout(r, 1000));
-    const listResp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
-    const targets = await listResp.json();
-    const found = targets.find(t => t.id === newTarget.id);
-    if (found) {
-      dedicatedTabId = found.id;
-      return found;
-    }
+  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
+  const targets = await resp.json();
+  const chart = targets.find(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
+    || targets.find(t => t.type === 'page' && /tradingview/i.test(t.url));
+  if (!chart) {
+    throw new Error('No TradingView chart tab found. Open a chart in TradingView Desktop (tradingview.com/chart).');
   }
-
-  // Fallback: return whatever we got from /json/new even if not yet in /json/list
-  dedicatedTabId = newTarget.id;
-  return newTarget;
+  dedicatedTabId = chart.id;
+  return chart;
 }
 
 /**
