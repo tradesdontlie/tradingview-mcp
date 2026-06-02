@@ -3,6 +3,12 @@
  */
 import { evaluate as _evaluate, getChartApi as _getChartApi, safeString, requireFinite } from '../connection.js';
 
+// Module-level aliases so listDrawings/getProperties/removeOne/clearAll (which
+// reference bare `evaluate`/`getChartApi`) resolve correctly. drawShape uses its
+// own locals via _resolve(), which shadow these inside that function.
+const evaluate = _evaluate;
+const getChartApi = _getChartApi;
+
 function _resolve(deps) {
   return { evaluate: deps?.evaluate || _evaluate, getChartApi: deps?.getChartApi || _getChartApi };
 }
