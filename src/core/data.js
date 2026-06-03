@@ -2,6 +2,7 @@
  * Core data access logic.
  */
 import { evaluate, evaluateAsync, KNOWN_PATHS, safeString } from '../connection.js';
+import { quoteSymbol } from './screener.js';
 
 const MAX_OHLCV_BARS = 500;
 const MAX_TRADES = 20;
@@ -243,6 +244,17 @@ export async function getEquity() {
 }
 
 export async function getQuote({ symbol } = {}) {
+  // Explicit symbol → authenticated scanner, which quotes ANY symbol without
+  // changing the chart (fixes the old behavior of ignoring `symbol` and always
+  // returning the charted symbol). Falls back to chart bars on failure.
+  if (symbol && String(symbol).trim()) {
+    try {
+      const q = await quoteSymbol(symbol);
+      return { ...q, symbol: q.ticker || symbol, last: q.last ?? q.close };
+    } catch (e) {
+      // fall through to chart-bars method (valid only for the charted symbol)
+    }
+  }
   const data = await evaluate(`
     (function() {
       var api = ${CHART_API};
@@ -322,33 +334,67 @@ export async function getDepth() {
 }
 
 export async function getStudyValues() {
+  // Read LAST-BAR plot values via getAllStudies()/getStudyById() (the same path
+  // stream.js uses) instead of dataWindowView().items(), which only populates on
+  // crosshair-hover and returned the '∅' sentinel for RSI/MACD/EMA when no bar was
+  // hovered — the cause of "only 1 of 4 studies" / missing momentum indicators.
   const data = await evaluate(`
     (function() {
-      var chart = window.TradingViewApi._activeChartWidgetWV.value()._chartWidget;
-      var model = chart.model();
-      var sources = model.model().dataSources();
+      var chart = ${CHART_API};
       var results = [];
-      for (var si = 0; si < sources.length; si++) {
-        var s = sources[si];
-        if (!s.metaInfo) continue;
+      var studies = [];
+      try { studies = chart.getAllStudies() || []; } catch(e) {}
+      for (var i = 0; i < studies.length; i++) {
+        var info = studies[i];
+        var name = (info && info.name) || '';
+        var values = {};
         try {
-          var meta = s.metaInfo();
-          var name = meta.description || meta.shortDescription || '';
-          if (!name) continue;
-          var values = {};
-          try {
-            var dwv = s.dataWindowView();
-            if (dwv) {
-              var items = dwv.items();
-              if (items) {
-                for (var i = 0; i < items.length; i++) {
-                  var item = items[i];
-                  if (item._value && item._value !== '∅' && item._title) values[item._title] = item._value;
+          var study = chart.getStudyById(info.id);
+          if (study) {
+            var src = study._study || study;
+            // Most-recent plot value via firstValue() — a real number, no
+            // crosshair-hover needed (dataWindowView returns '∅' without one).
+            // (firstValue() yields the study's primary plot; multi-line studies
+            // like MACD/Bollinger expose only their main line here — for named
+            // sub-plots, hover the last bar so the data-window merge below fills.)
+            try { var fv = src.firstValue(); if (typeof fv === 'number' && !isNaN(fv)) values['value'] = fv; } catch(e) {}
+            // Secondary: data-window view, covers some custom plot() studies.
+            try {
+              var realSource = study._source || src;
+              var dwv = realSource && realSource.dataWindowView && realSource.dataWindowView();
+              var items = dwv && dwv.items ? (dwv.items() || []) : [];
+              for (var j = 0; j < items.length; j++) {
+                var it = items[j];
+                if (it && it._title && it._value != null && it._value !== '∅' && !(it._title in values)) {
+                  values[it._title] = it._value;
                 }
               }
-            }
-          } catch(e) {}
-          if (Object.keys(values).length > 0) results.push({ name: name, values: values });
+            } catch(e) {}
+          }
+        } catch(e) {}
+        if (Object.keys(values).length > 0) results.push({ name: name, values: values });
+      }
+      // Fallback: original dataSources scan if getAllStudies yielded nothing.
+      if (results.length === 0) {
+        try {
+          var sources = chart._chartWidget.model().model().dataSources();
+          for (var si = 0; si < sources.length; si++) {
+            var s = sources[si];
+            if (!s.metaInfo) continue;
+            try {
+              var meta = s.metaInfo();
+              var nm = meta.description || meta.shortDescription || '';
+              if (!nm) continue;
+              var v = {};
+              var dwv2 = s.dataWindowView && s.dataWindowView();
+              var its = dwv2 && dwv2.items ? (dwv2.items() || []) : [];
+              for (var ii = 0; ii < its.length; ii++) {
+                var item = its[ii];
+                if (item && item._title && item._value != null && item._value !== '∅') v[item._title] = item._value;
+              }
+              if (Object.keys(v).length > 0) results.push({ name: nm, values: v });
+            } catch(e) {}
+          }
         } catch(e) {}
       }
       return results;
