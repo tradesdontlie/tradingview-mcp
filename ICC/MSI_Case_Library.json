@@ -1,0 +1,75 @@
+{
+  "library": "MSI Case Library",
+  "framework": "MSI-v1A (LOCKED)",
+  "purpose": "Evidence base for EE-2 execution-efficiency validation. FO-4 build phase.",
+  "status": "BUILD PHASE — collecting toward 20–30 validated cases",
+  "schema_version": "1.0",
+  "rules": {
+    "locked_components": ["MSI-v1A", "CASE-001", "Information Quality", "Confirmation Quality", "Thesis Confidence", "Participation First", "Readiness Ladder", "Core Workflow", "Objectives-as-Context", "Thesis-Based Risk"],
+    "fo4_may_not": ["modify locked components", "rank execution styles", "run EE-2", "optimize entries"]
+  },
+  "field_schema": {
+    "id": "CASE-NNN",
+    "asset": "string", "date": "YYYY-MM-DD", "tz_anchor": "trader local TZ for 7AM",
+    "classification": {"market_state": "one of Task-2 list", "setup_type": "Continuation|Reversal|Breakout"},
+    "interpretation": {"daily_context": "", "narrative": ""},
+    "plans": {"continuation_plan": "", "reversal_plan": "", "plan_type": "One-Way|Two-Way"},
+    "readiness_progression": ["NOT READY", "EARLY", "READY", "AUTHORIZED"],
+    "workflow": {"indication": "", "confirmation": "", "correction": "", "continuation": ""},
+    "authorization": {"authorized": true, "basis": ""},
+    "execution_options": {
+      "A_participation": {"entry": 0, "stop": 0, "risk_pct": 0, "R_to_T1": 0, "fill": "", "info_quality": "", "confirmation_level": "", "thesis_confidence": ""},
+      "B_retest": {},
+      "C_continuation": {},
+      "D_precision": {}
+    },
+    "executed": {"style": "A|B|C|D", "entry": 0, "stop": 0, "fill_status": "filled|missed", "miss_status": ""},
+    "outcome": {"MAE": 0, "MFE": 0, "heat_pct_of_stop": 0, "targets": [], "target_achievement": "", "invalidation_hit": false, "final_outcome": "WIN|LOSS|BE|OPEN", "R_realized": 0},
+    "quality": {"information_quality": "Low|Medium|High|Very High", "confirmation_quality": "L1..L5", "thesis_confidence": "Low|Medium|High|Very High", "stop_quality": ""},
+    "regime_tags": {"trend_type": "", "volatility": "Low|Med|High", "cont_or_rev": "Continuation|Reversal"},
+    "lessons": ""
+  },
+  "cases": [
+    {
+      "id": "CASE-001",
+      "status": "LOCKED — Official Verified Seed Case",
+      "asset": "ETHUSDT", "date": "2026-06-02", "tz_anchor": "UTC-5 (07:00 local = 12:00 UTC)",
+      "classification": {"market_state": "Mature Bear", "setup_type": "Continuation"},
+      "interpretation": {
+        "daily_context": "Bearish decline; mature; SHORT-only allowed.",
+        "narrative": "Sellers in control; June-1 range support 1951.53 the key level; break = continuation."
+      },
+      "plans": {
+        "continuation_plan": "Break below 1951.53 (indication) -> short toward prior daily lows.",
+        "reversal_plan": "Break above 2051.06 -> long (NOT triggered).",
+        "plan_type": "Two-Way (resolved One-Way bearish)"
+      },
+      "readiness_progression": ["NOT READY (7AM, price in zone)", "EARLY", "READY (alert triggered)", "AUTHORIZED (4H close 1914.47 < 1951 + correction)"],
+      "workflow": {
+        "indication": "Break of 1951.53 (June-1 range support).",
+        "confirmation": "4H close 1914.81 below 1951 (L2) -> correction into 1905-1951 (L3) -> continuation resume (L4).",
+        "correction": "Bounce high 1943.87 into broken-support-now-resistance.",
+        "continuation": "Resume down through ~1910."
+      },
+      "authorization": {"authorized": true, "basis": "Mature-bear continuation; daily+4H+1H aligned; all gates met."},
+      "execution_options": {
+        "A_participation": {"entry": 1914.81, "stop": 1951.0, "risk_pct": 1.9, "R_to_T1": 3.17, "fill": "~100%", "info_quality": "Low (blind)", "confirmation_level": "L2", "thesis_confidence": "Medium"},
+        "B_retest": {"entry": 1943.87, "stop": 1951.0, "risk_pct": 0.4, "R_to_T1": 20.18, "fill": "Low", "info_quality": "Medium", "confirmation_level": "L3", "thesis_confidence": "Med-High"},
+        "C_continuation": {"entry": 1905.36, "stop": 1951.0, "risk_pct": 2.4, "R_to_T1": 2.31, "fill": "Moderate", "info_quality": "High", "confirmation_level": "L4", "thesis_confidence": "High", "EXECUTED": true},
+        "D_precision": {"entry": 1945.0, "stop": 1951.0, "risk_pct": 0.3, "R_to_T1": "~24", "fill": "Lowest", "info_quality": "Low (anticipatory)", "confirmation_level": "L1-2", "thesis_confidence": "Medium"}
+      },
+      "executed": {"style": "C", "entry": 1905.36, "stop": 1951.0, "fill_status": "filled", "miss_status": "none"},
+      "outcome": {"MAE": "~0 (bounce high 1893 stayed below 1905 entry)", "MFE": 188.0, "heat_pct_of_stop": 0, "targets": [1800, 1747.80], "target_achievement": "Both reached (actual low 1717.28)", "invalidation_hit": false, "final_outcome": "WIN", "R_realized": "3.45+ (to 1747.80; more to 1717)"},
+      "quality": {"information_quality": "High", "confirmation_quality": "L4", "thesis_confidence": "High", "stop_quality": "Good (stop 1951 = correction high + buffer; = engine stop logic)"},
+      "regime_tags": {"trend_type": "Mature Bear", "volatility": "High (ATR rising)", "cont_or_rev": "Continuation"},
+      "lessons": "Continuation entry (C) preserved highest information quality (saw break+correction+continuation) at acceptable R/fill; matched LOCKED workflow. Participation entry (A) had better raw R (3.17) but took ~80% heat and was blind. Discretionary entry beat the mechanical default (1881). Two-way plan correctly resolved one-way bearish."
+    }
+  ],
+  "candidate_roster": [
+    {"note": "Cases observed in prior FO/GR batches that can be formalized going forward (NOT yet logged as validated):"},
+    {"ref": "FO-1 ETH 05-11 dev-bear short (+2.04R, TP2)", "needs": "execution-option breakdown + IQ/CQ/TC tags"},
+    {"ref": "FO-1 BTC 06-01 dev-bear short (+1.61R, TP2)", "needs": "same"},
+    {"ref": "FO-3A ETH June-1 range (NO-TRADE, two-way, stood aside)", "needs": "log as a valid NO-TRADE case (decision quality)"},
+    {"ref": "FO-3A ETH June-3 extended-bear (NO-TRADE, exhaustion caution)", "needs": "log as valid NO-TRADE case"}
+  ]
+}
