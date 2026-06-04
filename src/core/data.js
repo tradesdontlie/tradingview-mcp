@@ -198,6 +198,30 @@ export function flattenStrategyReport(raw) {
   return metrics;
 }
 
+// Maps TradingView's minified order-leg keys (from ordersData()) to readable
+// names. Meanings verified live against a real backtest on TV 3.2.0:
+//   b  -> isBuy   (true on a long entry / buy, false when closing a long / sell)
+//   e  -> isEntry (true for entry orders, false for exit/close orders)
+//   tm -> seq     (order sequence index 0..n-1; NOT a bar index or timestamp —
+//                  tm matched the array position across all sampled orders and
+//                  avgBarsInTrade was ~27, ruling out a per-bar index)
+// Note: ordersData() carries no timestamp; the richer paired-trade data with
+// P&L lives in reportData().trades (cp/dd/rn fields) — a future getTrades source.
+const ORDER_KEY_MAP = { b: 'isBuy', c: 'comment', e: 'isEntry', id: 'id', p: 'price', q: 'qty', tm: 'seq', tp: 'type' };
+
+export function normalizeOrder(o) {
+  const out = {};
+  if (!o || typeof o !== 'object') return out;
+  for (const k of Object.keys(o)) {
+    const v = o[k];
+    if (v === null || v === undefined) continue;
+    const t = typeof v;
+    if (t !== 'number' && t !== 'string' && t !== 'boolean') continue;
+    out[ORDER_KEY_MAP[k] || k] = v;
+  }
+  return out;
+}
+
 export async function getStrategyResults({ _deps } = {}) {
   const { evaluate } = _resolve(_deps);
   const raw = await evaluate(`
@@ -257,7 +281,8 @@ export async function getTrades({ max_trades } = {}) {
       } catch(e) { return {trades: [], source: 'internal_api', error: e.message}; }
     })()
   `);
-  return { success: true, trade_count: trades?.trades?.length || 0, source: trades?.source, trades: trades?.trades || [], error: trades?.error };
+  const normalized = (trades?.trades || []).map(normalizeOrder);
+  return { success: true, trade_count: normalized.length, source: trades?.source, trades: normalized, error: trades?.error };
 }
 
 export async function getEquity() {

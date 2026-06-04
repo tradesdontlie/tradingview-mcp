@@ -15,6 +15,7 @@ import {
   findStrategySource,
   flattenStrategyReport,
   getStrategyResults,
+  normalizeOrder,
 } from '../src/core/data.js';
 
 // ── Fixture: real report shape from a live MA-cross strategy on BTCUSDT.P 60m ──
@@ -160,5 +161,35 @@ describe('getStrategyResults() — wiring', () => {
     assert.equal(res.success, true);
     assert.equal(res.metric_count, 0);
     assert.match(res.error, /No strategy found/);
+  });
+});
+
+// ── normalizeOrder() ─────────────────────────────────────────────────────────
+// Raw order leg shape captured live from ordersData() on TradingView 3.2.0.
+describe('normalizeOrder()', () => {
+  const rawEntry = { b: true, c: 'Long', e: true, id: 'Long', p: 43674, q: 0.228969, tm: 0, tp: 'MARKET' };
+
+  it('maps the single-letter order keys to readable names', () => {
+    const o = normalizeOrder(rawEntry);
+    assert.equal(o.isBuy, true);
+    assert.equal(o.comment, 'Long');
+    assert.equal(o.isEntry, true);
+    assert.equal(o.price, 43674);
+    assert.equal(o.qty, 0.228969);
+    assert.equal(o.type, 'MARKET');
+    assert.equal(o.id, 'Long');
+  });
+
+  it('maps tm -> seq (verified live: tm mirrors order sequence index, not bar/time)', () => {
+    assert.equal(normalizeOrder({ tm: 200 }).seq, 200);
+  });
+
+  it('passes through unmapped scalar keys unchanged', () => {
+    assert.equal(normalizeOrder({ somethingNew: 5 }).somethingNew, 5);
+  });
+
+  it('drops nested objects, functions and null/undefined', () => {
+    const o = normalizeOrder({ p: 1, nested: { x: 1 }, fn: () => {}, nil: null, und: undefined });
+    assert.deepEqual(Object.keys(o), ['price']);
   });
 });
