@@ -4,6 +4,25 @@
  * They throw on error (callers catch and format).
  */
 import { evaluate, evaluateAsync, getClient } from '../connection.js';
+import { appendFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+// ── Action log (script switches + injects) ──
+// Appends one JSON line per script-editor write action so the history of which
+// script was switched to / injected can be unwound after the fact (TM-229).
+// Override the path with env TV_MCP_ACTION_LOG.
+const ACTION_LOG = process.env.TV_MCP_ACTION_LOG
+  || join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'pine-actions.log');
+
+function logPineAction(entry) {
+  try {
+    appendFileSync(ACTION_LOG, JSON.stringify({ ts: new Date().toISOString(), ...entry }) + '\n');
+  } catch (_e) { /* logging must never break the action */ }
+}
+
+// Reads the Pine Editor's bound-script title (the Save/Publish target anchor).
+const READ_BOUND_TITLE = `(function(){ var t=document.querySelector('.label-k49p41Es'); return t?t.textContent.trim():null; })()`;
 
 // ── Monaco finder (injected into TV page) ──
 const FIND_MONACO = `
@@ -263,9 +282,12 @@ export async function getSource() {
   return { success: true, source, line_count: source.split('\n').length, char_count: source.length };
 }
 
-export async function setSource({ source }) {
+export async function setSource({ source, reason }) {
   const editorReady = await ensurePineEditorOpen();
   if (!editorReady) throw new Error('Could not open Pine Editor.');
+
+  // Record which script is bound (Save target) at inject time — see TM-229.
+  const boundTitle = await evaluate(READ_BOUND_TITLE);
 
   const escaped = JSON.stringify(source);
   const set = await evaluate(`
@@ -278,7 +300,10 @@ export async function setSource({ source }) {
   `);
 
   if (!set) throw new Error('Monaco found but setValue() failed.');
-  return { success: true, lines_set: source.split('\n').length };
+
+  logPineAction({ action: 'set_source', target: boundTitle, lines: source.split('\n').length, chars: source.length, reason: reason || null });
+
+  return { success: true, lines_set: source.split('\n').length, bound_title: boundTitle };
 }
 
 export async function compile() {
@@ -586,6 +611,82 @@ export async function openScript({ name }) {
   }
 
   return { success: true, name: result.name, script_id: result.id, lines: result.lines, source: 'internal_api', opened: true };
+}
+
+/**
+ * Real GUI script switch (TM-229). Unlike openScript() — which only setValue()s a
+ * script's source into the CURRENT editor without changing the editor's bound
+ * script — this drives TradingView's own "Open script…" flow so the editor REBINDS
+ * to the target. After this, Save/Publish target the correct script.
+ *
+ * Steps (validated DOM flow): click the editor name button → click the "Open script…"
+ * menu item → click the matching row in the open dialog → poll until the editor's
+ * bound-title equals the target. Throws (and logs) if the binding does not change,
+ * so callers never proceed with a save/publish on the wrong script.
+ */
+export async function openScriptGui({ name, reason }) {
+  const editorReady = await ensurePineEditorOpen();
+  if (!editorReady) throw new Error('Could not open Pine Editor.');
+
+  const fromTitle = await evaluate(READ_BOUND_TITLE);
+
+  // Resolve the canonical script_id + exact display name (registry anchor) via pine-facade.
+  const escapedName = JSON.stringify(name.toLowerCase());
+  const meta = await evaluateAsync(`
+    fetch('https://pine-facade.tradingview.com/pine-facade/list/?filter=saved', { credentials: 'include' })
+      .then(function(r){ return r.json(); })
+      .then(function(scripts){
+        if(!Array.isArray(scripts)) return {error:'pine-facade returned unexpected data'};
+        var target=${escapedName};
+        var m=null;
+        for(var i=0;i<scripts.length;i++){ var sn=(scripts[i].scriptName||'').toLowerCase(), st=(scripts[i].scriptTitle||'').toLowerCase(); if(sn===target||st===target){m=scripts[i];break;} }
+        if(!m){ for(var j=0;j<scripts.length;j++){ var sn2=(scripts[j].scriptName||'').toLowerCase(), st2=(scripts[j].scriptTitle||'').toLowerCase(); if(sn2.indexOf(target)!==-1||st2.indexOf(target)!==-1){m=scripts[j];break;} } }
+        if(!m) return {error:'Script "'+target+'" not found. Use pine_list_scripts.'};
+        return {id:m.scriptIdPart, name:m.scriptName||m.scriptTitle};
+      })
+      .catch(function(e){ return {error:e.message}; })
+  `);
+  if (meta?.error) throw new Error(meta.error);
+  const displayName = meta.name;
+  const scriptId = meta.id;
+
+  // Step 1 — open the script-management menu (the editor name button).
+  await evaluate(`(function(){ var n=document.querySelector('.nameButton-k49p41Es'); if(n) n.click(); })()`);
+  await new Promise(r => setTimeout(r, 350));
+
+  // Step 2 — click "Open script…".
+  const menuClicked = await evaluate(`(function(){ var mi=[].slice.call(document.querySelectorAll('[role="menuitem"]')).find(function(e){return /Open script/i.test(e.textContent||'');}); if(!mi) return false; mi.click(); return true; })()`);
+  if (!menuClicked) throw new Error('"Open script…" menu item not found (Pine Editor UI may have changed).');
+  await new Promise(r => setTimeout(r, 600));
+
+  // Step 3 — click the dialog row whose label is exactly the display name (immediately followed by "Version:").
+  const escapedDisplay = JSON.stringify(displayName);
+  const rowClicked = await evaluate(`(function(){
+    var target=${escapedDisplay};
+    var rows=[].slice.call(document.querySelectorAll('*')).filter(function(e){ if(e.children.length>3) return false; var t=(e.textContent||'').trim(); return t.indexOf(target+'Version:')===0; });
+    if(rows.length===0) return false;
+    rows[rows.length-1].click();
+    return true;
+  })()`);
+  if (!rowClicked) throw new Error('Script "'+displayName+'" not found in the open dialog.');
+  await new Promise(r => setTimeout(r, 900));
+
+  // Step 4 — VERIFY the binding actually changed (poll the bound-title).
+  let toTitle = null;
+  for (let i = 0; i < 12; i++) {
+    toTitle = await evaluate(READ_BOUND_TITLE);
+    if (toTitle === displayName) break;
+    await new Promise(r => setTimeout(r, 200));
+  }
+  const verified = toTitle === displayName;
+
+  logPineAction({ action: 'open_gui', from: fromTitle, to: displayName, script_id: scriptId, verified, reason: reason || null });
+
+  if (!verified) {
+    throw new Error('Binding verification FAILED: editor title is "' + toTitle + '", expected "' + displayName + '". Switch did not take effect — do NOT save or publish.');
+  }
+
+  return { success: true, name: displayName, script_id: scriptId, bound_title: toTitle, from: fromTitle, verified: true, method: 'gui_open' };
 }
 
 export async function listScripts() {
