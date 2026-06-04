@@ -16,6 +16,14 @@ export function registerPineTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
+  server.tool('pine_set_source_from_file', 'Inject a local file\'s exact bytes into the editor and verify byte-exactly. The server reads the file itself (no transcription of the source), sets it via Monaco, reads it back and compares SHA-256(file) vs SHA-256(editor) — the returned "verified" flag is the cryptographic byte-exact guarantee (closes the char_count gap). Use for large / unicode-heavy files (e.g. index.pine). Returns bound_title (the Save/Publish target) — verify it before saving. Never use to target the PROD script.', {
+    path: z.string().describe('Absolute path to the local file whose bytes will be injected'),
+    reason: z.string().optional().describe('Optional context (e.g. "TM-231: inject index.pine") logged to pine-actions.log'),
+  }, async ({ path, reason }) => {
+    try { return jsonResult(await core.setSourceFromFile({ path, reason })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
   server.tool('pine_compile', 'Compile / add the current Pine Script to the chart', {}, async () => {
     try { return jsonResult(await core.compile()); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }

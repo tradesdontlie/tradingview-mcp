@@ -4,7 +4,8 @@
  * They throw on error (callers catch and format).
  */
 import { evaluate, evaluateAsync, getClient } from '../connection.js';
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -19,6 +20,14 @@ function logPineAction(entry) {
   try {
     appendFileSync(ACTION_LOG, JSON.stringify({ ts: new Date().toISOString(), ...entry }) + '\n');
   } catch (_e) { /* logging must never break the action */ }
+}
+
+// SHA-256 hex of a UTF-8 string — used for cryptographic byte-exact verification
+// of editor content vs a local file (TM-233). Closes the char_count gap (equal-
+// length substitutions, e.g. a unicode separator swap, are invisible to char_count
+// but change the hash).
+function sha256(s) {
+  return createHash('sha256').update(s, 'utf8').digest('hex');
 }
 
 // Reads the Pine Editor's bound-script title (the Save/Publish target anchor).
@@ -279,7 +288,7 @@ export async function getSource() {
     throw new Error('Monaco editor found but getValue() returned null.');
   }
 
-  return { success: true, source, line_count: source.split('\n').length, char_count: source.length };
+  return { success: true, source, line_count: source.split('\n').length, char_count: source.length, sha256: sha256(source) };
 }
 
 export async function setSource({ source, reason }) {
@@ -304,6 +313,66 @@ export async function setSource({ source, reason }) {
   logPineAction({ action: 'set_source', target: boundTitle, lines: source.split('\n').length, chars: source.length, reason: reason || null });
 
   return { success: true, lines_set: source.split('\n').length, bound_title: boundTitle };
+}
+
+// Inject a local file's exact bytes into the editor and verify byte-exactly (TM-233).
+// The server reads the file itself (no model transcription of the source), sets it
+// via Monaco setValue, reads it back, and compares SHA-256(file) vs SHA-256(editor).
+// `verified` is the cryptographic guarantee that the editor holds exactly the file.
+// Use this for large / unicode-heavy files (e.g. index.pine) where re-emitting the
+// source as a string argument is unreliable. Like setSource it never targets PROD —
+// the caller must ensure the right script is bound (verify bound_title / pine_open_gui).
+export async function setSourceFromFile({ path, reason }) {
+  const editorReady = await ensurePineEditorOpen();
+  if (!editorReady) throw new Error('Could not open Pine Editor.');
+
+  const fileContent = readFileSync(path, 'utf8');
+  const fileSha = sha256(fileContent);
+
+  // Record which script is bound (Save target) at inject time — see TM-229.
+  const boundTitle = await evaluate(READ_BOUND_TITLE);
+
+  const escaped = JSON.stringify(fileContent);
+  const set = await evaluate(`
+    (function() {
+      var m = ${FIND_MONACO};
+      if (!m) return false;
+      m.editor.setValue(${escaped});
+      return true;
+    })()
+  `);
+  if (!set) throw new Error('Monaco found but setValue() failed.');
+
+  // Read back and verify byte-exactly via hash.
+  const editorContent = await evaluate(`
+    (function() {
+      var m = ${FIND_MONACO};
+      if (!m) return null;
+      return m.editor.getValue();
+    })()
+  `);
+  if (editorContent === null || editorContent === undefined) {
+    throw new Error('Monaco getValue() returned null after setSourceFromFile.');
+  }
+  const editorSha = sha256(editorContent);
+  const verified = fileSha === editorSha;
+
+  logPineAction({
+    action: 'set_source_from_file', target: boundTitle, path,
+    bytes: Buffer.byteLength(fileContent, 'utf8'), lines: fileContent.split('\n').length,
+    sha256: fileSha, verified, reason: reason || null,
+  });
+
+  return {
+    success: true,
+    path,
+    bound_title: boundTitle,
+    lines_set: fileContent.split('\n').length,
+    byte_count: Buffer.byteLength(fileContent, 'utf8'),
+    sha256: fileSha,
+    sha256_editor: editorSha,
+    verified,
+  };
 }
 
 export async function compile() {
