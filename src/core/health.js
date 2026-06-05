@@ -219,7 +219,15 @@ export async function launch({ port, kill_existing } = {}) {
     } catch { /* may not be running */ }
   }
 
-  const child = spawn(tvPath, [`--remote-debugging-port=${cdpPort}`], { detached: true, stdio: 'ignore' });
+  // On macOS, launch via `open -a` so Electron gets proper LaunchServices context.
+  // Spawning the binary directly bypasses macOS app lifecycle and causes a white screen.
+  let child;
+  if (platform === 'darwin') {
+    const appBundle = tvPath.replace(/\/Contents\/MacOS\/[^/]+$/, '');
+    child = spawn('open', ['-a', appBundle, '--args', `--remote-debugging-port=${cdpPort}`], { detached: true, stdio: 'ignore' });
+  } else {
+    child = spawn(tvPath, [`--remote-debugging-port=${cdpPort}`], { detached: true, stdio: 'ignore' });
+  }
   child.unref();
 
   for (let i = 0; i < 15; i++) {
@@ -236,7 +244,7 @@ export async function launch({ port, kill_existing } = {}) {
       if (ready) {
         const info = JSON.parse(ready);
         return {
-          success: true, platform, binary: tvPath, pid: child.pid,
+          success: true, platform, binary: tvPath,
           cdp_port: cdpPort, cdp_url: `http://localhost:${cdpPort}`,
           browser: info.Browser, user_agent: info['User-Agent'],
         };
@@ -245,7 +253,7 @@ export async function launch({ port, kill_existing } = {}) {
   }
 
   return {
-    success: true, platform, binary: tvPath, pid: child.pid, cdp_port: cdpPort, cdp_ready: false,
+    success: true, platform, binary: tvPath, cdp_port: cdpPort, cdp_ready: false,
     warning: 'TradingView launched but CDP not responding yet. It may still be loading. Try tv_health_check in a few seconds.',
   };
 }
