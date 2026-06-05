@@ -49,9 +49,10 @@ sleep 1
 
 echo "Found TradingView at: $APP"
 echo "Launching with --remote-debugging-port=$PORT ..."
-"$APP" --remote-debugging-port=$PORT &
-TV_PID=$!
-echo "PID: $TV_PID"
+# Use `open -a` so Electron gets proper LaunchServices context (avoids white screen)
+APP_BUNDLE="${APP%/Contents/MacOS/*}"
+open -a "$APP_BUNDLE" --args --remote-debugging-port=$PORT
+echo "Launched via open -a"
 
 # Wait for CDP to be ready
 echo "Waiting for CDP..."
