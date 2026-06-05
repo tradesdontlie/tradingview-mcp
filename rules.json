@@ -1,0 +1,71 @@
+{
+  "strategy": "swing-trading",
+  "watchlist": {
+    "crypto_pairs": [
+      "BTCUSDT",
+      "ETHUSDT",
+      "SOLUSDT",
+      "BNBUSDT",
+      "XRPUSDT",
+      "ADAUSDT",
+      "AVAXUSDT",
+      "DOTUSDT",
+      "LINKUSDT",
+      "MATICUSDT"
+    ],
+    "dominance_charts": [
+      "BTC.D",
+      "ETH.D",
+      "OTHERS.D",
+      "USDT.D"
+    ]
+  },
+  "timeframes": ["1W", "1D", "4H"],
+  "bias": {
+    "bullish": {
+      "ema_position": "price above 50 EMA and 50 EMA above 200 EMA (golden cross structure)",
+      "rsi_range": "RSI 14 between 50 and 70",
+      "market_structure": "higher highs and higher lows, bullish break of structure (BOS)"
+    },
+    "bearish": {
+      "ema_position": "price below 50 EMA and 50 EMA below 200 EMA (death cross structure)",
+      "rsi_range": "RSI 14 between 30 and 50",
+      "market_structure": "lower highs and lower lows, bearish break of structure (BOS)"
+    },
+    "neutral": {
+      "ema_position": "price oscillating around 50 EMA or EMAs converging",
+      "rsi_range": "RSI 14 between 45 and 55",
+      "market_structure": "range-bound, no clear directional structure"
+    }
+  },
+  "risk_rules": {
+    "max_risk_per_trade_pct": 1.0,
+    "min_reward_to_risk_ratio": 2.0,
+    "max_open_trades": 5,
+    "stop_loss_placement": "below/above recent swing low/high or key structure level",
+    "position_sizing": "risk amount / (entry price - stop loss price)"
+  },
+  "indicators": {
+    "RSI": {
+      "length": 14,
+      "overbought": 70,
+      "oversold": 30
+    },
+    "MACD": {
+      "fast": 12,
+      "slow": 26,
+      "signal": 9
+    },
+    "EMA_50": {
+      "length": 50,
+      "purpose": "short-term trend direction"
+    },
+    "EMA_200": {
+      "length": 200,
+      "purpose": "long-term trend direction"
+    },
+    "Volume": {
+      "purpose": "confirm breakouts and trend strength; look for above-average volume on directional moves"
+    }
+  }
+}
