@@ -103,6 +103,52 @@ export async function list() {
   return { success: true, alert_count: result?.alerts?.length || 0, source: 'internal_api', alerts: result?.alerts || [], error: result?.error };
 }
 
+export async function enable({ alert_ids } = {}) {
+  if (!Array.isArray(alert_ids) || alert_ids.length === 0) {
+    throw new Error('enable: alert_ids must be a non-empty array');
+  }
+  const result = await evaluateAsync(`
+    fetch('https://pricealerts.tradingview.com/restart_alerts', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+      body: JSON.stringify({ payload: { alert_ids: ${JSON.stringify(alert_ids)} } })
+    })
+      .then(function(r) {
+        return r.json().then(function(data) { return { ok: r.ok, status: r.status, data: data }; })
+          .catch(function() { return { ok: r.ok, status: r.status, data: null }; });
+      })
+      .catch(function(e) { return { ok: false, status: 0, error: e.message }; })
+  `);
+  if (!result?.ok) {
+    return { success: false, alert_ids, status: result?.status, error: result?.error || ('HTTP ' + result?.status), response: result?.data };
+  }
+  return { success: true, alert_ids, source: 'internal_api', status: result.status, response: result.data };
+}
+
+export async function disable({ alert_ids } = {}) {
+  if (!Array.isArray(alert_ids) || alert_ids.length === 0) {
+    throw new Error('disable: alert_ids must be a non-empty array');
+  }
+  const result = await evaluateAsync(`
+    fetch('https://pricealerts.tradingview.com/stop_alerts', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+      body: JSON.stringify({ payload: { alert_ids: ${JSON.stringify(alert_ids)} } })
+    })
+      .then(function(r) {
+        return r.json().then(function(data) { return { ok: r.ok, status: r.status, data: data }; })
+          .catch(function() { return { ok: r.ok, status: r.status, data: null }; });
+      })
+      .catch(function(e) { return { ok: false, status: 0, error: e.message }; })
+  `);
+  if (!result?.ok) {
+    return { success: false, alert_ids, status: result?.status, error: result?.error || ('HTTP ' + result?.status), response: result?.data };
+  }
+  return { success: true, alert_ids, source: 'internal_api', status: result.status, response: result.data };
+}
+
 export async function deleteAlerts({ delete_all }) {
   if (delete_all) {
     const result = await evaluate(`

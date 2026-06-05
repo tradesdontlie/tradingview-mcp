@@ -3,6 +3,24 @@
  */
 import { evaluate, evaluateAsync, KNOWN_PATHS, safeString } from '../connection.js';
 
+/**
+ * Adaptive price rounding precision based on absolute value.
+ * mintick is not available via current MCP API (quote_get / symbol_info
+ * do not expose it); this heuristic covers the main instrument classes:
+ *   - crypto, indices, metals (>=100): 2 decimal places
+ *   - FX majors, major crosses (1..100): 5 decimal places
+ *   - micro tokens (<1): 5 decimal places
+ *
+ * Known limitation: JPY pairs (~150) fall into the >=100 bucket and get
+ * 2 decimal places instead of the needed 3-5. Exact fix via
+ * chart.symbolExt().minmov is a separate follow-up task.
+ */
+function priceDecimals(value) {
+    const abs = Math.abs(value);
+    if (abs >= 100) return 2;
+    return 5;
+}
+
 const MAX_OHLCV_BARS = 500;
 const MAX_TRADES = 20;
 const CHART_API = KNOWN_PATHS.chartApi;
@@ -368,8 +386,8 @@ export async function getPineLines({ study_filter, verbose } = {}) {
     const allLines = [];
     for (const item of s.items) {
       const v = item.raw;
-      const y1 = v.y1 != null ? Math.round(v.y1 * 100) / 100 : null;
-      const y2 = v.y2 != null ? Math.round(v.y2 * 100) / 100 : null;
+      const y1 = v.y1 != null ? Number(v.y1.toFixed(priceDecimals(v.y1))) : null;
+      const y2 = v.y2 != null ? Number(v.y2.toFixed(priceDecimals(v.y2))) : null;
       if (verbose) allLines.push({ id: item.id, y1, y2, x1: v.x1, x2: v.x2, horizontal: v.y1 === v.y2, style: v.st, width: v.w, color: v.ci });
       if (y1 != null && v.y1 === v.y2 && !seen[y1]) { hLevels.push(y1); seen[y1] = true; }
     }
@@ -391,7 +409,9 @@ export async function getPineLabels({ study_filter, max_labels, verbose } = {}) 
     let labels = s.items.map(item => {
       const v = item.raw;
       const text = v.t || '';
-      const price = v.y != null ? Math.round(v.y * 100) / 100 : null;
+      const price = v.y != null
+        ? Number(v.y.toFixed(priceDecimals(v.y)))
+        : null;
       if (verbose) return { id: item.id, text, price, x: v.x, yloc: v.yl, size: v.sz, textColor: v.tci, color: v.ci };
       return { text, price };
     }).filter(l => l.text || l.price != null);
@@ -440,8 +460,10 @@ export async function getPineBoxes({ study_filter, verbose } = {}) {
     const allBoxes = [];
     for (const item of s.items) {
       const v = item.raw;
-      const high = v.y1 != null && v.y2 != null ? Math.round(Math.max(v.y1, v.y2) * 100) / 100 : null;
-      const low = v.y1 != null && v.y2 != null ? Math.round(Math.min(v.y1, v.y2) * 100) / 100 : null;
+      const hi = v.y1 != null && v.y2 != null ? Math.max(v.y1, v.y2) : null;
+      const lo = v.y1 != null && v.y2 != null ? Math.min(v.y1, v.y2) : null;
+      const high = hi != null ? Number(hi.toFixed(priceDecimals(hi))) : null;
+      const low  = lo != null ? Number(lo.toFixed(priceDecimals(lo))) : null;
       if (verbose) allBoxes.push({ id: item.id, high, low, x1: v.x1, x2: v.x2, borderColor: v.c, bgColor: v.bc });
       if (high != null && low != null) { const key = high + ':' + low; if (!seen[key]) { zones.push({ high, low }); seen[key] = true; } }
     }

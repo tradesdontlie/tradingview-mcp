@@ -8,10 +8,19 @@ export function registerPineTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('pine_set_source', 'Set Pine Script source code in the editor', {
+  server.tool('pine_set_source', 'Set Pine Script source code in the editor (returns bound_title = the script the editor will Save to — verify it matches your intended target before saving)', {
     source: z.string().describe('Pine Script source code to inject'),
-  }, async ({ source }) => {
-    try { return jsonResult(await core.setSource({ source })); }
+    reason: z.string().optional().describe('Optional context (e.g. "TM-230: warning fix") logged to pine-actions.log'),
+  }, async ({ source, reason }) => {
+    try { return jsonResult(await core.setSource({ source, reason })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('pine_set_source_from_file', 'Inject a local file\'s exact bytes into the editor and verify byte-exactly. The server reads the file itself (no transcription of the source), sets it via Monaco, reads it back and compares SHA-256(file) vs SHA-256(editor) — the returned "verified" flag is the cryptographic byte-exact guarantee (closes the char_count gap). Use for large / unicode-heavy files (e.g. index.pine). Returns bound_title (the Save/Publish target) — verify it before saving. Never use to target the PROD script.', {
+    path: z.string().describe('Absolute path to the local file whose bytes will be injected'),
+    reason: z.string().optional().describe('Optional context (e.g. "TM-231: inject index.pine") logged to pine-actions.log'),
+  }, async ({ path, reason }) => {
+    try { return jsonResult(await core.setSourceFromFile({ path, reason })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
@@ -47,11 +56,19 @@ export function registerPineTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('pine_open', 'Open a saved Pine Script by name', {
+  server.tool('pine_open', 'DEPRECATED — loads a script\'s source into the CURRENT editor WITHOUT changing the editor\'s bound script (Save/Publish target stays unchanged). Risk: a subsequent save overwrites the bound script with the loaded source. Use pine_open_gui to actually switch scripts.', {
     name: z.string().describe('Name of the saved script to open (case-insensitive match)'),
   }, async ({ name }) => {
     try { return jsonResult(await core.openScript({ name })); }
     catch (err) { return jsonResult({ success: false, source: 'internal_api', error: err.message }, true); }
+  });
+
+  server.tool('pine_open_gui', 'Really switch the Pine Editor to another saved script by driving TradingView\'s own "Open script…" flow, so the editor REBINDS (Save/Publish then target the new script). Verifies the switch by polling the editor title and throws if it did not change. Returns the canonical script_id. Logs the switch to pine-actions.log.', {
+    name: z.string().describe('Name of the saved script to switch to (case-insensitive match)'),
+    reason: z.string().optional().describe('Optional context (e.g. "TM-231: edit tmAlert") logged to pine-actions.log'),
+  }, async ({ name, reason }) => {
+    try { return jsonResult(await core.openScriptGui({ name, reason })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
   server.tool('pine_list_scripts', 'List saved Pine Scripts', {}, async () => {

@@ -60,6 +60,41 @@ function wv(path) {
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Unit tests — no CDP connection required
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Mirror of priceDecimals from src/core/data.js for test-scope validation. */
+function priceDecimals(value) {
+  const abs = Math.abs(value);
+  if (abs >= 100) return 2;
+  return 5;
+}
+
+describe('priceDecimals — adaptive price rounding heuristic', () => {
+  it('FX major (1.16017) → 5 decimal places', () => {
+    assert.strictEqual(priceDecimals(1.16017), 5);
+  });
+  it('JPY pair (150.23) → 2 decimal places (known limitation)', () => {
+    assert.strictEqual(priceDecimals(150.23), 2);
+  });
+  it('XAUUSD (4504.33) → 2 decimal places', () => {
+    assert.strictEqual(priceDecimals(4504.33), 2);
+  });
+  it('BTCUSDT (77123.5) → 2 decimal places', () => {
+    assert.strictEqual(priceDecimals(77123.5), 2);
+  });
+  it('micro token (0.00045) → 5 decimal places', () => {
+    assert.strictEqual(priceDecimals(0.00045), 5);
+  });
+  it('boundary at 100 exactly → 2 decimal places', () => {
+    assert.strictEqual(priceDecimals(100), 2);
+  });
+  it('negative FX value (-1.16017) → 5 decimal places', () => {
+    assert.strictEqual(priceDecimals(-1.16017), 5);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
 
 describe('TradingView MCP — Full E2E (70 tools)', () => {
 
@@ -472,7 +507,8 @@ describe('TradingView MCP — Full E2E (70 tools)', () => {
                 var prices = [];
                 var seen = {};
                 coll._primitivesDataById.forEach(function(v) {
-                  var y = v.y1 != null && v.y1 === v.y2 ? Math.round(v.y1 * 100) / 100 : null;
+                  var dec = Math.abs(v.y1) >= 100 ? 2 : 5;
+                  var y = v.y1 != null && v.y1 === v.y2 ? Number(v.y1.toFixed(dec)) : null;
                   if (y != null && !seen[y]) { prices.push(y); seen[y] = true; }
                 });
                 prices.sort(function(a,b) { return b - a; });
@@ -505,7 +541,8 @@ describe('TradingView MCP — Full E2E (70 tools)', () => {
               if (coll && coll._primitivesDataById && coll._primitivesDataById.size > 0) {
                 var labels = [];
                 coll._primitivesDataById.forEach(function(v) {
-                  if (v.t || v.y != null) labels.push({ text: v.t || '', price: v.y != null ? Math.round(v.y * 100) / 100 : null });
+                  var pdec = v.y != null ? (Math.abs(v.y) >= 100 ? 2 : 5) : 0;
+                  if (v.t || v.y != null) labels.push({ text: v.t || '', price: v.y != null ? Number(v.y.toFixed(pdec)) : null });
                 });
                 if (labels.length > 50) labels = labels.slice(-50);
                 var name = '';
