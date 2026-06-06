@@ -7,41 +7,53 @@ function _resolve(deps) {
   return { evaluate: deps?.evaluate || _evaluate, getChartApi: deps?.getChartApi || _getChartApi };
 }
 
-export async function drawShape({ shape, point, point2, overrides: overridesRaw, text, _deps }) {
+export async function drawShape({ shape, point, point2, point3, overrides: overridesRaw, text, _deps }) {
   const { evaluate, getChartApi } = _resolve(_deps);
   const overrides = overridesRaw ? (typeof overridesRaw === 'string' ? JSON.parse(overridesRaw) : overridesRaw) : {};
   const apiPath = await getChartApi();
   const overridesStr = JSON.stringify(overrides || {});
   const textStr = text ? JSON.stringify(text) : '""';
 
-  const p1time = requireFinite(point.time, 'point.time');
-  const p1price = requireFinite(point.price, 'point.price');
+  // Build the point list; supports 1-point (createShape) and 2-/3-point
+  // (createMultipointShape) tools — e.g. parallel_channel & pitchfork need 3.
+  const pts = [{ time: requireFinite(point.time, 'point.time'), price: requireFinite(point.price, 'point.price') }];
+  if (point2) pts.push({ time: requireFinite(point2.time, 'point2.time'), price: requireFinite(point2.price, 'point2.price') });
+  if (point3) pts.push({ time: requireFinite(point3.time, 'point3.time'), price: requireFinite(point3.price, 'point3.price') });
 
   const before = await evaluate(`${apiPath}.getAllShapes().map(function(s) { return s.id; })`);
 
-  if (point2) {
-    const p2time = requireFinite(point2.time, 'point2.time');
-    const p2price = requireFinite(point2.price, 'point2.price');
-    await evaluate(`
-      ${apiPath}.createMultipointShape(
-        [{ time: ${p1time}, price: ${p1price} }, { time: ${p2time}, price: ${p2price} }],
-        { shape: ${safeString(shape)}, overrides: ${overridesStr}, text: ${textStr} }
-      )
-    `);
-  } else {
-    await evaluate(`
-      ${apiPath}.createShape(
-        { time: ${p1time}, price: ${p1price} },
-        { shape: ${safeString(shape)}, overrides: ${overridesStr}, text: ${textStr} }
-      )
-    `);
-  }
+  const createExpr = pts.length > 1
+    ? `${apiPath}.createMultipointShape(${JSON.stringify(pts)}, { shape: ${safeString(shape)}, overrides: ${overridesStr}, text: ${textStr} })`
+    : `${apiPath}.createShape(${JSON.stringify(pts[0])}, { shape: ${safeString(shape)}, overrides: ${overridesStr}, text: ${textStr} })`;
 
-  await new Promise(r => setTimeout(r, 200));
-  const after = await evaluate(`${apiPath}.getAllShapes().map(function(s) { return s.id; })`);
-  const newId = (after || []).find(id => !(before || []).includes(id)) || null;
-  const result = { entity_id: newId };
-  return { success: true, shape, entity_id: result?.entity_id };
+  // Fire the create. We deliberately do NOT awaitPromise: on this build the
+  // Promise returned by createMultipointShape can reject ("Value is undefined")
+  // even though the shape IS created, so detect the new entity by polling
+  // getAllShapes instead (3-point shapes like parallel_channel register async).
+  await evaluate(createExpr);
+  let newId = null;
+  for (let i = 0; i < 12 && !newId; i++) {
+    await new Promise(r => setTimeout(r, 150));
+    const after = await evaluate(`${apiPath}.getAllShapes().map(function(s) { return s.id; })`);
+    newId = (after || []).find(id => !(before || []).includes(id)) || null;
+  }
+  return { success: true, shape, entity_id: newId };
+}
+
+// Convenience wrapper around the native TradingView "parallel_channel" linetool.
+// The main rail is point -> point2; the parallel rail is set either by an explicit
+// point3, or by `width` (price units; positive = parallel rail BELOW the main rail).
+// Using the native shape guarantees the two rails stay truly parallel.
+export async function drawParallelChannel({ point, point2, width, point3, overrides, _deps }) {
+  let third = point3;
+  if (!third) {
+    const w = requireFinite(width, 'width');
+    const p2price = requireFinite(point2.price, 'point2.price');
+    third = { time: point2.time, price: p2price - w };
+  }
+  // Note: TradingView's parallel_channel linetool does not accept a `text`
+  // label (passing one makes createMultipointShape fail); style via overrides.
+  return drawShape({ shape: 'parallel_channel', point, point2, point3: third, overrides, _deps });
 }
 
 export async function listDrawings() {
