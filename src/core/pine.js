@@ -281,29 +281,52 @@ export async function setSource({ source }) {
   return { success: true, lines_set: source.split('\n').length };
 }
 
+/**
+ * Classify a Pine-editor toolbar button into a compile action.
+ *
+ * Matches against textContent, the `title` attribute AND `aria-label` — the
+ * add-to-chart button is icon-only (empty textContent) on non-English UIs and
+ * carries the label only in its localized `title`. Returns one of
+ * 'save-and-add' | 'add-or-update' | 'save' | null.
+ *
+ * Exported so it can be unit-tested in Node and embedded into the in-page IIFE
+ * via toString() — keep it self-contained (no closures / outer references).
+ *
+ * Localized labels: English via anchored regex; other locales by exact title.
+ * Add a locale by extending ADD_OR_UPDATE_LABELS below.
+ */
+export function classifyPineButton(b) {
+  if (!b) return null;
+  var labels = [b.text || '', b.title || '', b.aria || ''].map(function (s) { return String(s).trim(); });
+  var className = String(b.className || '');
+  // Korean (차트에 넣기 = Add to chart, 차트에서 업데이트 = Update on chart). Extend per locale.
+  var ADD_OR_UPDATE_LABELS = ['차트에 넣기', '차트에서 업데이트'];
+  function anyMatch(re) { for (var i = 0; i < labels.length; i++) { if (re.test(labels[i])) return true; } return false; }
+  function anyEq(arr) { for (var i = 0; i < labels.length; i++) { if (arr.indexOf(labels[i]) !== -1) return true; } return false; }
+  if (anyMatch(/save and add to chart/i)) return 'save-and-add';
+  if (anyMatch(/^(add to chart|update on chart)/i) || anyEq(ADD_OR_UPDATE_LABELS)) return 'add-or-update';
+  if (className.indexOf('saveButton') !== -1) return 'save';
+  return null;
+}
+
 export async function compile() {
   const editorReady = await ensurePineEditorOpen();
   if (!editorReady) throw new Error('Could not open Pine Editor.');
 
   const clicked = await evaluate(`
     (function() {
+      var classify = ${classifyPineButton.toString()};
       var btns = document.querySelectorAll('button');
-      var fallback = null;
+      var addBtn = null;
       var saveBtn = null;
       for (var i = 0; i < btns.length; i++) {
-        var text = btns[i].textContent.trim();
-        if (/save and add to chart/i.test(text)) {
-          btns[i].click();
-          return 'Save and add to chart';
-        }
-        if (!fallback && /^(Add to chart|Update on chart)/i.test(text)) {
-          fallback = btns[i];
-        }
-        if (!saveBtn && btns[i].className.indexOf('saveButton') !== -1 && btns[i].offsetParent !== null) {
-          saveBtn = btns[i];
-        }
+        var b = btns[i];
+        var kind = classify({ text: b.textContent, title: b.getAttribute('title'), aria: b.getAttribute('aria-label'), className: (b.className || '').toString() });
+        if (kind === 'save-and-add' && b.offsetParent !== null) { b.click(); return 'Save and add to chart'; }
+        if (kind === 'add-or-update' && !addBtn && b.offsetParent !== null) addBtn = b;
+        if (kind === 'save' && !saveBtn && b.offsetParent !== null) saveBtn = b;
       }
-      if (fallback) { fallback.click(); return fallback.textContent.trim(); }
+      if (addBtn) { addBtn.click(); return (addBtn.getAttribute('title') || addBtn.textContent.trim() || 'Add to chart'); }
       if (saveBtn) { saveBtn.click(); return 'Pine Save'; }
       return null;
     })()
