@@ -9,7 +9,7 @@ register('status', {
 register('launch', {
   description: 'Launch TradingView with CDP enabled',
   options: {
-    port: { type: 'string', short: 'p', description: 'CDP port (default 9222)' },
+    port: { type: 'string', short: 'p', description: 'CDP port (default 9222, or TV_CDP_PORT env var)' },
     'no-kill': { type: 'boolean', description: 'Do not kill existing instances' },
   },
   handler: (opts) => core.launch({

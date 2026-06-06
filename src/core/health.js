@@ -160,7 +160,7 @@ export async function uiState() {
 }
 
 export async function launch({ port, kill_existing } = {}) {
-  const cdpPort = port || 9223;
+  const cdpPort = port || (process.env.TV_CDP_PORT ? Number(process.env.TV_CDP_PORT) : 9222);
   const killFirst = kill_existing !== false;
   const platform = process.platform;
 

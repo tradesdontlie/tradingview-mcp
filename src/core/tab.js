@@ -5,7 +5,7 @@
 import { getClient, evaluate } from '../connection.js';
 
 const CDP_HOST = 'localhost';
-const CDP_PORT = 9222;
+const CDP_PORT = process.env.TV_CDP_PORT ? Number(process.env.TV_CDP_PORT) : 9222;
 
 /**
  * List all open chart tabs (CDP page targets).
