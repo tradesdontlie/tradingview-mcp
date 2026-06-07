@@ -59,6 +59,13 @@ export function registerChartTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
+  server.tool('chart_set_right_offset', 'Set the chart right offset: number of empty bars to the right of the last bar (future/projection space). Use after chart_set_visible_range to reveal room for extended trendlines/channels past the latest candle.', {
+    bars: z.coerce.number().describe('Number of empty bars to show on the right (e.g., 60 ≈ 60 future periods)'),
+  }, async ({ bars }) => {
+    try { return jsonResult(await core.setRightOffset({ bars })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
   server.tool('symbol_info', 'Get detailed metadata about the current symbol (name, exchange, type, description)', {}, async () => {
     try { return jsonResult(await core.symbolInfo()); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
