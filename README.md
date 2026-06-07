@@ -343,7 +343,7 @@ The key flag: `--remote-debugging-port=9222`
 npm test
 ```
 
-29 tests covering: Pine Script static analysis, server-side compilation, and CLI routing.
+86 offline tests covering: Pine Script static analysis, server-side compilation, CLI routing, CDP injection sanitization, and replay functions.
 
 ## Architecture
 

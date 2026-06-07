@@ -32,13 +32,13 @@ If you're unsure whether a feature fits, open an issue to discuss before submitt
 
 ```bash
 npm install
-npm test          # 29 offline tests (no TradingView needed)
-tv status         # verify CDP connection (TradingView must be running)
+npm run test:unit  # 86 offline tests (no TradingView needed)
+tv status          # verify CDP connection (TradingView must be running)
 ```
 
 ## Pull Requests
 
 - Keep changes focused — one feature or fix per PR
 - Add tests for new functionality where possible
-- Ensure `npm test` passes (29/29)
+- Ensure `npm run test:unit` passes (86/86)
 - Test against a live TradingView Desktop instance before submitting
