@@ -89,12 +89,16 @@ export async function manageIndicator({ action, indicator, entity_id, inputs: in
   const inputs = inputsRaw ? (typeof inputsRaw === 'string' ? JSON.parse(inputsRaw) : inputsRaw) : undefined;
 
   if (action === 'add') {
-    const inputArr = inputs ? Object.entries(inputs).map(([k, v]) => ({ id: k, value: v })) : [];
+    // createStudy expects inputs as a plain { inputId: value } object. The
+    // [{ id, value }] form is silently ignored by the charting library, leaving
+    // the study at its default inputs — e.g. a "Moving Average" requested with
+    // { length: 200 } would stay at the default length (9). Pass the object map.
+    const inputObj = inputs && typeof inputs === 'object' ? inputs : {};
     const before = await evaluate(`${CHART_API}.getAllStudies().map(function(s) { return s.id; })`);
     await evaluate(`
       (function() {
         var chart = ${CHART_API};
-        chart.createStudy(${safeString(indicator)}, false, false, ${JSON.stringify(inputArr)});
+        chart.createStudy(${safeString(indicator)}, false, false, ${JSON.stringify(inputObj)});
       })()
     `);
     await new Promise(r => setTimeout(r, 1500));
