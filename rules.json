@@ -1,0 +1,59 @@
+{
+  "market": "USA / Canada (NYSE, NASDAQ, TSX) + XAUUSD",
+  "trading_style": "swing + positional",
+  "watchlist": {
+    "indices": ["NASDAQ:NDX", "SP:SPX", "TVC:DJI", "TVC:RUT", "AMEX:SPY", "NASDAQ:QQQ", "TSX:TSX"],
+    "primary_focus": ["OANDA:XAUUSD", "COMEX:GC1!", "TVC:GOLD"],
+    "us_largecap_leaders": ["NASDAQ:AAPL", "NASDAQ:MSFT", "NASDAQ:NVDA", "NASDAQ:AMZN", "NASDAQ:META", "NYSE:JPM", "NYSE:GS", "NYSE:XOM", "NYSE:UNH", "NYSE:BRK.B"],
+    "canada_tsx_leaders": ["TSX:RY", "TSX:TD", "TSX:CNR", "TSX:ENB", "TSX:SU", "TSX:ABX"],
+    "gold_related_equities": ["NYSE:GLD", "NYSE:IAU", "NYSE:GDX", "NYSE:GDXJ", "NYSE:NEM", "TSX:ABX", "TSX:WPM"],
+    "macro": ["TVC:GOLD", "TVC:DXY", "TVC:US10Y", "TVC:CA10Y", "OANDA:USDCAD", "TVC:VIX", "FRED:FEDFUNDS"]
+  },
+  "timeframes_to_check": ["1M", "1W", "1D", "4H"],
+  "xauusd_specific": {
+    "primary_symbol": "OANDA:XAUUSD",
+    "correlated_watch": ["TVC:DXY", "TVC:US10Y", "TVC:VIX", "OANDA:USDCAD"],
+    "key_drivers": [
+      "DXY inverse correlation — strong dollar pressures gold",
+      "US10Y real yield — rising real yields bearish for gold",
+      "Risk-off demand — VIX spikes often lift gold",
+      "Fed rate expectations — dovish pivot = bullish gold",
+      "Geopolitical events — safe haven bid"
+    ],
+    "bias_notes": {
+      "bullish": "DXY trending down or flat, US10Y real yield falling, price above 50D and 200D EMA, weekly RSI 50-70, higher highs on daily",
+      "bearish": "DXY trending up, US10Y real yield rising, price below 50D EMA, weekly RSI below 45",
+      "key_levels_approach": "Use anchored VWAP from major swing highs/lows; watch round numbers (2000, 2100, 2200, 2300, 2400, 2500, 3000, 3100, 3200, 3300) as psychological S/R"
+    },
+    "best_entry_windows_est": "London open 3:00-5:00 AM EST, NY open 8:30-10:30 AM EST — highest volume and tightest spreads",
+    "avoid": "Low-liquidity windows: Friday 3 PM EST onward, major US holiday sessions"
+  },
+  "bias_criteria": {
+    "bullish": "Price above 50D EMA AND 200D EMA, weekly RSI between 50 and 70, higher highs and higher lows on daily, sector index also trending up",
+    "bearish": "Price below 50D EMA, weekly RSI below 45, lower highs and lower lows on daily, sector index weak or down",
+    "neutral": "Price oscillating around 50D EMA, weekly RSI between 40 and 60, no clean structure on daily"
+  },
+  "risk_rules": {
+    "max_risk_per_trade": "1% of portfolio for swings, 2% for positional with wider stop",
+    "min_rr_ratio": 2,
+    "position_sizing": "size based on stop distance, not gut feel — especially critical for XAUUSD given volatile $20-50 intraday swings",
+    "no_trades_during": [
+      "FOMC rate decision day (8 times/year)",
+      "US CPI / PCE release day",
+      "US NFP (Non-Farm Payrolls) first Friday of the month",
+      "Bank of Canada rate decision day",
+      "Major quarterly earnings for individual stocks",
+      "VIX above 30 unless thesis specifically benefits from volatility",
+      "Extreme XAUUSD spread events (weekends, illiquid holidays)"
+    ],
+    "xauusd_stop_guidance": "Minimum 15-20 pip buffer beyond structure; daily ATR ~$25-40 — size accordingly"
+  },
+  "indicators_i_care_about": ["RSI (14)", "MACD (12, 26, 9)", "50 EMA", "200 EMA", "Volume", "VWAP for entries", "Anchored VWAP from prior swing high/low", "ATR (14) for stop sizing on XAUUSD"],
+  "session_notes": {
+    "us_market_hours_est": "09:30 to 16:00 EST (NYSE/NASDAQ)",
+    "tsx_market_hours_est": "09:30 to 16:00 EST",
+    "xauusd_best_sessions_est": "London 3:00-5:00 AM, NY 8:30-10:30 AM — peak liquidity; avoid 5 PM EST rollover",
+    "best_swing_entry_window_est": "10:30 to 14:00 EST after the opening range settles for US equities",
+    "premarket_use": "08:00-09:30 EST — gap analysis and XAUUSD level mapping only, do not chase"
+  }
+}
