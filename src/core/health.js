@@ -197,6 +197,20 @@ export async function launch({ port, kill_existing } = {}) {
     } catch { /* ignore */ }
   }
 
+  // win32 MSIX install (official .exe installer from tradingview.com/desktop now ships as MSIX,
+  // landing under Program Files\WindowsApps\TradingView.Desktop_<version>__<hash>\TradingView.exe).
+  // Query the Appx package registry for the current InstallLocation.
+  if (!tvPath && platform === 'win32') {
+    try {
+      const ps = 'powershell -NoProfile -Command "(Get-AppxPackage -Name TradingView.Desktop).InstallLocation"';
+      const loc = execSync(ps, { timeout: 5000 }).toString().trim();
+      if (loc) {
+        const candidate = `${loc}\\TradingView.exe`;
+        if (existsSync(candidate)) tvPath = candidate;
+      }
+    } catch { /* ignore */ }
+  }
+
   if (!tvPath && platform === 'darwin') {
     try {
       const found = execSync('mdfind "kMDItemFSName == TradingView.app" | head -1', { timeout: 5000 }).toString().trim();
