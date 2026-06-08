@@ -157,6 +157,18 @@ export async function setVisibleRange({ from, to, _deps }) {
   return { success: true, requested: { from, to }, actual: actual || { from: 0, to: 0 } };
 }
 
+// Set the chart's right offset: the number of empty bars shown to the right of
+// the last bar (i.e. how much future / projection space). Useful for extending
+// trendlines and channels past the latest candle.
+export async function setRightOffset({ bars, _deps }) {
+  const { evaluate } = _resolve(_deps);
+  const n = requireFinite(bars, 'bars');
+  await evaluate(`(function() { try { ${CHART_API}._chartWidget.model().timeScale().setRightOffset(${n}); } catch (e) {} })()`);
+  await new Promise(r => setTimeout(r, 300));
+  const actual = await evaluate(`(function() { try { var r = ${CHART_API}.getVisibleRange(); return { from: r.from || 0, to: r.to || 0 }; } catch (e) { return { from: 0, to: 0, error: e.message }; } })()`);
+  return { success: true, right_offset: n, actual: actual || { from: 0, to: 0 } };
+}
+
 export async function scrollToDate({ date }) {
   let timestamp;
   if (/^\d+$/.test(date)) timestamp = Number(date);
