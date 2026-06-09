@@ -129,16 +129,18 @@ thresh = atr * atr_touch
 
 f_near_sup() =>
     bool found = false
-    for i = 0 to array.size(s_lvl) - 1
-        if math.abs(close - array.get(s_lvl, i)) <= thresh
-            found := true
+    if array.size(s_lvl) > 0
+        for i = 0 to array.size(s_lvl) - 1
+            if math.abs(close - array.get(s_lvl, i)) <= thresh
+                found := true
     found
 
 f_near_res() =>
     bool found = false
-    for i = 0 to array.size(r_lvl) - 1
-        if math.abs(close - array.get(r_lvl, i)) <= thresh
-            found := true
+    if array.size(r_lvl) > 0
+        for i = 0 to array.size(r_lvl) - 1
+            if math.abs(close - array.get(r_lvl, i)) <= thresh
+                found := true
     found
 
 at_sup = f_near_sup()
