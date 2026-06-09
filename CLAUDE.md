@@ -73,6 +73,15 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 - `alert_list` → view active alerts
 - `alert_delete` → remove alerts
 
+### "Manage watchlists"
+Named-watchlist management uses TradingView's internal REST API (`/api/v1/symbols_list/`) — language-independent and reliable. Do NOT drive the watchlist UI to create lists.
+
+- `watchlist_create` with `name` + optional `symbols: ["NASDAQ:NVDA", "NASDAQ:AMD"]` → create a named list, pre-populated, in one call. This is the right tool for building a list from scratch (e.g. pushing tickers from an external source). It does NOT change the active list (new list is created inactive), so it won't disturb the user's current view.
+- `watchlist_list` → all named lists with their `id`, name, symbol count, and which is active. Use it to look up an `id` before deleting, or to check whether a named list already exists.
+- `watchlist_delete` with `id` (numeric, from `watchlist_list`) → delete a named list. Scoped by id only, never by name.
+- `watchlist_add` with `symbol` → append a single symbol to the **active** list (UI-based). Prefer `watchlist_create` with the full `symbols` array when building a new list — don't create-then-add one-by-one.
+- `watchlist_get` → read symbols + prices from the **active** list only (DOM-based). For all lists, use `watchlist_list`.
+
 ### "Navigate the UI"
 - `ui_open_panel` → open/close pine-editor, strategy-tester, watchlist, alerts, trading
 - `ui_click` → click buttons by aria-label, text, or data-name
