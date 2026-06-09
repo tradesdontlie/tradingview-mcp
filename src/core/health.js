@@ -197,6 +197,20 @@ export async function launch({ port, kill_existing } = {}) {
     } catch { /* ignore */ }
   }
 
+  // Windows: TradingView is commonly installed as a Microsoft Store (Appx) package,
+  // which lives under C:\Program Files\WindowsApps\<pkg> (a path the static
+  // candidates above never cover). Resolve it via the package manager.
+  if (!tvPath && platform === 'win32') {
+    try {
+      const ps = `powershell -NoProfile -NonInteractive -Command "(Get-AppxPackage -Name '*TradingView*' | Select-Object -First 1).InstallLocation"`;
+      const loc = execSync(ps, { timeout: 8000 }).toString().trim();
+      if (loc) {
+        const candidate = `${loc}\\TradingView.exe`;
+        if (existsSync(candidate)) tvPath = candidate;
+      }
+    } catch { /* ignore */ }
+  }
+
   if (!tvPath && platform === 'darwin') {
     try {
       const found = execSync('mdfind "kMDItemFSName == TradingView.app" | head -1', { timeout: 5000 }).toString().trim();
@@ -227,7 +241,7 @@ export async function launch({ port, kill_existing } = {}) {
     try {
       const http = await import('http');
       const ready = await new Promise((resolve) => {
-        http.get(`http://localhost:${cdpPort}/json/version`, (res) => {
+        http.get(`http://127.0.0.1:${cdpPort}/json/version`, (res) => {
           let data = '';
           res.on('data', (chunk) => data += chunk);
           res.on('end', () => resolve(data));
