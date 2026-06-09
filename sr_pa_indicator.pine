@@ -173,33 +173,40 @@ at_sup = f_near_sup()
 at_res = f_near_res()
 
 // ══════════════════════════════════════════════
-//  SIGNAL LOGIC  (S/R + PA + EMA + RSI + VWAP)
+//  SIGNAL LOGIC
+//  Trigger  : S/R level + bullish/bearish PA  (always fires if these two align)
+//  Strength : score EMA + VWAP + RSI  → STRONG / normal / WAIT
 // ══════════════════════════════════════════════
-// BUY  : at support  + bullish PA + bullish trend + above VWAP + RSI not OB
-// SELL : at resistance + bearish PA + bearish trend + below VWAP + RSI not OS
-// WAIT : at a level but full confluence not met (mixed signals)
 
-buy_conf  = at_sup  and bull_pa and bull_trend and above_vwap and rsi_buy_ok
-sell_conf = at_res  and bear_pa and bear_trend and below_vwap and rsi_sell_ok
-// Partial confluence: at level + PA but trend/vwap/rsi mixed
-buy_partial  = at_sup  and bull_pa and not buy_conf
-sell_partial = at_res  and bear_pa and not sell_conf
-wait_sig     = (at_sup or at_res) and (indecision or buy_partial or sell_partial) and not buy_conf and not sell_conf
+// Core trigger — price at level with confirmed price action
+buy_sig  = at_sup and bull_pa
+sell_sig = at_res and bear_pa
+wait_sig = (at_sup or at_res) and indecision and not buy_sig and not sell_sig
+
+// Confluence score  (each extra confirmation adds 1)
+buy_score  = (bull_trend ? 1 : 0) + (above_vwap ? 1 : 0) + (rsi_buy_ok ? 1 : 0)
+sell_score = (bear_trend ? 1 : 0) + (below_vwap ? 1 : 0) + (rsi_sell_ok ? 1 : 0)
+
+// Label: STRONG BUY (3/3) · BUY (1-2/3) · WAIT · —
+buy_strong  = buy_sig  and buy_score  == 3
+sell_strong = sell_sig and sell_score == 3
 
 pa_tag() =>
-    bull_pin    ? " · Pin Bar"    :
-     bull_engulf ? " · Engulfing"  :
-     bear_pin    ? " · Pin Bar"    :
-     bear_engulf ? " · Engulfing"  :
-     doji        ? " · Doji"       :
-     inside_bar  ? " · Inside Bar" : ""
+    bull_pin    ? " Pin Bar"    :
+     bull_engulf ? " Engulfing"  :
+     bear_pin    ? " Pin Bar"    :
+     bear_engulf ? " Engulfing"  :
+     doji        ? " Doji"       :
+     inside_bar  ? " Inside Bar" : ""
 
 // ── Chart labels ──
-if buy_conf and show_labels
-    label.new(bar_index, low - atr * 0.5, "BUY" + pa_tag(), style=label.style_label_up, color=buy_col, textcolor=color.black, size=size.small)
+if buy_sig and show_labels
+    lbl = buy_strong ? "STRONG BUY" + pa_tag() : "BUY" + pa_tag()
+    label.new(bar_index, low - atr * 0.5, lbl, style=label.style_label_up, color=buy_col, textcolor=color.black, size=size.small)
 
-if sell_conf and show_labels
-    label.new(bar_index, high + atr * 0.5, "SELL" + pa_tag(), style=label.style_label_down, color=sell_col, textcolor=color.white, size=size.small)
+if sell_sig and show_labels
+    lbl = sell_strong ? "STRONG SELL" + pa_tag() : "SELL" + pa_tag()
+    label.new(bar_index, high + atr * 0.5, lbl, style=label.style_label_down, color=sell_col, textcolor=color.white, size=size.small)
 
 // ══════════════════════════════════════════════
 //  TABLE
@@ -259,33 +266,37 @@ if barstate.islast and show_table
     table.cell(tbl, 1, 10, "", text_color=color.gray, text_size=size.tiny, bgcolor=color.new(color.gray, 80))
 
     // ── Confluence checklist ──
-    if buy_conf or buy_partial or (at_sup and not sell_conf)
-        table.cell(tbl, 0, 11, "At Support",   text_color=chk_col(at_sup),    text_size=size.tiny)
-        table.cell(tbl, 1, 11, chk(at_sup),    text_color=chk_col(at_sup),    text_size=size.tiny, text_halign=text.align_right)
-        table.cell(tbl, 0, 12, "Bull PA · EMA",text_color=chk_col(bull_pa and bull_trend), text_size=size.tiny)
+    if buy_sig or (at_sup and not sell_sig)
+        table.cell(tbl, 0, 11, "At Support",    text_color=chk_col(at_sup),              text_size=size.tiny)
+        table.cell(tbl, 1, 11, chk(at_sup),     text_color=chk_col(at_sup),              text_size=size.tiny, text_halign=text.align_right)
+        table.cell(tbl, 0, 12, "Bull PA · EMA", text_color=chk_col(bull_pa and bull_trend), text_size=size.tiny)
         table.cell(tbl, 1, 12, chk(bull_pa and bull_trend), text_color=chk_col(bull_pa and bull_trend), text_size=size.tiny, text_halign=text.align_right)
     else
-        table.cell(tbl, 0, 11, "At Resist.",   text_color=chk_col(at_res),    text_size=size.tiny)
-        table.cell(tbl, 1, 11, chk(at_res),    text_color=chk_col(at_res),    text_size=size.tiny, text_halign=text.align_right)
-        table.cell(tbl, 0, 12, "Bear PA · EMA",text_color=chk_col(bear_pa and bear_trend), text_size=size.tiny)
+        table.cell(tbl, 0, 11, "At Resist.",    text_color=chk_col(at_res),              text_size=size.tiny)
+        table.cell(tbl, 1, 11, chk(at_res),     text_color=chk_col(at_res),              text_size=size.tiny, text_halign=text.align_right)
+        table.cell(tbl, 0, 12, "Bear PA · EMA", text_color=chk_col(bear_pa and bear_trend), text_size=size.tiny)
         table.cell(tbl, 1, 12, chk(bear_pa and bear_trend), text_color=chk_col(bear_pa and bear_trend), text_size=size.tiny, text_halign=text.align_right)
 
     // ── Main signal row ──
-    sig_txt = buy_conf  ? "BUY"  :
-              sell_conf ? "SELL" :
-              wait_sig  ? "WAIT" : "—"
-    sig_bg  = buy_conf  ? color.new(buy_col,  20) :
-              sell_conf ? color.new(sell_col, 20) :
-              wait_sig  ? color.new(wait_col, 20) : color.new(color.gray, 75)
-    sig_tc  = buy_conf  ? color.black :
-              sell_conf ? color.white :
-              wait_sig  ? color.black : color.new(color.gray, 20)
+    sig_txt = buy_strong  ? "STRONG BUY"  :
+              buy_sig     ? "BUY " + str.tostring(buy_score) + "/3" :
+              sell_strong ? "STRONG SELL" :
+              sell_sig    ? "SELL " + str.tostring(sell_score) + "/3" :
+              wait_sig    ? "WAIT" : "—"
+    sig_bg  = (buy_sig  or buy_strong)  ? color.new(buy_col,  15) :
+              (sell_sig or sell_strong) ? color.new(sell_col, 15) :
+              wait_sig                  ? color.new(wait_col, 20) : color.new(color.gray, 75)
+    sig_tc  = (buy_sig  or buy_strong)  ? color.black :
+              (sell_sig or sell_strong) ? color.white :
+              wait_sig                  ? color.black : color.new(color.gray, 20)
     table.cell(tbl, 0, 13, "SIGNAL", text_color=color.white, text_size=size.small, bgcolor=sig_bg, text_halign=text.align_left)
     table.cell(tbl, 1, 13, sig_txt,  text_color=sig_tc,      text_size=size.small, bgcolor=sig_bg, text_halign=text.align_right)
 
 // ══════════════════════════════════════════════
 //  ALERTS
 // ══════════════════════════════════════════════
-alertcondition(buy_conf,  "BUY  – Full Confluence", "BUY: {{ticker}} {{interval}} S/R+PA+EMA+VWAP+RSI @ {{close}}")
-alertcondition(sell_conf, "SELL – Full Confluence", "SELL: {{ticker}} {{interval}} S/R+PA+EMA+VWAP+RSI @ {{close}}")
-alertcondition(wait_sig,  "WAIT – Mixed Signals",   "WAIT: {{ticker}} {{interval}} partial confluence @ {{close}}")
+alertcondition(buy_sig,    "BUY",         "BUY: {{ticker}} {{interval}} at support @ {{close}}")
+alertcondition(buy_strong, "STRONG BUY",  "STRONG BUY: {{ticker}} {{interval}} full confluence @ {{close}}")
+alertcondition(sell_sig,   "SELL",        "SELL: {{ticker}} {{interval}} at resistance @ {{close}}")
+alertcondition(sell_strong,"STRONG SELL", "STRONG SELL: {{ticker}} {{interval}} full confluence @ {{close}}")
+alertcondition(wait_sig,   "WAIT",        "WAIT: {{ticker}} {{interval}} indecision at level @ {{close}}")
