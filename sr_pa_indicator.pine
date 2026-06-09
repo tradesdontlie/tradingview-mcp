@@ -77,12 +77,13 @@ if barstate.islast
         box.delete(b)
     array.clear(s_boxes)
 
-    half = atr * 0.3
+    half      = atr * 0.3
+    safe_left = math.max(bar_index - 500, 0)  // never exceed historical buffer
 
     if array.size(r_lvl) > 0
         for i = 0 to array.size(r_lvl) - 1
             lvl = array.get(r_lvl, i)
-            t   = array.get(r_time, i)
+            t   = math.max(array.get(r_time, i), safe_left)
             lbl = "R" + str.tostring(i + 1) + " " + str.tostring(lvl, "#.##")
             b   = box.new(t, lvl + half, bar_index + extend_bars, lvl - half, border_color=color.new(#FF4444, 30), bgcolor=res_col, border_width=1, text=lbl, text_color=color.new(#FF4444, 0), text_size=size.tiny, text_halign=text.align_right)
             array.push(r_boxes, b)
@@ -90,7 +91,7 @@ if barstate.islast
     if array.size(s_lvl) > 0
         for i = 0 to array.size(s_lvl) - 1
             lvl = array.get(s_lvl, i)
-            t   = array.get(s_time, i)
+            t   = math.max(array.get(s_time, i), safe_left)
             lbl = "S" + str.tostring(i + 1) + " " + str.tostring(lvl, "#.##")
             b   = box.new(t, lvl + half, bar_index + extend_bars, lvl - half, border_color=color.new(#2196F3, 30), bgcolor=sup_col, border_width=1, text=lbl, text_color=color.new(#2196F3, 0), text_size=size.tiny, text_halign=text.align_right)
             array.push(s_boxes, b)
