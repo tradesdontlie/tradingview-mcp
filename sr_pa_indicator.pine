@@ -8,38 +8,36 @@ grp_sr  = "Support & Resistance"
 grp_sig = "Signals"
 grp_col = "Colors"
 
-pivot_len   = input.int   (10,    "Pivot Lookback",       minval=3,   maxval=50,  group=grp_sr)
-max_levels  = input.int   (5,     "Max Levels Each Side", minval=3,   maxval=10,  group=grp_sr)
-zone_width  = input.float (0.15,  "Zone Width %",         minval=0.05,maxval=1.0, step=0.05, group=grp_sr)
-atr_touch   = input.float (0.5,   "ATR Touch Threshold",  minval=0.1, maxval=3.0, step=0.1,  group=grp_sr)
-extend_bars = input.int   (40,    "Extend Zones (bars)",  minval=5,   maxval=200, group=grp_sr)
+pivot_len    = input.int   (10,   "Pivot Lookback",        minval=3,    maxval=50,  group=grp_sr)
+max_levels   = input.int   (5,    "Max Levels Each Side",  minval=3,    maxval=10,  group=grp_sr)
+zone_width   = input.float (0.15, "Zone Width %",          minval=0.05, maxval=1.0, step=0.05, group=grp_sr)
+atr_touch    = input.float (0.5,  "ATR Touch Threshold",   minval=0.1,  maxval=3.0, step=0.1,  group=grp_sr)
+extend_bars  = input.int   (40,   "Extend Zones (bars)",   minval=5,    maxval=200, group=grp_sr)
 
-show_signals = input.bool(true, "Show Buy/Sell/Wait Labels", group=grp_sig)
-show_table   = input.bool(true, "Show Level Table",          group=grp_sig)
+// Major move filter — body must be this multiple of ATR to count as a real signal
+min_body_atr = input.float (0.4,  "Min Body (× ATR) for Signal", minval=0.1, maxval=2.0, step=0.1, group=grp_sig)
+show_labels  = input.bool  (true, "Show BUY/SELL on Chart",       group=grp_sig)
+show_table   = input.bool  (true, "Show Table",                    group=grp_sig)
 
-res_col  = input.color(color.new(#FF4444, 75), "Resistance Zone",  group=grp_col)
-sup_col  = input.color(color.new(#2196F3, 75), "Support Zone",     group=grp_col)
-buy_col  = input.color(#00E676,                "Buy Signal",        group=grp_col)
-sell_col = input.color(#FF1744,                "Sell Signal",       group=grp_col)
-wait_col = input.color(#FFD600,                "Wait Signal",       group=grp_col)
+res_col  = input.color(color.new(#FF4444, 75), "Resistance Zone", group=grp_col)
+sup_col  = input.color(color.new(#2196F3, 75), "Support Zone",    group=grp_col)
+buy_col  = input.color(#00E676,                "Buy Signal",       group=grp_col)
+sell_col = input.color(#FF1744,                "Sell Signal",      group=grp_col)
+wait_col = input.color(#FFD600,                "Wait Signal",      group=grp_col)
 
 // ══════════════════════════════════════════════
 //  CORE CALCULATIONS
 // ══════════════════════════════════════════════
-atr  = ta.atr(14)
-zone = (close * zone_width) / 100.0  // absolute zone half-width
+atr = ta.atr(14)
 
-// ── Pivot detection ──
 ph = ta.pivothigh(high, pivot_len, pivot_len)
 pl = ta.pivotlow (low,  pivot_len, pivot_len)
 
-// ── Level storage ──
 var float[] r_lvl  = array.new_float(0)
 var int[]   r_time = array.new_int(0)
 var float[] s_lvl  = array.new_float(0)
 var int[]   s_time = array.new_int(0)
 
-// Merge check: skip if a level within zone_width% already exists
 f_dup(arr, lvl, pct) =>
     bool found = false
     sz = array.size(arr)
@@ -66,7 +64,7 @@ if not na(pl)
             array.pop(s_time)
 
 // ══════════════════════════════════════════════
-//  DRAW S/R ZONES  (rebuilt on last bar)
+//  DRAW S/R ZONES
 // ══════════════════════════════════════════════
 var box[] r_boxes = array.new_box(0)
 var box[] s_boxes = array.new_box(0)
@@ -81,45 +79,45 @@ if barstate.islast
 
     half = atr * 0.3
 
-    for i = 0 to array.size(r_lvl) - 1
-        lvl = array.get(r_lvl, i)
-        t   = array.get(r_time, i)
-        lbl = "R" + str.tostring(i + 1) + "  " + str.tostring(lvl, "#.##")
-        b   = box.new(t, lvl + half, bar_index + extend_bars, lvl - half, border_color=color.new(#FF4444, 30), bgcolor=res_col, border_width=1, text=lbl, text_color=color.new(#FF4444, 0), text_size=size.tiny, text_halign=text.align_right)
-        array.push(r_boxes, b)
+    if array.size(r_lvl) > 0
+        for i = 0 to array.size(r_lvl) - 1
+            lvl = array.get(r_lvl, i)
+            t   = array.get(r_time, i)
+            lbl = "R" + str.tostring(i + 1) + " " + str.tostring(lvl, "#.##")
+            b   = box.new(t, lvl + half, bar_index + extend_bars, lvl - half, border_color=color.new(#FF4444, 30), bgcolor=res_col, border_width=1, text=lbl, text_color=color.new(#FF4444, 0), text_size=size.tiny, text_halign=text.align_right)
+            array.push(r_boxes, b)
 
-    for i = 0 to array.size(s_lvl) - 1
-        lvl = array.get(s_lvl, i)
-        t   = array.get(s_time, i)
-        lbl = "S" + str.tostring(i + 1) + "  " + str.tostring(lvl, "#.##")
-        b   = box.new(t, lvl + half, bar_index + extend_bars, lvl - half, border_color=color.new(#2196F3, 30), bgcolor=sup_col, border_width=1, text=lbl, text_color=color.new(#2196F3, 0), text_size=size.tiny, text_halign=text.align_right)
-        array.push(s_boxes, b)
+    if array.size(s_lvl) > 0
+        for i = 0 to array.size(s_lvl) - 1
+            lvl = array.get(s_lvl, i)
+            t   = array.get(s_time, i)
+            lbl = "S" + str.tostring(i + 1) + " " + str.tostring(lvl, "#.##")
+            b   = box.new(t, lvl + half, bar_index + extend_bars, lvl - half, border_color=color.new(#2196F3, 30), bgcolor=sup_col, border_width=1, text=lbl, text_color=color.new(#2196F3, 0), text_size=size.tiny, text_halign=text.align_right)
+            array.push(s_boxes, b)
 
 // ══════════════════════════════════════════════
 //  PRICE ACTION PATTERNS
 // ══════════════════════════════════════════════
 body       = math.abs(close - open)
 rng        = high - low
-upper_wick = high  - math.max(close, open)
+upper_wick = high - math.max(close, open)
 lower_wick = math.min(close, open) - low
 bull_bar   = close > open
 bear_bar   = close < open
 
-// Pin bars
-bull_pin = lower_wick >= body * 2.0 and lower_wick >= upper_wick * 2.0 and rng > 0 and body / rng > 0.05
-bear_pin = upper_wick >= body * 2.0 and upper_wick >= lower_wick * 2.0 and rng > 0 and body / rng > 0.05
+// Major move filter — candle body must clear the threshold
+is_major = body >= atr * min_body_atr
 
-// Engulfing
+bull_pin    = lower_wick >= body * 2.0 and lower_wick >= upper_wick * 2.0 and rng > 0 and body / rng > 0.05
+bear_pin    = upper_wick >= body * 2.0 and upper_wick >= lower_wick * 2.0 and rng > 0 and body / rng > 0.05
 bull_engulf = bull_bar and bear_bar[1] and open <= close[1] and close >= open[1] and body > body[1] * 0.8
 bear_engulf = bear_bar and bull_bar[1] and open >= close[1] and close <= open[1] and body > body[1] * 0.8
+doji        = body <= rng * 0.15 and rng > 0
+inside_bar  = high < high[1] and low > low[1]
 
-// Indecision
-doji       = body <= rng * 0.15 and rng > 0
-inside_bar = high < high[1] and low > low[1]
-
-// ── Bullish / bearish PA confirmation ──
-bull_pa = bull_pin or bull_engulf
-bear_pa = bear_pin or bear_engulf
+// Apply major-move filter to directional patterns only
+bull_pa    = (bull_pin or bull_engulf) and is_major
+bear_pa    = (bear_pin or bear_engulf) and is_major
 indecision = doji or inside_bar
 
 // ══════════════════════════════════════════════
@@ -149,119 +147,83 @@ at_res = f_near_res()
 // ══════════════════════════════════════════════
 //  SIGNAL LOGIC
 // ══════════════════════════════════════════════
-// PRIMARY: price at level
-// CONFIRMATION: price action pattern  ← double confirmation
-buy_raw  = at_sup and bull_pa
-sell_raw = at_res and bear_pa
-wait_raw = (at_sup or at_res) and indecision and not buy_raw and not sell_raw
+buy_sig  = at_sup and bull_pa
+sell_sig = at_res and bear_pa
+wait_sig = (at_sup or at_res) and indecision and not buy_sig and not sell_sig
 
-buy_sig  = buy_raw  and show_signals
-sell_sig = sell_raw and show_signals
-wait_sig = wait_raw and show_signals
-
-// ══════════════════════════════════════════════
-//  SIGNAL LABELS
-// ══════════════════════════════════════════════
-// Pattern tag for label tooltip
 pa_tag() =>
-    bull_pin     ? " [Pin Bar]"     :
-     bull_engulf  ? " [Engulfing]"   :
-     bear_pin     ? " [Pin Bar]"     :
-     bear_engulf  ? " [Engulfing]"   :
-     doji         ? " [Doji]"        :
-     inside_bar   ? " [Inside Bar]"  : ""
+    bull_pin    ? " Pin Bar"    :
+     bull_engulf ? " Engulfing"  :
+     bear_pin    ? " Pin Bar"    :
+     bear_engulf ? " Engulfing"  :
+     doji        ? " Doji"       :
+     inside_bar  ? " Inside Bar" : ""
 
-if buy_sig
-    label.new(bar_index, low - atr * 0.6,
-              "BUY" + pa_tag(),
-              style    = label.style_label_up,
-              color    = buy_col,
-              textcolor = color.black,
-              size     = size.normal)
+// ── Chart labels: BUY / SELL only (no WAIT clutter) ──
+if buy_sig and show_labels
+    label.new(bar_index, low - atr * 0.5, "B" + pa_tag(), style=label.style_label_up, color=buy_col, textcolor=color.black, size=size.small)
 
-if sell_sig
-    label.new(bar_index, high + atr * 0.6,
-              "SELL" + pa_tag(),
-              style    = label.style_label_down,
-              color    = sell_col,
-              textcolor = color.white,
-              size     = size.normal)
-
-if wait_sig
-    label.new(bar_index, high + atr * 0.4,
-              "WAIT" + pa_tag(),
-              style    = label.style_label_down,
-              color    = wait_col,
-              textcolor = color.black,
-              size     = size.small)
+if sell_sig and show_labels
+    label.new(bar_index, high + atr * 0.5, "S" + pa_tag(), style=label.style_label_down, color=sell_col, textcolor=color.white, size=size.small)
 
 // ══════════════════════════════════════════════
-//  INFO TABLE  (top-right)
+//  COMPACT TABLE  (top-right)
 // ══════════════════════════════════════════════
-var table tbl = table.new(position.top_right, 2, 13,
-                          bgcolor       = color.new(color.black, 75),
-                          border_width  = 1,
-                          border_color  = color.new(color.gray, 60),
-                          frame_width   = 1,
-                          frame_color   = color.new(color.gray, 40))
+// Layout: 2 cols × 10 rows — all size.tiny to keep it tight on small screens
+var table tbl = table.new(position.top_right, 2, 10, bgcolor=color.new(color.black, 80), border_width=1, border_color=color.new(color.gray, 65), frame_width=1, frame_color=color.new(color.gray, 50))
 
 if barstate.islast and show_table
-    // Header
-    table.cell(tbl, 0, 0, "S/R · PA SIGNALS",
-               text_color=color.white, text_size=size.small,
-               bgcolor=color.new(color.gray, 55), text_halign=text.align_center)
-    table.cell(tbl, 1, 0, syminfo.ticker + " · " + timeframe.period,
-               text_color=color.new(color.yellow, 10), text_size=size.small,
-               bgcolor=color.new(color.gray, 55), text_halign=text.align_center)
+    // Row 0 — header
+    table.cell(tbl, 0, 0, syminfo.ticker, text_color=color.white, text_size=size.tiny, bgcolor=color.new(color.gray, 60), text_halign=text.align_left)
+    table.cell(tbl, 1, 0, timeframe.period + "  ATR " + str.tostring(math.round(atr, 1)), text_color=color.new(color.gray, 10), text_size=size.tiny, bgcolor=color.new(color.gray, 60), text_halign=text.align_right)
 
-    // Resistance
-    table.cell(tbl, 0, 1, "RESISTANCE", text_color=color.new(#FF4444,0), text_size=size.tiny, bgcolor=color.new(#FF4444,85))
-    table.cell(tbl, 1, 1, "",           text_color=color.white,          text_size=size.tiny, bgcolor=color.new(#FF4444,85))
-    for i = 0 to math.min(array.size(r_lvl) - 1, 2)
-        lvl = array.get(r_lvl, i)
+    // Rows 1-3 — resistance (up to 3 levels)
+    r_count = math.min(array.size(r_lvl), 3)
+    for i = 0 to r_count - 1
+        lvl  = array.get(r_lvl, i)
         dist = (lvl - close) / close * 100.0
-        table.cell(tbl, 0, 2 + i, "R" + str.tostring(i+1) + " " + str.tostring(lvl, "#.##"),
-                   text_color=color.new(#FF4444,0), text_size=size.tiny)
-        table.cell(tbl, 1, 2 + i, "+" + str.tostring(dist, "#.##") + "%",
-                   text_color=color.new(#FF4444,0), text_size=size.tiny)
+        table.cell(tbl, 0, 1 + i, "R" + str.tostring(i + 1) + "  " + str.tostring(lvl, "#.##"), text_color=color.new(#FF6B6B, 0), text_size=size.tiny, text_halign=text.align_left)
+        table.cell(tbl, 1, 1 + i, "+" + str.tostring(dist, "#.0") + "%", text_color=color.new(#FF6B6B, 0), text_size=size.tiny, text_halign=text.align_right)
+    // Fill unused resistance rows
+    if r_count < 3
+        for i = r_count to 2
+            table.cell(tbl, 0, 1 + i, "—", text_color=color.new(color.gray, 40), text_size=size.tiny)
+            table.cell(tbl, 1, 1 + i, "", text_color=color.gray, text_size=size.tiny)
 
-    // Support
-    table.cell(tbl, 0, 5, "SUPPORT", text_color=color.new(#2196F3,0), text_size=size.tiny, bgcolor=color.new(#2196F3,85))
-    table.cell(tbl, 1, 5, "",        text_color=color.white,          text_size=size.tiny, bgcolor=color.new(#2196F3,85))
-    for i = 0 to math.min(array.size(s_lvl) - 1, 2)
-        lvl = array.get(s_lvl, i)
+    // Row 4 — spacer/divider
+    table.cell(tbl, 0, 4, "·", text_color=color.new(color.gray, 50), text_size=size.tiny)
+    table.cell(tbl, 1, 4, "·", text_color=color.new(color.gray, 50), text_size=size.tiny)
+
+    // Rows 5-7 — support (up to 3 levels)
+    s_count = math.min(array.size(s_lvl), 3)
+    for i = 0 to s_count - 1
+        lvl  = array.get(s_lvl, i)
         dist = (close - lvl) / close * 100.0
-        table.cell(tbl, 0, 6 + i, "S" + str.tostring(i+1) + " " + str.tostring(lvl, "#.##"),
-                   text_color=color.new(#2196F3,0), text_size=size.tiny)
-        table.cell(tbl, 1, 6 + i, "-" + str.tostring(dist, "#.##") + "%",
-                   text_color=color.new(#2196F3,0), text_size=size.tiny)
+        table.cell(tbl, 0, 5 + i, "S" + str.tostring(i + 1) + "  " + str.tostring(lvl, "#.##"), text_color=color.new(#64B5F6, 0), text_size=size.tiny, text_halign=text.align_left)
+        table.cell(tbl, 1, 5 + i, "-" + str.tostring(dist, "#.0") + "%", text_color=color.new(#64B5F6, 0), text_size=size.tiny, text_halign=text.align_right)
+    if s_count < 3
+        for i = s_count to 2
+            table.cell(tbl, 0, 5 + i, "—", text_color=color.new(color.gray, 40), text_size=size.tiny)
+            table.cell(tbl, 1, 5 + i, "", text_color=color.gray, text_size=size.tiny)
 
-    // Divider
-    table.cell(tbl, 0, 9, "──────", text_color=color.new(color.gray,30), text_size=size.tiny)
-    table.cell(tbl, 1, 9, "──────", text_color=color.new(color.gray,30), text_size=size.tiny)
+    // Row 8 — spacer
+    table.cell(tbl, 0, 8, "·", text_color=color.new(color.gray, 50), text_size=size.tiny)
+    table.cell(tbl, 1, 8, "·", text_color=color.new(color.gray, 50), text_size=size.tiny)
 
-    // Signal
-    sig_txt = buy_sig ? "▲ BUY"  + pa_tag() :
-              sell_sig? "▼ SELL" + pa_tag() :
-              wait_sig? "◆ WAIT" + pa_tag() : "— No signal"
-    sig_col = buy_sig ? buy_col : sell_sig ? sell_col : wait_sig ? wait_col : color.gray
-    table.cell(tbl, 0, 10, "SIGNAL",  text_color=color.white,  text_size=size.small)
-    table.cell(tbl, 1, 10, sig_txt,   text_color=sig_col,       text_size=size.small)
-
-    // ATR
-    table.cell(tbl, 0, 11, "ATR(14)", text_color=color.new(color.gray,20), text_size=size.tiny)
-    table.cell(tbl, 1, 11, str.tostring(math.round(atr, 2), "#.##"),
-               text_color=color.new(color.gray,20), text_size=size.tiny)
-
-    // At level status
-    loc_txt = at_sup ? "At Support" : at_res ? "At Resistance" : "Between Levels"
-    loc_col = at_sup ? color.new(#2196F3,0) : at_res ? color.new(#FF4444,0) : color.new(color.gray,30)
-    table.cell(tbl, 0, 12, "LOCATION", text_color=color.new(color.gray,20), text_size=size.tiny)
-    table.cell(tbl, 1, 12, loc_txt,    text_color=loc_col,                  text_size=size.tiny)
+    // Row 9 — signal (the only row that changes live)
+    sig_txt = buy_sig  ? "BUY " + pa_tag() :
+              sell_sig ? "SELL" + pa_tag() :
+              wait_sig ? "WAIT" + pa_tag() : "—"
+    sig_col = buy_sig  ? buy_col  :
+              sell_sig ? sell_col :
+              wait_sig ? wait_col : color.new(color.gray, 30)
+    loc_txt = at_sup ? " sup" : at_res ? " res" : ""
+    table.cell(tbl, 0, 9, "SIGNAL" + loc_txt, text_color=color.new(color.gray, 10), text_size=size.tiny, text_halign=text.align_left)
+    table.cell(tbl, 1, 9, sig_txt, text_color=sig_col, text_size=size.tiny, text_halign=text.align_right)
 
 // ══════════════════════════════════════════════
 //  ALERTS
 // ══════════════════════════════════════════════
-alertcondition(buy_sig,  "BUY  – S/R + PA",   "BUY: {{ticker}} {{interval}} at support with {{close}}")
-alertcondition(sell_sig, "SELL – S/R + PA",   "SELL: {{ticker}} {{interval}} at resistance with {{close}}")
-alertcondition(wait_sig, "WAIT – Indecision", "WAIT: {{ticker}} {{interval}} indecision at level {{close}}")
+alertcondition(buy_sig,  "BUY – Major Move at Support",    "BUY: {{ticker}} {{interval}} major move at support {{close}}")
+alertcondition(sell_sig, "SELL – Major Move at Resistance", "SELL: {{ticker}} {{interval}} major move at resistance {{close}}")
+alertcondition(wait_sig, "WAIT – Indecision at Level",      "WAIT: {{ticker}} {{interval}} indecision at level {{close}}")
