@@ -211,22 +211,42 @@ async def eth_fills(wallet: str = ""):
             raw = (await c.post(f"{hl_url}/info", json={"type": "userFills", "user": wallet})).json()
         if not isinstance(raw, list):
             return {"ok": False, "error": str(raw), "trades": [], "metrics": {}}
-        trades, open_t = [], None
+        # Aggregate partial fills into complete trades using weighted-average prices
+        trades = []
+        entry_fills: list = []   # accumulated open fills for current trade
+        close_fills: list = []   # accumulated close fills for current trade
+        side = ""
         for f in sorted(raw, key=lambda x: x["time"]):
             if f.get("coin") != "ETH":
                 continue
-            d = f.get("dir", ""); px = float(f.get("px", 0))
+            d = f.get("dir", "")
+            sz = float(f.get("sz", 0))
+            px = float(f.get("px", 0))
             ts = datetime.fromtimestamp(f["time"]/1000, tz=timezone.utc).isoformat()
             if "Open" in d:
-                open_t = {"time": ts, "entry_price": px,
-                          "side": "Long" if "Long" in d else "Short",
-                          "fee": float(f.get("fee", 0))}
-            elif "Close" in d and open_t:
-                net = round(float(f.get("closedPnl", 0)) - float(f.get("fee", 0)) - open_t["fee"], 4)
-                trades.append({"time": ts, "side": open_t["side"],
-                               "entry_price": open_t["entry_price"], "exit_price": px,
-                               "pnl": net, "event": d})
-                open_t = None
+                if not entry_fills:
+                    side = "Long" if "Long" in d else "Short"
+                entry_fills.append({"px": px, "sz": sz, "fee": float(f.get("fee", 0)), "ts": ts})
+            elif "Close" in d and entry_fills:
+                close_fills.append({"px": px, "sz": sz,
+                                    "pnl": float(f.get("closedPnl", 0)),
+                                    "fee": float(f.get("fee", 0)), "ts": ts})
+                # Check if position fully closed (side B=buy +sz, A=sell -sz)
+                sp = float(f.get("startPosition", 1))
+                pos_after = sp + sz if f.get("side") == "B" else sp - sz
+                if abs(pos_after) < 0.0001:
+                    entry_sz  = sum(x["sz"] for x in entry_fills)
+                    entry_avg = sum(x["px"] * x["sz"] for x in entry_fills) / entry_sz if entry_sz else 0
+                    exit_sz   = sum(x["sz"] for x in close_fills)
+                    exit_avg  = sum(x["px"] * x["sz"] for x in close_fills) / exit_sz if exit_sz else 0
+                    total_pnl = sum(x["pnl"] for x in close_fills)
+                    total_fee = sum(x["fee"] for x in entry_fills) + sum(x["fee"] for x in close_fills)
+                    net = round(total_pnl - total_fee, 4)
+                    trades.append({"time": close_fills[-1]["ts"], "side": side,
+                                   "entry_price": round(entry_avg, 2),
+                                   "exit_price": round(exit_avg, 2),
+                                   "pnl": net, "size": round(entry_sz, 4)})
+                    entry_fills = []; close_fills = []; side = ""
         m = calc_metrics(trades, cur_eq)
         return {"ok": True, "trades": list(reversed(trades[-50:])), "metrics": m}
     except Exception as e:
