@@ -627,7 +627,7 @@ function saveWallet(){
   if(s)s.textContent=w?'Saved ✓':'Cleared';
 }
 function loadWalletInput(){
-  const w=localStorage.getItem('eth_wallet')||'';
+  const w=localStorage.getItem('eth_wallet')||'0xD8cb475a415cEd00aAd3F794a2451eB096735a38';
   const el=document.getElementById('e-wallet');
   if(el)el.value=w;
 }
