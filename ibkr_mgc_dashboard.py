@@ -202,7 +202,12 @@ async def eth_fills(wallet: str = ""):
         async with httpx.AsyncClient(timeout=12) as c:
             health = (await c.get(f"{ETH_BOT_URL}/health")).json()
             hl_url = health.get("api_url", "https://api.hyperliquid-testnet.xyz")
-            cur_eq = float(health.get("equity_usd", 0))
+            # Pull true equity from Hyperliquid spot USDC balance
+            # (spot USDC total already reflects perp mark-to-market in real time)
+            spot_state = (await c.post(f"{hl_url}/info", json={"type": "spotClearinghouseState", "user": wallet})).json()
+            cur_eq = round(next(
+                (float(b["total"]) for b in spot_state.get("balances", []) if b.get("coin") == "USDC"), 0
+            ), 2)
             raw = (await c.post(f"{hl_url}/info", json={"type": "userFills", "user": wallet})).json()
         if not isinstance(raw, list):
             return {"ok": False, "error": str(raw), "trades": [], "metrics": {}}
@@ -603,7 +608,7 @@ async function pollMGC(){
     set('m-al','-$'+Math.abs(m.avg_loss).toFixed(2));
     set('m-tc','('+m.total+' trades)');
     mkChart('m-chart',m.equity_curve||[]);mkChart('b-m-chart',m.equity_curve||[]);
-    const th=t.trades.map(tr=>{
+    const th=t.trades.filter(tr=>tr.entry_price&&tr.side).map(tr=>{
       const dt=new Date(tr.time||tr.exit_time||'');
       const ts=isNaN(dt)?'—':dt.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
       const pnl=tr.pnl||tr.net_pnl_usd||0; const side=(tr.side||tr.direction||'').toUpperCase();
@@ -627,7 +632,9 @@ function saveWallet(){
   if(s)s.textContent=w?'Saved ✓':'Cleared';
 }
 function loadWalletInput(){
-  const w=localStorage.getItem('eth_wallet')||'0xD8cb475a415cEd00aAd3F794a2451eB096735a38';
+  const stored=localStorage.getItem('eth_wallet');
+  const w=stored||'0xD8cb475a415cEd00aAd3F794a2451eB096735a38';
+  if(!stored)localStorage.setItem('eth_wallet',w);
   const el=document.getElementById('e-wallet');
   if(el)el.value=w;
 }
