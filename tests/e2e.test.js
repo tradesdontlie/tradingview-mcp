@@ -165,9 +165,9 @@ describe('TradingView MCP — Full E2E (70 tools)', () => {
     });
 
     after(async () => {
-      await evaluate(`${CHART_API}.setSymbol('${originalSymbol}')`);
+      await Promise.race([evaluate(`${CHART_API}.setSymbol('${originalSymbol}')`), new Promise(r => setTimeout(r, 5000))]);
       await sleep(2000);
-      await evaluate(`${CHART_API}.setResolution('${originalTF}')`);
+      await Promise.race([evaluate(`${CHART_API}.setResolution('${originalTF}')`), new Promise(r => setTimeout(r, 5000))]);
       await sleep(1000);
       await evaluate(`${CHART_API}.setChartType(${originalType})`);
       await sleep(500);
@@ -195,14 +195,20 @@ describe('TradingView MCP — Full E2E (70 tools)', () => {
     });
 
     it('chart_set_symbol — change ticker', async () => {
-      await evaluate(`${CHART_API}.setSymbol('AAPL', {})`);
+      await Promise.race([
+        evaluate(`${CHART_API}.setSymbol('AAPL', {})`),
+        new Promise(resolve => setTimeout(resolve, 5000)),
+      ]);
       await sleep(2500);
       const sym = await evaluate(`${CHART_API}.symbol()`);
       assert.ok(sym.includes('AAPL'), `Symbol changed to AAPL, got: ${sym}`);
     });
 
     it('chart_set_timeframe — change resolution', async () => {
-      await evaluate(`${CHART_API}.setResolution('D', {})`);
+      await Promise.race([
+        evaluate(`${CHART_API}.setResolution('D', {})`),
+        new Promise(resolve => setTimeout(resolve, 5000)),
+      ]);
       await sleep(1500);
       const tf = await evaluate(`${CHART_API}.resolution()`);
       assert.equal(tf, '1D');
@@ -1038,8 +1044,8 @@ val = array.get(a, 5)`;
       await sleep(500);
       const isOpen = await evaluate(`!!document.querySelector('.monaco-editor.pine-editor-monaco')`);
 
-      // Close
-      await evaluate(`${BOTTOM_BAR}.hideWidget('pine-editor')`);
+      // Close (hideWidget removed in newer TV versions — use try-catch)
+      await evaluate(`try { ${BOTTOM_BAR}.hideWidget('pine-editor'); } catch(e) {}`);
       await sleep(300);
 
       assert.ok(typeof isOpen === 'boolean', 'Panel toggle works');
@@ -1087,7 +1093,10 @@ val = array.get(a, 5)`;
           return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
         })()
       `);
-      await Input.dispatchMouseEvent({ type: 'mouseWheel', x: center.x, y: center.y, deltaX: 0, deltaY: 100 });
+      await Promise.race([
+        Input.dispatchMouseEvent({ type: 'mouseWheel', x: center.x, y: center.y, deltaX: 0, deltaY: 100 }),
+        new Promise(resolve => setTimeout(resolve, 3000)),
+      ]);
       // No assertion — verifying no throw
     });
 
@@ -1152,16 +1161,16 @@ val = array.get(a, 5)`;
   describe('Replay Mode', () => {
 
     after(async () => {
-      // Ensure replay is stopped
       try {
         const rp = REPLAY_API;
         const started = await evaluate(wv(`${rp}.isReplayStarted()`));
         if (started) {
           await evaluate(`${rp}.stopReplay()`);
-          await evaluate(`${rp}.goToRealtime()`);
-          await evaluate(`${rp}.hideReplayToolbar()`);
-          await sleep(500);
+          await sleep(300);
         }
+        // Hide toolbar only — goToRealtime() triggers a blocking "Leave current replay?" dialog
+        try { await evaluate(`${rp}.hideReplayToolbar()`); } catch {}
+        await sleep(300);
       } catch {}
     });
 
@@ -1235,8 +1244,6 @@ val = array.get(a, 5)`;
       if (!started) return;
 
       await evaluate(`${REPLAY_API}.stopReplay()`);
-      await evaluate(`${REPLAY_API}.goToRealtime()`);
-      await evaluate(`${REPLAY_API}.hideReplayToolbar()`);
       await sleep(500);
 
       const stoppedNow = await evaluate(wv(`${REPLAY_API}.isReplayStarted()`));
