@@ -32,7 +32,7 @@ If you're unsure whether a feature fits, open an issue to discuss before submitt
 
 ```bash
 npm install
-npm test          # 29 offline tests (no TradingView needed)
+npm test          # 171 offline tests (no TradingView needed)
 tv status         # verify CDP connection (TradingView must be running)
 ```
 
