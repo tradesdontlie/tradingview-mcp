@@ -550,15 +550,23 @@ export async function smartCompile() {
   const editorReady = await ensurePineEditorOpen();
   if (!editorReady) throw new Error('Could not open Pine Editor.');
 
-  const studiesBefore = await evaluate(`
+  // Shared sampler: snapshot the study list as { count, ids } so the post-Add
+  // poll can detect either a count increase or a brand-new study id. Returns
+  // null on any failure so callers can treat it as "couldn't measure".
+  const SAMPLE_STUDIES = `
     (function() {
       try {
         var chart = window.TradingViewApi._activeChartWidgetWV.value();
-        if (chart && typeof chart.getAllStudies === 'function') return chart.getAllStudies().length;
+        if (chart && typeof chart.getAllStudies === 'function') {
+          var all = chart.getAllStudies();
+          return { count: all.length, ids: all.map(function(s){ return s.id; }) };
+        }
       } catch(e) {}
       return null;
     })()
-  `);
+  `;
+
+  const studiesBefore = await evaluate(SAMPLE_STUDIES);
 
   const click = await evaluate(CLICK_ADD_TO_CHART);
 
@@ -579,9 +587,29 @@ export async function smartCompile() {
   // or Save-Script name dialog). Fast poll — the confirm modal auto-cancels.
   const dialog = await pollPostAddDialog();
 
-  // Only AFTER dialog handling has resolved: let the new study settle, then
-  // sample studiesAfter. Sampling earlier would race the confirm-dialog add.
-  await new Promise(r => setTimeout(r, 2500));
+  // Only AFTER dialog handling has resolved: poll for the new study instead of
+  // sampling once after a fixed settle. confirm-dialog adds register late —
+  // TradingView re-requests external data before the study lands — so a single
+  // early sample races the add and reports a false negative. Re-sample every
+  // 300ms for up to 5000ms; stop the instant the study count grows or a new
+  // study id appears. If the budget elapses with no change, study_added: false
+  // is a genuine miss, not a race. Strictly non-fatal — a failed sample tick is
+  // simply skipped, never thrown.
+  let studyAdded = null;
+  if (studiesBefore !== null) {
+    const beforeCount = studiesBefore.count;
+    const beforeIds = new Set(studiesBefore.ids || []);
+    studyAdded = false;
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      const snap = await evaluate(SAMPLE_STUDIES);
+      if (snap !== null && (snap.count > beforeCount || (snap.ids || []).some(id => !beforeIds.has(id)))) {
+        studyAdded = true;
+        break;
+      }
+      await new Promise(r => setTimeout(r, 300));
+    }
+  }
 
   const errors = await evaluate(`
     (function() {
@@ -595,18 +623,6 @@ export async function smartCompile() {
       });
     })()
   `);
-
-  const studiesAfter = await evaluate(`
-    (function() {
-      try {
-        var chart = window.TradingViewApi._activeChartWidgetWV.value();
-        if (chart && typeof chart.getAllStudies === 'function') return chart.getAllStudies().length;
-      } catch(e) {}
-      return null;
-    })()
-  `);
-
-  const studyAdded = (studiesBefore !== null && studiesAfter !== null) ? studiesAfter > studiesBefore : null;
 
   return {
     success: true,
