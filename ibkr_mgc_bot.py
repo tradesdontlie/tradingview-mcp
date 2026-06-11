@@ -249,6 +249,11 @@ class MGCBot:
         self._equity_fetched = False  # accountValues() called at most once per bot instance
         self._last_processed_ts: datetime = datetime.fromtimestamp(0, tz=timezone.utc)
         self._last_poll_time: float = 0.0
+        # Cached IBKR account snapshot (updated via updatePortfolio events)
+        self._acct_id: str = ""
+        self._acct_realized: float = 0.0
+        self._acct_unrealized: float = 0.0
+        self._acct_mkt_price: float = 0.0
 
     # ── IBKR account equity ───────────────────────────────────────────────────
 
@@ -783,21 +788,11 @@ class MGCBot:
     def _write_runtime(self):
         """Write live state for the dashboard to read."""
         s = self.state
-        # Pull account data from IBKR portfolio
-        realized_pnl = 0.0
-        unrealized_pnl = 0.0
-        account_id = ""
-        mkt_price = None
-        try:
-            items = self.ib.portfolio()
-            for item in items:
-                realized_pnl   += item.realizedPNL or 0.0
-                unrealized_pnl += item.unrealizedPNL or 0.0
-                account_id      = item.account or account_id
-                if item.contract.symbol == "MGC":
-                    mkt_price = round(item.marketPrice, 2) if item.marketPrice else None
-        except Exception:
-            pass
+        # Use cached account data from updatePortfolio events
+        realized_pnl   = self._acct_realized
+        unrealized_pnl = self._acct_unrealized
+        account_id     = self._acct_id
+        mkt_price      = self._acct_mkt_price or None
         runtime = dict(
             equity=round(s.equity, 2),
             realized_pnl=round(realized_pnl, 2),
@@ -894,6 +889,17 @@ class MGCBot:
         self._refresh_equity()
         log.info(f"Starting MGC bot  paper={self.paper}  contract={self.contract.localSymbol}  equity=${self.state.equity:,.2f}")
         self._adopt_orphaned_position()
+
+        def on_portfolio_update(item):
+            self._acct_realized   = item.realizedPNL or 0.0
+            self._acct_unrealized = item.unrealizedPNL or 0.0
+            if item.account:
+                self._acct_id = item.account
+            if item.contract and item.contract.symbol == "MGC" and item.marketPrice:
+                self._acct_mkt_price = round(item.marketPrice, 2)
+
+        self.ib.updatePortfolioEvent += on_portfolio_update
+
         self._active_bars = self._subscribe_bars()
         self._feed_dead = False
         self._last_bar_time = time.time()
