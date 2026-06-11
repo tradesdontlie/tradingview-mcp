@@ -116,6 +116,56 @@ const HANDLE_SAVE_DIALOG = `
   })()
 `;
 
+// ── Confirm-dialog handler (injected): clicking Add-to-chart on a script that
+//    requests another symbol/timeframe pops a [data-name="confirm-dialog"] modal
+//    that AUTO-CANCELS on a short window. Selects the primary action button in a
+//    strictly language-independent way (stable data-names first, then a className
+//    pattern) — never matches Arabic/English text. Returns what it clicked, or false.
+const HANDLE_CONFIRM_DIALOG = `
+  (function(){
+    var dlg = document.querySelector('[data-name="confirm-dialog"]');
+    if (!dlg) return false;
+    var btn = dlg.querySelector('button[data-name="yes-button"]')
+      || dlg.querySelector('button[data-name="ok-button"]');
+    if (!btn) {
+      var btns = dlg.querySelectorAll('button');
+      for (var i = 0; i < btns.length; i++) {
+        var cls = btns[i].className;
+        if (typeof cls !== 'string') cls = '';
+        if (/actionButton|primary|submit/.test(cls) && btns[i].offsetParent !== null) { btn = btns[i]; break; }
+      }
+    }
+    if (btn && btn.offsetParent !== null) {
+      btn.click();
+      return btn.getAttribute('data-name') || (String(btn.className).split(' ')[0]) || 'confirm';
+    }
+    return false;
+  })()
+`;
+
+// ── Post-Add dialog poller (shared by compile + smartCompile so both behave
+//    identically). After the Add-to-chart click one of two modals can appear:
+//      • confirm-dialog → cross-symbol/timeframe scripts; auto-cancels fast.
+//      • Save-Script name dialog → brand-new/unsaved scripts.
+//    Poll every 150ms for up to 3000ms, checking BOTH each tick, so the
+//    auto-cancelling confirm modal is caught before it dismisses. Strictly
+//    non-fatal: returns 'failed' on any CDP/eval error, never throws.
+async function pollPostAddDialog() {
+  try {
+    const deadline = Date.now() + 3000;
+    while (Date.now() < deadline) {
+      const confirmed = await evaluate(HANDLE_CONFIRM_DIALOG);
+      if (confirmed) return 'confirm-dialog';
+      const saved = await evaluate(HANDLE_SAVE_DIALOG);
+      if (saved) return 'save-dialog-confirmed';
+      await new Promise(r => setTimeout(r, 150));
+    }
+    return 'none';
+  } catch (e) {
+    return 'failed';
+  }
+}
+
 /**
  * Opens the Pine Editor panel and waits for Monaco to become available.
  * Returns true if editor is accessible, false on timeout.
@@ -381,16 +431,9 @@ export async function compile() {
     ? (click.kind === 'save_only' ? 'Pine Save (add-to-chart button not found)' : (click.label || click.kind))
     : 'keyboard_shortcut';
 
-  // Strictly non-fatal: confirm a "Save Script" name dialog if one appeared.
-  // Never throw / wedge CDP — record the outcome in the result instead.
-  let dialog = 'none';
-  try {
-    await new Promise(r => setTimeout(r, 600));
-    const handled = await evaluate(HANDLE_SAVE_DIALOG);
-    dialog = handled ? 'confirmed' : 'none';
-  } catch (e) {
-    dialog = 'failed';
-  }
+  // Strictly non-fatal: handle whichever post-Add modal appears (confirm-dialog
+  // or Save-Script name dialog). Fast poll — the confirm modal auto-cancels.
+  const dialog = await pollPostAddDialog();
 
   await new Promise(r => setTimeout(r, 2000));
   return { success: true, button_clicked: buttonClicked, dialog, source: 'dom_fallback' };
@@ -532,17 +575,12 @@ export async function smartCompile() {
     ? (click.kind === 'save_only' ? 'Pine Save (add-to-chart button not found)' : (click.label || click.kind))
     : 'keyboard_shortcut';
 
-  // Strictly non-fatal: confirm a "Save Script" name dialog if one appeared.
-  // Never throw / wedge CDP — record the outcome in the result instead.
-  let dialog = 'none';
-  try {
-    await new Promise(r => setTimeout(r, 600));
-    const handled = await evaluate(HANDLE_SAVE_DIALOG);
-    dialog = handled ? 'confirmed' : 'none';
-  } catch (e) {
-    dialog = 'failed';
-  }
+  // Strictly non-fatal: handle whichever post-Add modal appears (confirm-dialog
+  // or Save-Script name dialog). Fast poll — the confirm modal auto-cancels.
+  const dialog = await pollPostAddDialog();
 
+  // Only AFTER dialog handling has resolved: let the new study settle, then
+  // sample studiesAfter. Sampling earlier would race the confirm-dialog add.
   await new Promise(r => setTimeout(r, 2500));
 
   const errors = await evaluate(`
