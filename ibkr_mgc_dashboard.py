@@ -120,7 +120,12 @@ def mgc_status():
     pid = bot_pid()
     return dict(running=pid is not None, pid=pid, filter_mode=fm, contract=contract,
                 denver=now.strftime("%H:%M MT"), session=sess,
-                equity=rt.get("equity",3500), daily_pnl=rt.get("daily_pnl",0),
+                equity=rt.get("equity",3500),
+                realized_pnl=rt.get("realized_pnl", 0),
+                unrealized_pnl=rt.get("unrealized_pnl", 0),
+                account=rt.get("account", "—"),
+                mkt_price=rt.get("mkt_price"),
+                daily_pnl=rt.get("daily_pnl",0),
                 trades_today=rt.get("trades_today",0),
                 active_side=rt.get("active_side",""),
                 active_entry=rt.get("active_entry_price"),
@@ -252,6 +257,34 @@ async def eth_fills(wallet: str = ""):
     except Exception as e:
         return {"ok": False, "error": str(e), "trades": [], "metrics": {}}
 
+@app.get("/api/eth/position")
+async def eth_position(wallet: str = ""):
+    if not wallet:
+        return {"ok": False, "position": None}
+    try:
+        async with httpx.AsyncClient(timeout=10) as c:
+            health = (await c.get(f"{ETH_BOT_URL}/health")).json()
+            hl_url = health.get("api_url", "https://api.hyperliquid-testnet.xyz")
+            state = (await c.post(f"{hl_url}/info", json={"type": "clearinghouseState", "user": wallet})).json()
+        positions = [p["position"] for p in state.get("assetPositions", [])
+                     if p.get("position", {}).get("coin") == "ETH"
+                     and abs(float(p["position"].get("szi", 0))) > 0.0001]
+        if not positions:
+            return {"ok": True, "position": None}
+        p = positions[0]
+        szi = float(p["szi"])
+        return {"ok": True, "position": {
+            "side": "Long" if szi > 0 else "Short",
+            "size": abs(szi),
+            "entry_price": float(p.get("entryPx", 0)),
+            "unrealized_pnl": float(p.get("unrealizedPnl", 0)),
+            "roe": float(p.get("returnOnEquity", 0)) * 100,
+            "liq_price": float(p.get("liquidationPx", 0)),
+            "leverage": p.get("leverage", {}).get("value", "—"),
+        }}
+    except Exception as e:
+        return {"ok": False, "position": None, "error": str(e)}
+
 # ── WebSocket — MGC live log ───────────────────────────────────────────────────
 
 @app.websocket("/ws/mgc-log")
@@ -364,8 +397,12 @@ select,input{background:#1a1a1a;color:#e0e0e0;border:1px solid #2a2a2a;border-ra
       <div class="row"><span class="lbl">Denver Time</span><span class="val" id="m-time">—</span></div>
     </div>
     <div class="card">
-      <h2>Account</h2>
-      <div class="row"><span class="lbl">Equity</span><span class="val g" id="m-eq">—</span></div>
+      <h2>IBKR Account</h2>
+      <div class="row"><span class="lbl">Account</span><span class="val dim" id="m-acct">—</span></div>
+      <div class="row"><span class="lbl">Net Liquidation</span><span class="val g" id="m-eq">—</span></div>
+      <div class="row"><span class="lbl">Realized P&L</span><span class="val" id="m-rpnl">—</span></div>
+      <div class="row"><span class="lbl">Unrealized P&L</span><span class="val" id="m-upnl">—</span></div>
+      <div class="row"><span class="lbl">MGC Mark Price</span><span class="val" id="m-mktpx">—</span></div>
       <div class="row"><span class="lbl">Daily P&L</span><span class="val" id="m-dpnl">—</span></div>
       <div class="row"><span class="lbl">Trades Today</span><span class="val" id="m-tt">—</span></div>
       <div id="m-posbox" style="display:none" class="ap">
@@ -461,6 +498,20 @@ select,input{background:#1a1a1a;color:#e0e0e0;border:1px solid #2a2a2a;border-ra
         <button class="btn bpu" onclick="eCtrl('/api/eth/unblock')">⟳ Unblock</button>
       </div>
       <div class="msg" id="e-msg"></div>
+    </div>
+    <div class="card">
+      <h2>Open Position</h2>
+      <div id="e-pos-none" class="dim" style="font-size:10px;padding:4px 0">No open position</div>
+      <div id="e-pos-box" style="display:none">
+        <div class="row"><span class="lbl">Side</span><span class="val" id="e-pos-side">—</span></div>
+        <div class="row"><span class="lbl">Size</span><span class="val" id="e-pos-size">—</span></div>
+        <div class="row"><span class="lbl">Entry Price</span><span class="val" id="e-pos-entry">—</span></div>
+        <div class="row"><span class="lbl">Mark Price</span><span class="val" id="e-pos-mark">—</span></div>
+        <div class="row"><span class="lbl">Unrealized P&L</span><span class="val" id="e-pos-upnl">—</span></div>
+        <div class="row"><span class="lbl">ROE</span><span class="val" id="e-pos-roe">—</span></div>
+        <div class="row"><span class="lbl">Liq. Price</span><span class="val r" id="e-pos-liq">—</span></div>
+        <div class="row"><span class="lbl">Leverage</span><span class="val" id="e-pos-lev">—</span></div>
+      </div>
     </div>
     <div class="card">
       <h2>Trade History Config</h2>
@@ -607,6 +658,7 @@ async function pollMGC(){
     const badge=run?'<span class="badge bg">RUNNING</span>':'<span class="badge br">STOPPED</span>';
     ['m-status','b-m-status'].forEach(id=>{const e=document.getElementById(id);if(e)e.innerHTML=badge;});
     set('m-pid',s.pid||'—');
+    set('m-acct',s.account||'—');
     set('m-contract',s.contract); set('b-m-contract',s.contract);
     set('m-filter',s.filter_mode); set('b-m-filter',s.filter_mode);
     set('m-time',s.denver);
@@ -614,6 +666,11 @@ async function pollMGC(){
     ['m-session','b-m-session'].forEach(id=>{const e=document.getElementById(id);if(e)e.innerHTML=sb;});
     const eq='$'+s.equity.toLocaleString('en-US',{minimumFractionDigits:2});
     set('m-eq',eq); set('b-m-eq',eq);
+    const rp=(s.realized_pnl||0);
+    setC('m-rpnl',(rp>=0?'+':'')+'$'+rp.toFixed(2),rp>0?'val g':rp<0?'val r':'val dim');
+    const up=(s.unrealized_pnl||0);
+    setC('m-upnl',(up>=0?'+':'')+'$'+up.toFixed(2),up>0?'val g':up<0?'val r':'val dim');
+    set('m-mktpx',s.mkt_price?'$'+s.mkt_price.toFixed(2):'—');
     const dp=(s.daily_pnl||0); const dpstr=(dp>=0?'+':'')+' $'+dp.toFixed(2);
     setC('m-dpnl',dpstr,dp>0?'val g':dp<0?'val r':'val dim');
     setC('b-m-dpnl',dpstr,dp>0?'val g':dp<0?'val r':'val dim');
@@ -676,9 +733,32 @@ async function pollETH(){
     set('e-blocked',bl); set('b-e-blocked',bl);
     set('e-reason',s.block_reason||'—');
   }catch(e){}
-  // Fetch fills if wallet configured
+  // Fetch open position
   const wallet=localStorage.getItem('eth_wallet')||'';
   if(!wallet) return;
+  try{
+    const pr=await fetch('/api/eth/position?wallet='+encodeURIComponent(wallet));
+    const pd=await pr.json();
+    const pos=pd.position;
+    const posBox=document.getElementById('e-pos-box');
+    const posNone=document.getElementById('e-pos-none');
+    if(pos&&posBox&&posNone){
+      posBox.style.display='block'; posNone.style.display='none';
+      const sc=pos.side==='Long'?'g':'r';
+      set('e-pos-side',`<span class="${sc}">${pos.side.toUpperCase()}</span>`);
+      set('e-pos-size',pos.size.toFixed(4)+' ETH');
+      set('e-pos-entry','$'+pos.entry_price.toFixed(2));
+      set('e-pos-mark','—');
+      const upnl=pos.unrealized_pnl;
+      set('e-pos-upnl',(upnl>=0?'+':'')+'$'+upnl.toFixed(2),upnl>=0?'val g':'val r');
+      set('e-pos-roe',(pos.roe>=0?'+':'')+pos.roe.toFixed(2)+'%',pos.roe>=0?'val g':'val r');
+      set('e-pos-liq','$'+pos.liq_price.toFixed(2));
+      set('e-pos-lev',pos.leverage+'x');
+    } else if(posBox&&posNone){
+      posBox.style.display='none'; posNone.style.display='block';
+    }
+  }catch(e){}
+  // Fetch fills
   try{
     const r=await fetch('/api/eth/fills?wallet='+encodeURIComponent(wallet));
     const d=await r.json();

@@ -783,8 +783,27 @@ class MGCBot:
     def _write_runtime(self):
         """Write live state for the dashboard to read."""
         s = self.state
+        # Pull account data from IBKR portfolio
+        realized_pnl = 0.0
+        unrealized_pnl = 0.0
+        account_id = ""
+        mkt_price = None
+        try:
+            items = self.ib.portfolio()
+            for item in items:
+                realized_pnl   += item.realizedPNL or 0.0
+                unrealized_pnl += item.unrealizedPNL or 0.0
+                account_id      = item.account or account_id
+                if item.contract.symbol == "MGC":
+                    mkt_price = round(item.marketPrice, 2) if item.marketPrice else None
+        except Exception:
+            pass
         runtime = dict(
             equity=round(s.equity, 2),
+            realized_pnl=round(realized_pnl, 2),
+            unrealized_pnl=round(unrealized_pnl, 2),
+            account=account_id,
+            mkt_price=mkt_price,
             active_side=s.active_side,
             active_entry_price=round(s.active_entry_price, 2) if s.active_side else None,
             active_stop=round(s.active_stop, 2) if s.active_side else None,
