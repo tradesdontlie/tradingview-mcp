@@ -89,18 +89,79 @@ export async function manageIndicator({ action, indicator, entity_id, inputs: in
   const inputs = inputsRaw ? (typeof inputsRaw === 'string' ? JSON.parse(inputsRaw) : inputsRaw) : undefined;
 
   if (action === 'add') {
-    const inputArr = inputs ? Object.entries(inputs).map(([k, v]) => ({ id: k, value: v })) : [];
+    if (inputs && (typeof inputs !== 'object' || Array.isArray(inputs))) {
+      throw new Error('inputs must be an object keyed by input id, e.g. { "length": 200 }');
+    }
     const before = await evaluate(`${CHART_API}.getAllStudies().map(function(s) { return s.id; })`);
+    // IMPORTANT: create the study with NO custom inputs. createStudy's 4th arg expects positional
+    // input VALUES (e.g. [200]) or a keyed object — NOT an array of {id,value} objects. Passing the
+    // wrong shape corrupts the study's input registration: getInputValues() comes back empty and the
+    // study silently falls back to its defaults (e.g. MA length 9 instead of 200). We instead create
+    // clean — which initializes inputs correctly — then apply overrides by id via setInputValues,
+    // and finally re-read to return the values that ACTUALLY took. This makes the tool self-verifying
+    // rather than reporting a false "success".
     await evaluate(`
       (function() {
         var chart = ${CHART_API};
-        chart.createStudy(${safeString(indicator)}, false, false, ${JSON.stringify(inputArr)});
+        chart.createStudy(${safeString(indicator)}, false, false, []);
       })()
     `);
     await new Promise(r => setTimeout(r, 1500));
     const after = await evaluate(`${CHART_API}.getAllStudies().map(function(s) { return s.id; })`);
     const newIds = (after || []).filter(id => !(before || []).includes(id));
-    return { success: newIds.length > 0, action: 'add', indicator, entity_id: newIds[0] || null, new_study_count: newIds.length };
+    const entityId = newIds[0] || null;
+
+    let appliedInputs = null;
+    let warning = null;
+    if (entityId && inputs && Object.keys(inputs).length > 0) {
+      const overridesJson = JSON.stringify(inputs);
+      // Inputs may not be queryable for a moment after creation; retry a few times.
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const res = await evaluate(`
+          (function() {
+            var chart = ${CHART_API};
+            var study = chart.getStudyById(${safeString(entityId)});
+            if (!study) return { ready: false };
+            var cur = study.getInputValues();
+            if (!cur || cur.length === 0) return { ready: false };
+            var ov = ${overridesJson};
+            var applied = {}, unknown = [];
+            for (var key in ov) {
+              if (!Object.prototype.hasOwnProperty.call(ov, key)) continue;
+              var found = false;
+              for (var i = 0; i < cur.length; i++) {
+                if (cur[i].id === key) { cur[i].value = ov[key]; applied[key] = ov[key]; found = true; break; }
+              }
+              if (!found) unknown.push(key);
+            }
+            study.setInputValues(cur);
+            return { ready: true, applied: applied, unknown: unknown, inputs: study.getInputValues() };
+          })()
+        `);
+        if (res && res.ready) {
+          appliedInputs = res.inputs;
+          if (res.unknown && res.unknown.length) {
+            warning = 'Unknown input keys ignored (not valid for this indicator): ' + res.unknown.join(', ');
+          }
+          break;
+        }
+        await new Promise(r => setTimeout(r, 800));
+      }
+      if (appliedInputs === null) {
+        warning = 'Study created, but inputs could not be applied — it did not expose inputs in time. Retry indicator_set_inputs on entity_id ' + entityId + '.';
+      }
+    }
+
+    const out = {
+      success: newIds.length > 0,
+      action: 'add',
+      indicator,
+      entity_id: entityId,
+      new_study_count: newIds.length,
+      inputs: appliedInputs,
+    };
+    if (warning) out.warning = warning;
+    return out;
   } else if (action === 'remove') {
     if (!entity_id) throw new Error('entity_id required for remove action. Use chart_get_state to find study IDs.');
     await evaluate(`
