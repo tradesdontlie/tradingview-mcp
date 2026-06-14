@@ -159,6 +159,67 @@ export async function uiState() {
   return { success: true, ...state };
 }
 
+// Run a PowerShell script via -EncodedCommand (base64 UTF-16LE) to sidestep all
+// cmd.exe/PowerShell quoting issues. Returns trimmed stdout.
+function runPowerShell(script, timeout = 15000) {
+  const b64 = Buffer.from(script, 'utf16le').toString('base64');
+  return execSync(`powershell -NoProfile -NonInteractive -EncodedCommand ${b64}`, { timeout }).toString().trim();
+}
+
+// Detect a Microsoft Store / Appx install of TradingView Desktop and return its
+// AppUserModelID (PackageFamilyName!AppId), or null if there is no Store install.
+// Store builds live under C:\Program Files\WindowsApps (ACL-locked) and cannot be
+// started by exe path, so they need a different launch path entirely.
+function detectWindowsStoreAumid() {
+  const script = `
+$ErrorActionPreference = 'SilentlyContinue'
+$p = Get-AppxPackage -Name 'TradingView*' | Select-Object -First 1
+if ($p) {
+  $app = (Get-AppxPackageManifest $p.PackageFullName).Package.Applications.Application
+  if ($app -is [array]) { $app = $app[0] }
+  Write-Output ("{0}!{1}" -f $p.PackageFamilyName, $app.Id)
+}`;
+  try {
+    const out = runPowerShell(script, 10000);
+    const line = out.split(/\r?\n/).map(s => s.trim()).find(s => s.includes('!'));
+    return line || null;
+  } catch {
+    return null;
+  }
+}
+
+// Launch a packaged (Store/Appx) app WITH command-line arguments. A packaged app
+// can't be spawned by exe path, so we activate it through its AUMID via the
+// IApplicationActivationManager COM API, which forwards the args to the process.
+// Must run non-elevated: packaged apps cannot be activated from an elevated context.
+// Returns the new process id.
+function launchWindowsStore(aumid, cdpPort) {
+  const script = `
+$ErrorActionPreference = 'Stop'
+$code = @"
+using System; using System.Runtime.InteropServices;
+public enum ActivateOptions { None = 0 }
+[ComImport, Guid("2e941141-7f97-4756-ba1d-9decde894a3d"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+public interface IApplicationActivationManager {
+  int ActivateApplication([In] string a, [In] string args, [In] ActivateOptions o, [Out] out uint pid);
+  int ActivateForFile([In] string a, [In] IntPtr i, [In] string v, [Out] out uint pid);
+  int ActivateForProtocol([In] string a, [In] IntPtr i, [Out] out uint pid);
+}
+[ComImport, Guid("45BA127D-10A8-46EA-8AB7-56EA9078943C")] public class ApplicationActivationManager { }
+public static class TvLauncher {
+  public static uint Launch(string aumid, string args) {
+    var m = (IApplicationActivationManager) new ApplicationActivationManager();
+    uint pid; m.ActivateApplication(aumid, args, ActivateOptions.None, out pid); return pid;
+  }
+}
+"@
+Add-Type -TypeDefinition $code
+[TvLauncher]::Launch('${aumid}', '--remote-debugging-port=${cdpPort}')`;
+  const out = runPowerShell(script, 30000);
+  const pid = parseInt(out.split(/\r?\n/).map(s => s.trim()).filter(Boolean).pop(), 10);
+  return Number.isNaN(pid) ? null : pid;
+}
+
 export async function launch({ port, kill_existing } = {}) {
   const cdpPort = port || 9222;
   const killFirst = kill_existing !== false;
@@ -207,20 +268,36 @@ export async function launch({ port, kill_existing } = {}) {
     } catch { /* ignore */ }
   }
 
-  if (!tvPath) {
-    throw new Error(`TradingView not found on ${platform}. Searched: ${candidates.join(', ')}. Launch manually with: /path/to/TradingView --remote-debugging-port=${cdpPort}`);
+  // Windows fallback: no classic exe found — check for a Microsoft Store / Appx install,
+  // which can't be located by path and must be launched via AUMID activation.
+  let storeAumid = null;
+  if (!tvPath && platform === 'win32') {
+    storeAumid = detectWindowsStoreAumid();
+  }
+
+  if (!tvPath && !storeAumid) {
+    const storeNote = platform === 'win32' ? ' (no Microsoft Store install found either)' : '';
+    throw new Error(`TradingView not found on ${platform}${storeNote}. Searched: ${candidates.join(', ')}. Launch manually with: /path/to/TradingView --remote-debugging-port=${cdpPort}`);
   }
 
   if (killFirst) {
     try {
+      // taskkill by image name covers both classic and Store builds (both run as TradingView.exe).
       if (platform === 'win32') execSync('taskkill /F /IM TradingView.exe', { timeout: 5000 });
       else execSync('pkill -f TradingView', { timeout: 5000 });
       await new Promise(r => setTimeout(r, 1500));
     } catch { /* may not be running */ }
   }
 
-  const child = spawn(tvPath, [`--remote-debugging-port=${cdpPort}`], { detached: true, stdio: 'ignore' });
-  child.unref();
+  let pid;
+  if (storeAumid) {
+    pid = launchWindowsStore(storeAumid, cdpPort);
+  } else {
+    const child = spawn(tvPath, [`--remote-debugging-port=${cdpPort}`], { detached: true, stdio: 'ignore' });
+    child.unref();
+    pid = child.pid;
+  }
+  const launchTarget = tvPath || storeAumid;
 
   for (let i = 0; i < 15; i++) {
     await new Promise(r => setTimeout(r, 1000));
@@ -236,7 +313,8 @@ export async function launch({ port, kill_existing } = {}) {
       if (ready) {
         const info = JSON.parse(ready);
         return {
-          success: true, platform, binary: tvPath, pid: child.pid,
+          success: true, platform, binary: launchTarget, pid,
+          launch_method: storeAumid ? 'appx-activation' : 'spawn',
           cdp_port: cdpPort, cdp_url: `http://localhost:${cdpPort}`,
           browser: info.Browser, user_agent: info['User-Agent'],
         };
@@ -245,7 +323,9 @@ export async function launch({ port, kill_existing } = {}) {
   }
 
   return {
-    success: true, platform, binary: tvPath, pid: child.pid, cdp_port: cdpPort, cdp_ready: false,
+    success: true, platform, binary: launchTarget, pid,
+    launch_method: storeAumid ? 'appx-activation' : 'spawn',
+    cdp_port: cdpPort, cdp_ready: false,
     warning: 'TradingView launched but CDP not responding yet. It may still be loading. Try tv_health_check in a few seconds.',
   };
 }
