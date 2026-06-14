@@ -59,6 +59,48 @@ function buildGraphicsJS(collectionName, mapKey, filter) {
   `;
 }
 
+// Pine drawing objects (box.new/line.new/label.new/table.new) are only materialized
+// while the study is VISIBLE. A hidden study yields empty graphics collections, which
+// otherwise looks identical to "indicator draws nothing" — return an explicit warning
+// instead so the caller knows to toggle visibility rather than assume no data.
+function buildHiddenMatchJS(filter) {
+  return `
+    (function() {
+      try {
+        var chart = window.TradingViewApi._activeChartWidgetWV.value()._chartWidget;
+        var sources = chart.model().model().dataSources();
+        var filter = ${safeString(filter || '')};
+        var hidden = [];
+        for (var si = 0; si < sources.length; si++) {
+          var s = sources[si];
+          if (!s.metaInfo) continue;
+          try {
+            var meta = s.metaInfo();
+            var name = meta.description || meta.shortDescription || '';
+            if (!name) continue;
+            if (filter && name.indexOf(filter) === -1) continue;
+            var vis = true; try { vis = s.isVisible(); } catch(e) {}
+            if (!vis) hidden.push(name);
+          } catch(e) {}
+        }
+        return hidden;
+      } catch(e) { return []; }
+    })()
+  `;
+}
+
+async function withHiddenWarning(result, filter) {
+  if (result.study_count > 0) return result;
+  const hidden = await evaluate(buildHiddenMatchJS(filter));
+  if (hidden && hidden.length) {
+    result.hidden_studies = hidden;
+    result.warning = `Matched ${hidden.length} indicator(s) but they are HIDDEN (visibility toggled off): `
+      + `${hidden.join(', ')}. Their drawings are not materialized while hidden — make them visible `
+      + `(indicator_toggle_visibility) and retry.`;
+  }
+  return result;
+}
+
 export async function getOhlcv({ count, summary } = {}) {
   const limit = Math.min(count || 100, MAX_OHLCV_BARS);
   let data;
@@ -243,6 +285,50 @@ export async function getEquity() {
 }
 
 export async function getQuote({ symbol } = {}) {
+  // The chart holds bars for ONE symbol only. If the caller asks for a DIFFERENT
+  // symbol, reading chart bars would silently return the wrong instrument — so we
+  // detect that case and fetch a real snapshot from TradingView's quote endpoint
+  // instead (same-origin from the chart page; does not disturb the active chart).
+  const activeSym = await evaluate(
+    `(function(){ try { return String(${CHART_API}.symbol()); } catch(e){ return ''; } })()`
+  );
+  const reqSym = symbol ? String(symbol) : '';
+  const norm = (x) => String(x).toUpperCase();
+  const tail = (x) => norm(x).split(':').pop();
+  const sameSymbol = !reqSym
+    || norm(reqSym) === norm(activeSym)
+    || norm(activeSym).endsWith(':' + norm(reqSym))
+    || tail(activeSym) === tail(reqSym);
+
+  if (reqSym && !sameSymbol) {
+    const snap = await evaluateAsync(`
+      (async function(){
+        try {
+          var url = 'https://scanner.tradingview.com/symbol?symbol=' + encodeURIComponent(${safeString(reqSym)})
+            + '&fields=' + encodeURIComponent('close,open,high,low,volume,change,change_abs,description,exchange,type')
+            + '&no_404=true';
+          var r = await fetch(url, { credentials: 'omit' });
+          if (!r.ok) return { __error: 'HTTP ' + r.status };
+          return await r.json();
+        } catch(e) { return { __error: String((e && e.message) || e) }; }
+      })()
+    `);
+    if (!snap || snap.__error != null || snap.close == null) {
+      throw new Error(
+        `Could not retrieve quote for "${reqSym}"` +
+        (snap && snap.__error ? ` (${snap.__error})` : '') +
+        `. Active chart is "${activeSym}". Cross-symbol quotes use TradingView's snapshot API ` +
+        `and need an exchange-qualified symbol (e.g. TVC:DXY, TVC:US10Y, OANDA:XAUUSD).`
+      );
+    }
+    return {
+      success: true, symbol: reqSym, source: 'snapshot',
+      open: snap.open, high: snap.high, low: snap.low, close: snap.close, last: snap.close,
+      change: snap.change, change_abs: snap.change_abs, volume: snap.volume,
+      description: snap.description, exchange: snap.exchange, type: snap.type,
+    };
+  }
+
   const data = await evaluate(`
     (function() {
       var api = ${CHART_API};
@@ -274,7 +360,7 @@ export async function getQuote({ symbol } = {}) {
     })()
   `);
   if (!data || (!data.last && !data.close)) throw new Error('Could not retrieve quote. The chart may still be loading.');
-  return { success: true, ...data };
+  return { success: true, source: 'chart', ...data };
 }
 
 export async function getDepth() {
@@ -360,7 +446,7 @@ export async function getStudyValues() {
 export async function getPineLines({ study_filter, verbose } = {}) {
   const filter = study_filter || '';
   const raw = await evaluate(buildGraphicsJS('dwglines', 'lines', filter));
-  if (!raw || raw.length === 0) return { success: true, study_count: 0, studies: [] };
+  if (!raw || raw.length === 0) return withHiddenWarning({ success: true, study_count: 0, studies: [] }, filter);
 
   const studies = raw.map(s => {
     const hLevels = [];
@@ -384,7 +470,7 @@ export async function getPineLines({ study_filter, verbose } = {}) {
 export async function getPineLabels({ study_filter, max_labels, verbose } = {}) {
   const filter = study_filter || '';
   const raw = await evaluate(buildGraphicsJS('dwglabels', 'labels', filter));
-  if (!raw || raw.length === 0) return { success: true, study_count: 0, studies: [] };
+  if (!raw || raw.length === 0) return withHiddenWarning({ success: true, study_count: 0, studies: [] }, filter);
 
   const limit = max_labels || 50;
   const studies = raw.map(s => {
@@ -404,7 +490,7 @@ export async function getPineLabels({ study_filter, max_labels, verbose } = {}) 
 export async function getPineTables({ study_filter } = {}) {
   const filter = study_filter || '';
   const raw = await evaluate(buildGraphicsJS('dwgtablecells', 'tableCells', filter));
-  if (!raw || raw.length === 0) return { success: true, study_count: 0, studies: [] };
+  if (!raw || raw.length === 0) return withHiddenWarning({ success: true, study_count: 0, studies: [] }, filter);
 
   const studies = raw.map(s => {
     const tables = {};
@@ -432,7 +518,7 @@ export async function getPineTables({ study_filter } = {}) {
 export async function getPineBoxes({ study_filter, verbose } = {}) {
   const filter = study_filter || '';
   const raw = await evaluate(buildGraphicsJS('dwgboxes', 'boxes', filter));
-  if (!raw || raw.length === 0) return { success: true, study_count: 0, studies: [] };
+  if (!raw || raw.length === 0) return withHiddenWarning({ success: true, study_count: 0, studies: [] }, filter);
 
   const studies = raw.map(s => {
     const zones = [];
