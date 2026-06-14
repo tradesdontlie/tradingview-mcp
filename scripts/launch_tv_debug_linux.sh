@@ -2,7 +2,7 @@
 # Launch TradingView Desktop on Linux with Chrome DevTools Protocol enabled
 # Usage: ./scripts/launch_tv_debug_linux.sh [port]
 
-PORT="${1:-9222}"
+PORT="${1:-9223}"
 
 # Auto-detect TradingView install location
 APP=""

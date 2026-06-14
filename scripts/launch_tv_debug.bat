@@ -3,7 +3,7 @@ REM Launch TradingView Desktop on Windows with Chrome DevTools Protocol enabled
 REM Usage: scripts\launch_tv_debug.bat [port]
 
 set PORT=%1
-if "%PORT%"=="" set PORT=9222
+if "%PORT%"=="" set PORT=9223
 
 REM Kill existing TradingView instances
 taskkill /F /IM TradingView.exe >nul 2>&1

@@ -2,7 +2,7 @@
 # Launch TradingView Desktop on macOS with Chrome DevTools Protocol enabled
 # Usage: ./scripts/launch_tv_debug_mac.sh [port]
 
-PORT="${1:-9222}"
+PORT="${1:-9223}"
 
 # Auto-detect TradingView install location
 APP=""

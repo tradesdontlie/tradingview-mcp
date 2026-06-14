@@ -3,10 +3,10 @@
 import CDP from 'chrome-remote-interface';
 import { writeFileSync } from 'fs';
 
-const targets = await (await fetch('http://localhost:9222/json/list')).json();
+const targets = await (await fetch('http://localhost:9223/json/list')).json();
 const t = targets.find(t => t.url?.includes('tradingview.com'));
 if (!t) { console.error('No TradingView target'); process.exit(1); }
-const c = await CDP({ host: 'localhost', port: 9222, target: t.id });
+const c = await CDP({ host: 'localhost', port: 9223, target: t.id });
 await c.Runtime.enable();
 
 const src = (await c.Runtime.evaluate({
