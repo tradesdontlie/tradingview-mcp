@@ -1,12 +1,22 @@
 /**
  * Core data access logic.
  */
-import { evaluate, evaluateAsync, KNOWN_PATHS, safeString } from '../connection.js';
+import { evaluate as _evaluate, evaluateAsync as _evaluateAsync, KNOWN_PATHS, safeString } from '../connection.js';
 
 const MAX_OHLCV_BARS = 500;
 const MAX_TRADES = 20;
 const CHART_API = KNOWN_PATHS.chartApi;
 const BARS_PATH = KNOWN_PATHS.mainSeriesBars;
+
+// Allow tests to inject a mock evaluate (mirrors the DI pattern in chart.js).
+const evaluate = _evaluate;
+const evaluateAsync = _evaluateAsync;
+function _resolve(deps) {
+  return {
+    evaluate: deps?.evaluate || _evaluate,
+    evaluateAsync: deps?.evaluateAsync || _evaluateAsync,
+  };
+}
 
 function buildGraphicsJS(collectionName, mapKey, filter) {
   return `
@@ -242,17 +252,26 @@ export async function getEquity() {
   return { success: true, data_points: equity?.data?.length || 0, source: equity?.source, data: equity?.data || [], equity_summary: equity?.equity_summary, note: equity?.note, error: equity?.error };
 }
 
-export async function getQuote({ symbol } = {}) {
+export async function getQuote({ symbol, _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
   const data = await evaluate(`
     (function() {
       var api = ${CHART_API};
-      var sym = ${safeString(symbol || '')};
-      if (!sym) { try { sym = api.symbol(); } catch(e) {} }
-      if (!sym) { try { sym = api.symbolExt().symbol; } catch(e) {} }
+      var chartSym = '';
+      try { chartSym = api.symbol() || ''; } catch(e) {}
+      if (!chartSym) { try { chartSym = (api.symbolExt() || {}).symbol || ''; } catch(e) {} }
+      // bars/symbolExt below always come from the ACTIVE chart — if the caller
+      // asked for a different symbol, refuse rather than mislabel another
+      // ticker's prices (quote_get cannot fetch arbitrary symbols).
+      var requested = ${safeString(symbol || '')};
+      var norm = function(s) { return String(s).toUpperCase().split(':').pop(); };
+      if (requested && chartSym && norm(requested) !== norm(chartSym)) {
+        return { symbol_mismatch: true, requested: requested, chart_symbol: chartSym };
+      }
       var ext = {};
       try { ext = api.symbolExt() || {}; } catch(e) {}
+      var quote = { symbol: chartSym || requested };
       var bars = ${BARS_PATH};
-      var quote = { symbol: sym };
       if (bars && typeof bars.lastIndex === 'function') {
         var last = bars.valueAt(bars.lastIndex());
         if (last) { quote.time = last[0]; quote.open = last[1]; quote.high = last[2]; quote.low = last[3]; quote.close = last[4]; quote.last = last[4]; quote.volume = last[5] || 0; }
@@ -273,6 +292,9 @@ export async function getQuote({ symbol } = {}) {
       return quote;
     })()
   `);
+  if (data && data.symbol_mismatch) {
+    throw new Error(`Chart is on ${data.chart_symbol}, not ${data.requested}. quote_get reads the active chart only — call chart_set_symbol("${data.requested}") first, or omit symbol to quote the current chart.`);
+  }
   if (!data || (!data.last && !data.close)) throw new Error('Could not retrieve quote. The chart may still be loading.');
   return { success: true, ...data };
 }
