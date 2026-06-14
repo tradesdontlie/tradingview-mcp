@@ -173,6 +173,8 @@ export async function launch({ port, kill_existing } = {}) {
       `${process.env.LOCALAPPDATA}\\TradingView\\TradingView.exe`,
       `${process.env.PROGRAMFILES}\\TradingView\\TradingView.exe`,
       `${process.env['PROGRAMFILES(X86)']}\\TradingView\\TradingView.exe`,
+      // Microsoft Store install (WindowsApps) — versioned folder, discovered via Get-Process
+      `${process.env.PROGRAMFILES}\\WindowsApps\\TradingView.Desktop_3.2.0.7916_x64__n534cwy3pjxzj\\TradingView.exe`,
     ],
     linux: [
       '/opt/TradingView/tradingview',
