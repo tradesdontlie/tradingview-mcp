@@ -67,7 +67,7 @@ export async function connect() {
     try {
       const target = await findChartTarget();
       if (!target) {
-        throw new Error('No TradingView chart target found. Is TradingView open with a chart?');
+        throw new Error('No TradingView chart is open. The desktop app may be showing the "New Tab" launcher (common right after an update) — open or click into a chart tab, then retry.');
       }
       targetInfo = target;
       client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: target.id });
@@ -90,10 +90,38 @@ export async function connect() {
 async function findChartTarget() {
   const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
   const targets = await resp.json();
-  // Prefer targets with tradingview.com/chart in the URL
-  return targets.find(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
-    || targets.find(t => t.type === 'page' && /tradingview/i.test(t.url))
-    || null;
+  const pages = targets.filter(t => t.type === 'page');
+
+  // 1. Strong match: a real TradingView chart URL. Works on the 2.9.x web URL
+  //    (https://www.tradingview.com/chart/...) and the 3.2.x desktop, which still
+  //    loads the chart from that same URL inside its Electron shell.
+  const byUrl = pages.find(t => /tradingview\.com\/chart/i.test(t.url || ''));
+  if (byUrl) return byUrl;
+
+  // 2. Fallback: probe each page for a live chart API. We deliberately do NOT
+  //    match "tradingview" loosely in the URL: the 3.2.x desktop wraps the app in
+  //    file://.../TradingView.Desktop_x.y.z/.../app.asar/app/{new-tab,window,...}
+  //    shell pages whose PATHS contain "TradingView" but expose no chart API.
+  //    Matching those connected us to the New Tab launcher and produced confusing
+  //    "TradingViewApi is undefined" errors. Detect the real chart by the API.
+  for (const t of pages) {
+    if (!t.webSocketDebuggerUrl) continue;
+    let probe;
+    try {
+      probe = await CDP({ host: CDP_HOST, port: CDP_PORT, target: t.id });
+      const { result } = await probe.Runtime.evaluate({
+        expression: "typeof window.TradingViewApi !== 'undefined' && !!(window.TradingViewApi && window.TradingViewApi._activeChartWidgetWV)",
+        returnByValue: true,
+      });
+      if (result && result.value === true) return t;
+    } catch {
+      // unreachable / detached target — skip it
+    } finally {
+      if (probe) { try { await probe.close(); } catch {} }
+    }
+  }
+
+  return null;
 }
 
 export async function getTargetInfo() {

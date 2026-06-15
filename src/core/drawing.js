@@ -7,6 +7,12 @@ function _resolve(deps) {
   return { evaluate: deps?.evaluate || _evaluate, getChartApi: deps?.getChartApi || _getChartApi };
 }
 
+// listDrawings/getProperties/removeOne/clearAll call bare evaluate()/getChartApi(),
+// but the module only imports them under the _-prefixed aliases. Bind the bare
+// names so those functions work (drawShape keeps using _resolve for dep injection).
+const evaluate = _evaluate;
+const getChartApi = _getChartApi;
+
 export async function drawShape({ shape, point, point2, overrides: overridesRaw, text, _deps }) {
   const { evaluate, getChartApi } = _resolve(_deps);
   const overrides = overridesRaw ? (typeof overridesRaw === 'string' ? JSON.parse(overridesRaw) : overridesRaw) : {};
