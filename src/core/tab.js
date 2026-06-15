@@ -2,7 +2,7 @@
  * Core tab management logic.
  * Controls TradingView Desktop tabs via CDP and Electron keyboard shortcuts.
  */
-import { getClient, evaluate } from '../connection.js';
+import { getClient, evaluate, connectToTarget } from '../connection.js';
 
 const CDP_HOST = 'localhost';
 const CDP_PORT = 9222;
@@ -16,6 +16,10 @@ export async function list() {
 
   const tabs = targets
     .filter(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
+    // Sort by chart_id so a given index always maps to the same tab. The raw
+    // /json/list order is recency-based and reshuffles whenever a tab is
+    // activated, which made indices unstable across switchTab calls.
+    .sort((a, b) => (a.url || '').localeCompare(b.url || ''))
     .map((t, i) => ({
       index: i,
       id: t.id,
@@ -95,10 +99,15 @@ export async function switchTab({ index }) {
 
   const target = tabs.tabs[idx];
 
-  // Use CDP Target.activateTarget to bring the tab to front
+  // Bring the tab to the UI front (so it paints), then repoint the CDP client
+  // to that target. Without the repoint, evaluate()/screenshot keep hitting the
+  // originally-connected tab no matter which one is activated.
   try {
-    const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/activate/${target.id}`);
-    const text = await resp.text();
+    await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/activate/${target.id}`);
+    // Give the renderer a moment to bring the activated tab to the foreground
+    // and paint before we capture from it.
+    await new Promise(r => setTimeout(r, 400));
+    await connectToTarget(target.id);
     return { success: true, action: 'switched', index: idx, tab_id: target.id, chart_id: target.chart_id };
   } catch (e) {
     throw new Error(`Failed to activate tab ${idx}: ${e.message}`);
