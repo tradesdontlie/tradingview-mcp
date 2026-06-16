@@ -173,8 +173,6 @@ export async function launch({ port, kill_existing } = {}) {
       `${process.env.LOCALAPPDATA}\\TradingView\\TradingView.exe`,
       `${process.env.PROGRAMFILES}\\TradingView\\TradingView.exe`,
       `${process.env['PROGRAMFILES(X86)']}\\TradingView\\TradingView.exe`,
-      // Windows Store (MSIX) install path — detected via Get-AppxPackage
-      '__STORE__',
     ],
     linux: [
       '/opt/TradingView/tradingview',
@@ -192,8 +190,7 @@ export async function launch({ port, kill_existing } = {}) {
   }
 
   // Resolve Windows Store (MSIX) app path via PowerShell
-  if (platform === 'win32' && (!tvPath || tvPath === '__STORE__')) {
-    tvPath = null;
+  if (platform === 'win32' && !tvPath) {
     try {
       const storeExe = execSync(
         'powershell -NoProfile -Command "(Get-AppxPackage | Where-Object { $_.Name -like \'*TradingView*\' } | Select-Object -First 1 -ExpandProperty InstallLocation) + \'\\TradingView.exe\'"',
@@ -238,9 +235,9 @@ export async function launch({ port, kill_existing } = {}) {
   let child;
   if (isStoreApp) {
     try {
-      // Get AUMID for the Store app
+      // Build AUMID in a single Get-AppxPackage call: PackageFamilyName!AppId
       const aumid = execSync(
-        'powershell -NoProfile -Command "(Get-AppxPackage | Where-Object { $_.Name -like \'*TradingView*\' } | Select-Object -First 1 | Get-AppxPackageManifest).Package.Applications.Application.Id | ForEach-Object { (Get-AppxPackage | Where-Object { $_.Name -like \'*TradingView*\' }).PackageFamilyName + \'!\' + $_ }"',
+        'powershell -NoProfile -Command "$p=Get-AppxPackage|Where-Object{$_.Name -like \'*TradingView*\'}|Select-Object -First 1;$id=(Get-AppxPackageManifest $p).Package.Applications.Application.Id;$p.PackageFamilyName+\'!\'+$id"',
         { timeout: 8000 }
       ).toString().trim();
       execSync(
@@ -249,8 +246,16 @@ export async function launch({ port, kill_existing } = {}) {
       );
       child = { pid: null, unref: () => {} };
     } catch (e) {
-      // Fallback: launch via explorer shell (no flags, but gets app open)
-      execSync('explorer.exe shell:AppsFolder\\TradingView.Desktop_n534cwy3pjxzj!TradingView.Desktop', { timeout: 5000 });
+      // Fallback: launch via explorer shell using the dynamically resolved AUMID
+      try {
+        const aumid = execSync(
+          'powershell -NoProfile -Command "$p=Get-AppxPackage|Where-Object{$_.Name -like \'*TradingView*\'}|Select-Object -First 1;$id=(Get-AppxPackageManifest $p).Package.Applications.Application.Id;$p.PackageFamilyName+\'!\'+$id"',
+          { timeout: 8000 }
+        ).toString().trim();
+        execSync(`explorer.exe shell:AppsFolder\\${aumid}`, { timeout: 5000 });
+      } catch {
+        execSync('explorer.exe shell:AppsFolder\\TradingView.Desktop_n534cwy3pjxzj!TradingView.Desktop', { timeout: 5000 });
+      }
       child = { pid: null, unref: () => {} };
     }
   } else {
