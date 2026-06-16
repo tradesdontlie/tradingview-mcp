@@ -129,7 +129,8 @@ async function main() {
 
   // --- Footprint + MA ---
   const fp = { conf:null, cumD:null, buyVol:null, sellVol:null, totalVol:null,
-    buyPct:null, div:null, buyStack:null, sellStack:null, vah:null, val:null, ver:null };
+    buyPct:null, div:null, buyStack:null, sellStack:null, vah:null, val:null, ver:null,
+    confShort:null, bias:null, confNet:null };
   const ma = { ma20: null, ma100: null };
 
   let fpFound = false;
@@ -138,6 +139,9 @@ async function main() {
     if (s.name.includes('Footprint Aggressor')) {
       fpFound = true;
       fp.conf      = parseNum(v['Confluence']);
+      fp.confShort = parseNum(v['Confluence Short']);  // chi co o ban BiDir
+      fp.bias      = parseNum(v['Bias']);              // 1=LONG -1=SHORT 0=NEUTRAL
+      fp.confNet   = parseNum(v['Conf Net']);
       fp.cumD      = parseNum(v['Cum Delta']);
       fp.buyVol    = parseNum(v['FP Buy Vol']);
       fp.sellVol   = parseNum(v['FP Sell Vol']);
@@ -260,9 +264,12 @@ async function main() {
   if (structure === 'UPTREND')   { mtfScore += 1; mtfNotes.push('D_UPTREND+1'); }
   if (structure === 'DOWNTREND') { mtfScore -= 2; mtfNotes.push('D_DOWNTREND-2'); }
 
+  // --- Huong (BiDir): tu fp.bias. null = ban cu long-only ---
+  const dir = fp.bias === 1 ? 'LONG' : fp.bias === -1 ? 'SHORT' : fp.bias === 0 ? 'NEUTRAL' : 'LONG_ONLY';
+
   // --- Compact output ---
   const out = {
-    ticker, price, timeframe, tf_confirmed: tfOk,
+    ticker, price, timeframe, tf_confirmed: tfOk, dir,
     symbol_confirmed: ok,
     date: bars[n-1]?.time ? new Date(bars[n-1].time * 1000).toISOString().slice(0,10) : new Date().toISOString().slice(0,10),
     ohlc_today: { o: todayBar?.open, h: todayBar?.high, l: todayBar?.low, c: todayBar?.close, vol: todayBar?.volume },
