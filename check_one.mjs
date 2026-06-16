@@ -75,12 +75,12 @@ function trailStatus(bars, sma20arr) {
   return { bars: results, status };
 }
 
-// TF mac dinh theo loai tai san — VN stock swing=D, XAUUSD & VN30F intraday=M5
+// TF mac dinh theo loai tai san — XAUUSD & VN30F intraday=M5, VN stock=H6 (loc volume thoa thuan, sach hon daily)
 function defaultTf(ticker) {
   const t = ticker.toUpperCase();
   if (t.includes('XAU')) return '5';
   if (t.includes('VN30') || t.includes('VN301')) return '5';
-  return 'D';
+  return '360';
 }
 
 async function main() {
