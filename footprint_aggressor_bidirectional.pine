@@ -1,0 +1,545 @@
+//@version=6
+indicator('Footprint Aggressor Analysis [Claude] v2 BiDir', overlay=false)
+
+// ─── Inputs ───────────────────────────────────────────────────────────────
+// XAUUSD: tickSize ~50 (≈$0.5/row neu mintick 0.01) | VN: 2 (≈100đ/row). Tinh chinh theo chart.
+tickSize = input.int(50,  'Ticks per Row (XAUUSD~50 / VN=2)', minval=1)
+vaPct    = input.int(70,  'Value Area %')
+impPct   = input.int(300, 'Imbalance Threshold %')
+topN     = input.int(8,   'Top N rows hiển thị',        minval=3, maxval=15)
+cumLen   = input.int(10,  'Cumulative Delta (N bars)',   minval=2, maxval=50)
+
+// ─── Footprint ────────────────────────────────────────────────────────────
+footprint reqFp = request.footprint(tickSize, vaPct, imbalance_percent=impPct)
+
+// ═══ § 1  BAR-LEVEL ══════════════════════════════════════════════════════
+float fpDelta    = na
+float fpBuyVol   = na
+float fpSellVol  = na
+float fpTotalVol = na
+float fpPocHigh  = na
+float fpPocLow   = na
+float fpVahHigh  = na
+float fpValLow   = na
+
+if not na(reqFp)
+    fpDelta    := reqFp.delta()
+    fpBuyVol   := reqFp.buy_volume()
+    fpSellVol  := reqFp.sell_volume()
+    fpTotalVol := reqFp.total_volume()
+    volume_row poc = reqFp.poc()
+    volume_row vah = reqFp.vah()
+    volume_row val = reqFp.val()
+    if not na(poc)
+        fpPocHigh := poc.up_price()
+        fpPocLow  := poc.down_price()
+    if not na(vah)
+        fpVahHigh := vah.up_price()
+    if not na(val)
+        fpValLow  := val.down_price()
+
+// ═══ § 2  CUMULATIVE DELTA ═══════════════════════════════════════════════
+float cumDelta = math.sum(nz(fpDelta), cumLen)
+float cumSlope = cumDelta - nz(cumDelta[3])
+bool  bearDiv  = close > nz(close[cumLen]) and cumDelta < nz(cumDelta[cumLen])
+bool  bullDiv  = close < nz(close[cumLen]) and cumDelta > nz(cumDelta[cumLen])
+
+// ═══ § 3  VOLUME EFFICIENCY RATIO ════════════════════════════════════════
+float barSpread = high - low
+float ver       = barSpread > 0 and not na(fpTotalVol) ? fpTotalVol / barSpread : na
+float avgVer    = ta.sma(ver, 20)
+float verRatio  = not na(avgVer) and avgVer > 0 ? math.round(ver / avgVer * 100) / 100 : na
+
+string verType = 'NORMAL'
+if na(verRatio)
+    verType := 'n/a'
+else if verRatio >= 1.5
+    verType := 'ABSORB'
+else if verRatio <= 0.8
+    verType := 'MOMENTUM'
+
+// ═══ § 4  IMB STACK COUNTER ══════════════════════════════════════════════
+int maxBuyStack  = 0
+int maxSellStack = 0
+int totBuyImb    = 0
+int totSellImb   = 0
+
+if not na(reqFp)
+    array<volume_row> allRows = reqFp.rows()
+    int nR   = allRows.size()
+    int curB = 0
+    int curS = 0
+    for i = 0 to nR - 1
+        volume_row r = allRows.get(i)
+        if r.has_buy_imbalance()
+            curB      += 1
+            curS       := 0
+            totBuyImb += 1
+        else if r.has_sell_imbalance()
+            curS       += 1
+            curB       := 0
+            totSellImb += 1
+        else
+            curB := 0
+            curS := 0
+        maxBuyStack  := math.max(maxBuyStack,  curB)
+        maxSellStack := math.max(maxSellStack, curS)
+
+// ═══ § 5  CONFLUENCE SCORE — BIDIRECTIONAL (LONG + SHORT) ════════════════
+float closePct   = barSpread > 0 ? (close - low) / barSpread * 100 : 50.0
+float volRatio   = ta.sma(volume, 20) > 0 ? volume / ta.sma(volume, 20) : 1.0
+float deltaRatio = not na(fpTotalVol) and fpTotalVol > 0 ? fpDelta / fpTotalVol * 100 : 0.0
+int   imbNet     = maxBuyStack - maxSellStack
+
+bool posDelta   = nz(fpDelta) > 0
+bool negDelta   = nz(fpDelta) < 0
+bool cumRising  = cumSlope > 0
+bool cumFalling = cumSlope < 0
+bool isAbsorb   = not na(verRatio) and verRatio >= 1.5
+bool isMomentum = not na(verRatio) and verRatio <= 0.8
+
+// ════════════════════════════════════════════════════════════════════════
+// ── LONG SIDE (giu nguyen logic goc) ────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════
+
+// VSA LONG (25): demand bar = close cao + vol; phat upthrust (close thap + vol cao)
+float sVSA = 0.0
+if closePct < 30.0 and volRatio >= 1.2
+    sVSA := -8.0
+else if closePct >= 60.0 and volRatio >= 1.0
+    sVSA := 25.0
+else if closePct >= 60.0 or (closePct >= 50.0 and volRatio >= 1.0)
+    sVSA := 15.0
+else if closePct >= 40.0 and volRatio >= 0.8
+    sVSA := 8.0
+else if closePct >= 30.0
+    sVSA := 3.0
+
+// Delta% LONG (25)
+float sDelt = 0.0
+if deltaRatio >= 15.0
+    sDelt := 25.0
+else if deltaRatio >= 8.0
+    sDelt := 20.0
+else if deltaRatio >= 3.0
+    sDelt := 14.0
+else if deltaRatio >= 0.0
+    if isAbsorb and cumRising
+        sDelt := 12.0
+    else if cumRising
+        sDelt := 7.0
+    else
+        sDelt := 3.0
+else if deltaRatio >= -5.0
+    sDelt := 0.0
+else
+    sDelt := -8.0
+
+// IMB Stack LONG (20)
+float sIMB = 0.0
+if maxBuyStack >= 3 and maxSellStack == 0
+    sIMB := 20.0
+else if maxBuyStack >= 3
+    sIMB := 14.0
+else if maxBuyStack == 2 and maxSellStack <= 1
+    sIMB := 12.0
+else if imbNet >= 2
+    sIMB := 10.0
+else if imbNet == 1
+    sIMB := 6.0
+else if imbNet == 0
+    sIMB := 3.0
+else if imbNet == -1
+    sIMB := -4.0
+else if imbNet == -2
+    sIMB := -8.0
+else
+    sIMB := -15.0
+
+// VER LONG (20)
+float sVER = 8.0
+if isAbsorb
+    if posDelta and cumRising and closePct >= 50.0
+        sVER := 20.0
+    else if posDelta and closePct >= 40.0
+        sVER := 13.0
+    else if posDelta and cumRising
+        sVER := 10.0
+    else if not posDelta and closePct < 40.0
+        sVER := -8.0
+    else if not posDelta
+        sVER := -3.0
+    else
+        sVER := 6.0
+else if isMomentum
+    if posDelta and closePct >= 60.0
+        sVER := 18.0
+    else if posDelta
+        sVER := 12.0
+    else if not posDelta and closePct < 40.0
+        sVER := -5.0
+    else
+        sVER := 5.0
+else
+    if posDelta and cumRising
+        sVER := 12.0
+    else if posDelta
+        sVER := 8.0
+    else
+        sVER := 4.0
+
+// CumDelta LONG (10)
+float sCum = 5.0
+if bearDiv
+    sCum := -8.0
+else if bullDiv
+    sCum := 10.0
+else if cumDelta > 0.0 and cumRising
+    sCum := 10.0
+else if cumDelta > 0.0 and not cumRising
+    sCum := 5.0
+else if cumDelta < 0.0 and cumRising
+    sCum := 3.0
+else if cumDelta < 0.0 and not cumRising
+    sCum := 0.0
+
+float confScore = math.max(0, math.min(100, sVSA + sDelt + sIMB + sVER + sCum))
+
+// ════════════════════════════════════════════════════════════════════════
+// ── SHORT SIDE (mirror doi xung) ────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════
+
+// VSA SHORT (25): supply bar = close thap + vol; phat spring (close cao + vol cao)
+float sVSA_S = 0.0
+if closePct > 70.0 and volRatio >= 1.2
+    sVSA_S := -8.0   // Spring / tich luy nguy hiem cho short
+else if closePct <= 40.0 and volRatio >= 1.0
+    sVSA_S := 25.0   // Supply bar chuan
+else if closePct <= 40.0 or (closePct <= 50.0 and volRatio >= 1.0)
+    sVSA_S := 15.0
+else if closePct <= 60.0 and volRatio >= 0.8
+    sVSA_S := 8.0
+else if closePct <= 70.0
+    sVSA_S := 3.0
+
+// Delta% SHORT (25): delta am uu the
+float sDelt_S = 0.0
+if deltaRatio <= -15.0
+    sDelt_S := 25.0
+else if deltaRatio <= -8.0
+    sDelt_S := 20.0
+else if deltaRatio <= -3.0
+    sDelt_S := 14.0
+else if deltaRatio <= 0.0
+    if isAbsorb and cumFalling
+        sDelt_S := 12.0  // Distribution: delta nho nhung MM dang xa hang
+    else if cumFalling
+        sDelt_S := 7.0
+    else
+        sDelt_S := 3.0
+else if deltaRatio <= 5.0
+    sDelt_S := 0.0
+else
+    sDelt_S := -8.0   // Buyers ro rang chiem uu the
+
+// IMB Stack SHORT (20): sell stacks uu the
+float sIMB_S = 0.0
+if maxSellStack >= 3 and maxBuyStack == 0
+    sIMB_S := 20.0   // Pure sell pressure
+else if maxSellStack >= 3
+    sIMB_S := 14.0
+else if maxSellStack == 2 and maxBuyStack <= 1
+    sIMB_S := 12.0
+else if imbNet <= -2
+    sIMB_S := 10.0
+else if imbNet == -1
+    sIMB_S := 6.0
+else if imbNet == 0
+    sIMB_S := 3.0
+else if imbNet == 1
+    sIMB_S := -4.0
+else if imbNet == 2
+    sIMB_S := -8.0
+else
+    sIMB_S := -15.0  // Pure buy pressure — khong co sellers
+
+// VER SHORT (20): absorb=distribution / momentum=breakdown khi delta am
+float sVER_S = 8.0
+if isAbsorb
+    if negDelta and cumFalling and closePct <= 50.0
+        sVER_S := 20.0   // Distribution manh nhat: hut demand de xa
+    else if negDelta and closePct <= 60.0
+        sVER_S := 13.0
+    else if negDelta and cumFalling
+        sVER_S := 10.0
+    else if posDelta and closePct >= 60.0
+        sVER_S := -8.0   // Bullish absorption — xau cho short
+    else if posDelta
+        sVER_S := -3.0
+    else
+        sVER_S := 6.0
+else if isMomentum
+    if negDelta and closePct <= 40.0
+        sVER_S := 18.0   // Clean bearish breakdown
+    else if negDelta
+        sVER_S := 12.0
+    else if posDelta and closePct >= 60.0
+        sVER_S := -5.0   // Clean bullish momentum — xau cho short
+    else
+        sVER_S := 5.0
+else
+    if negDelta and cumFalling
+        sVER_S := 12.0
+    else if negDelta
+        sVER_S := 8.0
+    else
+        sVER_S := 4.0
+
+// CumDelta SHORT (10): mirror
+float sCum_S = 5.0
+if bullDiv
+    sCum_S := -8.0   // Gia giam nhung delta tang = tich luy an, xau cho short
+else if bearDiv
+    sCum_S := 10.0   // Gia tang nhung delta giam = phan phoi an, tot cho short
+else if cumDelta < 0.0 and cumFalling
+    sCum_S := 10.0   // Am + dang giam = ly tuong short
+else if cumDelta < 0.0 and not cumFalling
+    sCum_S := 5.0
+else if cumDelta > 0.0 and cumFalling
+    sCum_S := 3.0
+else if cumDelta > 0.0 and not cumFalling
+    sCum_S := 0.0
+
+float confScoreShort = math.max(0, math.min(100, sVSA_S + sDelt_S + sIMB_S + sVER_S + sCum_S))
+
+// ════════════════════════════════════════════════════════════════════════
+// ── BIAS & GRADE ────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════
+float confNet = confScore - confScoreShort
+
+string bias = 'NEUTRAL'
+if confScore >= 50.0 and confScore > confScoreShort
+    bias := 'LONG'
+else if confScoreShort >= 50.0 and confScoreShort > confScore
+    bias := 'SHORT'
+
+float biasNum  = bias == 'LONG' ? 1.0 : bias == 'SHORT' ? -1.0 : 0.0
+float bestScore = math.max(confScore, confScoreShort)
+
+string grade = 'WEAK  → skip'
+if bias != 'NEUTRAL'
+    if bestScore >= 75.0
+        grade := bias + ' STRONG → 2%'
+    else if bestScore >= 50.0
+        grade := bias + ' MODERATE → 1%'
+
+// ═══ PLOTS — invisible on chart, readable via values ═════════════════════
+color inv = color.new(color.white, 100)
+plot(fpDelta,                               title='FP Delta',         color=inv)
+plot(fpBuyVol,                              title='FP Buy Vol',       color=inv)
+plot(fpSellVol,                             title='FP Sell Vol',      color=inv)
+plot(fpTotalVol,                            title='FP Total Vol',     color=inv)
+plot(fpPocHigh,                             title='FP POC High',      color=inv)
+plot(fpPocLow,                              title='FP POC Low',       color=inv)
+plot(fpVahHigh,                             title='FP VAH',           color=inv)
+plot(fpValLow,                              title='FP VAL',           color=inv)
+plot(cumDelta,                              title='Cum Delta',        color=inv)
+plot(cumSlope,                              title='Cum Slope',        color=inv)
+plot(verRatio,                              title='VER Ratio',        color=inv)
+plot(confScore,                             title='Confluence',       color=inv)
+plot(confScoreShort,                        title='Confluence Short', color=inv)
+plot(confNet,                               title='Conf Net',         color=inv)
+plot(biasNum,                               title='Bias',             color=inv)
+plot(maxBuyStack,                           title='Max Buy Stack',    color=inv)
+plot(maxSellStack,                          title='Max Sell Stack',   color=inv)
+plot(totBuyImb,                             title='Total Buy IMB',    color=inv)
+plot(totSellImb,                            title='Total Sell IMB',   color=inv)
+plot(bearDiv ? 1.0 : bullDiv ? -1.0 : 0.0, title='Div Signal',       color=inv)
+
+// ═══ TABLE ════════════════════════════════════════════════════════════════
+color cHdr = color.new(color.navy, 30)
+var table tbl = table.new(position.top_right, 6, 26,
+    border_color=color.new(color.gray, 60), border_width=1,
+    frame_color=color.new(color.gray, 40), frame_width=1)
+
+if barstate.islast and not na(reqFp)
+    table.cell(tbl, 0, 0, 'Price Zone', text_color=color.silver, bgcolor=cHdr, text_size=size.small)
+    table.cell(tbl, 1, 0, 'Buy',        text_color=color.silver, bgcolor=cHdr, text_size=size.small)
+    table.cell(tbl, 2, 0, 'Sell',       text_color=color.silver, bgcolor=cHdr, text_size=size.small)
+    table.cell(tbl, 3, 0, 'Delta',      text_color=color.silver, bgcolor=cHdr, text_size=size.small)
+    table.cell(tbl, 4, 0, 'Vol%',       text_color=color.silver, bgcolor=cHdr, text_size=size.small)
+    table.cell(tbl, 5, 0, 'Signal',     text_color=color.silver, bgcolor=cHdr, text_size=size.small)
+
+    array<volume_row> rows2 = reqFp.rows()
+    int nRR = rows2.size()
+    array<float> vArr = array.new_float(nRR)
+    array<int>   iArr = array.new_int(nRR)
+    for i = 0 to nRR - 1
+        array.set(vArr, i, rows2.get(i).total_volume())
+        array.set(iArr, i, i)
+    for i = 0 to nRR - 2
+        for j = 0 to nRR - 2 - i
+            if array.get(vArr, j) < array.get(vArr, j + 1)
+                float tv = array.get(vArr, j)
+                int   ti = array.get(iArr, j)
+                array.set(vArr, j,     array.get(vArr, j + 1))
+                array.set(iArr, j,     array.get(iArr, j + 1))
+                array.set(vArr, j + 1, tv)
+                array.set(iArr, j + 1, ti)
+
+    int lim = math.min(topN, nRR)
+    for rank = 0 to lim - 1
+        volume_row r2 = rows2.get(array.get(iArr, rank))
+        float bv = r2.buy_volume()
+        float sv = r2.sell_volume()
+        float dv = r2.delta()
+        float tv = r2.total_volume()
+        float pv = fpTotalVol > 0 ? math.round(tv / fpTotalVol * 100) : 0
+        bool  bB = r2.has_buy_imbalance()
+        bool  bS = r2.has_sell_imbalance()
+
+        color bg = color.new(color.red, 90)
+        if bB
+            bg := color.new(color.green, 75)
+        else if bS
+            bg := color.new(color.red, 75)
+        else if dv > 0
+            bg := color.new(color.green, 90)
+
+        color sigCol = color.new(color.red, 20)
+        if bB
+            sigCol := color.lime
+        else if bS
+            sigCol := color.red
+        else if dv > 0
+            sigCol := color.new(color.green, 20)
+
+        string sigTxt = dv > 0 ? 'Net Buy' : 'Net Sell'
+        if bB
+            sigTxt := 'BUY IMB'
+        else if bS
+            sigTxt := 'SELL IMB'
+
+        int tr = rank + 1
+        table.cell(tbl, 0, tr, str.tostring(r2.down_price(), '#,###') + '-' + str.tostring(r2.up_price(), '#,###'), text_color=color.white,  bgcolor=bg, text_size=size.small)
+        table.cell(tbl, 1, tr, str.tostring(math.round(bv / 1000), '#,###') + 'K',                                 text_color=color.lime,   bgcolor=bg, text_size=size.small)
+        table.cell(tbl, 2, tr, str.tostring(math.round(sv / 1000), '#,###') + 'K',                                 text_color=color.orange, bgcolor=bg, text_size=size.small)
+        table.cell(tbl, 3, tr, (dv >= 0 ? '+' : '') + str.tostring(math.round(dv / 1000), '#,###') + 'K',         text_color=dv >= 0 ? color.lime : color.orange, bgcolor=bg, text_size=size.small)
+        table.cell(tbl, 4, tr, str.tostring(pv) + '%',                                                             text_color=color.silver, bgcolor=bg, text_size=size.small)
+        table.cell(tbl, 5, tr, sigTxt,                                                                             text_color=sigCol,       bgcolor=bg, text_size=size.small)
+
+    int s = lim + 1
+
+    // IMB Stacks
+    color sBg = color.new(color.gray, 80)
+    if maxBuyStack > maxSellStack
+        sBg := color.new(color.green, 75)
+    else if maxSellStack > maxBuyStack
+        sBg := color.new(color.red, 75)
+
+    string imbTxt = 'Neutral'
+    if imbNet > 0
+        imbTxt := 'Net BUY'
+    else if imbNet < 0
+        imbTxt := 'Net SELL'
+
+    table.cell(tbl, 0, s, 'IMB Stack',                                                                   text_color=color.silver, bgcolor=cHdr, text_size=size.small)
+    table.cell(tbl, 1, s, 'Buy: ' + str.tostring(maxBuyStack) + ' (' + str.tostring(totBuyImb) + ')',   text_color=color.lime,   bgcolor=sBg,  text_size=size.small)
+    table.cell(tbl, 2, s, 'Sel: ' + str.tostring(maxSellStack) + ' (' + str.tostring(totSellImb) + ')', text_color=color.orange, bgcolor=sBg,  text_size=size.small)
+    table.cell(tbl, 3, s, imbTxt,                                                                        text_color=color.white,  bgcolor=sBg,  text_size=size.small)
+    table.cell(tbl, 4, s, '',                                                                            text_color=color.white,  bgcolor=sBg,  text_size=size.small)
+    table.cell(tbl, 5, s, '',                                                                            text_color=color.white,  bgcolor=sBg,  text_size=size.small)
+
+    // Cumulative Delta
+    color cBg = color.new(color.gray, 80)
+    if bearDiv
+        cBg := color.new(color.red, 65)
+    else if bullDiv
+        cBg := color.new(color.green, 65)
+    else if cumDelta > 0 and cumRising
+        cBg := color.new(color.green, 80)
+    else if cumDelta < 0 and not cumRising
+        cBg := color.new(color.red, 80)
+
+    string slopeTxt = '→ Flat'
+    if cumSlope > 0
+        slopeTxt := '↑ Rising'
+    else if cumSlope < 0
+        slopeTxt := '↓ Falling'
+
+    string divTxt = 'No Div'
+    if bearDiv
+        divTxt := '⚠ BEAR DIV'
+    else if bullDiv
+        divTxt := 'BULL DIV'
+
+    table.cell(tbl, 0, s + 1, 'Cum Delta',                                                 text_color=color.silver,                              bgcolor=cHdr, text_size=size.small)
+    table.cell(tbl, 1, s + 1, str.tostring(math.round(cumDelta / 1000), '#,###') + 'K',   text_color=cumSlope >= 0 ? color.lime : color.orange, bgcolor=cBg,  text_size=size.small)
+    table.cell(tbl, 2, s + 1, slopeTxt,                                                    text_color=color.white,                               bgcolor=cBg,  text_size=size.small)
+    table.cell(tbl, 3, s + 1, divTxt,                                                      text_color=color.white,                               bgcolor=cBg,  text_size=size.small)
+    table.cell(tbl, 4, s + 1, '',                                                           text_color=color.white,                               bgcolor=cBg,  text_size=size.small)
+    table.cell(tbl, 5, s + 1, '',                                                           text_color=color.white,                               bgcolor=cBg,  text_size=size.small)
+
+    // VER — context
+    color vBg = color.new(color.gray, 80)
+    if not na(verRatio)
+        if isAbsorb and posDelta and cumRising
+            vBg := color.new(color.green, 65)
+        else if isAbsorb and negDelta
+            vBg := color.new(color.red, 65)
+        else if isMomentum and posDelta
+            vBg := color.new(color.blue, 65)
+        else if isMomentum and negDelta
+            vBg := color.new(color.red, 75)
+        else
+            vBg := color.new(color.gray, 75)
+
+    string verContext = verType
+    if isAbsorb and posDelta and cumRising
+        verContext := 'ABSORB ✅L'
+    else if isAbsorb and negDelta and cumFalling
+        verContext := 'DISTRIB ⚠S'
+    else if isMomentum and posDelta
+        verContext := 'MOM ✅L'
+    else if isMomentum and negDelta
+        verContext := 'MOM ⚠S'
+
+    string verValTxt = 'n/a'
+    if not na(verRatio)
+        verValTxt := str.tostring(verRatio, '#.##') + 'x'
+
+    table.cell(tbl, 0, s + 2, 'VER',       text_color=color.silver, bgcolor=cHdr, text_size=size.small)
+    table.cell(tbl, 1, s + 2, verValTxt,   text_color=color.white,  bgcolor=vBg,  text_size=size.small)
+    table.cell(tbl, 2, s + 2, verContext,  text_color=color.white,  bgcolor=vBg,  text_size=size.small)
+    table.cell(tbl, 3, s + 2, '',          text_color=color.white,  bgcolor=vBg,  text_size=size.small)
+    table.cell(tbl, 4, s + 2, '',          text_color=color.white,  bgcolor=vBg,  text_size=size.small)
+    table.cell(tbl, 5, s + 2, '',          text_color=color.white,  bgcolor=vBg,  text_size=size.small)
+
+    // Confluence LONG vs SHORT + Bias
+    color qBgL = confScore     >= 75 ? color.new(color.green, 55)  : confScore     >= 50 ? color.new(color.green, 75)  : color.new(color.gray, 80)
+    color qBgS = confScoreShort >= 75 ? color.new(color.red, 55)   : confScoreShort >= 50 ? color.new(color.red, 75)   : color.new(color.gray, 80)
+    color biasBg = bias == 'LONG' ? color.new(color.green, 45) : bias == 'SHORT' ? color.new(color.red, 45) : color.new(color.gray, 70)
+
+    string brkL = 'V:' + str.tostring(math.round(sVSA)) + ' D:' + str.tostring(math.round(sDelt)) + ' I:' + str.tostring(math.round(sIMB)) + ' R:' + str.tostring(math.round(sVER)) + ' C:' + str.tostring(math.round(sCum))
+    string brkS = 'V:' + str.tostring(math.round(sVSA_S)) + ' D:' + str.tostring(math.round(sDelt_S)) + ' I:' + str.tostring(math.round(sIMB_S)) + ' R:' + str.tostring(math.round(sVER_S)) + ' C:' + str.tostring(math.round(sCum_S))
+
+    table.cell(tbl, 0, s + 3, 'Conf LONG',                                       text_color=color.white,  bgcolor=color.new(color.navy, 20), text_size=size.small)
+    table.cell(tbl, 1, s + 3, str.tostring(math.round(confScore)) + '/100',      text_color=color.white,  bgcolor=qBgL, text_size=size.small)
+    table.cell(tbl, 2, s + 3, brkL,                                              text_color=color.silver, bgcolor=qBgL, text_size=size.small)
+    table.cell(tbl, 3, s + 3, '',                                                text_color=color.white,  bgcolor=qBgL, text_size=size.small)
+    table.cell(tbl, 4, s + 3, '',                                                text_color=color.white,  bgcolor=qBgL, text_size=size.small)
+    table.cell(tbl, 5, s + 3, '',                                                text_color=color.white,  bgcolor=qBgL, text_size=size.small)
+
+    table.cell(tbl, 0, s + 4, 'Conf SHORT',                                      text_color=color.white,  bgcolor=color.new(color.maroon, 20), text_size=size.small)
+    table.cell(tbl, 1, s + 4, str.tostring(math.round(confScoreShort)) + '/100', text_color=color.white,  bgcolor=qBgS, text_size=size.small)
+    table.cell(tbl, 2, s + 4, brkS,                                              text_color=color.silver, bgcolor=qBgS, text_size=size.small)
+    table.cell(tbl, 3, s + 4, '',                                                text_color=color.white,  bgcolor=qBgS, text_size=size.small)
+    table.cell(tbl, 4, s + 4, '',                                                text_color=color.white,  bgcolor=qBgS, text_size=size.small)
+    table.cell(tbl, 5, s + 4, '',                                                text_color=color.white,  bgcolor=qBgS, text_size=size.small)
+
+    table.cell(tbl, 0, s + 5, 'BIAS',                                            text_color=color.white,  bgcolor=color.new(color.black, 10), text_size=size.small)
+    table.cell(tbl, 1, s + 5, bias,                                              text_color=color.white,  bgcolor=biasBg, text_size=size.small)
+    table.cell(tbl, 2, s + 5, grade,                                             text_color=color.white,  bgcolor=biasBg, text_size=size.small)
+    table.cell(tbl, 3, s + 5, '',                                                text_color=color.white,  bgcolor=biasBg, text_size=size.small)
+    table.cell(tbl, 4, s + 5, '',                                                text_color=color.white,  bgcolor=biasBg, text_size=size.small)
+    table.cell(tbl, 5, s + 5, '',                                                text_color=color.white,  bgcolor=biasBg, text_size=size.small)
