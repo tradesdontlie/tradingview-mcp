@@ -87,6 +87,32 @@ export async function connect() {
   throw new Error(`CDP connection failed after ${MAX_RETRIES} attempts: ${lastError?.message}`);
 }
 
+/**
+ * Reconnect the CDP client to a specific page target by id.
+ * Tab switching uses this so data/screenshot tools follow the activated tab
+ * instead of staying glued to the target picked at first connect.
+ */
+export async function connectToTarget(targetId) {
+  await disconnect();
+  client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: targetId });
+
+  // Enable required domains (same as connect())
+  await client.Runtime.enable();
+  await client.Page.enable();
+  await client.DOM.enable();
+
+  // Refresh cached target info from the live target list
+  try {
+    const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
+    const targets = await resp.json();
+    targetInfo = targets.find(t => t.id === targetId) || { id: targetId };
+  } catch {
+    targetInfo = { id: targetId };
+  }
+
+  return client;
+}
+
 async function findChartTarget() {
   const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
   const targets = await resp.json();
