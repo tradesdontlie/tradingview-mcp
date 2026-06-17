@@ -8,7 +8,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { safeString, requireFinite } from '../src/connection.js';
 import { setSymbol, setTimeframe, setType, manageIndicator, setVisibleRange } from '../src/core/chart.js';
-import { drawShape } from '../src/core/drawing.js';
+import { drawShape, listDrawings, getProperties, removeOne, clearAll } from '../src/core/drawing.js';
 
 // ── Mock helpers ─────────────────────────────────────────────────────────
 
@@ -281,6 +281,47 @@ describe('drawing.js — sanitized evaluate calls', () => {
     const call = evaluate.calls.find(c => c.includes('createMultipointShape'));
     assert.ok(call, 'createMultipointShape called');
     assert.ok(call.includes('"trend_line"'), 'shape name via safeString');
+  });
+});
+
+// ── drawing.js — chart API resolution via DI (regression: getChartApi/evaluate scope) ──
+
+describe('drawing.js — chart API resolution (DI scope regression)', () => {
+  it('listDrawings resolves chart API via injected deps', async () => {
+    const { _deps, evaluate } = mockDeps();
+    const r = await listDrawings({ _deps });
+    assert.equal(r.success, true);
+    const call = evaluate.calls.find(c => c.includes('getAllShapes'));
+    assert.ok(call, 'getAllShapes evaluate call made');
+    assert.ok(call.includes('window.__api'), 'uses resolved apiPath from _deps');
+  });
+
+  it('getProperties resolves chart API via injected deps', async () => {
+    const { _deps, evaluate } = mockDeps();
+    const r = await getProperties({ entity_id: 'abc123', _deps });
+    assert.equal(r.success, true);
+    const call = evaluate.calls.find(c => c.includes('getShapeById'));
+    assert.ok(call, 'getShapeById evaluate call made');
+    assert.ok(call.includes('window.__api'), 'uses resolved apiPath from _deps');
+    assert.ok(call.includes('"abc123"'), 'entity_id via safeString');
+  });
+
+  it('removeOne resolves chart API via injected deps', async () => {
+    const { _deps, evaluate } = mockDeps();
+    const r = await removeOne({ entity_id: 'abc123', _deps });
+    assert.equal(r.success, true);
+    const call = evaluate.calls.find(c => c.includes('removeEntity'));
+    assert.ok(call, 'removeEntity evaluate call made');
+    assert.ok(call.includes('window.__api'), 'uses resolved apiPath from _deps');
+  });
+
+  it('clearAll resolves chart API via injected deps', async () => {
+    const { _deps, evaluate } = mockDeps();
+    const r = await clearAll({ _deps });
+    assert.equal(r.success, true);
+    const call = evaluate.calls.find(c => c.includes('removeAllShapes'));
+    assert.ok(call, 'removeAllShapes evaluate call made');
+    assert.ok(call.includes('window.__api'), 'uses resolved apiPath');
   });
 });
 
