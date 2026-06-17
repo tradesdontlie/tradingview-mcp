@@ -1,75 +1,115 @@
 /**
  * Core alert logic.
+ *
+ * Alerts are managed through TradingView's pricealerts REST API
+ * (https://pricealerts.tradingview.com), reusing the desktop app's logged-in
+ * session via `credentials: 'include'`. This is far more reliable than driving
+ * the alert dialog through the DOM: the dialog's price field is a React
+ * controlled input that ignores synthetic value assignments (so DOM-set prices
+ * silently revert to the prefilled current price), and the "Create alert"
+ * button's aria-label casing varies between TradingView Desktop builds.
+ *
+ * REST notes:
+ * - Use Content-Type 'text/plain' to avoid a CORS preflight the endpoint rejects.
+ * - create_alert  body: {"payload": { ...alert spec... }}
+ * - delete_alerts body: {"payload": {"alert_ids": [id, ...]}}
  */
-import { evaluate, evaluateAsync, getClient, safeString } from '../connection.js';
+import { evaluate, evaluateAsync } from '../connection.js';
 
-export async function create({ condition, price, message }) {
-  const opened = await evaluate(`
+const CHART_API = 'window.TradingViewApi._activeChartWidgetWV.value()';
+
+// Map friendly condition names to TradingView alert condition types.
+const CONDITION_TYPES = {
+  cross: 'cross', crossing: 'cross',
+  cross_up: 'cross_up', crossing_up: 'cross_up',
+  cross_down: 'cross_down', crossing_down: 'cross_down',
+  greater: 'greater', greater_than: 'greater', above: 'greater',
+  less: 'less', less_than: 'less', below: 'less',
+};
+
+async function getChartContext() {
+  const r = await evaluate(`
     (function() {
-      var btn = document.querySelector('[aria-label="Create Alert"]')
-        || document.querySelector('[data-name="alerts"]');
-      if (btn) { btn.click(); return true; }
-      return false;
+      try { var c = ${CHART_API}; return { symbol: c.symbol(), resolution: String(c.resolution()) }; }
+      catch (e) { return { symbol: null, resolution: null, error: e.message }; }
     })()
   `);
+  return r || {};
+}
 
-  if (!opened) {
-    const client = await getClient();
-    await client.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: 1, key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65 });
-    await client.Input.dispatchKeyEvent({ type: 'keyUp', key: 'a', code: 'KeyA' });
+// POST a text/plain JSON body to a pricealerts endpoint and return the parsed response.
+async function postAlertApi(endpoint, bodyObj) {
+  const bodyStr = JSON.stringify(bodyObj);
+  return await evaluateAsync(`
+    fetch('https://pricealerts.tradingview.com/${endpoint}', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+      body: ${JSON.stringify(bodyStr)}
+    })
+      .then(function(r) { return r.json(); })
+      .catch(function(e) { return { s: 'error', errmsg: e.message }; })
+  `);
+}
+
+export async function create({ condition, price, message, symbol, resolution }) {
+  const value = Number(price);
+  if (!Number.isFinite(value)) throw new Error('price must be a finite number');
+
+  const type = CONDITION_TYPES[String(condition || 'cross').toLowerCase()] || 'cross';
+
+  const ctx = await getChartContext();
+  const sym = symbol || ctx.symbol;
+  if (!sym) throw new Error(`Could not determine chart symbol (${ctx.error || 'no active chart'}); pass symbol explicitly.`);
+  const res = String(resolution || ctx.resolution || '1');
+
+  const msg = message || `${sym} ${condition || 'crossing'} ${value}`;
+  const expiration = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+
+  const payload = {
+    payload: {
+      conditions: [{
+        type,
+        frequency: 'on_first_fire',
+        series: [{ type: 'barset' }, { type: 'value', value }],
+        resolution: res,
+      }],
+      symbol: `=${JSON.stringify({ symbol: sym })}`,
+      resolution: res,
+      message: msg,
+      sound_file: null,
+      sound_duration: 0,
+      popup: true,
+      auto_deactivate: true,
+      email: false,
+      sms_over_email: false,
+      mobile_push: true,
+      web_hook: null,
+      name: null,
+      expiration,
+      active: true,
+      ignore_warnings: true,
+    },
+  };
+
+  const result = await postAlertApi('create_alert', payload);
+  if (!result || result.s !== 'ok') {
+    const err = (result && (result.errmsg || (result.err && JSON.stringify(result.err)))) || 'create failed';
+    return { success: false, price: value, condition: type, symbol: sym, message: msg, error: err, source: 'rest_api' };
   }
-
-  await new Promise(r => setTimeout(r, 1000));
-
-  const priceSet = await evaluate(`
-    (function() {
-      var inputs = document.querySelectorAll('[class*="alert"] input[type="text"], [class*="alert"] input[type="number"]');
-      for (var i = 0; i < inputs.length; i++) {
-        var label = inputs[i].closest('[class*="row"]')?.querySelector('[class*="label"]');
-        if (label && /value|price/i.test(label.textContent)) {
-          var nativeSet = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-          nativeSet.call(inputs[i], ${safeString(String(price))});
-          inputs[i].dispatchEvent(new Event('input', { bubbles: true }));
-          inputs[i].dispatchEvent(new Event('change', { bubbles: true }));
-          return true;
-        }
-      }
-      if (inputs.length > 0) {
-        var nativeSet = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-        nativeSet.call(inputs[0], ${safeString(String(price))});
-        inputs[0].dispatchEvent(new Event('input', { bubbles: true }));
-        return true;
-      }
-      return false;
-    })()
-  `);
-
-  if (message) {
-    await evaluate(`
-      (function() {
-        var textarea = document.querySelector('[class*="alert"] textarea')
-          || document.querySelector('textarea[placeholder*="message"]');
-        if (textarea) {
-          var nativeSet = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
-          nativeSet.call(textarea, ${JSON.stringify(message)});
-          textarea.dispatchEvent(new Event('input', { bubbles: true }));
-        }
-      })()
-    `);
-  }
-
-  await new Promise(r => setTimeout(r, 500));
-  const created = await evaluate(`
-    (function() {
-      var btns = document.querySelectorAll('button[data-name="submit"], button');
-      for (var i = 0; i < btns.length; i++) {
-        if (/^create$/i.test(btns[i].textContent.trim())) { btns[i].click(); return true; }
-      }
-      return false;
-    })()
-  `);
-
-  return { success: !!created, price, condition, message: message || '(none)', price_set: !!priceSet, source: 'dom_fallback' };
+  const a = result.r || {};
+  return {
+    success: true,
+    alert_id: a.alert_id,
+    symbol: sym,
+    price: value,
+    condition: type,
+    resolution: res,
+    message: msg,
+    active: a.active,
+    expiration: a.expiration,
+    source: 'rest_api',
+  };
 }
 
 export async function list() {
@@ -83,9 +123,12 @@ export async function list() {
           alerts: data.r.map(function(a) {
             var sym = '';
             try { sym = JSON.parse(a.symbol.replace(/^=/, '')).symbol || a.symbol; } catch(e) { sym = a.symbol; }
+            var price = null;
+            try { (a.condition.series || []).forEach(function(s) { if (s && s.value != null) price = s.value; }); } catch(e) {}
             return {
               alert_id: a.alert_id,
               symbol: sym,
+              price: price,
               type: a.type,
               message: a.message,
               active: a.active,
@@ -100,24 +143,44 @@ export async function list() {
       })
       .catch(function(e) { return { alerts: [], error: e.message }; })
   `);
-  return { success: true, alert_count: result?.alerts?.length || 0, source: 'internal_api', alerts: result?.alerts || [], error: result?.error };
+  return { success: true, alert_count: result?.alerts?.length || 0, source: 'rest_api', alerts: result?.alerts || [], error: result?.error };
 }
 
-export async function deleteAlerts({ delete_all }) {
-  if (delete_all) {
-    const result = await evaluate(`
-      (function() {
-        var alertBtn = document.querySelector('[data-name="alerts"]');
-        if (alertBtn) alertBtn.click();
-        var header = document.querySelector('[data-name="alerts"]');
-        if (header) {
-          header.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 100, clientY: 100 }));
-          return { context_menu_opened: true };
-        }
-        return { context_menu_opened: false };
-      })()
-    `);
-    return { success: true, note: 'Alert deletion requires manual confirmation in the context menu.', context_menu_opened: result?.context_menu_opened || false, source: 'dom_fallback' };
+/**
+ * Delete alerts via the REST API.
+ * Pass one of: delete_all (bool), alert_id (number), alert_ids (number[]),
+ * or price (number — deletes every alert whose level matches).
+ */
+export async function deleteAlerts({ delete_all, alert_id, alert_ids, price }) {
+  let ids = [];
+  if (Array.isArray(alert_ids)) ids = ids.concat(alert_ids);
+  if (alert_id != null) ids.push(alert_id);
+
+  if (delete_all || price != null) {
+    const listed = await list();
+    const alerts = listed.alerts || [];
+    if (delete_all) {
+      ids = ids.concat(alerts.map(a => a.alert_id));
+    } else {
+      const target = Number(price);
+      ids = ids.concat(
+        alerts.filter(a => Number(a.price) === target).map(a => a.alert_id)
+      );
+    }
   }
-  throw new Error('Individual alert deletion not yet supported. Use delete_all: true.');
+
+  ids = [...new Set(ids.map(Number).filter(n => Number.isFinite(n)))];
+  if (!ids.length) {
+    return { success: true, deleted: 0, alert_ids: [], note: 'no matching alerts to delete', source: 'rest_api' };
+  }
+
+  const result = await postAlertApi('delete_alerts', { payload: { alert_ids: ids } });
+  const ok = !!result && result.s === 'ok';
+  return {
+    success: ok,
+    deleted: ok ? ids.length : 0,
+    alert_ids: ids,
+    error: ok ? undefined : ((result && (result.errmsg || (result.err && JSON.stringify(result.err)))) || 'delete failed'),
+    source: 'rest_api',
+  };
 }
