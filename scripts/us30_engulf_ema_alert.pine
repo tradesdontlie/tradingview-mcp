@@ -1,0 +1,50 @@
+//@version=5
+indicator("US30 Engulf + EMA Cross Alert", overlay=true, max_bars_back=500)
+
+// ─── Inputs ───────────────────────────────────────────────────────────────────
+ema_fast_len    = input.int(10,   "EMA Fast",            minval=1)
+ema_slow_len    = input.int(15,   "EMA Slow",            minval=1)
+vol_mult        = input.float(1.5, "Volume Spike Multiplier", minval=1.0, step=0.1)
+vol_lookback    = input.int(20,   "Volume Avg Lookback", minval=5)
+engulf_wick_pct = input.float(0.0, "Max Wick % of Body (0 = off)", minval=0.0, step=0.1)
+
+// ─── EMAs ─────────────────────────────────────────────────────────────────────
+ema_fast = ta.ema(close, ema_fast_len)
+ema_slow = ta.ema(close, ema_slow_len)
+
+plot(ema_fast, color=color.blue,   linewidth=1, title="EMA 10")
+plot(ema_slow, color=color.red,    linewidth=1, title="EMA 15")
+
+// ─── Volume Spike ─────────────────────────────────────────────────────────────
+avg_vol   = ta.sma(volume, vol_lookback)
+vol_spike = volume > avg_vol * vol_mult
+
+// ─── Engulfing Candles ────────────────────────────────────────────────────────
+// Bullish engulf: current candle opens below prior close, closes above prior open
+bull_engulf = close > open[1] and open < close[1] and close > open and open[1] > close[1]
+// Bearish engulf: current candle opens above prior close, closes below prior open
+bear_engulf = close < open[1] and open > close[1] and close < open and open[1] < close[1]
+
+// ─── EMA Cross ────────────────────────────────────────────────────────────────
+bull_cross = ta.crossover(ema_fast,  ema_slow)
+bear_cross = ta.crossunder(ema_fast, ema_slow)
+
+// ─── Signal: all three conditions within a 3-bar window ───────────────────────
+// Volume spike and engulfing on candle N, EMA cross on candle N or N+1 or N+2
+bull_setup = (vol_spike and bull_engulf) or (vol_spike[1] and bull_engulf[1]) or (vol_spike[2] and bull_engulf[2])
+bear_setup = (vol_spike and bear_engulf) or (vol_spike[1] and bear_engulf[1]) or (vol_spike[2] and bear_engulf[2])
+
+bull_signal = bull_cross and bull_setup
+bear_signal = bear_cross and bear_setup
+
+// ─── Plots ────────────────────────────────────────────────────────────────────
+plotshape(bull_signal, title="BUY Signal",  location=location.belowbar, style=shape.triangleup,   size=size.normal, color=color.lime,  text="BUY")
+plotshape(bear_signal, title="SELL Signal", location=location.abovebar, style=shape.triangledown, size=size.normal, color=color.red,   text="SELL")
+
+// ─── Background highlight on volume spike bars ────────────────────────────────
+bgcolor(vol_spike ? color.new(color.yellow, 90) : na, title="Volume Spike Bar")
+
+// ─── Alerts ───────────────────────────────────────────────────────────────────
+alertcondition(bull_signal, title="BUY  — Engulf + EMA Cross Up",   message="US30 BUY: Bullish engulfing candle + volume spike + EMA10 crossed above EMA15. Price: {{close}}")
+alertcondition(bear_signal, title="SELL — Engulf + EMA Cross Down",  message="US30 SELL: Bearish engulfing candle + volume spike + EMA10 crossed below EMA15. Price: {{close}}")
+alertcondition(bull_signal or bear_signal, title="ANY Signal — Engulf + EMA Cross", message="US30 Signal: {{ticker}} {{interval}} — Direction: {{plot_0 > plot_1 ? 'BUY' : 'SELL'}} at {{close}}")
