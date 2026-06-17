@@ -2,7 +2,7 @@
  * Core health/discovery/launch logic.
  */
 import { getClient, getTargetInfo, evaluate } from '../connection.js';
-import { existsSync } from 'fs';
+import { existsSync, readdirSync } from 'fs';
 import { execSync, spawn } from 'child_process';
 
 export async function healthCheck() {
@@ -159,6 +159,21 @@ export async function uiState() {
   return { success: true, ...state };
 }
 
+// Scan WindowsApps for any installed TradingView Store (UWP) version.
+// Returns newest-first so version updates are picked up automatically.
+function findStoreTradingView() {
+  const base = 'C:\\Program Files\\WindowsApps';
+  try {
+    const dirs = readdirSync(base)
+      .filter((d) => /^TradingView\.Desktop_.*_x64__n534cwy3pjxzj$/.test(d))
+      .sort()
+      .reverse();
+    return dirs.map((d) => `${base}\\${d}\\TradingView.exe`);
+  } catch {
+    return [];
+  }
+}
+
 export async function launch({ port, kill_existing } = {}) {
   const cdpPort = port || 9222;
   const killFirst = kill_existing !== false;
@@ -173,6 +188,8 @@ export async function launch({ port, kill_existing } = {}) {
       `${process.env.LOCALAPPDATA}\\TradingView\\TradingView.exe`,
       `${process.env.PROGRAMFILES}\\TradingView\\TradingView.exe`,
       `${process.env['PROGRAMFILES(X86)']}\\TradingView\\TradingView.exe`,
+      // Windows Store (Electron UWP) version — scan for whatever version is installed
+      ...findStoreTradingView(),
     ],
     linux: [
       '/opt/TradingView/tradingview',
