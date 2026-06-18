@@ -2,6 +2,7 @@ import CDP from 'chrome-remote-interface';
 
 let client = null;
 let targetInfo = null;
+let preferredTargetId = null;
 const CDP_HOST = 'localhost';
 const CDP_PORT = 9222;
 const MAX_RETRIES = 5;
@@ -90,10 +91,31 @@ export async function connect() {
 async function findChartTarget() {
   const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
   const targets = await resp.json();
+  // If a specific tab was selected via switchTab, stay on it across reconnects.
+  if (preferredTargetId) {
+    const pref = targets.find(t => t.id === preferredTargetId && t.type === 'page');
+    if (pref) return pref;
+  }
   // Prefer targets with tradingview.com/chart in the URL
   return targets.find(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
     || targets.find(t => t.type === 'page' && /tradingview/i.test(t.url))
     || null;
+}
+
+/**
+ * Repoint the CDP client to a specific page target (e.g. after switching tabs).
+ * Closes the current client and connects fresh to the given target id, so all
+ * subsequent evaluate()/screenshot calls operate on the selected tab. The target
+ * becomes "sticky" — reconnects after a dropped client return to it, not tab 0.
+ */
+export async function connectToTarget(targetId) {
+  preferredTargetId = targetId;
+  if (client) {
+    try { await client.close(); } catch {}
+    client = null;
+    targetInfo = null;
+  }
+  return connect();
 }
 
 export async function getTargetInfo() {
@@ -129,6 +151,7 @@ export async function disconnect() {
     try { await client.close(); } catch {}
     client = null;
     targetInfo = null;
+    preferredTargetId = null;
   }
 }
 
