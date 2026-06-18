@@ -324,30 +324,60 @@ export async function getDepth() {
 export async function getStudyValues() {
   const data = await evaluate(`
     (function() {
-      var chart = window.TradingViewApi._activeChartWidgetWV.value()._chartWidget;
+      // NOTE (2026-06-18): the data-window (s.dataWindowView().items()._value) is
+      // populated only at the crosshair position, so it is EMPTY in headless/programmatic
+      // access — which made this tool return 0 studies. Fix: fall back through the legend
+      // values provider and finally s.firstValue() (the only reader that returns a live
+      // number in this TV build). Source enumeration tries double- then single-model.
+      var api = window.TradingViewApi._activeChartWidgetWV.value();
+      var chart = api._chartWidget;
       var model = chart.model();
-      var sources = model.model().dataSources();
+      var sources;
+      try { sources = model.model().dataSources(); } catch(e) { sources = null; }
+      if (!sources || !sources.length) { try { sources = model.dataSources(); } catch(e) { sources = []; } }
+      function ok(v) { return v !== undefined && v !== null && v !== '' && v !== '∅'; }
       var results = [];
       for (var si = 0; si < sources.length; si++) {
         var s = sources[si];
-        if (!s.metaInfo) continue;
+        if (!s || typeof s.metaInfo !== 'function') continue;
         try {
           var meta = s.metaInfo();
           var name = meta.description || meta.shortDescription || '';
           if (!name) continue;
           var values = {};
+          // 1) data window (works when a crosshair/last value is present)
           try {
             var dwv = s.dataWindowView();
-            if (dwv) {
-              var items = dwv.items();
-              if (items) {
-                for (var i = 0; i < items.length; i++) {
-                  var item = items[i];
-                  if (item._value && item._value !== '∅' && item._title) values[item._title] = item._value;
-                }
+            var items = dwv && dwv.items ? dwv.items() : null;
+            if (items) {
+              for (var i = 0; i < items.length; i++) {
+                var item = items[i];
+                if (ok(item._value) && item._title) values[item._title] = item._value;
               }
             }
           } catch(e) {}
+          // 2) legend values provider (formatted per-plot values)
+          if (Object.keys(values).length === 0) {
+            try {
+              var lp = s.legendValuesProvider && s.legendValuesProvider();
+              var lv = lp && lp.getValues ? lp.getValues() : null;
+              if (lv && lv.length) {
+                for (var j = 0; j < lv.length; j++) {
+                  var it = lv[j];
+                  var t = it.title || it._title;
+                  var val = (it.value !== undefined ? it.value : it._value);
+                  if (ok(val) && t) values[t] = val;
+                }
+              }
+            } catch(e) {}
+          }
+          // 3) firstValue() fallback — primary plot's live reference value
+          if (Object.keys(values).length === 0) {
+            try {
+              var fv = (typeof s.firstValue === 'function') ? s.firstValue() : null;
+              if (typeof fv === 'number' && isFinite(fv)) values.value = fv;
+            } catch(e) {}
+          }
           if (Object.keys(values).length > 0) results.push({ name: name, values: values });
         } catch(e) {}
       }
