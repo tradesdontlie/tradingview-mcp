@@ -197,6 +197,21 @@ export async function launch({ port, kill_existing } = {}) {
     } catch { /* ignore */ }
   }
 
+  // Windows Store (MSIX) install: lives under the access-protected WindowsApps
+  // folder, so existsSync/where can't see it. Query the package directly.
+  if (!tvPath && platform === 'win32') {
+    try {
+      const loc = execSync(
+        'powershell -NoProfile -Command "(Get-AppxPackage *TradingView*).InstallLocation"',
+        { timeout: 8000 }
+      ).toString().trim().split('\n')[0].trim();
+      if (loc) {
+        // Don't existsSync() — WindowsApps blocks attribute reads but allows execute.
+        tvPath = `${loc}\\TradingView.exe`;
+      }
+    } catch { /* ignore */ }
+  }
+
   if (!tvPath && platform === 'darwin') {
     try {
       const found = execSync('mdfind "kMDItemFSName == TradingView.app" | head -1', { timeout: 5000 }).toString().trim();
