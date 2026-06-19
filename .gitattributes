@@ -1,0 +1,7 @@
+# Batch files must use CRLF or cmd.exe mangles them (eats the first char of
+# each line). Force it regardless of the user's core.autocrlf setting.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Shell scripts must stay LF so they run on Mac/Linux.
+*.sh text eol=lf
