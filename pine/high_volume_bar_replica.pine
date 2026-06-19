@@ -1,0 +1,41 @@
+//@version=5
+indicator("High Volume Bar (Replica)", overlay=true, max_lines_count=500, max_bars_back=500)
+
+// === Inputs ===
+tf        = input.timeframe("1", "Timeframe")
+length    = input.int(144, "Length", minval=1)
+threshold = input.float(2.5, "Threshold", minval=0.1, step=0.1)
+useLookback = input.bool(false, "Lookback (Days)")
+lookbackDays = input.int(7, "Lookback (Days)", minval=1)
+
+bullColor = input.color(color.blue, "Candle Up", inline="candle")
+bearColor = input.color(color.red, "Candle Down", inline="candle")
+
+// === Pull base-timeframe data (defaults to 1-minute regardless of chart resolution) ===
+[o, h, l, c, v, t] = request.security(syminfo.tickerid, tf, [open, high, low, close, volume, time])
+
+// === High-volume bar detection ===
+avgVol = ta.sma(v, length)
+isHighVol = v > avgVol * threshold
+
+// Optional lookback window cutoff
+withinLookback = not useLookback or (time - t) <= lookbackDays * 24 * 60 * 60 * 1000
+
+qualifies = isHighVol and withinLookback
+
+// POC approximation: since true volume-profile POC needs intrabar data,
+// use the bar's typical price (hl2) as the point-of-control proxy.
+pocLevel = (h + l) / 2
+
+// === Plot candle overlay on qualifying bars ===
+plotcandle(qualifies ? o : na, qualifies ? h : na, qualifies ? l : na, qualifies ? c : na,
+     title="High Volume Candle", color = c >= o ? bullColor : bearColor,
+     wickcolor = c >= o ? bullColor : bearColor, bordercolor = c >= o ? bullColor : bearColor)
+
+// === Draw POC line for each qualifying bar ===
+if qualifies
+    line.new(bar_index, pocLevel, bar_index + 1, pocLevel,
+         extend=extend.right, color=color.new(color.yellow, 0), width=1)
+    label.new(bar_index, pocLevel, str.tostring(pocLevel, format.mintick),
+         style=label.style_label_left, color=color.new(color.yellow, 80),
+         textcolor=color.yellow, size=size.tiny)
