@@ -1,0 +1,10 @@
+{
+  "market": "India (NSE)",
+  "strategy": "Swing/Positional",
+  "watchlist": ["NSE:NIFTY", "NSE:BANKNIFTY", "NSE:RELIANCE", "NSE:HDFCBANK", "NSE:ICICIBANK", "NSE:INFY", "NSE:TCS", "NSE:SBIN"],
+  "indicators": ["50 EMA", "200 EMA", "RSI", "VWAP"],
+  "rules": {
+    "bullish": "Price > 50 EMA AND RSI > 50",
+    "bearish": "Price < 50 EMA AND RSI < 45"
+  }
+}
