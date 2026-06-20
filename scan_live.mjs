@@ -22,6 +22,7 @@ const SCAN_CANDIDATES_PATH = requiredEnv('SCAN_CANDIDATES_PATH');
 const COS_PATH = requiredEnv('CLAUDE_OS_COS');
 const FOREIGN_LATEST_PATH = requiredEnv('FOREIGN_LATEST_PATH');
 const REGIME_LATEST_PATH = requiredEnv('REGIME_LATEST_PATH');
+const SECTOR_MAP_PATH = requiredEnv('SECTOR_MAP_PATH');
 const PYTHON_EXECUTABLE = requiredEnv('PYTHON_EXECUTABLE');
 
 // Fallback neu decision watchlist loi/rong.
@@ -122,6 +123,21 @@ function loadHeat() {
   } catch (e) {
     return { status: 'N/A', warnings: ['heat unavailable: ' + e.message] };
   }
+}
+
+function sectorWarnings(results) {
+  let sectors = {};
+  try { sectors = JSON.parse(readFileSync(SECTOR_MAP_PATH, 'utf-8')); } catch {}
+  const buys = {};
+  for (const result of results) {
+    result.sector = sectors[result.name] || 'Unknown';
+    if (result.sig === 'BUY' && result.sector !== 'Unknown') {
+      (buys[result.sector] ||= []).push(result.name);
+    }
+  }
+  return Object.entries(buys)
+    .filter(([, tickers]) => tickers.length > 2)
+    .map(([sector, tickers]) => `Sector cluster ${sector}: ${tickers.join(',')} = one correlated bet`);
 }
 
 // CLI args: node scan_live.mjs FPT SAB -> scan ad-hoc thay vi WATCHLIST
@@ -405,6 +421,12 @@ async function main() {
     console.log(JSON.stringify(sample));
     process.exit(sample.scored.sig === 'WATCH' && sample.scored.pct === 70 ? 0 : 1);
   }
+  if (process.argv.includes('--self-test-sector')) {
+    const sample = ['ACB', 'MBB', 'TCB', 'VCB'].map(name => ({ name, sig: 'BUY' }));
+    const warnings = sectorWarnings(sample);
+    console.log(JSON.stringify({ results: sample, warnings }));
+    process.exit(warnings.length === 1 ? 0 : 1);
+  }
   // Verify CDP
   try {
     await getClient();
@@ -473,6 +495,7 @@ async function main() {
   const noData= results.filter(r => r.sig === 'N/A' || r.sig === 'ERR');
   const breadth = computeBreadth(results);
   const heat = loadHeat();
+  const sectorClusterWarnings = sectorWarnings(results);
 
   // ---- PERSIST: scout_scan.json cho morning brief (0 token, headless) ----
   let persistOk = false;
@@ -506,10 +529,12 @@ async function main() {
         market_regime: r.scored?.market_regime ?? marketRegime.regime,
         market_adj: r.scored?.market_adj ?? 0,
         regime_note: r.scored?.regime_note ?? marketRegime.note,
+        sector: r.sector,
       })),
       breadth,
       market_regime: marketRegime,
       heat,
+      sector_warnings: sectorClusterWarnings,
     };
     writeFileSync(SCOUT_SCAN_PATH, JSON.stringify(scoutPayload, null, 2), 'utf-8');
     writeFileSync(SCAN_LATEST_PATH, JSON.stringify(scoutPayload, null, 2), 'utf-8');
@@ -584,6 +609,7 @@ async function main() {
     console.log('\n>>> KHONG DU DU LIEU (' + noData.length + ' ma): ' + noData.map(r=>r.name).join(', '));
   }
   for (const warning of heat.warnings || []) console.log('  HEAT WARNING: ' + warning);
+  for (const warning of sectorClusterWarnings) console.log('  SECTOR WARNING: ' + warning);
 
   console.log('\n  Criteria: [Conf>=60][CumD>0][Buy%>=55][NoDIV][BuyIMB>=1][P>MA20][MA20>100]');
   console.log('  Data source: TradingView H6 Footprint Aggressor v2 (CDP real-time)');
