@@ -297,7 +297,7 @@ function scoreSignal(fp, ma, price, phase = 'UNKNOWN', vol_ratio = null, churn =
   const known = Object.values(c).filter(v => v !== null);
   const passed = known.filter(v => v === true).length;
   const total  = known.length;
-  const pct    = total > 0 ? Math.round(passed / total * 1000) / 10 : null;
+  const pct    = total > 0 ? Math.round(passed / Object.keys(c).length * 1000) / 10 : null;
 
   // Hard reject: Div TRUE + CumDelta < 0
   let sig = 'N/A';
@@ -427,6 +427,16 @@ async function main() {
     console.log(JSON.stringify({ results: sample, warnings }));
     process.exit(warnings.length === 1 ? 0 : 1);
   }
+  if (process.argv.includes('--self-test-missing-footprint')) {
+    const scored = scoreSignal(
+      { conf: 80, cumDelta: null, buyPct: 60, divSignal: 0, maxBuyStack: 0 },
+      { ma20: 100, ma100: null },
+      110,
+    );
+    const result = { signal: scored.sig, score: scored.pct, cum_delta: null };
+    console.log(JSON.stringify(result));
+    process.exit(result.cum_delta === null && result.signal !== 'BUY' ? 0 : 1);
+  }
   // Verify CDP
   try {
     await getClient();
@@ -510,9 +520,9 @@ async function main() {
         ticker: r.name,
         signal: r.sig,
         score: r.scored?.pct ?? 0,
-        conf: r.fp?.conf ?? 0,
-        cum_delta: r.fp?.cumDelta ?? 0,
-        buy_pct: r.fp?.buyPct ?? 0,
+        conf: r.fp?.conf ?? null,
+        cum_delta: r.fp?.cumDelta ?? null,
+        buy_pct: r.fp?.buyPct ?? null,
         chg_pct: r.chg_pct ?? null,
         phase: r.phase ?? null,
         vol_ratio: r.vol_ratio ?? null,
