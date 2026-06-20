@@ -69,21 +69,61 @@ CONTEXT MANAGEMENT:
   }
 );
 
+const READ_ONLY_TOOLS = new Set([
+  'tv_health_check',
+  'tv_discover',
+  'tv_ui_state',
+  'chart_get_state',
+  'chart_get_visible_range',
+  'symbol_info',
+  'symbol_search',
+  'data_get_ohlcv',
+  'data_get_indicator',
+  'data_get_strategy_results',
+  'data_get_trades',
+  'data_get_equity',
+  'quote_get',
+  'depth_get',
+  'data_get_pine_lines',
+  'data_get_pine_labels',
+  'data_get_pine_tables',
+  'data_get_pine_boxes',
+  'data_get_study_values',
+  'pane_list',
+]);
+
+const registerTool = server.tool.bind(server);
+server.tool = (name, ...args) => {
+  if (!READ_ONLY_TOOLS.has(name)) return registerTool(name, ...args);
+
+  const handler = args.pop();
+  return registerTool(
+    name,
+    ...args,
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+    handler,
+  );
+};
+
+// Register all tool groups
 // Register all tool groups
 registerHealthTools(server);
 registerChartTools(server);
-registerPineTools(server);
 registerDataTools(server);
-registerCaptureTools(server);
-registerDrawingTools(server);
-registerAlertTools(server);
-registerBatchTools(server);
-registerReplayTools(server);
 registerIndicatorTools(server);
-registerWatchlistTools(server);
-registerUiTools(server);
 registerPaneTools(server);
-registerTabTools(server);
+
+// Mở lại drawing tools theo yêu cầu
+registerDrawingTools(server);
+// Các nhóm khác vẫn khóa để AI đỡ loạn:
+// registerPineTools(server);     (Chỉ mở khi muốn AI viết script Pine)
+// registerAlertTools(server);    (Cài đặt cảnh báo)
+// registerWatchlistTools(server); (Quản lý danh mục theo dõi)
+// registerUITools(server);       (Thay đổi giao diện sáng/tối)
+// registerTabTools(server);      (Chuyển đổi các tab biểu đồ)
+// registerCaptureTools(server);  (Chụp ảnh màn hình)
+// registerBatchTools(server);    (Xử lý hàng loạt)
+// registerReplayTools(server);   (Chế độ phát lại biểu đồ)
 
 // Startup notice (stderr so it doesn't interfere with MCP stdio protocol)
 process.stderr.write('⚠  tradingview-mcp  |  Unofficial tool. Not affiliated with TradingView Inc. or Anthropic.\n');
