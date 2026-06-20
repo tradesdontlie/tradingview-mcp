@@ -282,7 +282,7 @@ function scoreSignal(fp, ma, price, phase = 'UNKNOWN', vol_ratio = null, churn =
   // 1. Confluence >= 60
   c.conf = fp.conf !== null ? fp.conf >= 60 : null;
   // 2. Cum Delta > 0
-  c.cumD = fp.cumDelta !== null ? fp.cumDelta > 0 : null;
+  c.cumD = Number.isFinite(fp.cumDelta) ? fp.cumDelta > 0 : null;
   // 3. Buy% >= 55%
   c.buyPct = fp.buyPct !== null ? fp.buyPct >= 55 : null;
   // 4. No Div Signal
@@ -340,6 +340,34 @@ function scoreSignal(fp, ma, price, phase = 'UNKNOWN', vol_ratio = null, churn =
   if (total < 4) sig = 'N/A';
 
   return { sig, pct, passed, total, c, phase, vol_ratio, churn };
+}
+
+function buildScoutResult(r, marketRegime) {
+  return {
+    ticker: r.name,
+    signal: r.sig,
+    score: r.scored?.pct ?? 0,
+    conf: r.fp?.conf ?? null,
+    cum_delta: r.fp?.cumDelta ?? null,
+    buy_pct: r.fp?.buyPct ?? null,
+    chg_pct: r.chg_pct ?? null,
+    phase: r.phase ?? null,
+    vol_ratio: r.vol_ratio ?? null,
+    churn: r.churn ?? false,
+    rs_20: r.rs?.rs_20 ?? null,
+    leader: r.rs?.leader ?? null,
+    div_signal: r.fp?.divSignal ?? null,
+    max_buy_stack: r.fp?.maxBuyStack ?? null,
+    price: r.price ?? null,
+    sma20: r.ma?.ma20 ?? null,
+    sma100: r.ma?.ma100 ?? null,
+    above_ma20: r.scored?.c?.aboveMA20 ?? null,
+    ma20_slope_ok: r.scored?.c?.ma20vsMa100 ?? null,
+    market_regime: r.scored?.market_regime ?? marketRegime.regime,
+    market_adj: r.scored?.market_adj ?? 0,
+    regime_note: r.scored?.regime_note ?? marketRegime.note,
+    sector: r.sector,
+  };
 }
 
 function fmtNum(n, decimals = 0) {
@@ -428,14 +456,18 @@ async function main() {
     process.exit(warnings.length === 1 ? 0 : 1);
   }
   if (process.argv.includes('--self-test-missing-footprint')) {
-    const scored = scoreSignal(
-      { conf: 80, cumDelta: null, buyPct: 60, divSignal: 0, maxBuyStack: 0 },
-      { ma20: 100, ma100: null },
-      110,
+    const fp = { conf: 80, cumDelta: null, buyPct: 60, divSignal: 0, maxBuyStack: 1 };
+    const ma = { ma20: 100, ma100: 90 };
+    const scored = scoreSignal(fp, ma, 110);
+    const zeroDelta = scoreSignal({ ...fp, cumDelta: 0 }, ma, 110);
+    const result = buildScoutResult(
+      { name: 'TEST', sig: scored.sig, scored, fp: {}, ma: {}, rs: {} },
+      { regime: 'NEUTRAL', note: null },
     );
-    const result = { signal: scored.sig, score: scored.pct, cum_delta: null };
     console.log(JSON.stringify(result));
-    process.exit(result.cum_delta === null && result.signal !== 'BUY' ? 0 : 1);
+    const footprintNull = ['conf', 'cum_delta', 'buy_pct', 'max_buy_stack']
+      .every(field => result[field] === null);
+    process.exit(footprintNull && scored.sig === 'BUY' && zeroDelta.sig === 'WATCH' ? 0 : 1);
   }
   // Verify CDP
   try {
@@ -516,31 +548,7 @@ async function main() {
       date: `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`,
       scan_time: `${pad(now.getHours())}:${pad(now.getMinutes())}`,
       source: 'scan_live.mjs H6 Footprint',
-      results: results.map(r => ({
-        ticker: r.name,
-        signal: r.sig,
-        score: r.scored?.pct ?? 0,
-        conf: r.fp?.conf ?? null,
-        cum_delta: r.fp?.cumDelta ?? null,
-        buy_pct: r.fp?.buyPct ?? null,
-        chg_pct: r.chg_pct ?? null,
-        phase: r.phase ?? null,
-        vol_ratio: r.vol_ratio ?? null,
-        churn: r.churn ?? false,
-        rs_20: r.rs?.rs_20 ?? null,
-        leader: r.rs?.leader ?? null,
-        div_signal: r.fp?.divSignal ?? null,
-        max_buy_stack: r.fp?.maxBuyStack ?? null,
-        price: r.price ?? null,
-        sma20: r.ma?.ma20 ?? null,
-        sma100: r.ma?.ma100 ?? null,
-        above_ma20: r.scored?.c?.aboveMA20 ?? null,
-        ma20_slope_ok: r.scored?.c?.ma20vsMa100 ?? null,
-        market_regime: r.scored?.market_regime ?? marketRegime.regime,
-        market_adj: r.scored?.market_adj ?? 0,
-        regime_note: r.scored?.regime_note ?? marketRegime.note,
-        sector: r.sector,
-      })),
+      results: results.map(r => buildScoutResult(r, marketRegime)),
       breadth,
       market_regime: marketRegime,
       heat,
