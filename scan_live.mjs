@@ -8,7 +8,7 @@ import * as chart from './src/core/chart.js';
 import * as data from './src/core/data.js';
 import { getClient } from './src/connection.js';
 import { readFileSync, writeFileSync } from 'fs';
-import { execFileSync, execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { computeRS, writeVnindexCache, VNINDEX_SYM } from './rs_util.mjs';
 
 // Evening Scout feed: scan_live ghi ket qua footprint cho morning brief (scout_promote.py doc file nay)
@@ -20,6 +20,7 @@ const SCOUT_SCAN_PATH = requiredEnv('SCOUT_SCAN_PATH');
 const SCAN_LATEST_PATH = requiredEnv('SCAN_LATEST_PATH');
 const COS_PATH = requiredEnv('CLAUDE_OS_COS');
 const FOREIGN_LATEST_PATH = requiredEnv('FOREIGN_LATEST_PATH');
+const REGIME_LATEST_PATH = requiredEnv('REGIME_LATEST_PATH');
 const PYTHON_EXECUTABLE = requiredEnv('PYTHON_EXECUTABLE');
 
 // Fallback neu decision watchlist loi/rong.
@@ -44,7 +45,6 @@ function exchangePrefix(raw) {
 }
 
 function loadExchangeMap() {
-  let persistOk = false;
   try {
     const payload = JSON.parse(readFileSync(FOREIGN_LATEST_PATH, 'utf-8'));
     const rows = payload.data || {};
@@ -59,7 +59,7 @@ function loadExchangeMap() {
 
 function loadWatchlist() {
   try {
-    const output = execSync(`python "${COS_PATH}" decision watchlist`, { encoding: 'utf-8' });
+    const output = execFileSync(PYTHON_EXECUTABLE, [COS_PATH, 'decision', 'watchlist'], { encoding: 'utf-8' });
     const rows = JSON.parse(output);
     if (!Array.isArray(rows) || rows.length === 0) return FALLBACK_WATCHLIST;
     const exchanges = loadExchangeMap();
@@ -73,6 +73,44 @@ function loadWatchlist() {
   } catch (e) {
     console.error('decision watchlist failed, fallback hardcoded:', e.message);
     return FALLBACK_WATCHLIST;
+  }
+}
+
+const MARKET_ADJ = { RISK_ON: 5, NEUTRAL: -5, RISK_OFF: -15 };
+
+function loadMarketRegime() {
+  try {
+    const payload = JSON.parse(readFileSync(REGIME_LATEST_PATH, 'utf-8'));
+    const raw = String(payload.date || '');
+    const date = /^\d{8}$/.test(raw)
+      ? new Date(Number(raw.slice(0, 4)), Number(raw.slice(4, 6)) - 1, Number(raw.slice(6, 8)))
+      : new Date(raw);
+    const ageDays = Math.floor((Date.now() - date.getTime()) / 86400000);
+    if (!Number.isFinite(ageDays) || ageDays > 2) return { regime: 'N/A', note: 'regime stale/missing; gate skipped' };
+    return { regime: payload.regime || 'N/A', note: null };
+  } catch {
+    return { regime: 'N/A', note: 'regime stale/missing; gate skipped' };
+  }
+}
+
+function applyRegimeGate(result, regime) {
+  const adj = MARKET_ADJ[regime] || 0;
+  result.scored.pct = Math.round(Math.max(0, Math.min(100, result.scored.pct + adj)) * 10) / 10;
+  result.scored.market_regime = regime;
+  result.scored.market_adj = adj;
+  result.scored.regime_note = null;
+  if (regime === 'RISK_OFF' && result.scored.sig === 'BUY') {
+    result.scored.sig = 'WATCH';
+    result.scored.regime_note = 'RISK_OFF: BUY->WATCH';
+  }
+  return result;
+}
+
+function loadHeat() {
+  try {
+    return JSON.parse(execFileSync(PYTHON_EXECUTABLE, [COS_PATH, 'heat', '--json'], { encoding: 'utf-8' }));
+  } catch (e) {
+    return { status: 'N/A', warnings: ['heat unavailable: ' + e.message] };
   }
 }
 
@@ -233,7 +271,7 @@ function scoreSignal(fp, ma, price, phase = 'UNKNOWN', vol_ratio = null, churn =
   const known = Object.values(c).filter(v => v !== null);
   const passed = known.filter(v => v === true).length;
   const total  = known.length;
-  const pct    = total > 0 ? Math.round(passed / total * 100) : null;
+  const pct    = total > 0 ? Math.round(passed / total * 1000) / 10 : null;
 
   // Hard reject: Div TRUE + CumDelta < 0
   let sig = 'N/A';
@@ -348,6 +386,11 @@ async function scanOne(ticker, name, idxCloses) {
 }
 
 async function main() {
+  if (process.argv.includes('--self-test-regime')) {
+    const sample = applyRegimeGate({ scored: { sig: 'BUY', pct: 85 } }, 'RISK_OFF');
+    console.log(JSON.stringify(sample));
+    process.exit(sample.scored.sig === 'WATCH' && sample.scored.pct === 70 ? 0 : 1);
+  }
   // Verify CDP
   try {
     await getClient();
@@ -380,6 +423,8 @@ async function main() {
     else console.log('VNINDEX baseline thieu data -> RS=N/A\n');
   } catch (e) { console.log('VNINDEX fetch loi -> RS=N/A: ' + e.message + '\n'); }
 
+  const marketRegime = loadMarketRegime();
+  console.log('Market regime: ' + marketRegime.regime + (marketRegime.note ? ' | ' + marketRegime.note : ''));
   const results = [];
 
   for (let i = 0; i < SCAN_LIST.length; i++) {
@@ -391,6 +436,7 @@ async function main() {
       results.push({ name, group: g, error: r.error, sig: 'ERR' });
       continue;
     }
+    applyRegimeGate(r, marketRegime.regime);
     const sig = r.scored.sig;
     const pct = r.scored.pct;
     console.log(sig + (pct !== null ? ' (' + pct + '%)' : '') +
@@ -412,8 +458,10 @@ async function main() {
   const loai  = results.filter(r => r.sig === 'LOAI');
   const noData= results.filter(r => r.sig === 'N/A' || r.sig === 'ERR');
   const breadth = computeBreadth(results);
+  const heat = loadHeat();
 
   // ---- PERSIST: scout_scan.json cho morning brief (0 token, headless) ----
+  let persistOk = false;
   try {
     const now = new Date();
     const pad = n => String(n).padStart(2, '0');
@@ -441,8 +489,13 @@ async function main() {
         sma100: r.ma?.ma100 ?? null,
         above_ma20: r.scored?.c?.aboveMA20 ?? null,
         ma20_slope_ok: r.scored?.c?.ma20vsMa100 ?? null,
+        market_regime: r.scored?.market_regime ?? marketRegime.regime,
+        market_adj: r.scored?.market_adj ?? 0,
+        regime_note: r.scored?.regime_note ?? marketRegime.note,
       })),
       breadth,
+      market_regime: marketRegime,
+      heat,
     };
     writeFileSync(SCOUT_SCAN_PATH, JSON.stringify(scoutPayload, null, 2), 'utf-8');
     writeFileSync(SCAN_LATEST_PATH, JSON.stringify(scoutPayload, null, 2), 'utf-8');
@@ -455,6 +508,7 @@ async function main() {
   console.log('\n' + '='.repeat(W));
   console.log('  SCAN REPORT H6 | ' + new Date().toLocaleDateString('vi-VN') + ' | BUY:' + buy.length + ' WATCH:' + watch.length + ' AVOID:' + avoid.length + ' LOAI:' + loai.length);
   console.log('  Breadth: up ' + breadth.up + ' | down ' + breadth.down + ' | pct_up ' + (breadth.pct_up ?? 'N/A') + '%');
+  console.log('  Regime: ' + marketRegime.regime + ' | Heat: ' + (heat.status || 'N/A') + ' (warning only)');
   console.log('='.repeat(W));
 
   function printHeader() {
@@ -515,6 +569,7 @@ async function main() {
   if (noData.length > 0) {
     console.log('\n>>> KHONG DU DU LIEU (' + noData.length + ' ma): ' + noData.map(r=>r.name).join(', '));
   }
+  for (const warning of heat.warnings || []) console.log('  HEAT WARNING: ' + warning);
 
   console.log('\n  Criteria: [Conf>=60][CumD>0][Buy%>=55][NoDIV][BuyIMB>=1][P>MA20][MA20>100]');
   console.log('  Data source: TradingView H6 Footprint Aggressor v2 (CDP real-time)');
