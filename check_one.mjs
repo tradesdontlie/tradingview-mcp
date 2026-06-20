@@ -8,6 +8,7 @@ import path from 'path';
 import * as chart from './src/core/chart.js';
 import * as data from './src/core/data.js';
 import { getClient } from './src/connection.js';
+import { computeRS, readVnindexCache } from './rs_util.mjs';
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function parseNum(val) {
@@ -15,9 +16,43 @@ function parseNum(val) {
   const s = val.toString().replace(/[,\s]/g,'').replace('−','-');
   const n = parseFloat(s); return isNaN(n) ? null : n;
 }
+
+// Volume thresholds — đồng bộ toàn hệ thống (scan_live.mjs, scan_engine.py, check.md)
+const BREAKOUT_VOL = 1.5;
+const PULLBACK_VOL = 0.5;
+// TopBot VSA/Wyckoff: nguong vol sieu cao (climactic) + cao (effort)
+const VOL_ULTRA = 2.0;
+const VOL_HIGH  = BREAKOUT_VOL;
+// Bien do tran/san: coi la sat tran/san khi da di >=93% bien do tu tham chieu
+const NEAR_LIMIT = 0.93;
+
+// --full flag: include heavy diagnostic fields (fp_table_summary, raw vol, amp_prev, mtf)
+const FULL = process.argv.includes('full') || process.env.CHECK_FULL === '1';
+
 function sma(arr, period) {
   if (arr.length < period) return null;
   return arr.slice(-period).reduce((a, b) => a + b, 0) / period;
+}
+
+// === TopBot DOAN 1: phan loai nen (VSA: vol + spread + close position) ===
+const round2 = (num) => Math.round(num * 100) / 100;
+
+function classifyBar(bar, avgVol, avgSpread, prior20Highs, prior20Lows) {
+  const spread = bar.high - bar.low;
+  const volRatio = avgVol ? round2(bar.volume / avgVol) : null;
+  const spreadRatio = avgSpread ? round2(spread / avgSpread) : null;
+  let spreadClass = 'normal';
+  if (spreadRatio !== null) {
+    if (spreadRatio < 0.7) spreadClass = 'narrow';
+    else if (spreadRatio > 1.3) spreadClass = 'wide';
+  }
+  const highEqLow = bar.high === bar.low;
+  const closePos = highEqLow ? 50 : Math.round(((bar.close - bar.low) / (bar.high - bar.low)) * 100);
+  const isUp = bar.close > bar.open;
+  const isDown = bar.close < bar.open;
+  const atNewHigh = prior20Highs.length ? bar.high >= Math.max(...prior20Highs) : false;
+  const atNewLow = prior20Lows.length ? bar.low <= Math.min(...prior20Lows) : false;
+  return { volRatio, spread, spreadRatio, spreadClass, closePos, isUp, isDown, atNewHigh, atNewLow };
 }
 
 // Pivot High: high[i] = max trong window ±w
@@ -236,6 +271,14 @@ async function main() {
     ratio: avgVol20 ? Math.round(b.volume / avgVol20 * 100) / 100 : null,
   }));
 
+  // Derived volume state for phase-aware logic
+  const lastVolRatio = vol5.length > 0 ? vol5[vol5.length - 1].ratio : null;
+  const vol_state = {
+    ratio_last: lastVolRatio,
+    breakout: lastVolRatio !== null && lastVolRatio >= BREAKOUT_VOL,
+    exhausted: lastVolRatio !== null && lastVolRatio < PULLBACK_VOL,
+  };
+
   // --- Footprint score ---
   let fpScore = 0;
   const fpChecks = {
@@ -256,6 +299,193 @@ async function main() {
   }
   fpScore = Object.values(fpChecks).filter(Boolean).length;
 
+  // --- VSA effort-vs-result (chom cung tai nen no-progress) ---
+  // Bo sung cho 'div': bat ca vol cao + dong cua yeu/mid + than nho (gia khong tien len).
+  let vsa_churn = { flag: false, close_pos: fp.closePos ?? null, body_pct: null, vol_ratio: lastVolRatio, note: null };
+  if (todayBar && todayBar.high > todayBar.low) {
+    const spread = todayBar.high - todayBar.low;
+    const bodyPct = Math.round(Math.abs(todayBar.close - todayBar.open) / spread * 100);
+    const effort    = lastVolRatio !== null && lastVolRatio >= 1.2;  // no luc > TB
+    const weakClose = (fp.closePos ?? 50) <= 50;                     // dong <=50% nen
+    const noResult  = bodyPct < 35;                                  // than nho -> gia khong tien
+    const flag = effort && weakClose && noResult;
+    vsa_churn = {
+      flag, close_pos: fp.closePos ?? null, body_pct: bodyPct, vol_ratio: lastVolRatio,
+      note: flag ? 'no luc cao + ket qua kem -> chom cung/cau yeu, can delta xac nhan' : null,
+    };
+  }
+
+  // --- Overhead resistance gan nhat (room cho RR) ---
+  const aboveHighs = ph.map(p => p.price).filter(p => p > price);
+  const overheadPrice = aboveHighs.length ? Math.min(...aboveHighs) : null;
+  const overhead = {
+    resistance: overheadPrice,
+    headroom_pct: overheadPrice ? Math.round((overheadPrice - price) / price * 1000) / 10 : null,
+  };
+
+  // === TopBot DOAN 2: detector 6 pattern cao trao + nen xac nhan ===
+  const avgSpread20 = sma(bars.map(b => b.high - b.low), 20);
+
+  function detectPattern(idx) {
+    const prior20Highs = bars.slice(Math.max(0, idx - 20), idx).map(b => b.high);
+    const prior20Lows = bars.slice(Math.max(0, idx - 20), idx).map(b => b.low);
+    const c = classifyBar(bars[idx], avgVol20, avgSpread20, prior20Highs, prior20Lows);
+    if (c.isUp && c.spreadClass === 'narrow' && c.volRatio >= VOL_ULTRA && c.closePos >= 40 && c.atNewHigh) {
+      return { pattern: 'ERM', side: 'SELL' };
+    }
+    if (c.isUp && c.spreadClass === 'wide' && c.volRatio >= VOL_ULTRA && c.atNewHigh && c.closePos >= 30 && c.closePos <= 70) {
+      return { pattern: 'BUYING_CLIMAX', side: 'SELL' };
+    }
+    if (c.atNewHigh && c.closePos <= 20 && c.volRatio >= VOL_HIGH) {
+      return { pattern: 'UPTHRUST', side: 'SELL' };
+    }
+    if (c.isDown && c.spreadClass === 'narrow' && c.volRatio >= VOL_ULTRA && c.closePos <= 20 && c.atNewLow) {
+      return { pattern: 'BAG_HOLDING', side: 'BUY' };
+    }
+    if (c.isDown && c.spreadClass === 'wide' && c.volRatio >= VOL_ULTRA && c.atNewLow && c.closePos >= 30) {
+      return { pattern: 'SELLING_CLIMAX', side: 'BUY' };
+    }
+    if (c.isDown && c.volRatio >= VOL_ULTRA && c.closePos >= 50) {
+      return { pattern: 'STOPPING_VOL', side: 'BUY' };
+    }
+    return null;
+  }
+
+  let signalIdx = -1;
+  let det = detectPattern(n - 2);
+  if (det) {
+    signalIdx = n - 2;
+  } else {
+    det = detectPattern(n - 1);
+    if (det) signalIdx = n - 1;
+  }
+
+  let signalBar, cSig, confirmed, confirm_rule, stop, target, rr, rr_ok;
+  if (det) {
+    signalBar = bars[signalIdx];
+    cSig = classifyBar(signalBar, avgVol20, avgSpread20,
+      bars.slice(Math.max(0, signalIdx - 20), signalIdx).map(b => b.high),
+      bars.slice(Math.max(0, signalIdx - 20), signalIdx).map(b => b.low)
+    );
+    if (signalIdx === n - 2) {
+      const confBar = bars[n - 1];
+      confirmed = det.side === 'SELL' ? confBar.close < signalBar.close : confBar.close > signalBar.close;
+      confirm_rule = null;
+    } else {
+      confirmed = false;
+      confirm_rule = det.side === 'SELL'
+        ? `cho nen sau dong < ${Math.round(signalBar.close)}`
+        : `cho nen sau dong > ${Math.round(signalBar.close)}`;
+    }
+    const entry = signalBar.close;
+    if (det.side === 'SELL') {
+      stop = Math.round(signalBar.high * 1.002);
+      const cands = pl.filter(p => p.price < price).map(p => p.price);
+      target = cands.length ? Math.max(...cands) : null;
+    } else {
+      stop = Math.round(signalBar.low * 0.998);
+      target = overhead.resistance || null;
+    }
+    rr = (target && stop) ? Math.round(Math.abs(entry - target) / Math.abs(entry - stop) * 100) / 100 : null;
+    rr_ok = rr != null && rr >= 2.0;
+  }
+
+  // === TopBot DOAN 3: output object ===
+  let topbot;
+  if (!det) {
+    topbot = { pattern: null };
+  } else {
+    let note = '';
+    switch (det.pattern) {
+      case 'ERM':            note = 'tang gia bien hep + vol sieu cao tai dinh moi -> cung hap thu het cau, nguy co dao chieu giam'; break;
+      case 'BUYING_CLIMAX':  note = 'cuc tang gia bien rong + vol sieu cao, dong cua roi dinh -> to chuc phan phoi'; break;
+      case 'UPTHRUST':       note = 'bay tang gia: pha dinh roi dong cua thap + vol cao -> luc ban manh'; break;
+      case 'BAG_HOLDING':    note = 'giam bien hep + vol sieu cao tai day moi -> to chuc hap thu cung, kha nang tao day'; break;
+      case 'SELLING_CLIMAX': note = 'cuc giam bien rong + vol sieu cao tai day moi, dong cua hoi -> hap thu cung hoang loan'; break;
+      case 'STOPPING_VOL':   note = 'giam nhung vol sieu cao + dong cua nua tren -> dong tien lon chan da roi'; break;
+      default: note = '';
+    }
+    topbot = {
+      pattern: det.pattern,
+      side: det.side,
+      signal_bar: {
+        d: `D-${n - 1 - signalIdx}`,
+        close: Math.round(signalBar.close),
+        vol_ratio: cSig.volRatio,
+        spread_class: cSig.spreadClass,
+        close_pos: cSig.closePos
+      },
+      confirmed, confirm_rule, stop, target, rr, rr_ok, note
+    };
+  }
+  const cToday = classifyBar(todayBar, avgVol20, avgSpread20,
+    bars.slice(Math.max(0, n - 21), n - 1).map(b => b.high),
+    bars.slice(Math.max(0, n - 21), n - 1).map(b => b.low)
+  );
+  const spreadOut = { class: cToday.spreadClass, ratio: cToday.spreadRatio };
+  vol_state.ultra = lastVolRatio != null && lastVolRatio >= VOL_ULTRA;
+
+  // === VN structural fields: bien do tran/san + ADTV + dao han VN30F ===
+  // Tach board tu prefix
+  const board = ticker.split(':')[0].toUpperCase();
+  const LIMIT_MAP = { HOSE: 0.07, HSX: 0.07, HNX: 0.10, UPCOM: 0.15, UPCOMVN: 0.15 };
+  const limit = LIMIT_MAP[board] ?? null;
+
+  // (A) price_limit
+  let price_limit;
+  if (limit === null) {
+    price_limit = { board: null };
+  } else {
+    const limitPct = Math.round(limit * 1000) / 10;
+    const refBar = bars[n - 2];
+    if (refBar != null) {
+      const ref = refBar.close;
+      const ceiling = Math.round(ref * (1 + limit));
+      const floor = Math.round(ref * (1 - limit));
+      const pctFromRef = Math.round((price - ref) / ref * 1000) / 10;
+      const distToCeilingPct = Math.round((ceiling - price) / price * 1000) / 10;
+      const ceilingRisk = pctFromRef >= limit * 100 * NEAR_LIMIT;
+      const floorRisk = pctFromRef <= -limit * 100 * NEAR_LIMIT;
+      price_limit = {
+        board, limit_pct: limitPct, ref, ceiling, floor,
+        pct_from_ref: pctFromRef, dist_to_ceiling_pct: distToCeilingPct,
+        ceiling_risk: ceilingRisk, floor_risk: floorRisk,
+      };
+    } else {
+      price_limit = { board, limit_pct: limitPct, note: 'thieu nen tham chieu' };
+    }
+  }
+
+  // (B) adtv_20_bn — gia tri giao dich TB 20 nen, quy ty VND
+  let adtv_20_bn = null;
+  const last20 = bars.slice(-20);
+  if (last20.length > 0) {
+    const sum = last20.reduce((acc, b) => acc + b.close * b.volume, 0);
+    adtv_20_bn = Math.round(sum / last20.length / 1e9 * 10) / 10;
+  }
+
+  // (C) days_to_vn30f_expiry — thu Nam tuan thu 3 hang thang
+  const today = bars[n - 1] ? new Date(bars[n - 1].time * 1000) : new Date();
+  const thirdThursday = (year, month) => {
+    const first = new Date(year, month, 1);
+    const firstThu = 1 + ((4 - first.getDay() + 7) % 7);
+    return new Date(year, month, firstThu + 14);
+  };
+  let expiry = thirdThursday(today.getFullYear(), today.getMonth());
+  if (today > expiry) {
+    let nextMonth = today.getMonth() + 1;
+    let nextYear = today.getFullYear();
+    if (nextMonth > 11) { nextMonth = 0; nextYear++; }
+    expiry = thirdThursday(nextYear, nextMonth);
+  }
+  const days_to_vn30f_expiry = Math.ceil((expiry - today) / 86400000);
+
+  // --- RS vs VNINDEX (doc cache scan_live ghi; cu >36h -> null, chay /scan de lam moi) ---
+  const idxCache = readVnindexCache();
+  const rs = (idxCache && idxCache.fresh)
+    ? computeRS(bars, idxCache.closes)
+    : { rs_20: null, leader: null, note: idxCache ? 'cache VNINDEX cu, chay /scan' : 'chua co cache, chay /scan' };
+
   // --- MTF score ---
   let mtfScore = 0;
   const mtfNotes = [];
@@ -267,19 +497,33 @@ async function main() {
   // --- Huong (BiDir): tu fp.bias. null = ban cu long-only ---
   const dir = fp.bias === 1 ? 'LONG' : fp.bias === -1 ? 'SHORT' : fp.bias === 0 ? 'NEUTRAL' : 'LONG_ONLY';
 
-  // --- Compact output ---
+  // --- Compact output (gate heavy diagnostics behind --full) ---
+  const fpOut = { ...fp, score: fpScore, checks: fpChecks };
+  if (!FULL) { delete fpOut.buyVol; delete fpOut.sellVol; delete fpOut.totalVol; }
+  if (!FULL) { delete wave.amp_prev; delete wave.amp_prev_pct; }
+
   const out = {
     ticker, price, timeframe, tf_confirmed: tfOk, dir,
     symbol_confirmed: ok,
+    as_of: new Date().toISOString(),
     date: bars[n-1]?.time ? new Date(bars[n-1].time * 1000).toISOString().slice(0,10) : new Date().toISOString().slice(0,10),
     ohlc_today: { o: todayBar?.open, h: todayBar?.high, l: todayBar?.low, c: todayBar?.close, vol: todayBar?.volume },
     ma: { sma20: sma20_current, sma100: sma100_current },
-    fp: { ...fp, score: fpScore, checks: fpChecks },
-    fp_table_summary: tableRows,
+    fp: fpOut,
+    fp_table_summary: FULL ? tableRows : undefined,
     structure,
     wave,
     trail: { ...trail, sma20_current },
     vol5,
+    vol_state,
+    spread: spreadOut,
+    vsa_churn,
+    topbot,
+    price_limit,
+    adtv_20_bn,
+    days_to_vn30f_expiry,
+    overhead,
+    rs,
     avg_vol20: Math.round(avgVol20 || 0),
     mtf: { score: mtfScore, notes: mtfNotes },
     pivots: {
