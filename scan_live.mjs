@@ -18,6 +18,7 @@ const requiredEnv = name => {
 };
 const SCOUT_SCAN_PATH = requiredEnv('SCOUT_SCAN_PATH');
 const SCAN_LATEST_PATH = requiredEnv('SCAN_LATEST_PATH');
+const SCAN_CANDIDATES_PATH = requiredEnv('SCAN_CANDIDATES_PATH');
 const COS_PATH = requiredEnv('CLAUDE_OS_COS');
 const FOREIGN_LATEST_PATH = requiredEnv('FOREIGN_LATEST_PATH');
 const REGIME_LATEST_PATH = requiredEnv('REGIME_LATEST_PATH');
@@ -58,6 +59,15 @@ function loadExchangeMap() {
 }
 
 function loadWatchlist() {
+  try {
+    const payload = JSON.parse(readFileSync(SCAN_CANDIDATES_PATH, 'utf-8'));
+    if (Array.isArray(payload.candidates) && payload.candidates.length > 0) {
+      return payload.candidates.map(row => {
+        const name = String(row.ticker).toUpperCase();
+        return { t: exchangePrefix(row.exchange) + ':' + name, g: 0, name };
+      });
+    }
+  } catch {}
   try {
     const output = execFileSync(PYTHON_EXECUTABLE, [COS_PATH, 'decision', 'watchlist'], { encoding: 'utf-8' });
     const rows = JSON.parse(output);
@@ -386,6 +396,10 @@ async function scanOne(ticker, name, idxCloses) {
 }
 
 async function main() {
+  if (process.argv.includes('--print-watchlist')) {
+    console.log(JSON.stringify(SCAN_LIST));
+    process.exit(0);
+  }
   if (process.argv.includes('--self-test-regime')) {
     const sample = applyRegimeGate({ scored: { sig: 'BUY', pct: 85 } }, 'RISK_OFF');
     console.log(JSON.stringify(sample));
