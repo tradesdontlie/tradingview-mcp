@@ -4,6 +4,7 @@
 import { getClient, getTargetInfo, evaluate } from '../connection.js';
 import { existsSync } from 'fs';
 import { execSync, spawn } from 'child_process';
+import { join } from 'path';
 
 export async function healthCheck() {
   await getClient();
@@ -187,6 +188,17 @@ export async function launch({ port, kill_existing } = {}) {
   const candidates = pathMap[platform] || pathMap.linux;
   for (const p of candidates) {
     if (p && existsSync(p)) { tvPath = p; break; }
+  }
+
+  if (!tvPath && platform === 'win32') {
+    try {
+      const psCmd = "(Get-AppxPackage -Name '*TradingView*').InstallLocation";
+      const installLocation = execSync(`powershell -NoProfile -Command "${psCmd}"`, { timeout: 5000 }).toString().trim();
+      if (installLocation) {
+        const candidate = join(installLocation, 'TradingView.exe');
+        if (existsSync(candidate)) tvPath = candidate;
+      }
+    } catch { /* ignore - MSIX package not found */ }
   }
 
   if (!tvPath) {
