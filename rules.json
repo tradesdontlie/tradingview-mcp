@@ -1,5 +1,5 @@
 {
-  "watchlist": ["BTCUSD", "ETHUSD", "SOLUSD", "AAPL", "TSLA", "NVDA"],
+  "watchlist": ["BTCUSD", "XAUUSD", "SOLUSD", "AAPL", "TSLA", "NVDA"],
   "timeframes": ["1W", "1D", "4H"],
   "biasCriteria": {
     "bullish": [
