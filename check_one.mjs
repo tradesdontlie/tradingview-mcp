@@ -422,7 +422,21 @@ async function main() {
     bars.slice(Math.max(0, n - 21), n - 1).map(b => b.high),
     bars.slice(Math.max(0, n - 21), n - 1).map(b => b.low)
   );
-  const spreadOut = { class: cToday.spreadClass, ratio: cToday.spreadRatio };
+  // --- ATR(14) tu True Range (tinh ca gap) + range nen hien tai theo boi so ATR ---
+  const trArr = bars.slice(1).map((b, i) =>
+    Math.max(b.high - b.low, Math.abs(b.high - bars[i].close), Math.abs(b.low - bars[i].close)));
+  const atr14 = trArr.length >= 14 ? round2(trArr.slice(-14).reduce((a, c) => a + c, 0) / 14) : null;
+  const range_atr = (atr14 && todayBar) ? round2((todayBar.high - todayBar.low) / atr14) : null;
+  const spreadOut = { class: cToday.spreadClass, ratio: cToday.spreadRatio, atr14 };
+  // doc nen hien tai = 3 so tho, khong phan: range theo boi so ATR + vol ratio + vi tri dong cua
+  const bar_read = { range_atr, vol_ratio: lastVolRatio, close_pos: fp.closePos ?? null };
+  // nen DA DONG gan nhat (1-3 cay ben trai). bar_read tren la nen real-time chua dong -> doc ket luan o day cho chac
+  const closedRead = (b) => b ? {
+    range_atr: atr14 ? round2((b.high - b.low) / atr14) : null,
+    vol_ratio: avgVol20 ? Math.round(b.volume / avgVol20 * 100) / 100 : null,
+    close_pos: b.high > b.low ? Math.round((b.close - b.low) / (b.high - b.low) * 100) : null,
+  } : null;
+  const prev_closed = [bars[n-2], bars[n-3], bars[n-4]].map(closedRead);
   vol_state.ultra = lastVolRatio != null && lastVolRatio >= VOL_ULTRA;
 
   // === VN structural fields: bien do tran/san + ADTV + dao han VN30F ===
@@ -517,6 +531,8 @@ async function main() {
     vol5,
     vol_state,
     spread: spreadOut,
+    bar_read,
+    prev_closed,
     vsa_churn,
     topbot,
     price_limit,
