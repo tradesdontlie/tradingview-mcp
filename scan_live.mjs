@@ -161,7 +161,7 @@ function parseNum(val) {
 
 // --- Nguong volume THONG NHAT toan he thong (xem hermes_volume_consistency_plan.md) ---
 const BREAKOUT_VOL = 1.5;   // vol nen pha >= 1.5x avgVol20 -> xac nhan breakout
-const PULLBACK_VOL = 0.5;   // vol nen <0.5x avgVol20 -> can cung (pullback lanh)
+const PULLBACK_VOL = 1.0;   // vol nen <1x avgVol20 -> can cung (pullback lanh)
 
 // --- Helpers port tu check_one.mjs de tinh wave.phase (giu dong bo 1 nguon) ---
 function sma(arr, period) {

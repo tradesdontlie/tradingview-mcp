@@ -19,7 +19,7 @@ function parseNum(val) {
 
 // Volume thresholds — đồng bộ toàn hệ thống (scan_live.mjs, scan_engine.py, check.md)
 const BREAKOUT_VOL = 1.5;
-const PULLBACK_VOL = 0.5;
+const PULLBACK_VOL = 1.0;
 // TopBot VSA/Wyckoff: nguong vol sieu cao (climactic) + cao (effort)
 const VOL_ULTRA = 2.0;
 const VOL_HIGH  = BREAKOUT_VOL;
@@ -119,13 +119,27 @@ function defaultTf(ticker) {
 }
 
 async function main() {
-  const ticker = process.argv[2] || 'HOSE:OCB';
+  let ticker = process.argv[2] || 'HOSE:OCB';
   const timeframe = process.argv[3] || defaultTf(ticker);
   const shortName = ticker.split(':').pop();
 
   try { await getClient(); } catch(e) { console.error('CDP FAIL:', e.message); process.exit(1); }
 
   const initState = await chart.getState();
+
+  // VN stock: prefix HOSE co the sai (SHS o HNX) -> resolve dung san qua TradingView symbol search REST,
+  // tranh ban symbol invalid len chart (gay ket UI). Non-VN / search khong thay -> giu ticker goc.
+  const VN_BOARDS = ['HOSE', 'HSX', 'HNX', 'UPCOM'];
+  const givenBoard = ticker.includes(':') ? ticker.split(':')[0].toUpperCase() : null;
+  if (givenBoard && VN_BOARDS.includes(givenBoard)) {
+    try {
+      const sr = await chart.symbolSearch({ query: shortName });
+      const hit = (sr.results || []).find(x =>
+        VN_BOARDS.includes((x.exchange || '').toUpperCase()) &&
+        x.symbol.toUpperCase() === shortName.toUpperCase());
+      if (hit) ticker = hit.full_name;
+    } catch (e) {}
+  }
 
   await chart.setSymbol({ symbol: ticker });
   let ok = false;
