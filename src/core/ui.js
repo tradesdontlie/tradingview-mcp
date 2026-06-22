@@ -4,6 +4,9 @@
 import { evaluate, evaluateAsync, getClient } from '../connection.js';
 
 export async function click({ by, value }) {
+  if (value === undefined || value === null) {
+    return { success: false, found: false, error: 'ui_click requires a non-empty value' };
+  }
   const escaped = JSON.stringify(value);
   const result = await evaluate(`
     (function() {
