@@ -41,9 +41,16 @@ start "" "%TV_EXE%" --remote-debugging-port=%PORT%
 echo Waiting for CDP to become available...
 timeout /t 5 /nobreak >nul
 
+set RETRIES=0
 :check
 curl -s http://localhost:%PORT%/json/version >nul 2>&1
 if %errorlevel% neq 0 (
+    set /a RETRIES+=1
+    if %RETRIES% geq 15 (
+        echo.
+        echo Warning: CDP not responding after 15 attempts. TradingView may still be loading.
+        exit /b 1
+    )
     echo Still waiting...
     timeout /t 2 /nobreak >nul
     goto check
