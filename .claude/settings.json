@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "tradingview": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "/Users/samteanjones/Dropbox/Clief_learn/tradingview-mcp/src/server.js"
+      ],
+      "env": {}
+    }
+  }
+}

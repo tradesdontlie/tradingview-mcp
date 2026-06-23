@@ -1,0 +1,167 @@
+//@version=6
+// SID Method — RSI + MACD + Reversal-Exit Strategy
+// Methodology paraphrased structurally from Six Figures From Scratch, Ch. 9
+// (Sid Naiman). This file does not reproduce any source text. Author's
+// claimed performance metrics are not independently verified.
+//
+// Rules implemented:
+//   Long  -> RSI(14) was <= oversold, then MACD bullish cross within lookback bars
+//            (optional: a recent double-bottom proxy via swing pivots)
+//   Short -> RSI(14) was >= overbought, then MACD bearish cross within lookback bars
+//            (optional: a recent double-top proxy via swing pivots)
+//   Stop  -> the structural extreme printed while RSI was beyond the threshold
+//   Exit  -> close when RSI crosses the mid level (default 50)
+//
+// Markets: US stocks, ETFs, indices. Default timeframe: 1D.
+
+strategy("SID Method",
+     overlay=true,
+     initial_capital=10000,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=10,
+     commission_type=strategy.commission.percent,
+     commission_value=0.05,
+     slippage=2,
+     pyramiding=0,
+     process_orders_on_close=true)
+
+// ──────────────────────────────────────────────────────────────────────────
+// Inputs
+// ──────────────────────────────────────────────────────────────────────────
+
+grpRSI  = "RSI"
+grpMACD = "MACD"
+grpPAT  = "Reversal pattern (optional)"
+grpVIZ  = "Visuals"
+
+rsiLen     = input.int(14,  "RSI length",      minval=2,  group=grpRSI)
+oversold   = input.float(30, "Oversold level",  minval=1,  maxval=49, group=grpRSI)
+overbought = input.float(70, "Overbought level",minval=51, maxval=99, group=grpRSI)
+exitLevel  = input.float(50, "Exit RSI level",  minval=20, maxval=80, group=grpRSI,
+   tooltip="Close all positions when RSI crosses this level.")
+
+macdFast = input.int(12, "MACD fast",   minval=1, group=grpMACD)
+macdSlow = input.int(26, "MACD slow",   minval=2, group=grpMACD)
+macdSig  = input.int(9,  "MACD signal", minval=1, group=grpMACD)
+macdLookback = input.int(20, "Max bars between RSI extreme and MACD cross",
+   minval=1, maxval=200, group=grpMACD,
+   tooltip="MACD must cross within this many bars after the RSI extreme.")
+
+usePattern = input.bool(false, "Require reversal pattern proxy", group=grpPAT,
+   tooltip="Long: two recent swing lows within tolerance (double-bottom). Short: two recent swing highs within tolerance (double-top).")
+pivotLeft  = input.int(5,    "Pivot left bars",            minval=2,  group=grpPAT)
+pivotRight = input.int(5,    "Pivot right bars",           minval=2,  group=grpPAT)
+pivotTolPct= input.float(0.3,"Pivot equality tolerance %", minval=0.0,step=0.05, group=grpPAT)
+
+showSignals = input.bool(true, "Plot entry / exit markers", group=grpVIZ)
+showStops   = input.bool(true, "Plot stop lines while in trade", group=grpVIZ)
+
+// ──────────────────────────────────────────────────────────────────────────
+// Indicators
+// ──────────────────────────────────────────────────────────────────────────
+
+rsi = ta.rsi(close, rsiLen)
+[macdLine, sigLine, _hist] = ta.macd(close, macdFast, macdSlow, macdSig)
+
+// Track the bar index of the most recent oversold / overbought touch.
+var int barOversold   = na
+var int barOverbought = na
+if rsi <= oversold
+    barOversold := bar_index
+if rsi >= overbought
+    barOverbought := bar_index
+
+bullCross = ta.crossover(macdLine, sigLine)
+bearCross = ta.crossunder(macdLine, sigLine)
+
+bullCrossValid = bullCross and not na(barOversold)   and (bar_index - barOversold)   <= macdLookback
+bearCrossValid = bearCross and not na(barOverbought) and (bar_index - barOverbought) <= macdLookback
+
+// ──────────────────────────────────────────────────────────────────────────
+// Stop-loss tracker: swing extreme printed while RSI was past the threshold
+// ──────────────────────────────────────────────────────────────────────────
+
+var float pendingLongStop  = na
+var float pendingShortStop = na
+var bool  inOversold       = false
+var bool  inOverbought     = false
+
+// Long-side: track the lowest low while RSI is in oversold.
+if rsi <= oversold
+    if not inOversold
+        pendingLongStop := low
+        inOversold := true
+    else
+        pendingLongStop := math.min(pendingLongStop, low)
+else
+    inOversold := false
+
+// Short-side: track the highest high while RSI is in overbought.
+if rsi >= overbought
+    if not inOverbought
+        pendingShortStop := high
+        inOverbought := true
+    else
+        pendingShortStop := math.max(pendingShortStop, high)
+else
+    inOverbought := false
+
+// ──────────────────────────────────────────────────────────────────────────
+// Reversal pattern proxy (optional)
+// ──────────────────────────────────────────────────────────────────────────
+
+ph = ta.pivothigh(high, pivotLeft, pivotRight)
+pl = ta.pivotlow(low,   pivotLeft, pivotRight)
+
+var float prevHigh1 = na
+var float prevHigh2 = na
+var float prevLow1  = na
+var float prevLow2  = na
+
+if not na(ph)
+    prevHigh2 := prevHigh1
+    prevHigh1 := ph
+if not na(pl)
+    prevLow2 := prevLow1
+    prevLow1 := pl
+
+tol = pivotTolPct / 100.0
+doubleBottom = not na(prevLow1)  and not na(prevLow2)  and math.abs(prevLow1  - prevLow2)  / prevLow2  <= tol
+doubleTop    = not na(prevHigh1) and not na(prevHigh2) and math.abs(prevHigh1 - prevHigh2) / prevHigh2 <= tol
+
+patternLongOk  = (not usePattern) or doubleBottom
+patternShortOk = (not usePattern) or doubleTop
+
+// ──────────────────────────────────────────────────────────────────────────
+// Entry / exit signals
+// ──────────────────────────────────────────────────────────────────────────
+
+longSignal  = bullCrossValid and patternLongOk  and not na(pendingLongStop)
+shortSignal = bearCrossValid and patternShortOk and not na(pendingShortStop)
+
+if longSignal and strategy.position_size <= 0
+    strategy.entry("SID Long", strategy.long)
+    strategy.exit("Stop L", from_entry="SID Long", stop=pendingLongStop)
+
+if shortSignal and strategy.position_size >= 0
+    strategy.entry("SID Short", strategy.short)
+    strategy.exit("Stop S", from_entry="SID Short", stop=pendingShortStop)
+
+exitLongAtMid  = ta.crossover(rsi,  exitLevel) and strategy.position_size > 0
+exitShortAtMid = ta.crossunder(rsi, exitLevel) and strategy.position_size < 0
+
+if exitLongAtMid
+    strategy.close("SID Long",  comment="RSI=mid")
+if exitShortAtMid
+    strategy.close("SID Short", comment="RSI=mid")
+
+// ──────────────────────────────────────────────────────────────────────────
+// Visuals
+// ──────────────────────────────────────────────────────────────────────────
+
+plotshape(showSignals and longSignal,  title="Long",  style=shape.triangleup,   location=location.belowbar, color=color.new(color.green,  0), size=size.small)
+plotshape(showSignals and shortSignal, title="Short", style=shape.triangledown, location=location.abovebar, color=color.new(color.red,    0), size=size.small)
+plotshape(showSignals and (exitLongAtMid or exitShortAtMid), title="Exit", style=shape.xcross, location=location.absolute, color=color.new(color.orange, 0), size=size.small)
+
+plot(showStops and strategy.position_size > 0 and not na(pendingLongStop)  ? pendingLongStop  : na, "Long stop",  color=color.new(color.red, 60), style=plot.style_linebr)
+plot(showStops and strategy.position_size < 0 and not na(pendingShortStop) ? pendingShortStop : na, "Short stop", color=color.new(color.red, 60), style=plot.style_linebr)

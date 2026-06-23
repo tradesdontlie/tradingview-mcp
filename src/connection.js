@@ -49,14 +49,7 @@ export function requireFinite(value, name) {
 
 export async function getClient() {
   if (client) {
-    try {
-      // Quick liveness check
-      await client.Runtime.evaluate({ expression: '1', returnByValue: true });
-      return client;
-    } catch {
-      client = null;
-      targetInfo = null;
-    }
+    return client;
   }
   return connect();
 }
@@ -71,6 +64,11 @@ export async function connect() {
       }
       targetInfo = target;
       client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: target.id });
+
+      client.on('disconnect', () => {
+        client = null;
+        targetInfo = null;
+      });
 
       await client.Runtime.enable();
 

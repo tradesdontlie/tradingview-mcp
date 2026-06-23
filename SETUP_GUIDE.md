@@ -100,6 +100,8 @@ Then `tv status`, `tv quote`, `tv pine compile`, etc. work from anywhere.
 | `tv` command not found | Run `npm link` from the project directory |
 | Tools return stale data | TradingView may still be loading — wait a few seconds |
 | Pine Editor tools fail | Open the Pine Editor panel first (`ui_open_panel pine-editor open`) |
+| TradingView window goes white | Force kill all TradingView processes, delete `SingletonLock` file, and relaunch:<br>`pkill -9 -f TradingView && rm -f "$HOME/Library/Application Support/TradingView/SingletonLock" && open -a TradingView --args --remote-debugging-port=9222` |
+
 
 ## What to Read Next
 

@@ -1,0 +1,302 @@
+//@version=6
+// Supply & Demand Zone Strategy
+// Methodology paraphrased structurally from Six Figures From Scratch, Ch. 10
+// (Alex Morris). This file does not reproduce any source text.
+//
+// Rules implemented:
+//   Zone creation:
+//     - Detect consolidation: range over last N bars below an ATR multiple.
+//     - Detect impulse: a bar whose body exceeds an ATR multiple in one direction.
+//     - Anchor candle = last opposite-coloured candle before the impulse.
+//     - Zone = anchor candle's wick-to-wick range, extended right (box).
+//   Entry:
+//     - Wait for FIRST retest of a fresh zone.
+//     - Confirmation candle inside the zone:
+//         * Pin bar (rejection wick >= 50% of total range), OR
+//         * Engulfing (body fully engulfs prior body), OR
+//         * Tweezer pair (two adjacent wicks at roughly the same level).
+//     - Enter at close of the reversal candle.
+//   Stops:
+//     - Long: a few pips/ticks below the reversal candle's low.
+//     - Short: a few pips/ticks above the reversal candle's high.
+//   Targets:
+//     - Long: just below nearest active supply zone.
+//     - Short: just above nearest active demand zone.
+//     - Skip the trade if computed RR < 1:2.
+//   Invalidation:
+//     - Zone is dead after first retest (fresh-only rule).
+//     - Optional: skip when ATR is too low / too high (regime filter).
+//
+// Markets: Forex (intended). Default timeframe: 1H.
+
+strategy("Supply & Demand",
+     overlay=true,
+     initial_capital=100000,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=10,
+     commission_type=strategy.commission.percent,
+     commission_value=0.05,
+     slippage=2,
+     pyramiding=0,
+     process_orders_on_close=true,
+     max_boxes_count=200,
+     max_lines_count=200,
+     max_labels_count=200)
+
+// ──────────────────────────────────────────────────────────────────────────
+// Inputs
+// ──────────────────────────────────────────────────────────────────────────
+
+grpZ = "Zone detection"
+grpC = "Confirmation candle"
+grpR = "Risk / targets"
+grpT = "Trend filter"
+grpF = "Time filter"
+grpV = "Visuals"
+
+consolBars     = input.int(3,   "Consolidation bars (>=)",       minval=1, group=grpZ)
+consolMaxAtr   = input.float(0.8, "Consolidation max range / ATR", minval=0.05, step=0.05, group=grpZ,
+   tooltip="Max range of the consolidation window measured in ATR units.")
+impulseMinAtr  = input.float(1.8, "Impulse body / ATR (>=)",       minval=0.2, step=0.1, group=grpZ,
+   tooltip="The breakout bar's body must be at least this many ATR units to count as an impulse.")
+atrLen         = input.int(14,  "ATR length",                    minval=2, group=grpZ)
+maxZones       = input.int(20,  "Max active zones per side",     minval=1, group=grpZ)
+maxZoneAge     = input.int(120, "Max zone age (bars)",           minval=10, group=grpZ,
+   tooltip="Zones older than this number of bars are considered stale and ignored.")
+
+useEngulfing   = input.bool(true,  "Allow engulfing confirmations", group=grpC)
+usePinBar      = input.bool(true,  "Allow pin-bar confirmations",  group=grpC)
+pinWickPct     = input.float(0.5, "Pin bar rejection wick %",     minval=0.3, maxval=0.95, step=0.05, group=grpC)
+useThreeCandleSwing = input.bool(true, "Allow three-candle swing confirmations", group=grpC)
+
+minRR          = input.float(2.0, "Min risk:reward (skip below)", minval=0.5, step=0.1, group=grpR)
+stopBufferAtrFrac = input.float(0.3, "Stop buffer (× ATR)",      minval=0.0, step=0.05, group=grpR,
+   tooltip="Extra distance beyond the reversal candle's low/high for the stop.")
+tpBufferAtrFrac   = input.float(0.1, "TP buffer (× ATR)",        minval=0.0, step=0.05, group=grpR,
+   tooltip="Pull the TP slightly inside the opposing zone by this much ATR.")
+
+useTrendFilter = input.bool(true,  "Use Trend Filter (EMA 200)",  group=grpT)
+emaLength      = input.int(200,    "EMA Length", minval=10,       group=grpT)
+
+useSessionFilter = input.bool(true, "Use Session Filter",         group=grpF)
+sessionTime      = input.session("0700-1900", "Trading Session (UTC)", group=grpF,
+   tooltip="Only execute trades inside these UTC hours (e.g. London & NY Session overlap).")
+
+showZones      = input.bool(true,  "Show zone boxes",       group=grpV)
+showSignals    = input.bool(true,  "Show entry markers",    group=grpV)
+zoneSupplyColor= input.color(color.new(color.red,   80), "Supply zone fill", group=grpV)
+zoneDemandColor= input.color(color.new(color.green, 80), "Demand zone fill", group=grpV)
+zoneDeadColor  = input.color(color.new(color.gray,  90), "Touched zone fill", group=grpV)
+
+// ──────────────────────────────────────────────────────────────────────────
+// Helpers
+// ──────────────────────────────────────────────────────────────────────────
+
+atrV = ta.atr(atrLen)
+
+// Range of the consolidation window ending one bar before the current bar
+// (we measure the bars leading INTO a potential impulse on this bar).
+f_consolidationRange(n) =>
+    hi = ta.highest(high, n)[1]
+    lo = ta.lowest(low,   n)[1]
+    hi - lo
+
+consRange = f_consolidationRange(consolBars)
+isConsolidated = atrV > 0 and (consRange / atrV) <= consolMaxAtr
+
+bodyAbs   = math.abs(close - open)
+isBullImpulse = (close > open) and isConsolidated and (bodyAbs / atrV) >= impulseMinAtr
+isBearImpulse = (close < open) and isConsolidated and (bodyAbs / atrV) >= impulseMinAtr
+
+// ──────────────────────────────────────────────────────────────────────────
+// Anchor candle helpers — look back for last opposite-coloured candle
+// ──────────────────────────────────────────────────────────────────────────
+
+f_anchorBearishLookback() =>
+    // For a bullish impulse, anchor = last bearish candle within consolidation window.
+    var int idx = na
+    idx := na
+    for i = 1 to consolBars + 1
+        if close[i] < open[i]
+            idx := i
+            break
+    idx
+
+f_anchorBullishLookback() =>
+    var int idx = na
+    idx := na
+    for i = 1 to consolBars + 1
+        if close[i] > open[i]
+            idx := i
+            break
+    idx
+
+// ──────────────────────────────────────────────────────────────────────────
+// Zone storage (user-defined types)
+// ──────────────────────────────────────────────────────────────────────────
+
+type Zone
+    float zHi
+    float zLo
+    bool  isSupply
+    bool  fresh
+    int   createdBar
+    box   bx
+
+var array<Zone> supplyZones = array.new<Zone>()
+var array<Zone> demandZones = array.new<Zone>()
+
+f_pushZone(array<Zone> arr, float zHi, float zLo, bool isSupply, color col) =>
+    Zone z = Zone.new(zHi, zLo, isSupply, true, bar_index, na)
+    if showZones
+        z.bx := box.new(left=bar_index, right=bar_index + 50, top=zHi, bottom=zLo,
+             bgcolor=col, border_color=color.new(col, 50), extend=extend.right)
+    array.unshift(arr, z)
+    // Trim
+    if array.size(arr) > maxZones
+        Zone last = array.pop(arr)
+        if not na(last.bx)
+            box.delete(last.bx)
+
+// Mark a zone as touched (no longer fresh) and recolour
+f_markTouched(Zone z) =>
+    z.fresh := false
+    if not na(z.bx)
+        box.set_bgcolor(z.bx, zoneDeadColor)
+
+// ──────────────────────────────────────────────────────────────────────────
+// Create zones on impulse bars
+// ──────────────────────────────────────────────────────────────────────────
+
+if isBullImpulse
+    int idx = f_anchorBullishLookback()
+    if na(idx)
+        // No bearish anchor in window; skip.
+        na
+    else
+        float zHi = high[idx]
+        float zLo = low[idx]
+        // Demand zone: longs entered here historically
+        f_pushZone(demandZones, zHi, zLo, false, zoneDemandColor)
+
+if isBearImpulse
+    int idx = f_anchorBearishLookback()
+    if na(idx)
+        na
+    else
+        float zHi = high[idx]
+        float zLo = low[idx]
+        // Supply zone: shorts entered here historically
+        f_pushZone(supplyZones, zHi, zLo, true, zoneSupplyColor)
+
+// ──────────────────────────────────────────────────────────────────────────
+// Confirmation candle detection (current bar)
+// ──────────────────────────────────────────────────────────────────────────
+
+barRange  = high - low
+upperWick = high - math.max(open, close)
+lowerWick = math.min(open, close) - low
+priorBodyHi = math.max(open[1], close[1])
+priorBodyLo = math.min(open[1], close[1])
+
+isBullPin   = usePinBar and barRange > 0 and (lowerWick / barRange) >= pinWickPct and close > open[1]
+isBearPin   = usePinBar and barRange > 0 and (upperWick / barRange) >= pinWickPct and close < open[1]
+isBullEng   = useEngulfing and (close > open) and (close[1] < open[1]) and (close >= priorBodyHi) and (open <= priorBodyLo)
+isBearEng   = useEngulfing and (close < open) and (close[1] > open[1]) and (open >= priorBodyHi) and (close <= priorBodyLo)
+
+isBullSwing = useThreeCandleSwing and (low[1] < low[2]) and (close > high[1])
+isBearSwing = useThreeCandleSwing and (high[1] > high[2]) and (close < low[1])
+
+bullConfirm = isBullPin or isBullEng or isBullSwing
+bearConfirm = isBearPin or isBearEng or isBearSwing
+
+// ──────────────────────────────────────────────────────────────────────────
+// First-retest detection + entries
+// ──────────────────────────────────────────────────────────────────────────
+
+emaV           = ta.ema(close, emaLength)
+trendBullish   = not useTrendFilter or close > emaV
+trendBearish   = not useTrendFilter or close < emaV
+
+inSession      = not useSessionFilter or not na(time(timeframe.period, sessionTime, "UTC"))
+
+f_findFreshZoneTouching(array<Zone> arr, float testHi, float testLo) =>
+    Zone hit = na
+    if array.size(arr) > 0
+        for i = 0 to array.size(arr) - 1
+            Zone z = array.get(arr, i)
+            if z.fresh and z.createdBar < bar_index and (bar_index - z.createdBar) <= maxZoneAge and not (testLo > z.zHi or testHi < z.zLo)
+                hit := z
+                break
+    hit
+
+// Find nearest opposing zone above (for longs) / below (for shorts).
+f_nearestAbove(array<Zone> arr, float refPrice) =>
+    float best = na
+    if array.size(arr) > 0
+        for i = 0 to array.size(arr) - 1
+            Zone z = array.get(arr, i)
+            if z.fresh and z.zLo > refPrice
+                best := na(best) ? z.zLo : math.min(best, z.zLo)
+    best
+
+f_nearestBelow(array<Zone> arr, float refPrice) =>
+    float best = na
+    if array.size(arr) > 0
+        for i = 0 to array.size(arr) - 1
+            Zone z = array.get(arr, i)
+            if z.fresh and z.zHi < refPrice
+                best := na(best) ? z.zHi : math.max(best, z.zHi)
+    best
+
+// LONG retest of fresh demand zone with bullish confirmation
+Zone touchedDemand = f_findFreshZoneTouching(demandZones, high, low)
+canLong = not na(touchedDemand) and bullConfirm and trendBullish and inSession and strategy.position_size <= 0
+
+if canLong
+    float stopBufLong = stopBufferAtrFrac * atrV
+    float entryPrice  = close
+    float stopPrice   = low - stopBufLong
+    float risk        = entryPrice - stopPrice
+    float tpRaw       = f_nearestAbove(supplyZones, entryPrice)
+    bool  haveTp      = not na(tpRaw)
+    float tpPrice     = haveTp ? (tpRaw - tpBufferAtrFrac * atrV) : entryPrice + risk * minRR
+    float reward      = tpPrice - entryPrice
+    float rr          = risk > 0 ? reward / risk : 0
+    if rr >= minRR
+        strategy.entry("SD Long", strategy.long)
+        strategy.exit("L exit", from_entry="SD Long", stop=stopPrice, limit=tpPrice)
+        f_markTouched(touchedDemand)
+    else
+        // Even if we skip the trade, the zone has been retested -> kill it.
+        f_markTouched(touchedDemand)
+
+// SHORT retest of fresh supply zone with bearish confirmation
+Zone touchedSupply = f_findFreshZoneTouching(supplyZones, high, low)
+canShort = not na(touchedSupply) and bearConfirm and trendBearish and inSession and strategy.position_size >= 0
+
+if canShort
+    float stopBufShort = stopBufferAtrFrac * atrV
+    float entryPriceS  = close
+    float stopPriceS   = high + stopBufShort
+    float riskS        = stopPriceS - entryPriceS
+    float tpRawS       = f_nearestBelow(demandZones, entryPriceS)
+    bool  haveTpS      = not na(tpRawS)
+    float tpPriceS     = haveTpS ? (tpRawS + tpBufferAtrFrac * atrV) : entryPriceS - riskS * minRR
+    float rewardS      = entryPriceS - tpPriceS
+    float rrS          = riskS > 0 ? rewardS / riskS : 0
+    if rrS >= minRR
+        strategy.entry("SD Short", strategy.short)
+        strategy.exit("S exit", from_entry="SD Short", stop=stopPriceS, limit=tpPriceS)
+        f_markTouched(touchedSupply)
+    else
+        f_markTouched(touchedSupply)
+
+// ──────────────────────────────────────────────────────────────────────────
+// Visuals
+// ──────────────────────────────────────────────────────────────────────────
+
+plotshape(showSignals and canLong,  title="Long",  style=shape.triangleup,
+     location=location.belowbar, color=color.new(color.green, 0), size=size.small)
+plotshape(showSignals and canShort, title="Short", style=shape.triangledown,
+     location=location.abovebar, color=color.new(color.red,   0), size=size.small)

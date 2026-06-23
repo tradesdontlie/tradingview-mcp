@@ -8,55 +8,59 @@ const MAX_TRADES = 20;
 const CHART_API = KNOWN_PATHS.chartApi;
 const BARS_PATH = KNOWN_PATHS.mainSeriesBars;
 
-function buildGraphicsJS(collectionName, mapKey, filter) {
-  return `
-    (function() {
-      var chart = window.TradingViewApi._activeChartWidgetWV.value()._chartWidget;
-      var model = chart.model();
-      var sources = model.model().dataSources();
-      var results = [];
-      var filter = ${safeString(filter || '')};
-      for (var si = 0; si < sources.length; si++) {
-        var s = sources[si];
-        if (!s.metaInfo) continue;
-        try {
-          var meta = s.metaInfo();
-          var name = meta.description || meta.shortDescription || '';
-          if (!name) continue;
-          if (filter && name.indexOf(filter) === -1) continue;
-          var g = s._graphics;
-          if (!g || !g._primitivesCollection) continue;
-          var pc = g._primitivesCollection;
-          var items = [];
+async function extractGraphics(collectionName, mapKey, filter) {
+  const setupScript = `
+    if (!window.__tvMCP) window.__tvMCP = {};
+    if (!window.__tvMCP.extractGraphics) {
+      window.__tvMCP.extractGraphics = function(colName, mKey, filt) {
+        var chart = window.TradingViewApi._activeChartWidgetWV.value()._chartWidget;
+        var model = chart.model();
+        var sources = model.model().dataSources();
+        var results = [];
+        for (var si = 0; si < sources.length; si++) {
+          var s = sources[si];
+          if (!s.metaInfo) continue;
           try {
-            var outer = pc.${collectionName};
-            if (outer) {
-              var inner = outer.get('${mapKey}');
-              if (inner) {
-                var coll = inner.get(false);
-                if (coll && coll._primitivesDataById && coll._primitivesDataById.size > 0) {
-                  coll._primitivesDataById.forEach(function(v, id) { items.push({id: id, raw: v}); });
-                }
-              }
-            }
-          } catch(e) {}
-          if (items.length === 0 && '${collectionName}' === 'dwgtablecells') {
+            var meta = s.metaInfo();
+            var name = meta.description || meta.shortDescription || '';
+            if (!name) continue;
+            if (filt && name.indexOf(filt) === -1) continue;
+            var g = s._graphics;
+            if (!g || !g._primitivesCollection) continue;
+            var pc = g._primitivesCollection;
+            var items = [];
             try {
-              var tcOuter = pc.dwgtablecells;
-              if (tcOuter) {
-                var tcColl = tcOuter.get('tableCells');
-                if (tcColl && tcColl._primitivesDataById && tcColl._primitivesDataById.size > 0) {
-                  tcColl._primitivesDataById.forEach(function(v, id) { items.push({id: id, raw: v}); });
+              var outer = pc[colName];
+              if (outer) {
+                var inner = outer.get(mKey);
+                if (inner) {
+                  var coll = inner.get(false);
+                  if (coll && coll._primitivesDataById && coll._primitivesDataById.size > 0) {
+                    coll._primitivesDataById.forEach(function(v, id) { items.push({id: id, raw: v}); });
+                  }
                 }
               }
             } catch(e) {}
-          }
-          if (items.length > 0) results.push({name: name, count: items.length, items: items});
-        } catch(e) {}
-      }
-      return results;
-    })()
+            if (items.length === 0 && colName === 'dwgtablecells') {
+              try {
+                var tcOuter = pc.dwgtablecells;
+                if (tcOuter) {
+                  var tcColl = tcOuter.get('tableCells');
+                  if (tcColl && tcColl._primitivesDataById && tcColl._primitivesDataById.size > 0) {
+                    tcColl._primitivesDataById.forEach(function(v, id) { items.push({id: id, raw: v}); });
+                  }
+                }
+              } catch(e) {}
+            }
+            if (items.length > 0) results.push({name: name, count: items.length, items: items});
+          } catch(e) {}
+        }
+        return results;
+      };
+    }
   `;
+  await evaluate(setupScript);
+  return await evaluate(`window.__tvMCP.extractGraphics(${safeString(collectionName)}, ${safeString(mapKey)}, ${safeString(filter || '')})`);
 }
 
 export async function getOhlcv({ count, summary } = {}) {
@@ -359,7 +363,7 @@ export async function getStudyValues() {
 
 export async function getPineLines({ study_filter, verbose } = {}) {
   const filter = study_filter || '';
-  const raw = await evaluate(buildGraphicsJS('dwglines', 'lines', filter));
+  const raw = await extractGraphics('dwglines', 'lines', filter);
   if (!raw || raw.length === 0) return { success: true, study_count: 0, studies: [] };
 
   const studies = raw.map(s => {
@@ -383,7 +387,7 @@ export async function getPineLines({ study_filter, verbose } = {}) {
 
 export async function getPineLabels({ study_filter, max_labels, verbose } = {}) {
   const filter = study_filter || '';
-  const raw = await evaluate(buildGraphicsJS('dwglabels', 'labels', filter));
+  const raw = await extractGraphics('dwglabels', 'labels', filter);
   if (!raw || raw.length === 0) return { success: true, study_count: 0, studies: [] };
 
   const limit = max_labels || 50;
@@ -403,7 +407,7 @@ export async function getPineLabels({ study_filter, max_labels, verbose } = {}) 
 
 export async function getPineTables({ study_filter } = {}) {
   const filter = study_filter || '';
-  const raw = await evaluate(buildGraphicsJS('dwgtablecells', 'tableCells', filter));
+  const raw = await extractGraphics('dwgtablecells', 'tableCells', filter);
   if (!raw || raw.length === 0) return { success: true, study_count: 0, studies: [] };
 
   const studies = raw.map(s => {
@@ -431,7 +435,7 @@ export async function getPineTables({ study_filter } = {}) {
 
 export async function getPineBoxes({ study_filter, verbose } = {}) {
   const filter = study_filter || '';
-  const raw = await evaluate(buildGraphicsJS('dwgboxes', 'boxes', filter));
+  const raw = await extractGraphics('dwgboxes', 'boxes', filter);
   if (!raw || raw.length === 0) return { success: true, study_count: 0, studies: [] };
 
   const studies = raw.map(s => {

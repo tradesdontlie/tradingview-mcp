@@ -352,8 +352,9 @@ Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  Tradin
 ```
 
 - **Transport**: MCP over stdio (78 tools) + CLI (`tv` command, 30 commands with 66 subcommands)
-- **Connection**: Chrome DevTools Protocol on localhost:9222
+- **Connection**: Chrome DevTools Protocol on localhost:9222 (Latency optimized with event-based disconnect listeners)
 - **Streaming**: Poll-and-diff loop with deduplication, JSONL output to stdout
+- **Payload Injection**: Uses a persistent Bridge Script (`window.__tvMCP`) to minimize V8 compilation overhead.
 - **No dependencies** beyond `@modelcontextprotocol/sdk` and `chrome-remote-interface`
 
 ## Attributions

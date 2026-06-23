@@ -1039,7 +1039,13 @@ val = array.get(a, 5)`;
       const isOpen = await evaluate(`!!document.querySelector('.monaco-editor.pine-editor-monaco')`);
 
       // Close
-      await evaluate(`${BOTTOM_BAR}.hideWidget('pine-editor')`);
+      await evaluate(`
+        (function() {
+          var bwb = ${BOTTOM_BAR};
+          if (typeof bwb.hideWidget === 'function') bwb.hideWidget('pine-editor');
+          else if (typeof bwb.close === 'function') bwb.close();
+        })()
+      `);
       await sleep(300);
 
       assert.ok(typeof isOpen === 'boolean', 'Panel toggle works');
@@ -1234,9 +1240,9 @@ val = array.get(a, 5)`;
       const started = await evaluate(wv(`${REPLAY_API}.isReplayStarted()`));
       if (!started) return;
 
-      await evaluate(`${REPLAY_API}.stopReplay()`);
-      await evaluate(`${REPLAY_API}.goToRealtime()`);
-      await evaluate(`${REPLAY_API}.hideReplayToolbar()`);
+      try { await evaluate(`${REPLAY_API}.goToRealtime()`); } catch {}
+      try { await evaluate(`${REPLAY_API}.stopReplay()`); } catch {}
+      try { await evaluate(`${REPLAY_API}.hideReplayToolbar()`); } catch {}
       await sleep(500);
 
       const stoppedNow = await evaluate(wv(`${REPLAY_API}.isReplayStarted()`));

@@ -1,0 +1,223 @@
+//@version=5
+// Open Swing Strategy — Gap Fade + Opening Range Breakout (ORB)
+// Paraphrased and structured from the superstar freedom framework trading agent.
+//
+// Rules implemented:
+//   1. Gap Fade:
+//      - At 9:45 AM ET (close of first 15m candle), checks if the daily gap is >= 1.5% or <= -1.5%.
+//      - If gap >= 1.5% and the first 15m candle is bearish, enter SHORT. Stop Loss at candle High, Target at yesterday's Close.
+//      - If gap <= -1.5% and the first 15m candle is bullish, enter LONG. Stop Loss at candle Low, Target at yesterday's Close.
+//   2. Opening Range Breakout (ORB):
+//      - Computes opening range (high - low of the 9:30 AM ET 15m candle).
+//      - If range is narrow (<= 2.5 * ATR(14)), the ticker is eligible for ORB.
+//      - Between 9:45 AM and 1:00 PM ET, monitor for breakouts of the opening range.
+//      - LONG breakout: close above Range High AND close above Trend SMA (520-period, ~20 days). Stop Loss at Range Low, Target = Entry + 2 * Risk.
+//      - SHORT breakout: close below Range Low AND close below Trend SMA. Stop Loss at Range High, Target = Entry - 2 * Risk.
+//   3. Exits:
+//      - Predefined Stop Loss and Limit Targets.
+//      - Force close all remaining open trades at 3:15 PM ET.
+//
+// Markets: US stocks, ETFs. Intended timeframe: 15m.
+
+strategy("Open Swing Strategy",
+     overlay=true,
+     initial_capital=100000,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=10,
+     commission_type=strategy.commission.percent,
+     commission_value=0.05,
+     slippage=2,
+     pyramiding=0,
+     process_orders_on_close=true)
+
+// ──────────────────────────────────────────────────────────────────────────
+// Inputs
+// ──────────────────────────────────────────────────────────────────────────
+
+grpGF  = "Gap Fade Settings"
+grpORB = "ORB Settings"
+grpSize = "Position Sizing"
+grpVIZ = "Visuals"
+
+enableGF       = input.bool(true, "Enable Gap Fade", group=grpGF)
+gapThresholdPct = input.float(1.5, "Gap threshold (%)", minval=0.1, step=0.1, group=grpGF)
+
+enableORB      = input.bool(true, "Enable ORB", group=grpORB)
+atrLen         = input.int(14, "ATR length", minval=2, group=grpORB)
+atrMultiplier  = input.float(2.5, "Opening range ATR multiplier", minval=0.5, step=0.1, group=grpORB)
+trendSmaLen    = input.int(520, "Trend SMA length (~20 days on 15m)", minval=10, group=grpORB)
+
+riskPct        = input.float(1.0, "Risk Percentage (1% - 1.5%)", minval=0.1, maxval=5.0, step=0.1, group=grpSize, tooltip="Percentage of capital to risk per trade setup (usually 1.0% to 1.5%)")
+maxPosPct      = input.float(30.0, "Max Position Size Cap (%)", minval=1.0, maxval=100.0, step=1.0, group=grpSize, tooltip="Maximum exposure cap as a percentage of total equity")
+
+showRanges     = input.bool(true, "Plot opening range lines", group=grpVIZ)
+showTrend      = input.bool(true, "Plot Trend SMA line", group=grpVIZ)
+showStops      = input.bool(true, "Plot stop/target levels while in trade", group=grpVIZ)
+
+// ──────────────────────────────────────────────────────────────────────────
+// Technical Indicators
+// ──────────────────────────────────────────────────────────────────────────
+
+atrVal = ta.atr(atrLen)
+trendSma = ta.sma(close, trendSmaLen)
+
+// Retrieve yesterday's close safely
+yesterdayClose = request.security(syminfo.tickerid, "D", close[1], barmerge.gaps_off, barmerge.lookahead_off)
+
+// ──────────────────────────────────────────────────────────────────────────
+// Time / Session Logic (America/New_York)
+// ──────────────────────────────────────────────────────────────────────────
+
+nyHour   = hour(time, "America/New_York")
+nyMinute = minute(time, "America/New_York")
+nyTime   = nyHour * 100 + nyMinute
+
+isNewDay = ta.change(time("D")) != 0
+
+// First 15m candle opens at 9:30 AM and closes at 9:45 AM
+isFirst15mBar = (nyHour == 9 and nyMinute == 30)
+
+// ──────────────────────────────────────────────────────────────────────────
+// State Variables (persistent across bars)
+// ──────────────────────────────────────────────────────────────────────────
+
+var float dayOpenPrice    = na
+var float dayYesterdayClose = na
+var float openRangeHigh   = na
+var float openRangeLow    = na
+var bool  orbEligible     = false
+var bool  orbTradeTaken   = false
+var bool  gfTradeTaken    = false
+
+// Reset daily variables on new day
+if isNewDay
+    dayOpenPrice      := na
+    dayYesterdayClose := yesterdayClose
+    openRangeHigh     := na
+    openRangeLow      := na
+    orbEligible       := false
+    orbTradeTaken     := false
+    gfTradeTaken      := false
+
+// Capture opening bar high, low, open
+if isFirst15mBar
+    dayOpenPrice   := open
+    openRangeHigh  := high
+    openRangeLow   := low
+    
+    // Check ORB Eligibility: range size <= 2.5 * ATR
+    rangeSize = high - low
+    if rangeSize <= atrMultiplier * atrVal
+        orbEligible := true
+
+// ──────────────────────────────────────────────────────────────────────────
+// Position Sizing Helper Function
+// ──────────────────────────────────────────────────────────────────────────
+
+f_calculateQty(entryPrice, stopLossPrice) =>
+    riskDist = math.abs(entryPrice - stopLossPrice)
+    qty = 0.0
+    if riskDist > 0.05
+        riskBudget = strategy.equity * (riskPct / 100)
+        rawQty = riskBudget / riskDist
+        maxQtyCap = (strategy.equity * (maxPosPct / 100)) / entryPrice
+        qty := math.min(rawQty, maxQtyCap)
+    qty
+
+// ──────────────────────────────────────────────────────────────────────────
+// Strategy Execution Logic
+// ──────────────────────────────────────────────────────────────────────────
+
+// Gap Fade execution (checks at close of the 9:30-9:45 AM candle)
+canGapFade = enableGF and not gfTradeTaken and isFirst15mBar and not na(dayYesterdayClose) and not na(dayOpenPrice)
+
+if canGapFade
+    gapPct = (dayOpenPrice - dayYesterdayClose) / dayYesterdayClose * 100
+    isBearish = close < open
+    isBullish = close > open
+
+    // Gap up >= 1.5% and first candle bearish -> Short
+    if gapPct >= gapThresholdPct and isBearish and strategy.position_size == 0
+        qty = f_calculateQty(close, high)
+        if qty > 0.0
+            strategy.entry("GF Short", strategy.short, qty=qty)
+            strategy.exit("GF Short Exit", from_entry="GF Short", stop=high, limit=dayYesterdayClose)
+            gfTradeTaken := true
+
+    // Gap down <= -1.5% and first candle bullish -> Long
+    else if gapPct <= -gapThresholdPct and isBullish and strategy.position_size == 0
+        qty = f_calculateQty(close, low)
+        if qty > 0.0
+            strategy.entry("GF Long", strategy.long, qty=qty)
+            strategy.exit("GF Long Exit", from_entry="GF Long", stop=low, limit=dayYesterdayClose)
+            gfTradeTaken := true
+
+// ORB monitoring window: 9:45 AM to 1:00 PM ET (nyTime 945 to 1300)
+inOrbWindow = (nyTime >= 945 and nyTime < 1300)
+
+// ORB Breakout triggers
+canORB = enableORB and orbEligible and not orbTradeTaken and inOrbWindow and strategy.position_size == 0
+
+if canORB
+    // Long ORB: close above High AND close above trend SMA
+    if close > openRangeHigh and close > trendSma
+        riskDist = close - openRangeLow
+        if riskDist > 0.05
+            qty = f_calculateQty(close, openRangeLow)
+            if qty > 0.0
+                targetPrice = close + 2.0 * riskDist
+                strategy.entry("ORB Long", strategy.long, qty=qty)
+                strategy.exit("ORB Long Exit", from_entry="ORB Long", stop=openRangeLow, limit=targetPrice)
+                orbTradeTaken := true
+                orbEligible := false // Only one ORB attempt per day
+
+    // Short ORB: close below Low AND close below trend SMA
+    else if close < openRangeLow and close < trendSma
+        riskDist = openRangeHigh - close
+        if riskDist > 0.05
+            qty = f_calculateQty(close, openRangeHigh)
+            if qty > 0.0
+                targetPrice = close - 2.0 * riskDist
+                strategy.entry("ORB Short", strategy.short, qty=qty)
+                strategy.exit("ORB Short Exit", from_entry="ORB Short", stop=openRangeHigh, limit=targetPrice)
+                orbTradeTaken := true
+                orbEligible := false
+
+// 3:15 PM ET EOD Close Window (nyTime >= 1515)
+isEodWindow = (nyTime >= 1515)
+
+if isEodWindow and strategy.position_size != 0
+    strategy.close_all(comment="EOD Force Close")
+
+// ──────────────────────────────────────────────────────────────────────────
+// Plots & Visuals
+// ──────────────────────────────────────────────────────────────────────────
+
+// Plot Trend SMA
+plot(showTrend and not na(trendSma) ? trendSma : na, "Trend SMA (520)", color=color.new(color.blue, 20), linewidth=2)
+
+// Plot Opening Range levels
+var line highLine = na
+var line lowLine = na
+
+if isNewDay
+    if not na(highLine)
+        line.delete(highLine)
+    if not na(lowLine)
+        line.delete(lowLine)
+    highLine := na
+    lowLine := na
+
+if showRanges and not na(openRangeHigh) and not isNewDay
+    if na(highLine)
+        highLine := line.new(bar_index[1], openRangeHigh, bar_index, openRangeHigh, color=color.new(color.green, 40), width=2, style=line.style_dashed, extend=extend.right)
+        lowLine := line.new(bar_index[1], openRangeLow, bar_index, openRangeLow, color=color.new(color.red, 40), width=2, style=line.style_dashed, extend=extend.right)
+    else
+        line.set_xy2(highLine, bar_index, openRangeHigh)
+        line.set_xy2(lowLine, bar_index, openRangeLow)
+
+// Plot Shapes for trade executions
+plotshape(ta.change(orbTradeTaken) and orbTradeTaken and strategy.position_size > 0, "ORB Long Trigger", shape.triangleup, location.belowbar, color.green, size=size.small)
+plotshape(ta.change(orbTradeTaken) and orbTradeTaken and strategy.position_size < 0, "ORB Short Trigger", shape.triangledown, location.abovebar, color.red, size=size.small)
+plotshape(ta.change(gfTradeTaken) and gfTradeTaken and strategy.position_size > 0, "Gap Fade Long Trigger", shape.triangleup, location.belowbar, color.teal, size=size.small)
+plotshape(ta.change(gfTradeTaken) and gfTradeTaken and strategy.position_size < 0, "Gap Fade Short Trigger", shape.triangledown, location.abovebar, color.orange, size=size.small)
