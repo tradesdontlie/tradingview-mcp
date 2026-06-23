@@ -53,6 +53,9 @@ let cr = contRetestScenario({ shelf: 14000, zoneHi: 14500,
 assert.ok(cr && cr.label === 'retest', 'gia tren shelf phai sinh retest');
 assert.ok(long(cr.entry_low, cr.entry_high, cr.sl, cr.tp1), 'cont retest SL<entry<TP1');
 assert.ok(cr.entry_high <= 14250, 'entry_high khong tren gia hien tai');
+// invalidation = dong cua duoi SHELF (= entry_low), KHONG phai SL (cat cung wick, thap hon)
+assert.ok(cr.invalidation.includes(String(cr.entry_low)) && cr.sl < cr.entry_low,
+  'invalidation neo shelf, sl thap hon shelf');
 // gia 13950 DONG DUOI shelf 14000 = mat shelf -> null
 assert.equal(contRetestScenario({ shelf: 14000, zoneHi: 14500,
   price: 13950, d0vol: 0.39, resistance: 14800, atr14: 343, dir: 'LONG' }), null, 'mat shelf -> null');

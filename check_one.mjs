@@ -113,6 +113,7 @@ function buildScenarios(structure, wave, overhead, dir, shelf = null) {
     if (valid(entry, entry, sl, tp1)) {
       out.push({ label: 'breakout', entry_low: entry, entry_high: entry,
         sl, tp1, tp2, trigger: `dong tren ${Math.round(r)} + vol>=1.5x`,
+        invalidation: `dong cua lai duoi ${Math.round(r)} (breakout that bai)`,
         size_note: '1/2 size, chase' });
     }
   } else if (wave.phase === 'IMPULSE' && wave.ph1) {
@@ -127,6 +128,7 @@ function buildScenarios(structure, wave, overhead, dir, shelf = null) {
     if (valid(lo, hi, sl, tp1)) {
       out.push({ label: 'retest', entry_low: lo, entry_high: hi,
         sl, tp1, tp2, trigger: `retest ve ${Math.round(lvl)} giu duoc + buy-tick`,
+        invalidation: `dong cua duoi ${Math.round(slBase)}`,
         size_note: 'full size neu giu' });
     }
   }
@@ -177,6 +179,7 @@ function contRetestScenario({ shelf, zoneHi, price, d0vol, resistance, atr14, di
   if (!(sl < lo && lo <= hi && hi < tp1)) return null;
   return { label: 'retest', entry_low: lo, entry_high: hi, sl, tp1, tp2,
     trigger: `pullback giu tren shelf ${lo} (KHONG dong cua duoi) + vol can + nen LTF (H1) lat delta duong`,
+    invalidation: `dong cua duoi shelf ${lo}`,   // thesis chet khi DONG CUA duoi shelf; sl la cat cung (wick) rieng
     size_note: 'continuation retest, invalidation = dong duoi shelf' };
 }
 
