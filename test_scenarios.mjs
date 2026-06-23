@@ -1,6 +1,6 @@
 // Self-check buildScenarios. Run: node test_scenarios.mjs  (expect ALL PASS)
 import assert from 'node:assert';
-import { buildScenarios, contRetestScenario, findDemandBar } from './check_one.mjs';
+import { buildScenarios, contRetestScenario, findDemandBar, rangeBreakoutScenario } from './check_one.mjs';
 
 const long = (lo, hi, sl, t1) => sl < lo && lo <= hi && hi < t1;
 
@@ -93,5 +93,17 @@ assert.ok(db && db.off === 5 && Math.abs(db.shelf - 10.425) < 1e-6, 'tim demand 
 // mot nen sau dong DUOI shelf (10.425) -> mat da -> null
 bars[3] = B(11.9,12,9.5,10.0,1e6);  // close 10.0 < 10.425
 assert.equal(findDemandBar(bars, bars.length, AV), null, 'dong duoi muc 25% -> null');
+
+// --- rangeBreakoutScenario (SIDEWAYS sat overhead): POW overhead 14300, gia 14300 ---
+let bo = rangeBreakoutScenario({ resistance: 14300, headroomPct: 0.7, price: 14300, atr14: 350, dir: 'LONG' });
+assert.ok(bo && bo.label === 'breakout', 'gia sat overhead -> co breakout');
+assert.ok(bo.entry_low > 14300 && bo.sl < bo.entry_low && bo.entry_low < bo.tp1, 'breakout entry tren overhead, SL<entry<TP1');
+assert.ok(bo.invalidation.includes('14300'), 'invalidation = dong lai duoi overhead');
+// da vuot ro overhead (>0.5%) -> khong phai pending breakout -> null
+assert.equal(rangeBreakoutScenario({ resistance: 14300, headroomPct: 0.7, price: 14450, atr14: 350, dir: 'LONG' }), null, 'da vuot -> null');
+// overhead qua xa (>5%) -> null
+assert.equal(rangeBreakoutScenario({ resistance: 14300, headroomPct: 9, price: 13000, atr14: 350, dir: 'LONG' }), null, 'overhead xa -> null');
+// SHORT -> null
+assert.equal(rangeBreakoutScenario({ resistance: 14300, headroomPct: 0.7, price: 14300, atr14: 350, dir: 'SHORT' }), null, 'SHORT -> null');
 
 console.log('ALL PASS');

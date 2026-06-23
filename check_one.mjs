@@ -184,6 +184,25 @@ function contRetestScenario({ shelf, zoneHi, price, resistance, atr14, dir }) {
     size_note: 'continuation retest, invalidation = dong duoi shelf' };
 }
 
+// Range breakout cho SIDEWAYS (CONTRACTING/EXPANDING): gia sat overhead -> nhanh chase neu DONG CUA tren overhead.
+// Bo sung de SIDEWAYS co du 2 duong (retest tu contRetest + breakout o day), khong rot ve plan cu.
+function rangeBreakoutScenario({ resistance, headroomPct, price, atr14, dir }) {
+  if (dir === 'SHORT' || dir === 'NEUTRAL') return null;
+  if (resistance == null || price == null) return null;
+  if (headroomPct == null || headroomPct > 5) return null;   // overhead phai gan (<=5%) moi dang "cho breakout"
+  if (price > resistance * 1.005) return null;               // da vuot ro -> khong phai pending breakout
+  const atr = atr14 || price * 0.02;
+  const entry = Math.round(resistance * 1.003);
+  const sl = Math.round(resistance * 0.99);                   // ve lai trong range = breakout that bai
+  const tp1 = Math.round(entry + 2 * atr);
+  const tp2 = Math.round(entry + 3.5 * atr);
+  if (!(sl < entry && entry < tp1)) return null;
+  return { label: 'breakout', entry_low: entry, entry_high: entry, sl, tp1, tp2,
+    trigger: `dong tren ${Math.round(resistance)} + vol>=1.5x`,
+    invalidation: `dong cua lai duoi ${Math.round(resistance)} (breakout that bai)`,
+    size_note: '1/2 size, chase' };
+}
+
 function trailStatus(bars, sma20arr) {
   // Check last 3 bars vs SMA20
   const n = bars.length;
@@ -635,6 +654,13 @@ async function main() {
     });
     if (cr) scenarios.push(cr);
   }
+  // SIDEWAYS sat overhead: them nhanh breakout (engine buildScenarios chi lam breakout cho UPTREND PULLBACK)
+  if (!scenarios.some(s => s.label === 'breakout') && wave.phase === 'SIDEWAYS') {
+    const bo = rangeBreakoutScenario({
+      resistance: overhead.resistance, headroomPct: overhead.headroom_pct, price, atr14, dir,
+    });
+    if (bo) scenarios.push(bo);
+  }
 
   // --- Compact output (gate heavy diagnostics behind --full) ---
   const fpOut = { ...fp, score: fpScore, checks: fpChecks };
@@ -693,7 +719,7 @@ async function main() {
   try { await chart.setSymbol({ symbol: initState.symbol }); } catch(e) {}
   process.exit(0);
 }
-export { buildScenarios, contRetestScenario, findDemandBar };
+export { buildScenarios, contRetestScenario, findDemandBar, rangeBreakoutScenario };
 
 // Chi chay engine khi goi truc tiep (node check_one.mjs ...), khong khi bi import vao test.
 if ((process.argv[1] || '').replace(/\\/g, '/').endsWith('check_one.mjs')) {
