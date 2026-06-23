@@ -46,32 +46,32 @@ assert.equal(buildScenarios('UPTREND',
   { phase: 'IMPULSE', ph1: 21927, pl1: 19342, tp: { tp1272: 21000 } },
   {}, 'LONG').length, 0, 'tp1 duoi entry -> bo');
 
-// --- contRetestScenario (shelf-based: POW shelf ~14000, demand close 14500) ---
-// gia 14250 > shelf 14000 (chua dong duoi shelf), D-0 can cung 0.39x -> co retest, entry [14000, min(14500,14250)]
+// --- contRetestScenario (shelf-based, KHONG gate vol: plan dung cau truc, on dinh ca phien) ---
+// gia 14250 > shelf 14000 -> co retest, entry [14000, min(14500,14250)]
 let cr = contRetestScenario({ shelf: 14000, zoneHi: 14500,
-  price: 14250, d0vol: 0.39, resistance: 14800, atr14: 343, dir: 'LONG' });
+  price: 14250, resistance: 14800, atr14: 343, dir: 'LONG' });
 assert.ok(cr && cr.label === 'retest', 'gia tren shelf phai sinh retest');
 assert.ok(long(cr.entry_low, cr.entry_high, cr.sl, cr.tp1), 'cont retest SL<entry<TP1');
 assert.ok(cr.entry_high <= 14250, 'entry_high khong tren gia hien tai');
 // invalidation = dong cua duoi SHELF (= entry_low), KHONG phai SL (cat cung wick, thap hon)
 assert.ok(cr.invalidation.includes(String(cr.entry_low)) && cr.sl < cr.entry_low,
   'invalidation neo shelf, sl thap hon shelf');
+// vol cao (1.2x) VAN sinh retest (vol can chi la trigger, khong gate emission) -> plan on dinh ca phien
+assert.ok(contRetestScenario({ shelf: 14000, zoneHi: 14500,
+  price: 14250, resistance: 14800, atr14: 343, dir: 'LONG' }), 'vol cao van co plan retest (vol can = trigger)');
 // gia 13950 DONG DUOI shelf 14000 = mat shelf -> null
 assert.equal(contRetestScenario({ shelf: 14000, zoneHi: 14500,
-  price: 13950, d0vol: 0.39, resistance: 14800, atr14: 343, dir: 'LONG' }), null, 'mat shelf -> null');
+  price: 13950, resistance: 14800, atr14: 343, dir: 'LONG' }), null, 'mat shelf -> null');
 // khang cu sat gia -> TP1 fallback price+2ATR, khong RR ao
 let cr2 = contRetestScenario({ shelf: 14000, zoneHi: 14500,
-  price: 14250, d0vol: 0.39, resistance: 14300, atr14: 343, dir: 'LONG' });
+  price: 14250, resistance: 14300, atr14: 343, dir: 'LONG' });
 assert.ok(cr2 && cr2.tp1 > 14250 * 1.01, 'TP1 khong duoc sat gia (RR ao)');
-// D-0 chua can cung (vol >=1x) -> null
-assert.equal(contRetestScenario({ shelf: 14000, zoneHi: 14500,
-  price: 14250, d0vol: 1.2, resistance: 14800, atr14: 343, dir: 'LONG' }), null, 'D-0 chua can cung -> null');
 // retest qua xa (price - zoneHi > 2*ATR) -> null
 assert.equal(contRetestScenario({ shelf: 14000, zoneHi: 14500,
-  price: 15300, d0vol: 0.39, resistance: 15800, atr14: 343, dir: 'LONG' }), null, 'retest qua xa -> null');
+  price: 15300, resistance: 15800, atr14: 343, dir: 'LONG' }), null, 'retest qua xa -> null');
 // SHORT -> null
 assert.equal(contRetestScenario({ shelf: 14000, zoneHi: 14500,
-  price: 14250, d0vol: 0.39, resistance: 14800, atr14: 343, dir: 'SHORT' }), null, 'SHORT -> null');
+  price: 14250, resistance: 14800, atr14: 343, dir: 'SHORT' }), null, 'SHORT -> null');
 
 // --- findDemandBar: quet D-1..D-5, shelf = muc 25% range nen manh, chua dong duoi shelf ---
 const B = (o, h, l, c, v) => ({ open: o, high: h, low: l, close: c, volume: v });

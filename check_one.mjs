@@ -164,10 +164,11 @@ function findDemandBar(bars, n, avgVol20, lookback = 5) {
 // Continuation-retest: nen cau manh (findDemandBar) + nen hien tai can cung -> neo retest vao ZONE [shelf .. close].
 // Invalidation = DONG CUA DUOI shelf (vd POW: dung dong duoi ~14000). Trigger = pullback giu tren shelf + can cung
 // + LTF lat delta. Chay ca khi structure != UPTREND -> chong vong "cho breakout".
-function contRetestScenario({ shelf, zoneHi, price, d0vol, resistance, atr14, dir }) {
+function contRetestScenario({ shelf, zoneHi, price, resistance, atr14, dir }) {
   if (dir === 'SHORT' || dir === 'NEUTRAL') return null;
   if (shelf == null || zoneHi == null || price == null) return null;
-  if (d0vol == null || d0vol >= 1.0) return null;                      // nen hien tai phai can cung (<1x)
+  // KHONG gate theo vol nen dang chay: "vol can" la dieu kien TRIGGER (o trigger text), khong phai dieu kien
+  // de plan TON TAI. Gate vol o day lam scenario nhap nhay moi khi vol cat 1x -> rot ve plan cu (loi POW 14:53).
   if (price <= shelf) return null;                                     // mat shelf -> bo
   if (atr14 && (price - zoneHi) > 2 * atr14) return null;              // retest qua xa, chua actionable
   const lo = Math.round(shelf);
@@ -627,14 +628,10 @@ async function main() {
   const db = findDemandBar(bars, n, avgVol20);
   const scenarios = buildScenarios(structure, wave, overhead, dir, db ? db.shelf : null);
   if (!scenarios.some(s => s.label === 'retest') && db) {
-    // continuation-retest la doc INTRADAY tren nen D-0 dang chay (D-1 = chinh nen cau manh, KHONG phai pullback)
-    // -> giu gia + vol LIVE, nhung chuan hoa vol theo tuoi nen: dau phien vol thap gia "can cung ao" -> chia age
-    // ponytail: gia dinh vol tich luy ~tuyen tinh theo thoi gian, du tot de loc fake dau phien
-    const ageFrac = barClosed ? 1 : Math.max((bar.age_pct || 100) / 100, 0.15);
-    const projVol = vol_state.ratio_last != null ? vol_state.ratio_last / ageFrac : null;
+    // retest = plan dung cau truc (shelf + vi tri gia), khong gate theo vol nen dang chay -> on dinh ca phien
     const cr = contRetestScenario({
       shelf: db.shelf, zoneHi: db.zoneHi, price,
-      d0vol: projVol, resistance: overhead.resistance, atr14, dir,
+      resistance: overhead.resistance, atr14, dir,
     });
     if (cr) scenarios.push(cr);
   }
