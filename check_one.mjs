@@ -9,6 +9,7 @@ import * as chart from './src/core/chart.js';
 import * as data from './src/core/data.js';
 import { getClient } from './src/connection.js';
 import { computeRS, readVnindexCache } from './rs_util.mjs';
+import { barStatus } from './bar_status.mjs';
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function parseNum(val) {
@@ -90,6 +91,93 @@ function tpProjections(pl1, ph1, pl2) {
     tp1272: Math.round(pl1 + amp * 1.272),
     tp1618: Math.round(pl1 + amp * 1.618),
   };
+}
+
+// Sinh kich ban phu (alt scenario) MAY MOC tu wave + overhead — khong de LLM tu nho (skill 6e).
+// Chi VN LONG uptrend; SL<entry<TP1 bat buoc, geometry khong thoa -> bo nhanh do (rong la dung).
+function buildScenarios(structure, wave, overhead, dir, shelf = null) {
+  if (structure !== 'UPTREND') return [];
+  if (dir === 'SHORT' || dir === 'NEUTRAL') return [];
+  const tp = wave.tp || {};
+  const tp1 = tp.tp1272 || null;
+  const tp2 = tp.tp1618 || null;
+  if (!tp1) return [];
+  const valid = (lo, hi, sl, t1) => sl < lo && lo <= hi && hi < t1;
+  const out = [];
+  if (wave.phase === 'PULLBACK' && overhead.resistance
+      && overhead.headroom_pct != null && overhead.headroom_pct <= 5) {
+    // primary = retest/pullback -> them nhanh breakout qua overhead
+    const r = overhead.resistance;
+    const entry = Math.round(r * 1.003);
+    const sl = Math.round(r * 0.99);
+    if (valid(entry, entry, sl, tp1)) {
+      out.push({ label: 'breakout', entry_low: entry, entry_high: entry,
+        sl, tp1, tp2, trigger: `dong tren ${Math.round(r)} + vol>=1.5x`,
+        size_note: '1/2 size, chase' });
+    }
+  } else if (wave.phase === 'IMPULSE' && wave.ph1) {
+    // primary = breakout/IMPULSE -> them nhanh retest ve pivot high cu
+    const lvl = wave.ph1;
+    const lo = Math.round(lvl * 0.997);
+    const hi = Math.round(lvl * 1.003);
+    // SL uu tien shelf (muc 25% nen cau manh, chat + dung cau truc) > pivot low xa > -3%
+    const slBase = (shelf != null && shelf < lo) ? shelf
+                 : (wave.pl1 && wave.pl1 < lo) ? wave.pl1 : lvl * 0.97;
+    const sl = Math.round(slBase * 0.998);
+    if (valid(lo, hi, sl, tp1)) {
+      out.push({ label: 'retest', entry_low: lo, entry_high: hi,
+        sl, tp1, tp2, trigger: `retest ve ${Math.round(lvl)} giu duoc + buy-tick`,
+        size_note: 'full size neu giu' });
+    }
+  }
+  return out;
+}
+
+// Giu bao nhieu % range nen cau manh moi coi la "con da". Dong cua duoi muc (1-HOLD_FRAC) range = mat.
+// HOLD_FRAC=0.75 -> giu nua tren + 1/4, shelf o muc 25% nen manh (vd POW 13800-14550 -> shelf ~13988). Chinh duoc.
+const HOLD_FRAC = 0.75;
+
+// Tim nen cau manh gan nhat trong `lookback` nen DA DONG (D-1..D-5): vol>=1.5x + dong cao + nen tang.
+// Shelf = muc (1-HOLD_FRAC) cua RANGE chinh nen manh = ranh gioi giu da. con nguyen = chua nen da-dong nao
+// sau no dong cua duoi shelf. Tra { shelf, zoneHi=close }.
+function findDemandBar(bars, n, avgVol20, lookback = 5) {
+  if (!avgVol20) return null;
+  for (let off = 1; off <= lookback; off++) {
+    const idx = n - 1 - off;
+    const b = bars[idx];
+    if (!b) continue;
+    const range = b.high - b.low;
+    const closePos = range > 0 ? (b.close - b.low) / range : 0;
+    if (b.close > b.open && (b.volume / avgVol20) >= 1.5 && closePos >= 0.65) {
+      const shelf = b.low + (1 - HOLD_FRAC) * range; // muc 25% cua nen manh (POW ~13988)
+      let broken = false;
+      for (let j = idx + 1; j <= n - 2; j++) { if (bars[j] && bars[j].close < shelf) { broken = true; break; } }
+      if (broken) continue;               // da dong cua duoi muc 25% sau do -> mat da, bo
+      return { shelf, zoneHi: b.close, off };
+    }
+  }
+  return null;
+}
+
+// Continuation-retest: nen cau manh (findDemandBar) + nen hien tai can cung -> neo retest vao ZONE [shelf .. close].
+// Invalidation = DONG CUA DUOI shelf (vd POW: dung dong duoi ~14000). Trigger = pullback giu tren shelf + can cung
+// + LTF lat delta. Chay ca khi structure != UPTREND -> chong vong "cho breakout".
+function contRetestScenario({ shelf, zoneHi, price, d0vol, resistance, atr14, dir }) {
+  if (dir === 'SHORT' || dir === 'NEUTRAL') return null;
+  if (shelf == null || zoneHi == null || price == null) return null;
+  if (d0vol == null || d0vol >= 1.0) return null;                      // nen hien tai phai can cung (<1x)
+  if (price <= shelf) return null;                                     // mat shelf -> bo
+  if (atr14 && (price - zoneHi) > 2 * atr14) return null;              // retest qua xa, chua actionable
+  const lo = Math.round(shelf);
+  const hi = Math.round(Math.min(zoneHi, price));                      // khong de xuat mua tren gia hien tai
+  const sl = Math.round(shelf - (atr14 ? atr14 * 0.5 : shelf * 0.01));
+  const tp1 = (resistance && resistance > price * 1.01) ? Math.round(resistance)
+            : Math.round(price + 2 * (atr14 || price * 0.02));
+  const tp2 = Math.round(tp1 + (atr14 ? atr14 * 2 : tp1 * 0.03));
+  if (!(sl < lo && lo <= hi && hi < tp1)) return null;
+  return { label: 'retest', entry_low: lo, entry_high: hi, sl, tp1, tp2,
+    trigger: `pullback giu tren shelf ${lo} (KHONG dong cua duoi) + vol can + nen LTF (H1) lat delta duong`,
+    size_note: 'continuation retest, invalidation = dong duoi shelf' };
 }
 
 function trailStatus(bars, sma20arr) {
@@ -235,6 +323,9 @@ async function main() {
   const bars = (ohlcv.bars || []).slice(-65);
   const closes = bars.map(b => b.close);
   const n = bars.length;
+  // nen D-0 da dong chua: chua dong -> phase/scenario chot theo nen D-1 (khong nhay trong phien)
+  const bar = barStatus(bars[n-1].time, Number(timeframe) || 360);
+  const barClosed = bar.closed;
 
   // --- Compute SMA20 for every bar (for trail check) ---
   const sma20arr = closes.map((_, i) => i < 19 ? null : sma(closes.slice(0, i+1), 20));
@@ -248,12 +339,14 @@ async function main() {
   // --- Wave context ---
   let wave = {};
   const price = quote.last || quote.close || bars[n-1]?.close;
+  // gia QUYET DINH phase: nen D-0 chua dong -> dung close D-1 (chot ca phien); dong roi -> gia thuc
+  const decisionPrice = barClosed ? price : (bars[n-2]?.close ?? price);
   if (structure === 'UPTREND' && ph.length >= 1 && pl.length >= 2) {
     const ph1 = ph[0].price, ph2 = ph.length >= 2 ? ph[1].price : null;
     const pl1 = pl[0].price, pl2 = pl[1].price;
     const ampPrev = ph1 - pl2;
-    const pullbackPct = ph1 > pl1 ? Math.round((ph1 - price) / (ph1 - pl1) * 100) : null;
-    const phase = price < ph1 ? 'PULLBACK' : 'IMPULSE';
+    const pullbackPct = ph1 > pl1 ? Math.round((ph1 - decisionPrice) / (ph1 - pl1) * 100) : null;
+    const phase = decisionPrice < ph1 ? 'PULLBACK' : 'IMPULSE';
     wave = {
       phase, ph1, ph2: ph2 || null,
       pl1, pl2,
@@ -264,13 +357,13 @@ async function main() {
     };
   } else if (structure === 'DOWNTREND') {
     const ph1 = ph[0]?.price, pl1 = pl[0]?.price;
-    const bounce = pl1 && ph1 ? Math.round((price - pl1) / (ph1 - pl1) * 100) : null;
+    const bounce = pl1 && ph1 ? Math.round((decisionPrice - pl1) / (ph1 - pl1) * 100) : null;
     wave = { phase: 'DOWNTREND', ph1, pl1, bounce_pct: bounce };
   } else {
     const hi20 = Math.max(...bars.slice(-20).map(b => b.high));
     const lo20 = Math.min(...bars.slice(-20).map(b => b.low));
     const range_pct = Math.round((hi20 - lo20) / lo20 * 100 * 10) / 10;
-    const pos_pct = lo20 < hi20 ? Math.round((price - lo20) / (hi20 - lo20) * 100) : null;
+    const pos_pct = lo20 < hi20 ? Math.round((decisionPrice - lo20) / (hi20 - lo20) * 100) : null;
     wave = { phase: 'SIDEWAYS', range_hi: hi20, range_lo: lo20, range_pct, pos_pct };
   }
 
@@ -451,6 +544,7 @@ async function main() {
     close_pos: b.high > b.low ? Math.round((b.close - b.low) / (b.high - b.low) * 100) : null,
   } : null;
   const prev_closed = [bars[n-2], bars[n-3], bars[n-4]].map(closedRead);
+  // `bar`/`barClosed` da tinh dau ham (truoc wave) de chot phase theo nen D-1 khi D-0 chua dong
   vol_state.ultra = lastVolRatio != null && lastVolRatio >= VOL_ULTRA;
 
   // === VN structural fields: bien do tran/san + ADTV + dao han VN30F ===
@@ -525,6 +619,20 @@ async function main() {
   // --- Huong (BiDir): tu fp.bias. null = ban cu long-only ---
   const dir = fp.bias === 1 ? 'LONG' : fp.bias === -1 ? 'SHORT' : fp.bias === 0 ? 'NEUTRAL' : 'LONG_ONLY';
 
+  // --- Kich ban phu tu dong (bo qua buoc 6e thu cong) ---
+  // Tim nen cau manh 1 lan: dung cho ca SL nhanh IMPULSE va nhanh continuation-retest (structure != UPTREND)
+  const db = findDemandBar(bars, n, avgVol20);
+  const scenarios = buildScenarios(structure, wave, overhead, dir, db ? db.shelf : null);
+  if (!scenarios.some(s => s.label === 'retest') && db) {
+    // D-0 chua dong -> chot theo nen D-1 (gia close + vol ratio cua no), khong an gia/vol nen dang chay
+    const scenVol = barClosed ? vol_state.ratio_last : (prev_closed[0]?.vol_ratio ?? vol_state.ratio_last);
+    const cr = contRetestScenario({
+      shelf: db.shelf, zoneHi: db.zoneHi, price: decisionPrice,
+      d0vol: scenVol, resistance: overhead.resistance, atr14, dir,
+    });
+    if (cr) scenarios.push(cr);
+  }
+
   // --- Compact output (gate heavy diagnostics behind --full) ---
   const fpOut = { ...fp, score: fpScore, checks: fpChecks };
   if (!FULL) { delete fpOut.buyVol; delete fpOut.sellVol; delete fpOut.totalVol; }
@@ -546,6 +654,7 @@ async function main() {
     vol_state,
     spread: spreadOut,
     bar_read,
+    bar,
     prev_closed,
     vsa_churn,
     topbot,
@@ -553,6 +662,7 @@ async function main() {
     adtv_20_bn,
     days_to_vn30f_expiry,
     overhead,
+    scenarios,
     rs,
     avg_vol20: Math.round(avgVol20 || 0),
     mtf: { score: mtfScore, notes: mtfNotes },
@@ -580,4 +690,9 @@ async function main() {
   try { await chart.setSymbol({ symbol: initState.symbol }); } catch(e) {}
   process.exit(0);
 }
-main().catch(e => { console.error(e); process.exit(1); });
+export { buildScenarios, contRetestScenario, findDemandBar };
+
+// Chi chay engine khi goi truc tiep (node check_one.mjs ...), khong khi bi import vao test.
+if ((process.argv[1] || '').replace(/\\/g, '/').endsWith('check_one.mjs')) {
+  main().catch(e => { console.error(e); process.exit(1); });
+}
