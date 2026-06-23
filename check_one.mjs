@@ -624,11 +624,14 @@ async function main() {
   const db = findDemandBar(bars, n, avgVol20);
   const scenarios = buildScenarios(structure, wave, overhead, dir, db ? db.shelf : null);
   if (!scenarios.some(s => s.label === 'retest') && db) {
-    // D-0 chua dong -> chot theo nen D-1 (gia close + vol ratio cua no), khong an gia/vol nen dang chay
-    const scenVol = barClosed ? vol_state.ratio_last : (prev_closed[0]?.vol_ratio ?? vol_state.ratio_last);
+    // continuation-retest la doc INTRADAY tren nen D-0 dang chay (D-1 = chinh nen cau manh, KHONG phai pullback)
+    // -> giu gia + vol LIVE, nhung chuan hoa vol theo tuoi nen: dau phien vol thap gia "can cung ao" -> chia age
+    // ponytail: gia dinh vol tich luy ~tuyen tinh theo thoi gian, du tot de loc fake dau phien
+    const ageFrac = barClosed ? 1 : Math.max((bar.age_pct || 100) / 100, 0.15);
+    const projVol = vol_state.ratio_last != null ? vol_state.ratio_last / ageFrac : null;
     const cr = contRetestScenario({
-      shelf: db.shelf, zoneHi: db.zoneHi, price: decisionPrice,
-      d0vol: scenVol, resistance: overhead.resistance, atr14, dir,
+      shelf: db.shelf, zoneHi: db.zoneHi, price,
+      d0vol: projVol, resistance: overhead.resistance, atr14, dir,
     });
     if (cr) scenarios.push(cr);
   }
