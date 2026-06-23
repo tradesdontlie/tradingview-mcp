@@ -72,10 +72,7 @@ export async function connect() {
       targetInfo = target;
       client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: target.id });
 
-      // Enable required domains
       await client.Runtime.enable();
-      await client.Page.enable();
-      await client.DOM.enable();
 
       return client;
     } catch (err) {
