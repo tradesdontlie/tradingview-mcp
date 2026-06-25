@@ -45,6 +45,7 @@ export async function drawShape({ shape, point, point2, overrides: overridesRaw,
 }
 
 export async function listDrawings() {
+  const { evaluate, getChartApi } = _resolve();
   const apiPath = await getChartApi();
   const shapes = await evaluate(`
     (function() {
@@ -57,6 +58,7 @@ export async function listDrawings() {
 }
 
 export async function getProperties({ entity_id }) {
+  const { evaluate, getChartApi } = _resolve();
   const apiPath = await getChartApi();
   const result = await evaluate(`
     (function() {
@@ -86,6 +88,7 @@ export async function getProperties({ entity_id }) {
 }
 
 export async function removeOne({ entity_id }) {
+  const { evaluate, getChartApi } = _resolve();
   const apiPath = await getChartApi();
   const result = await evaluate(`
     (function() {
@@ -107,6 +110,7 @@ export async function removeOne({ entity_id }) {
 }
 
 export async function clearAll() {
+  const { evaluate, getChartApi } = _resolve();
   const apiPath = await getChartApi();
   await evaluate(`${apiPath}.removeAllShapes()`);
   return { success: true, action: 'all_shapes_removed' };
