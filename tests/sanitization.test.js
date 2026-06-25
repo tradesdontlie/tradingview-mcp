@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { safeString, requireFinite } from '../src/connection.js';
-import { setSymbol, setTimeframe, setType, manageIndicator, setVisibleRange } from '../src/core/chart.js';
+import { setSymbol, setTimeframe, setType, manageIndicator, setVisibleRange, scrollToDate } from '../src/core/chart.js';
 import { drawShape } from '../src/core/drawing.js';
 
 // ── Mock helpers ─────────────────────────────────────────────────────────
@@ -32,6 +32,21 @@ function mockDeps(overrides = {}) {
     evaluate,
   };
 }
+
+// ── scrollToDate() dependency wiring ─────────────────────────────────────
+
+describe('scrollToDate() — dependency injection (regression)', () => {
+  it('uses the injected evaluate instead of an undefined module binding', async () => {
+    // Regression: scrollToDate omitted `_deps`/`_resolve`, so it referenced a
+    // bare `evaluate` (the import is aliased to `_evaluate`) → "evaluate is not
+    // defined" at runtime. It must resolve deps like every other chart fn.
+    const { _deps, evaluate } = mockDeps();
+    const result = await scrollToDate({ date: '2024-01-15', _deps });
+    assert.equal(result.success, true);
+    assert.ok(evaluate.calls.some(c => c.includes('zoomToBarsRange')),
+      'scrollToDate issued its zoom evaluate call through the injected dep');
+  });
+});
 
 // ── safeString() ─────────────────────────────────────────────────────────
 
