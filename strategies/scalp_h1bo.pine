@@ -1,0 +1,71 @@
+//@version=5
+strategy("H1 Breakout M5 [XAUUSD]", overlay=true,
+  default_qty_type=strategy.percent_of_equity, default_qty_value=2,
+  commission_type=strategy.commission.percent, commission_value=0.07, slippage=3)
+
+// === INPUTS ===
+i_body_pct = input.float(60.0, "Min body % for breakout candle", step=5.0, minval=30.0)
+i_tp_pct   = input.float(80.0, "TP % of prev H1 range",  step=10.0)
+i_sl_pct   = input.float(30.0, "SL % of prev H1 range",  step=5.0)
+i_min_atr  = input.float(1.0,  "Min H1 range (H1 ATR mult)", step=0.1)
+i_h4_trend = input.bool(true,  "H4 EMA Trend Filter")
+i_h4_ema_p = input.int(50,     "H4 EMA Period", minval=10)
+i_sess     = input.bool(true,  "Session Filter (London+NY)")
+i_dir      = input.int(0,      "Direction 0=Both 1=Long 2=Short", minval=0, maxval=2)
+i_retest   = input.bool(false, "Require retest of broken level (no immediate breakout)")
+
+// === HIGHER TF DATA ===
+// Previous COMPLETED H1 candle high/low (no lookahead bias — bar[1] from H1 is confirmed)
+prev_h1_high = request.security(syminfo.tickerid, "60", high[1],  lookahead=barmerge.lookahead_on)
+prev_h1_low  = request.security(syminfo.tickerid, "60", low[1],   lookahead=barmerge.lookahead_on)
+h1_atr       = request.security(syminfo.tickerid, "60", ta.atr(14), lookahead=barmerge.lookahead_off)
+h4_ema       = request.security(syminfo.tickerid, "240", ta.ema(close, i_h4_ema_p))
+
+prev_h1_range = prev_h1_high - prev_h1_low
+
+// === FILTERS ===
+h4_bull = not i_h4_trend or close > h4_ema
+h4_bear = not i_h4_trend or close < h4_ema
+h1_range_ok = prev_h1_range >= h1_atr * i_min_atr
+
+// === SESSION (London 08:00-18:00 GMT = 15:00-01:00 WIB; NY 13:30-22:00 GMT = 20:30-05:00 WIB) ===
+h_gmt7 = hour(time, "GMT+7")
+in_sess = not i_sess or (h_gmt7 >= 14 and h_gmt7 < 24)
+
+// === M5 CANDLE PROPS ===
+body    = math.abs(close - open)
+rng     = high - low
+body_p  = rng > 0 ? body / rng * 100 : 0
+is_bull = close >= open
+is_bear = close < open
+
+// Strong breakout candle
+bull_bo = is_bull and body_p >= i_body_pct and close > prev_h1_high and high > prev_h1_high
+bear_bo = is_bear and body_p >= i_body_pct and close < prev_h1_low  and low  < prev_h1_low
+
+// Optional: breakout must not be the very first bar above/below (require pullback-then-retest)
+// When retest mode OFF: trade the initial breakout bar
+// When retest mode ON:  skip the breakout bar, trade the next bar that confirms at the level
+long_sig  = bull_bo and h4_bull and h1_range_ok and in_sess and (i_dir == 0 or i_dir == 1)
+short_sig = bear_bo and h4_bear and h1_range_ok and in_sess and (i_dir == 0 or i_dir == 2)
+
+// === ENTRIES ===
+tp_ticks = math.max(math.round(prev_h1_range * (i_tp_pct / 100) / syminfo.mintick), 30)
+sl_ticks = math.max(math.round(prev_h1_range * (i_sl_pct / 100) / syminfo.mintick), 15)
+
+if long_sig and strategy.position_size == 0
+    strategy.entry("L", strategy.long)
+    strategy.exit("Lx", "L", profit=tp_ticks, loss=sl_ticks)
+
+if short_sig and strategy.position_size == 0
+    strategy.entry("S", strategy.short)
+    strategy.exit("Sx", "S", profit=tp_ticks, loss=sl_ticks)
+
+// === PLOTS ===
+plot(prev_h1_high, "Prev H1 High", color.new(color.red,   60), 1, plot.style_stepline)
+plot(prev_h1_low,  "Prev H1 Low",  color.new(color.green, 60), 1, plot.style_stepline)
+plot(h4_ema, "H4 EMA", color.new(color.orange, 40))
+bgcolor(long_sig  ? color.new(color.green, 80) : na)
+bgcolor(short_sig ? color.new(color.red,   80) : na)
+plotshape(long_sig,  "L", shape.triangleup,   location.belowbar, color.green, size=size.tiny)
+plotshape(short_sig, "S", shape.triangledown, location.abovebar, color.red,   size=size.tiny)

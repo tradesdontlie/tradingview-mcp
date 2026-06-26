@@ -1,0 +1,67 @@
+//@version=5
+strategy("Scalp EMA v1 [XAUUSD M5]",
+    overlay=true,
+    default_qty_type=strategy.percent_of_equity,
+    default_qty_value=2,
+    commission_type=strategy.commission.percent,
+    commission_value=0.07,
+    slippage=3,
+    max_bars_back=500)
+
+// === DATE RANGE ===
+i_start = input.time(timestamp("2025-01-01"), "Start")
+i_end   = input.time(timestamp("2026-06-25"), "End")
+in_range = time >= i_start and time <= i_end
+
+// === INPUTS ===
+i_fast    = input.int(8,  "Fast EMA",  minval=3)
+i_slow    = input.int(21, "Slow EMA",  minval=5)
+i_trend   = input.int(50, "Trend EMA", minval=20)
+i_atr_len = input.int(14, "ATR Length")
+i_tp_atr  = input.float(1.5, "TP (ATR mult)", step=0.1)
+i_sl_atr  = input.float(1.0, "SL (ATR mult)", step=0.1)
+i_rsi_len = input.int(14, "RSI Length")
+i_sess    = input.bool(true, "Session Filter")
+i_trend_f = input.bool(true, "Trend Filter (above/below EMA50)")
+
+// === INDICATORS ===
+ema_f  = ta.ema(close, i_fast)
+ema_s  = ta.ema(close, i_slow)
+ema_t  = ta.ema(close, i_trend)
+atr    = ta.atr(i_atr_len)
+rsi    = ta.rsi(close, i_rsi_len)
+
+// === SESSION: London + NY (07:00–21:00 WIB = UTC+7) ===
+in_sess = not i_sess or (hour(time, "GMT+7") >= 7 and hour(time, "GMT+7") < 21)
+
+// === SIGNALS ===
+cross_up   = ta.crossover(ema_f, ema_s)
+cross_dn   = ta.crossunder(ema_f, ema_s)
+
+trend_up   = not i_trend_f or close > ema_t
+trend_dn   = not i_trend_f or close < ema_t
+
+rsi_ok_l   = rsi > 35 and rsi < 68
+rsi_ok_s   = rsi < 65 and rsi > 32
+
+long_sig  = cross_up and trend_up and rsi_ok_l and in_sess and in_range
+short_sig = cross_dn and trend_dn and rsi_ok_s and in_sess and in_range
+
+// === ENTRIES ===
+if long_sig and strategy.position_size == 0
+    strategy.entry("L", strategy.long)
+    strategy.exit("Lx", "L",
+        profit = math.round(atr * i_tp_atr / syminfo.mintick),
+        loss   = math.round(atr * i_sl_atr / syminfo.mintick))
+
+if short_sig and strategy.position_size == 0
+    strategy.entry("S", strategy.short)
+    strategy.exit("Sx", "S",
+        profit = math.round(atr * i_tp_atr / syminfo.mintick),
+        loss   = math.round(atr * i_sl_atr / syminfo.mintick))
+
+// === PLOTS ===
+plot(ema_f, "Fast", color.new(color.blue, 0), 1)
+plot(ema_s, "Slow", color.new(color.orange, 0), 1)
+plot(ema_t, "Trend", color.new(color.gray, 40), 1)
+bgcolor(long_sig ? color.new(color.green, 90) : short_sig ? color.new(color.red, 90) : na)

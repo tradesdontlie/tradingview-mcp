@@ -1,0 +1,60 @@
+//@version=5
+strategy("BB Bounce M5 [XAUUSD]", overlay=true,
+  default_qty_type=strategy.percent_of_equity, default_qty_value=2,
+  commission_type=strategy.commission.percent, commission_value=0.07, slippage=3)
+
+// === INPUTS ===
+i_bb_len    = input.int(20,    "BB Length")
+i_bb_mult   = input.float(2.0, "BB Mult (std dev)", step=0.1)
+i_rsi_p     = input.int(14,    "RSI Period")
+i_rsi_os    = input.float(30.0,"RSI Oversold (long)", step=5.0)
+i_rsi_ob    = input.float(70.0,"RSI Overbought (short)", step=5.0)
+i_body_pct  = input.float(40.0,"Min body % for confirmation candle", step=5.0)
+i_tp_atr    = input.float(1.5, "TP (ATR mult)", step=0.1)
+i_sl_atr    = input.float(0.75,"SL (ATR mult)", step=0.05)
+i_h1_trend  = input.bool(true, "H1 EMA Trend Filter")
+i_h1_ema_p  = input.int(50,    "H1 EMA Period")
+i_sess      = input.bool(true,  "Session Filter (GMT+7 7-21)")
+i_dir       = input.int(0, "Direction 0=Both 1=Long 2=Short", minval=0, maxval=2)
+
+// === INDICATORS ===
+[bb_mid, bb_up, bb_dn] = ta.bb(close, i_bb_len, i_bb_mult)
+rsi  = ta.rsi(close, i_rsi_p)
+atr  = ta.atr(14)
+h1_ema = request.security(syminfo.tickerid, "60", ta.ema(close, i_h1_ema_p))
+
+// === CANDLE ===
+body  = math.abs(close - open)
+rng   = high - low
+bp    = rng > 0 ? body/rng*100 : 0
+bull  = close > open and bp >= i_body_pct
+bear  = close < open and bp >= i_body_pct
+
+// === FILTERS ===
+h1_up   = not i_h1_trend or close > h1_ema
+h1_dn   = not i_h1_trend or close < h1_ema
+in_sess = not i_sess or (hour(time, "GMT+7") >= 7 and hour(time, "GMT+7") < 21)
+
+// === SIGNALS ===
+// Previous bar touched/crossed lower BB + RSI oversold → current bar bouncing back up
+long_sig  = low[1] <= bb_dn[1] and rsi[1] <= i_rsi_os and bull and close > bb_dn and h1_up and in_sess and (i_dir == 0 or i_dir == 1)
+short_sig = high[1] >= bb_up[1] and rsi[1] >= i_rsi_ob and bear and close < bb_up and h1_dn and in_sess and (i_dir == 0 or i_dir == 2)
+
+tp_ticks = math.max(math.round(atr * i_tp_atr  / syminfo.mintick), 20)
+sl_ticks = math.max(math.round(atr * i_sl_atr / syminfo.mintick), 10)
+
+if long_sig and strategy.position_size == 0
+    strategy.entry("L", strategy.long)
+    strategy.exit("Lx", "L", profit=tp_ticks, loss=sl_ticks)
+
+if short_sig and strategy.position_size == 0
+    strategy.entry("S", strategy.short)
+    strategy.exit("Sx", "S", profit=tp_ticks, loss=sl_ticks)
+
+// === PLOTS ===
+plot(bb_up,  "BB Upper", color.new(color.red,   60))
+plot(bb_mid, "BB Mid",   color.new(color.gray,  60))
+plot(bb_dn,  "BB Lower", color.new(color.green, 60))
+plot(h1_ema, "H1 EMA",   color.new(color.orange,40))
+bgcolor(long_sig  ? color.new(color.lime,  75) : na)
+bgcolor(short_sig ? color.new(color.red,   75) : na)

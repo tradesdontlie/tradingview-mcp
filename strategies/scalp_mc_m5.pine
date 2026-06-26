@@ -1,0 +1,79 @@
+//@version=5
+strategy("MC Scalp M5 [XAUUSD]", overlay=true, default_qty_type=strategy.percent_of_equity, default_qty_value=2, commission_type=strategy.commission.percent, commission_value=0.07, slippage=3)
+
+// === INPUTS ===
+i_body_pct  = input.float(60.0, "Min Body % of Range", minval=30, maxval=99, step=5)
+i_wick_pct  = input.float(20.0, "Max Wick % of Range", minval=0, maxval=50, step=5)
+i_min_atr   = input.float(0.5,  "Min Size (ATR mult)", step=0.1)
+i_tp_pct    = input.float(100.0, "TP % of candle range", step=10)
+i_sl_pct    = input.float(60.0,  "SL % of candle range", step=10)
+i_atr_len   = input.int(14, "ATR Length")
+i_h1_ema    = input.bool(true, "H1 EMA Trend Filter")
+i_h1_ema_p  = input.int(50, "H1 EMA Period", minval=10)
+i_sess      = input.bool(true, "Session Filter (London+NY)")
+i_dir       = input.int(0, "Direction 0=Both 1=Long 2=Short", minval=0, maxval=2)
+i_consol    = input.bool(false, "Consolidation Filter")
+i_consol_n  = input.int(3, "Consol lookback bars", minval=2)
+
+// === INDICATORS ===
+atr   = ta.atr(i_atr_len)
+h1_ema_val = request.security(syminfo.tickerid, "60", ta.ema(close, i_h1_ema_p))
+
+// === CANDLE PROPERTIES ===
+candle_range = high - low
+body_size    = math.abs(close - open)
+upper_wick   = high - math.max(close, open)
+lower_wick   = math.min(close, open) - low
+body_pct     = candle_range > 0 ? (body_size / candle_range) * 100 : 0
+upper_wick_pct = candle_range > 0 ? (upper_wick / candle_range) * 100 : 0
+lower_wick_pct = candle_range > 0 ? (lower_wick / candle_range) * 100 : 0
+is_bullish   = close > open
+is_bearish   = close < open
+
+// === MOMENTUM CANDLE CRITERIA ===
+big_body    = body_pct >= i_body_pct
+small_upper = upper_wick_pct <= i_wick_pct
+small_lower = lower_wick_pct <= i_wick_pct
+min_size    = candle_range >= atr * i_min_atr
+
+bull_candle = big_body and small_upper and min_size and is_bullish
+bear_candle = big_body and small_lower and min_size and is_bearish
+
+// === CONSOLIDATION FILTER (no wide bar in recent n bars) ===
+max_recent = ta.highest(candle_range, i_consol_n)
+not_consol  = not i_consol or candle_range[1] < max_recent * 1.5
+
+// === SESSION FILTER ===
+in_sess = not i_sess or (hour(time, "GMT+7") >= 7 and hour(time, "GMT+7") < 21)
+
+// === TREND FILTER ===
+h1_bull = not i_h1_ema or close > h1_ema_val
+h1_bear = not i_h1_ema or close < h1_ema_val
+
+// === ENTRY SIGNALS (on next bar open) ===
+long_sig  = bull_candle[1] and h1_bull and in_sess and (i_dir == 0 or i_dir == 1)
+short_sig = bear_candle[1] and h1_bear and in_sess and (i_dir == 0 or i_dir == 2)
+
+// === TP/SL based on signal candle's range ===
+var float entry_range = na
+if long_sig
+    entry_range := high[1] - low[1]
+if short_sig
+    entry_range := high[1] - low[1]
+
+tp_pts = entry_range * (i_tp_pct / 100) / syminfo.mintick
+sl_pts = entry_range * (i_sl_pct / 100) / syminfo.mintick
+
+// === ENTRIES ===
+if long_sig and strategy.position_size == 0
+    strategy.entry("L", strategy.long)
+    strategy.exit("Lx", "L", profit=math.round(tp_pts), loss=math.round(sl_pts))
+
+if short_sig and strategy.position_size == 0
+    strategy.entry("S", strategy.short)
+    strategy.exit("Sx", "S", profit=math.round(tp_pts), loss=math.round(sl_pts))
+
+// === PLOTS ===
+plot(h1_ema_val, "H1 EMA", color.new(color.gray, 40), 1)
+bgcolor(bull_candle ? color.new(color.green, 85) : bear_candle ? color.new(color.red, 85) : na)
+bgcolor(long_sig ? color.new(color.lime, 75) : short_sig ? color.new(color.orange, 75) : na)

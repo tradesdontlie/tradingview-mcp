@@ -1,0 +1,73 @@
+//@version=5
+strategy("Scalp ST v3 [XAUUSD M5]",
+    overlay=true,
+    default_qty_type=strategy.percent_of_equity,
+    default_qty_value=2,
+    commission_type=strategy.commission.percent,
+    commission_value=0.07,
+    slippage=3,
+    max_bars_back=500)
+
+// === DATE RANGE ===
+i_start = input.time(timestamp("2025-01-01"), "Start")
+i_end   = input.time(timestamp("2026-06-25"), "End")
+in_range = time >= i_start and time <= i_end
+
+// === INPUTS ===
+i_st_atr   = input.int(10,   "ST ATR Period")
+i_st_mult  = input.float(2.0, "ST Multiplier", step=0.1)
+i_fast_ema = input.int(8,    "Fast EMA (momentum confirm)")
+i_atr_len  = input.int(14,   "ATR Length")
+i_tp_atr   = input.float(2.0, "TP (ATR mult)", step=0.1)
+i_sl_atr   = input.float(1.0, "SL (ATR mult)", step=0.1)
+i_rsi_len  = input.int(14,   "RSI Length")
+i_rsi_bull = input.int(50,   "RSI Bullish Min")
+i_rsi_bear = input.int(50,   "RSI Bearish Max")
+i_sess     = input.bool(true, "Session Filter")
+i_h1_trend = input.bool(true, "H1 Trend Filter (EMA50)")
+
+// === INDICATORS ===
+[st_line, st_dir] = ta.supertrend(i_st_mult, i_st_atr)
+ema_f  = ta.ema(close, i_fast_ema)
+atr    = ta.atr(i_atr_len)
+rsi    = ta.rsi(close, i_rsi_len)
+
+// H1 trend via HTF EMA50
+h1_ema = request.security(syminfo.tickerid, "60", ta.ema(close, 50))
+bull_h1 = not i_h1_trend or close > h1_ema
+bear_h1 = not i_h1_trend or close < h1_ema
+
+// === SESSION ===
+in_sess = not i_sess or (hour(time, "GMT+7") >= 7 and hour(time, "GMT+7") < 21)
+
+// === SIGNALS: Supertrend flip + momentum ===
+st_up  = st_dir == 1   // bullish supertrend
+st_dn  = st_dir == -1  // bearish supertrend
+
+flip_up = st_up and st_dir[1] == -1  // just flipped bullish
+flip_dn = st_dn and st_dir[1] == 1   // just flipped bearish
+
+long_sig  = flip_up and rsi >= i_rsi_bull and bull_h1 and in_sess and in_range
+short_sig = flip_dn and rsi <= i_rsi_bear and bear_h1 and in_sess and in_range
+
+// Continuation (trend riding, not just flips)
+cont_long  = st_up and ta.crossover(close, ema_f) and rsi >= i_rsi_bull and bull_h1 and in_sess and in_range
+cont_short = st_dn and ta.crossunder(close, ema_f) and rsi <= i_rsi_bear and bear_h1 and in_sess and in_range
+
+// === ENTRIES ===
+if (long_sig or cont_long) and strategy.position_size == 0
+    strategy.entry("L", strategy.long)
+    strategy.exit("Lx", "L",
+        profit = math.round(atr * i_tp_atr / syminfo.mintick),
+        loss   = math.round(atr * i_sl_atr / syminfo.mintick))
+
+if (short_sig or cont_short) and strategy.position_size == 0
+    strategy.entry("S", strategy.short)
+    strategy.exit("Sx", "S",
+        profit = math.round(atr * i_tp_atr / syminfo.mintick),
+        loss   = math.round(atr * i_sl_atr / syminfo.mintick))
+
+// === PLOTS ===
+plot(st_line, "Supertrend", st_dir == 1 ? color.green : color.red, 2)
+plot(ema_f, "EMA Fast", color.blue, 1)
+bgcolor(long_sig or cont_long ? color.new(color.green, 85) : (short_sig or cont_short) ? color.new(color.red, 85) : na)

@@ -1,0 +1,161 @@
+//@version=6
+// SMC Order Block MTF — last opposite candle before BOS, limit entry on retrace
+strategy("SMC Order Block MTF", overlay=true,
+     initial_capital   = 5000,
+     default_qty_type  = strategy.fixed,
+     default_qty_value = 1,
+     commission_type   = strategy.commission.percent,
+     commission_value  = 0.01,
+     slippage          = 3,
+     margin_long       = 1,
+     margin_short      = 1,
+     max_boxes_count   = 80,
+     max_labels_count  = 80,
+     calc_on_order_fills = true)
+
+// ── HTF bias ─────────────────────────────────────────────────────────────────
+htf_tf   = input.timeframe("240", "HTF Bias Timeframe")
+htf_fast = input.int(50,  "HTF EMA fast")
+htf_slow = input.int(200, "HTF EMA slow")
+
+// ── Entry inputs ─────────────────────────────────────────────────────────────
+atr_len   = input.int(14,   "ATR Length")
+sl_buf    = input.float(0.5,"SL buffer x ATR", minval=0.0, maxval=3.0)
+rr        = input.float(3.0,"Risk:Reward",     minval=1.0, maxval=6.0)
+entry_pos = input.float(0.5,"Entry in OB (0=far,1=near)", minval=0.0, maxval=1.0)
+expiry    = input.int(15,   "Cancel order after N bars", minval=3, maxval=60)
+struct_ln = input.int(20,   "BOS lookback")
+use_sweep = input.bool(true,"Also require liquidity sweep")
+sweep_win = input.int(8,    "Sweep within N bars", minval=1, maxval=30)
+ob_body   = input.bool(true,"OB = body only (else full candle)")
+acct_size = input.float(5000,"Account USD")
+risk_pct  = input.float(0.5, "Risk % per trade")
+size_mult = input.float(1.0, "Size multiplier")
+
+// ── HTF bias via request.security ────────────────────────────────────────────
+htf_ema_f = request.security(syminfo.tickerid, htf_tf, ta.ema(close, htf_fast), lookahead=barmerge.lookahead_off)
+htf_ema_s = request.security(syminfo.tickerid, htf_tf, ta.ema(close, htf_slow), lookahead=barmerge.lookahead_off)
+htf_bull  = htf_ema_f > htf_ema_s
+htf_bear  = htf_ema_f < htf_ema_s
+
+// ── LTF indicators ───────────────────────────────────────────────────────────
+atr  = ta.atr(atr_len)
+hi_n = ta.highest(high, struct_ln)[1]
+lo_n = ta.lowest(low,  struct_ln)[1]
+bos_up = close > hi_n
+bos_dn = close < lo_n
+
+// ── Track last opposite candle (the Order Block) ─────────────────────────────
+var float bull_ob_top = na
+var float bull_ob_bot = na
+var float bear_ob_top = na
+var float bear_ob_bot = na
+bear_candle = close < open
+bull_candle = close > open
+ob_hi(b) => ob_body ? math.max(open, close) : high
+ob_lo(b) => ob_body ? math.min(open, close) : low
+if bear_candle
+    bull_ob_top := ob_hi(0)
+    bull_ob_bot := ob_lo(0)
+if bull_candle
+    bear_ob_top := ob_hi(0)
+    bear_ob_bot := ob_lo(0)
+
+// ── Liquidity sweep (optional confluence) ────────────────────────────────────
+swept_low  = low  < lo_n and close > lo_n
+swept_high = high > hi_n and close < hi_n
+var int last_sweep_lo = na
+var int last_sweep_hi = na
+if swept_low
+    last_sweep_lo := bar_index
+if swept_high
+    last_sweep_hi := bar_index
+recent_sweep_lo = not na(last_sweep_lo) and (bar_index - last_sweep_lo <= sweep_win)
+recent_sweep_hi = not na(last_sweep_hi) and (bar_index - last_sweep_hi <= sweep_win)
+
+// ── Setups: BOS + OB exists, in HTF bias direction ──────────────────────────
+bull_set = bos_up and htf_bull and not na(bull_ob_bot) and (not use_sweep or recent_sweep_lo)
+bear_set = bos_dn and htf_bear and not na(bear_ob_top) and (not use_sweep or recent_sweep_hi)
+
+// ── Pending limit-order state ────────────────────────────────────────────────
+var float p_entry = na
+var float p_sl    = na
+var float p_tp    = na
+var float p_qty   = na
+var int   p_bar   = na
+var int   p_dir   = 0
+flat = strategy.position_size == 0
+
+if bull_set and flat and na(p_entry)
+    e = bull_ob_bot + entry_pos * (bull_ob_top - bull_ob_bot)
+    s = bull_ob_bot - sl_buf * atr
+    risk_d = e - s
+    if risk_d > 0
+        p_entry := e
+        p_sl    := s
+        p_tp    := e + rr * risk_d
+        p_qty   := math.max(0.01, (acct_size * risk_pct / 100 * size_mult) / risk_d)
+        p_bar   := bar_index
+        p_dir   := 1
+
+if bear_set and flat and na(p_entry)
+    e = bear_ob_bot + entry_pos * (bear_ob_top - bear_ob_bot)
+    s = bear_ob_top + sl_buf * atr
+    risk_d = s - e
+    if risk_d > 0
+        p_entry := e
+        p_sl    := s
+        p_tp    := e - rr * risk_d
+        p_qty   := math.max(0.01, (acct_size * risk_pct / 100 * size_mult) / risk_d)
+        p_bar   := bar_index
+        p_dir   := -1
+
+if not na(p_entry) and flat and p_dir == 1
+    strategy.entry("L", strategy.long,  qty=p_qty, limit=p_entry)
+if not na(p_entry) and flat and p_dir == -1
+    strategy.entry("S", strategy.short, qty=p_qty, limit=p_entry)
+if strategy.position_size > 0
+    strategy.exit("LX", "L", stop=p_sl, limit=p_tp)
+if strategy.position_size < 0
+    strategy.exit("SX", "S", stop=p_sl, limit=p_tp)
+if not na(p_entry) and flat and not na(p_bar) and (bar_index - p_bar >= expiry)
+    strategy.cancel("L")
+    strategy.cancel("S")
+    p_entry := na
+    p_dir   := 0
+    p_bar   := na
+if flat and strategy.position_size[1] != 0
+    p_entry := na
+    p_dir   := 0
+    p_bar   := na
+
+// ── Visuals ──────────────────────────────────────────────────────────────────
+bgcolor(htf_bull ? color.new(color.green, 92) : htf_bear ? color.new(color.red, 92) : na)
+plotshape(bull_set, "Bull", location=location.belowbar, style=shape.triangleup,   color=color.lime, size=size.tiny)
+plotshape(bear_set, "Bear", location=location.abovebar, style=shape.triangledown, color=color.red,  size=size.tiny)
+if bull_set and flat
+    box.new(bar_index, bull_ob_top, bar_index+expiry, bull_ob_bot, border_color=color.new(color.green,30), bgcolor=color.new(color.green,80))
+if bear_set and flat
+    box.new(bar_index, bear_ob_top, bar_index+expiry, bear_ob_bot, border_color=color.new(color.red,30), bgcolor=color.new(color.red,80))
+
+// ── Dashboard ────────────────────────────────────────────────────────────────
+var table t = table.new(position.top_right, 2, 7, bgcolor=color.new(color.black, 25), border_width=1)
+if barstate.islast
+    pnl_pct = strategy.netprofit / acct_size * 100
+    wr = strategy.closedtrades>0 ? math.round(strategy.wintrades/strategy.closedtrades*100,1) : 0.0
+    pf = strategy.grossloss!=0 ? math.abs(math.round(strategy.grossprofit/strategy.grossloss,2)) : 0.0
+    maxdd = math.round(strategy.max_drawdown/acct_size*100,2)
+    table.cell(t,0,0,"SMC OrderBlock",text_color=color.white,bgcolor=color.new(color.blue,30),text_size=size.normal)
+    table.cell(t,1,0,(pnl_pct>=0?"+":"")+str.tostring(math.round(pnl_pct,1))+"%",text_color=pnl_pct>=0?color.lime:color.red,bgcolor=color.new(color.blue,30),text_size=size.normal)
+    table.cell(t,0,1,"HTF Bias",text_color=color.silver,text_size=size.normal)
+    table.cell(t,1,1,htf_tf+" "+(htf_bull?"UP":htf_bear?"DOWN":"-"),text_color=htf_bull?color.lime:color.red,text_size=size.normal)
+    table.cell(t,0,2,"Trades",text_color=color.silver,text_size=size.normal)
+    table.cell(t,1,2,str.tostring(strategy.closedtrades),text_color=color.white,text_size=size.normal)
+    table.cell(t,0,3,"Win Rate",text_color=color.silver,text_size=size.normal)
+    table.cell(t,1,3,str.tostring(wr)+"%",text_color=color.white,text_size=size.normal)
+    table.cell(t,0,4,"Profit Factor",text_color=color.silver,text_size=size.normal)
+    table.cell(t,1,4,str.tostring(pf),text_color=pf>=1.5?color.lime:pf>=1.0?color.yellow:color.red,text_size=size.normal)
+    table.cell(t,0,5,"Max DD",text_color=color.silver,text_size=size.normal)
+    table.cell(t,1,5,str.tostring(maxdd)+"%",text_color=maxdd<10?color.lime:color.red,text_size=size.normal)
+    table.cell(t,0,6,"Net $",text_color=color.silver,text_size=size.normal)
+    table.cell(t,1,6,"$"+str.tostring(math.round(strategy.netprofit,0)),text_color=color.white,text_size=size.normal)

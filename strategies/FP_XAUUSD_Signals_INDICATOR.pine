@@ -1,0 +1,97 @@
+//@version=6
+indicator("FP XAUUSD Breakout Signals", overlay=true, max_labels_count=100)
+
+// ── Inputs ───────────────────────────────────────────────────────────────────
+acct_size = input.float(5000, "Account Size USD")
+risk_usd  = input.float(25,   "Risk per Trade USD (0.5%)")
+lookback  = input.int(30,     "Breakout Lookback")
+atr_len   = input.int(14,     "ATR Length")
+sl_mult   = input.float(1.5,  "SL = ATR x")
+rr        = input.float(3.0,  "Take Profit R:R")
+vol_x     = input.float(1.2,  "Volume must exceed MA x")
+show_sess = input.bool(true,  "Only signal in London/NY session")
+
+// ── Indicators ───────────────────────────────────────────────────────────────
+ema50  = ta.ema(close, 50)
+ema200 = ta.ema(close, 200)
+atr    = ta.atr(atr_len)
+vol_ma = ta.sma(volume, 20)
+swing_hi = ta.highest(high, lookback)[1]
+swing_lo = ta.lowest(low,  lookback)[1]
+
+// ── Session (UTC): London 07-12, NY 13-20 ────────────────────────────────────
+hh = hour(time, "UTC")
+in_sess = (hh >= 7 and hh < 12) or (hh >= 13 and hh < 20)
+sess_ok = not show_sess or in_sess
+
+// ── Trend / filters ──────────────────────────────────────────────────────────
+bull = ema50 > ema200
+bear = ema50 < ema200
+vol_ok = volume > vol_ma * vol_x
+
+// ── Signals (on confirmed bar close) ─────────────────────────────────────────
+brk_up = ta.crossover(close, swing_hi)
+brk_dn = ta.crossunder(close, swing_lo)
+buy  = bull and close > ema50 and brk_up and vol_ok and sess_ok
+sell = bear and close < ema50 and brk_dn and vol_ok and sess_ok
+
+// ── Trade levels ─────────────────────────────────────────────────────────────
+sl_dist = sl_mult * atr
+buy_sl  = close - sl_dist
+buy_tp  = close + sl_dist * rr
+sell_sl = close + sl_dist
+sell_tp = close - sl_dist * rr
+
+// MT5 lot size: risk_usd / (SL distance $ x 100 oz/lot), rounded to 0.01
+raw_lot = risk_usd / (sl_dist * 100)
+lot     = math.max(0.01, math.round(raw_lot / 0.01) * 0.01)
+
+// ── Plots ─────────────────────────────────────────────────────────────────────
+plot(ema50,  "EMA 50",  color=color.new(color.yellow, 0), linewidth=1)
+plot(ema200, "EMA 200", color=color.new(color.orange, 0), linewidth=2)
+plot(swing_hi, "Breakout High", color=color.new(color.red,  40), style=plot.style_stepline)
+plot(swing_lo, "Breakout Low",  color=color.new(color.teal, 40), style=plot.style_stepline)
+
+// Session shading (subtle)
+bgcolor(show_sess and not in_sess ? color.new(color.gray, 92) : na, title="Off-session")
+
+// Arrows
+plotshape(buy,  "BUY",  style=shape.triangleup,   location=location.belowbar, color=color.lime, size=size.small)
+plotshape(sell, "SELL", style=shape.triangledown, location=location.abovebar, color=color.red,  size=size.small)
+
+// ── Ready-to-trade labels (exact numbers for MT5) ────────────────────────────
+ticksize = 0.01
+f(x) => str.tostring(math.round(x / ticksize) * ticksize, "#.##")
+
+if buy
+    txt = "🟢 BUY  XAUUSD\nEntry ~" + f(close) + "\nSL  " + f(buy_sl) + "\nTP  " + f(buy_tp) + "\nLot " + str.tostring(lot, "#.##")
+    label.new(bar_index, low, txt, style=label.style_label_up, color=color.new(color.green, 10), textcolor=color.white, size=size.normal)
+
+if sell
+    txt = "🔴 SELL XAUUSD\nEntry ~" + f(close) + "\nSL  " + f(sell_sl) + "\nTP  " + f(sell_tp) + "\nLot " + str.tostring(lot, "#.##")
+    label.new(bar_index, high, txt, style=label.style_label_down, color=color.new(color.red, 10), textcolor=color.white, size=size.normal)
+
+// ── Info table (always-on quick reference) ───────────────────────────────────
+var table t = table.new(position.top_right, 2, 6, bgcolor=color.new(color.black, 55), border_width=1)
+if barstate.islast
+    table.cell(t,0,0,"FP Signals",text_color=color.white,bgcolor=color.new(color.blue,30),text_size=size.small)
+    table.cell(t,1,0,in_sess?"IN SESSION":"off-session",text_color=in_sess?color.lime:color.gray,bgcolor=color.new(color.blue,30),text_size=size.small)
+    table.cell(t,0,1,"Trend",text_color=color.silver,text_size=size.small)
+    table.cell(t,1,1,bull?"UP (buys only)":bear?"DOWN (sells only)":"flat",text_color=bull?color.lime:bear?color.red:color.gray,text_size=size.small)
+    table.cell(t,0,2,"ATR(14)",text_color=color.silver,text_size=size.small)
+    table.cell(t,1,2,f(atr),text_color=color.white,text_size=size.small)
+    table.cell(t,0,3,"SL distance",text_color=color.silver,text_size=size.small)
+    table.cell(t,1,3,f(sl_dist),text_color=color.white,text_size=size.small)
+    table.cell(t,0,4,"Lot (now)",text_color=color.silver,text_size=size.small)
+    table.cell(t,1,4,str.tostring(lot,"#.##"),text_color=color.aqua,text_size=size.small)
+    table.cell(t,0,5,"Risk/Trade",text_color=color.silver,text_size=size.small)
+    table.cell(t,1,5,"$"+str.tostring(risk_usd,"#"),text_color=color.white,text_size=size.small)
+
+// ── Alerts ───────────────────────────────────────────────────────────────────
+if buy
+    alert("🟢 BUY XAUUSD @ " + f(close) + " | SL " + f(buy_sl) + " | TP " + f(buy_tp) + " | Lot " + str.tostring(lot,"#.##"), alert.freq_once_per_bar_close)
+if sell
+    alert("🔴 SELL XAUUSD @ " + f(close) + " | SL " + f(sell_sl) + " | TP " + f(sell_tp) + " | Lot " + str.tostring(lot,"#.##"), alert.freq_once_per_bar_close)
+
+alertcondition(buy,  "FP BUY Signal",  "BUY XAUUSD breakout")
+alertcondition(sell, "FP SELL Signal", "SELL XAUUSD breakdown")

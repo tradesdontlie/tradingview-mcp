@@ -1,0 +1,128 @@
+//@version=5
+strategy("MC Scalp v3 [XAUUSD]", overlay=true,
+  default_qty_type=strategy.percent_of_equity, default_qty_value=2,
+  commission_type=strategy.commission.percent, commission_value=0.07, slippage=3)
+
+// === CORE (same as v1 best) ===
+i_body_pct  = input.float(75.0, "Min Body % of Range", step=5.0)
+i_wick_pct  = input.float(15.0, "Max Wick % of Range", step=5.0)
+i_min_atr   = input.float(1.5,  "Min Size (ATR mult)",  step=0.1)
+i_tp_pct    = input.float(100.0,"TP % of candle range", step=10.0)
+i_sl_pct    = input.float(60.0, "SL % of candle range", step=10.0)
+i_atr_len   = input.int(14, "ATR Length")
+
+// === TREND ===
+i_h1_ema    = input.bool(true, "H1 EMA50 Trend Filter")
+i_h1_ema_p  = input.int(50, "H1 EMA Period")
+i_ema_slope = input.bool(false, "Require EMA Slope (5-bar)")
+i_dir       = input.int(0, "Direction 0=Both 1=Long 2=Short", minval=0, maxval=2)
+
+// === NEW FILTERS ===
+i_rsi_on    = input.bool(false, "RSI Filter", group="New Filters")
+i_rsi_p     = input.int(14, "RSI Period", group="New Filters")
+i_rsi_bull  = input.float(50.0, "Long: RSI must be above", step=5.0, group="New Filters")
+i_rsi_bear  = input.float(50.0, "Short: RSI must be below", step=5.0, group="New Filters")
+
+i_adx_on    = input.bool(false, "ADX Trend Strength Filter", group="New Filters")
+i_adx_p     = input.int(14, "ADX Period", group="New Filters")
+i_adx_min   = input.float(20.0, "Min ADX value", step=5.0, group="New Filters")
+
+// === EXIT OPTIONS ===
+i_exit_mode = input.int(0, "Exit 0=Fixed 1=Trail-only 2=BE+trail", minval=0, maxval=2, group="Exit")
+i_trail_atr = input.float(1.0, "Trailing stop (ATR mult)", step=0.1, group="Exit")
+i_be_pct    = input.float(60.0,"Breakeven trigger (% of TP reached)", step=10.0, group="Exit")
+
+// === SESSION (identical to v1: GMT+7 7am-9pm) ===
+i_sess      = input.bool(true, "Session Filter (London+Asian, GMT+7 7-21)")
+
+// ─────────────────────────────────────────────────────
+// INDICATORS
+// ─────────────────────────────────────────────────────
+atr      = ta.atr(i_atr_len)
+h1_ema_v = request.security(syminfo.tickerid, "60", ta.ema(close, i_h1_ema_p))
+h1_ema_p5= request.security(syminfo.tickerid, "60", ta.ema(close, i_h1_ema_p)[5])
+rsi_v    = ta.rsi(close, i_rsi_p)
+[_, _, adx_v] = ta.dmi(i_adx_p, i_adx_p)
+
+// ─────────────────────────────────────────────────────
+// CANDLE PROPERTIES
+// ─────────────────────────────────────────────────────
+c_range  = high - low
+body     = math.abs(close - open)
+up_wick  = high - math.max(close, open)
+dn_wick  = math.min(close, open) - low
+body_p   = c_range > 0 ? body / c_range * 100 : 0
+up_wp    = c_range > 0 ? up_wick / c_range * 100 : 0
+dn_wp    = c_range > 0 ? dn_wick / c_range * 100 : 0
+is_bull  = close > open
+is_bear  = close < open
+
+// Momentum candle conditions
+mc_bull  = is_bull and body_p >= i_body_pct and up_wp <= i_wick_pct and c_range >= atr * i_min_atr
+mc_bear  = is_bear and body_p >= i_body_pct and dn_wp <= i_wick_pct and c_range >= atr * i_min_atr
+
+// ─────────────────────────────────────────────────────
+// FILTERS
+// ─────────────────────────────────────────────────────
+// H1 EMA trend (with optional slope)
+h1_up = not i_h1_ema or (close > h1_ema_v and (not i_ema_slope or h1_ema_v > h1_ema_p5))
+h1_dn = not i_h1_ema or (close < h1_ema_v and (not i_ema_slope or h1_ema_v < h1_ema_p5))
+
+// RSI (checked on signal candle = [1])
+rsi_l = not i_rsi_on or rsi_v[1] > i_rsi_bull
+rsi_s = not i_rsi_on or rsi_v[1] < i_rsi_bear
+
+// ADX (checked on signal candle = [1])
+adx_ok = not i_adx_on or adx_v[1] >= i_adx_min
+
+// Session: SAME as v1 (GMT+7 7am-9pm)
+in_sess = not i_sess or (hour(time, "GMT+7") >= 7 and hour(time, "GMT+7") < 21)
+
+// ─────────────────────────────────────────────────────
+// SIGNALS (signal candle is [1], entry on current bar open)
+// ─────────────────────────────────────────────────────
+long_sig  = mc_bull[1] and h1_up and rsi_l and adx_ok and in_sess and (i_dir == 0 or i_dir == 1)
+short_sig = mc_bear[1] and h1_dn and rsi_s and adx_ok and in_sess and (i_dir == 0 or i_dir == 2)
+
+// ─────────────────────────────────────────────────────
+// TP / SL based on signal candle range
+// ─────────────────────────────────────────────────────
+var float sig_range = na
+if long_sig or short_sig
+    sig_range := high[1] - low[1]
+
+tp_ticks    = math.max(math.round(sig_range * (i_tp_pct / 100)  / syminfo.mintick), 30)
+sl_ticks    = math.max(math.round(sig_range * (i_sl_pct / 100)  / syminfo.mintick), 15)
+trail_ticks = math.max(math.round(atr * i_trail_atr / syminfo.mintick), 20)
+be_ticks    = math.round(tp_ticks * (i_be_pct / 100))
+
+// ─────────────────────────────────────────────────────
+// ENTRIES
+// ─────────────────────────────────────────────────────
+if long_sig and strategy.position_size == 0
+    strategy.entry("L", strategy.long)
+    if i_exit_mode == 0
+        strategy.exit("Lx", "L", profit=tp_ticks, loss=sl_ticks)
+    else if i_exit_mode == 1
+        strategy.exit("Lx", "L", loss=sl_ticks, trail_offset=trail_ticks, trail_points=trail_ticks)
+    else  // mode 2: BE + trail
+        strategy.exit("Lx", "L", profit=tp_ticks, loss=sl_ticks, trail_offset=trail_ticks, trail_points=be_ticks)
+
+if short_sig and strategy.position_size == 0
+    strategy.entry("S", strategy.short)
+    if i_exit_mode == 0
+        strategy.exit("Sx", "S", profit=tp_ticks, loss=sl_ticks)
+    else if i_exit_mode == 1
+        strategy.exit("Sx", "S", loss=sl_ticks, trail_offset=trail_ticks, trail_points=trail_ticks)
+    else
+        strategy.exit("Sx", "S", profit=tp_ticks, loss=sl_ticks, trail_offset=trail_ticks, trail_points=be_ticks)
+
+// ─────────────────────────────────────────────────────
+// PLOTS
+// ─────────────────────────────────────────────────────
+plot(h1_ema_v, "H1 EMA", color.new(color.gray, 40))
+bgcolor(mc_bull ? color.new(color.green, 90) : mc_bear ? color.new(color.red, 90) : na)
+bgcolor(long_sig  ? color.new(color.lime,   75) : na)
+bgcolor(short_sig ? color.new(color.orange, 75) : na)
+plotshape(long_sig,  "L", shape.triangleup,   location.belowbar, color.green, size=size.tiny)
+plotshape(short_sig, "S", shape.triangledown, location.abovebar, color.red,   size=size.tiny)

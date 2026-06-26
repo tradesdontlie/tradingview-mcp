@@ -1,0 +1,270 @@
+//@version=6
+// FundingPips $5K Challenge — XAUUSD H1 | Stop & Limit Orders
+strategy("FP XAUUSD Breakout FAST-PASS", overlay=true,
+     initial_capital   = 5000,
+     default_qty_type  = strategy.percent_of_equity,
+     default_qty_value = 1,
+     commission_type   = strategy.commission.percent,
+     commission_value  = 0.01,
+     slippage          = 3,
+     margin_long       = 1,
+     margin_short      = 1,
+     calc_on_order_fills = true)
+
+// ── Challenge Rules ──────────────────────────────────────────────────────────
+acct_size      = input.float(5000, "Account Size USD")
+phase          = input.int(1,      "Phase (1=8% / 2=5%)", minval=1, maxval=2)
+risk_pct       = input.float(1.0,  "Risk Per Trade %",    minval=0.1, maxval=2.0)
+size_mult      = input.float(1.3,  "Size Multiplier (fast-pass)", minval=1.0, maxval=4.0)
+max_dd_pct     = input.float(10.0, "Max Drawdown %")
+daily_loss_pct = input.float(5.0,  "Daily Loss Limit %")
+
+max_dd_usd     = acct_size * max_dd_pct    / 100   // $500
+daily_loss_usd = acct_size * daily_loss_pct / 100  // $250
+phase_target   = acct_size * (phase == 1 ? 0.08 : 0.05)
+
+// ── Strategy Inputs ──────────────────────────────────────────────────────────
+order_mode   = input.string("Stop",  "Order Mode",      options=["Stop","Limit","Both"])
+lookback     = input.int(30,         "Breakout Lookback",minval=10, maxval=100)
+atr_len      = input.int(14,         "ATR Length")
+sl_atr       = input.float(1.5,      "SL ATR Mult",     minval=0.5, maxval=4.0)
+rr           = input.float(3.0,      "Risk:Reward",     minval=1.5, maxval=6.0)
+ema_fast_len = input.int(50,         "EMA Fast")
+ema_slow_len = input.int(200,        "EMA Slow")
+vol_filter   = input.bool(true,      "Volume Filter")
+vol_len      = input.int(20,         "Vol MA Length")
+sess_filter  = input.bool(true,      "Session Filter")
+trail_enable = input.bool(true,      "Trailing Stop")
+trail_atr    = input.float(1.0,      "Trail ATR Mult")
+
+// ── Core Indicators ──────────────────────────────────────────────────────────
+atr    = ta.atr(atr_len)
+ema50  = ta.ema(close, ema_fast_len)
+ema200 = ta.ema(close, ema_slow_len)
+vol_ma = ta.sma(volume, vol_len)
+
+swing_high = ta.highest(high, lookback)[1]
+swing_low  = ta.lowest(low,   lookback)[1]
+
+// ── Session: London open + NY session (UTC) ──────────────────────────────────
+h = hour(time, "UTC")
+london = h >= 7  and h < 12
+ny     = h >= 13 and h < 20
+sess_ok = not sess_filter or (london or ny)
+
+// ── Trend & Momentum ────────────────────────────────────────────────────────
+bull_trend = ema50 > ema200
+bear_trend = ema50 < ema200
+above_ema  = close > ema50
+below_ema  = close < ema50
+vol_ok     = not vol_filter or volume > vol_ma * 1.2
+
+// ── Risk Guard (daily loss + max drawdown) — FLOATING equity, FundingPips-style
+var float peak_eq       = strategy.initial_capital
+var float day_start_eq  = strategy.initial_capital
+var int   last_day      = na
+var float max_daily_dd  = 0.0   // worst single-day loss ($) across the test
+var float max_daily_pct = 0.0   // worst single-day loss (%) across the test
+var float pos_stop      = na    // active stop price of the open position
+
+// eq_close  = equity at bar close (used for day-start snapshot + equity peak)
+// eq_worst  = equity at the bar's ADVERSE intrabar extreme (low for longs, high
+//             for shorts) — the true worst real-time equity the prop firm sees.
+realized_eq = strategy.initial_capital + strategy.netprofit
+eq_close = strategy.equity
+// Worst intrabar price is floored/capped at the protective stop (trade exits there)
+worst_px = strategy.position_size > 0 ? math.max(low,  na(pos_stop) ? low  : pos_stop) : strategy.position_size < 0 ? math.min(high, na(pos_stop) ? high : pos_stop) : close
+adverse = strategy.position_size != 0 ? strategy.position_size * (worst_px - strategy.position_avg_price) : 0.0
+eq_worst = realized_eq + math.min(0.0, adverse)
+cur_day = dayofmonth(time, "UTC")
+
+// na-safe daily reset: snapshot the day's opening equity (bar close)
+if na(last_day) or cur_day != last_day
+    day_start_eq := eq_close
+    last_day     := cur_day
+
+if eq_close > peak_eq
+    peak_eq := eq_close
+
+// Drawdown measured against the worst intrabar equity (FundingPips real-time)
+daily_loss_now = math.max(0.0, day_start_eq - eq_worst)
+total_dd_now   = math.max(0.0, peak_eq - eq_worst)
+
+// Track worst daily loss seen (includes floating intrabar drawdown at bar close)
+if daily_loss_now > max_daily_dd
+    max_daily_dd  := daily_loss_now
+    max_daily_pct := daily_loss_now / acct_size * 100
+
+daily_ok       = daily_loss_now < daily_loss_usd
+dd_ok          = total_dd_now   < max_dd_usd
+risk_guard     = daily_ok and dd_ok
+no_pos         = strategy.position_size == 0
+can_trade      = no_pos and risk_guard and sess_ok and vol_ok
+
+// ── Position Sizing (1% risk per trade) ──────────────────────────────────────
+sl_pts   = atr * sl_atr
+tp_pts   = sl_pts * rr
+risk_usd_t = acct_size * risk_pct / 100   // $50
+
+// For XAUUSD: each 1.0 move in price = $1 per unit on OANDA
+// Base = 1 oz/trade (proven). size_mult scales returns AND drawdown together.
+qty_pct  = 1.0 * size_mult
+
+// ── Entry Signals ─────────────────────────────────────────────────────────────
+cross_above_res = ta.crossover(close, swing_high)
+cross_below_sup = ta.crossunder(close, swing_low)
+
+// STOP: enter on breakout above/below swing level
+bull_stop = (order_mode == "Stop" or order_mode == "Both") and
+             bull_trend and above_ema and
+             cross_above_res and can_trade
+
+bear_stop = (order_mode == "Stop" or order_mode == "Both") and
+             bear_trend and below_ema and
+             cross_below_sup and can_trade
+
+// LIMIT: enter on pullback to EMA after breakout
+bull_pullback = bull_trend and high > swing_high    // prior breakout confirmed
+bear_pullback = bear_trend and low  < swing_low
+
+bull_limit = (order_mode == "Limit" or order_mode == "Both") and
+              bull_pullback and
+              close <= ema50 * 1.001 and close >= ema50 * 0.998 and
+              can_trade
+
+bear_limit = (order_mode == "Limit" or order_mode == "Both") and
+              bear_pullback and
+              close >= ema50 * 0.999 and close <= ema50 * 1.002 and
+              can_trade
+
+// ── Execute Orders ───────────────────────────────────────────────────────────
+if bull_stop or bull_limit
+    sl_p = close - sl_pts
+    tp_p = close + tp_pts
+    pos_stop := sl_p
+    strategy.entry("Long", strategy.long, qty=qty_pct)
+    if trail_enable
+        strategy.exit("Long X", "Long", stop=sl_p, limit=tp_p,
+             trail_points  = trail_atr * atr / syminfo.mintick,
+             trail_offset  = trail_atr * atr / syminfo.mintick)
+    else
+        strategy.exit("Long X", "Long", stop=sl_p, limit=tp_p)
+
+if bear_stop or bear_limit
+    sl_p = close + sl_pts
+    tp_p = close - tp_pts
+    pos_stop := sl_p
+    strategy.entry("Short", strategy.short, qty=qty_pct)
+    if trail_enable
+        strategy.exit("Short X", "Short", stop=sl_p, limit=tp_p,
+             trail_points  = trail_atr * atr / syminfo.mintick,
+             trail_offset  = trail_atr * atr / syminfo.mintick)
+    else
+        strategy.exit("Short X", "Short", stop=sl_p, limit=tp_p)
+
+if strategy.position_size == 0
+    pos_stop := na
+
+// ── Plots ─────────────────────────────────────────────────────────────────────
+plot(ema50,      "EMA 50",  color=color.new(color.yellow, 0),  linewidth=1)
+plot(ema200,     "EMA 200", color=color.new(color.orange, 0),  linewidth=2)
+plot(swing_high, "S/R High",color=color.new(color.red,   20),  linewidth=1, style=plot.style_stepline)
+plot(swing_low,  "S/R Low", color=color.new(color.teal,  20),  linewidth=1, style=plot.style_stepline)
+
+plotshape(bull_stop  or bull_limit,  title="Bull Entry", location=location.belowbar, style=shape.triangleup,   color=color.green, size=size.small)
+plotshape(bear_stop  or bear_limit,  title="Bear Entry", location=location.abovebar, style=shape.triangledown, color=color.red,   size=size.small)
+
+// ── Session coloring (your WIB times) ────────────────────────────────────────
+// London 14:00-19:00 WIB (07-12 UTC) = blue | New York 20:00-03:00 WIB (13-20 UTC) = green
+bgcolor(london ? color.new(color.blue,  88) : na, title="London 14-19 WIB")
+bgcolor(ny     ? color.new(color.green, 88) : na, title="NY 20-03 WIB")
+bgcolor(not risk_guard ? color.new(color.red, 70) : na, title="Halted")
+
+// ── Ready-to-trade labels (exact MT5 numbers) ────────────────────────────────
+ff(x) => str.tostring(math.round(x / 0.01) * 0.01, "#.##")
+mt5_risk = acct_size * 0.005   // 0.5% per trade = daily-rule-safe sizing
+mt5_lot  = math.max(0.01, math.round((mt5_risk / (sl_pts * 100)) / 0.01) * 0.01)
+if bull_stop or bull_limit
+    label.new(bar_index, low, "🟢 BUY XAUUSD\nEntry ~" + ff(close) + "\nSL " + ff(close - sl_pts) + "\nTP " + ff(close + tp_pts) + "\nLot " + str.tostring(mt5_lot, "#.##"), style=label.style_label_up, color=color.new(color.green,10), textcolor=color.white, size=size.small)
+if bear_stop or bear_limit
+    label.new(bar_index, high, "🔴 SELL XAUUSD\nEntry ~" + ff(close) + "\nSL " + ff(close + sl_pts) + "\nTP " + ff(close - tp_pts) + "\nLot " + str.tostring(mt5_lot, "#.##"), style=label.style_label_down, color=color.new(color.red,10), textcolor=color.white, size=size.small)
+
+// ── Monthly P&L Tracker ──────────────────────────────────────────────────────
+var float[] m_pnl    = array.new_float(0)
+var int[]   m_month  = array.new_int(0)
+var int[]   m_year   = array.new_int(0)
+var float   m_open_eq = strategy.initial_capital
+
+// Snapshot equity at start of each new month
+is_new_month = month != month[1] or year != year[1]
+if is_new_month and not na(m_open_eq)
+    array.push(m_pnl,   (strategy.initial_capital + strategy.netprofit) - m_open_eq)
+    array.push(m_month, month[1])
+    array.push(m_year,  year[1])
+    m_open_eq := strategy.initial_capital + strategy.netprofit
+
+// ── Dashboard ─────────────────────────────────────────────────────────────────
+var table t = table.new(position.top_right, 2, 10, bgcolor=color.new(color.black, 25), border_width=1, border_color=color.gray)
+
+// Monthly breakdown table (bottom-left)
+var table mt = table.new(position.bottom_left, 5, 25, bgcolor=color.new(color.black, 35), border_width=1, border_color=color.new(color.gray, 60))
+
+if barstate.islastconfirmedhistory or barstate.islast
+    pnl_pct   = strategy.netprofit / acct_size * 100
+    prog_pct  = math.min(strategy.netprofit / phase_target * 100, 100)
+    wr        = strategy.closedtrades > 0 ? math.round(strategy.wintrades / strategy.closedtrades * 100, 1) : 0.0
+    pf        = strategy.grossloss != 0 ? math.abs(math.round(strategy.grossprofit / strategy.grossloss, 2)) : 0.0
+
+    // ── Main Dashboard (top-right) ─────────────────────────────────────────
+    table.cell(t, 0, 0, "FundingPips Phase " + str.tostring(phase), text_color=color.white,  bgcolor=color.new(color.blue, 30), text_size=size.large)
+    table.cell(t, 1, 0, (pnl_pct >= 0 ? "+" : "") + str.tostring(math.round(pnl_pct,2)) + "%", text_color=strategy.netprofit>=0?color.green:color.red, bgcolor=color.new(color.blue,30), text_size=size.large)
+    table.cell(t, 0, 1, "Net P&L",      text_color=color.silver, text_size=size.normal)
+    table.cell(t, 1, 1, "$" + str.tostring(math.round(strategy.netprofit,2)), text_color=strategy.netprofit>=0?color.green:color.red, text_size=size.normal)
+    table.cell(t, 0, 2, "Target",       text_color=color.silver, text_size=size.normal)
+    table.cell(t, 1, 2, "$" + str.tostring(phase_target) + " (" + str.tostring(math.round(prog_pct,1)) + "%)", text_color=color.white, text_size=size.normal)
+    table.cell(t, 0, 3, "Worst Day",    text_color=color.silver, text_size=size.normal)
+    table.cell(t, 1, 3, "-$" + str.tostring(math.round(max_daily_dd,0)) + " (" + str.tostring(math.round(max_daily_pct,2)) + "%) / 5%", text_color=max_daily_pct<5?color.lime:color.red, text_size=size.normal)
+    table.cell(t, 0, 4, "Max DD",       text_color=color.silver, text_size=size.normal)
+    table.cell(t, 1, 4, "$" + str.tostring(math.round(total_dd_now,2)) + " / $" + str.tostring(max_dd_usd), text_color=dd_ok?color.green:color.red, text_size=size.normal)
+    table.cell(t, 0, 5, "Win Rate",     text_color=color.silver, text_size=size.normal)
+    table.cell(t, 1, 5, str.tostring(wr) + "% (" + str.tostring(strategy.wintrades) + "/" + str.tostring(strategy.closedtrades) + ")", text_color=color.white, text_size=size.normal)
+    table.cell(t, 0, 6, "Profit Factor",text_color=color.silver, text_size=size.normal)
+    table.cell(t, 1, 6, str.tostring(pf), text_color=pf>=1.5?color.green:pf>=1.0?color.yellow:color.red, text_size=size.normal)
+    table.cell(t, 0, 7, "Risk/Trade",   text_color=color.silver, text_size=size.normal)
+    table.cell(t, 1, 7, str.tostring(risk_pct) + "% = $" + str.tostring(math.round(risk_usd_t,0)), text_color=color.white, text_size=size.normal)
+    table.cell(t, 0, 8, "Mode",         text_color=color.silver, text_size=size.normal)
+    table.cell(t, 1, 8, order_mode + " | RR 1:" + str.tostring(rr), text_color=color.white, text_size=size.normal)
+    table.cell(t, 0, 9, "Status",       text_color=color.silver, text_size=size.normal)
+    table.cell(t, 1, 9, risk_guard ? "TRADING" : "HALTED", text_color=risk_guard?color.lime:color.red, text_size=size.normal)
+
+    // ── Monthly Table (bottom-left) ────────────────────────────────────────
+    mn_names = array.from("Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec")
+
+    // Header
+    table.cell(mt, 0, 0, "Month",   text_color=color.white, bgcolor=color.new(color.navy,20), text_size=size.small)
+    table.cell(mt, 1, 0, "P&L $",  text_color=color.white, bgcolor=color.new(color.navy,20), text_size=size.small)
+    table.cell(mt, 2, 0, "P&L %",  text_color=color.white, bgcolor=color.new(color.navy,20), text_size=size.small)
+    table.cell(mt, 3, 0, "Cum $",  text_color=color.white, bgcolor=color.new(color.navy,20), text_size=size.small)
+    table.cell(mt, 4, 0, "Pass 8%",text_color=color.white, bgcolor=color.new(color.navy,20), text_size=size.small)
+
+    n = array.size(m_pnl)
+    cum = 0.0
+    max_rows = math.min(n, 23)
+
+    for i = 0 to max_rows - 1
+        mp  = array.get(m_pnl,   i)
+        mm  = array.get(m_month, i)
+        my  = array.get(m_year,  i)
+        cum := cum + mp
+        mp_pct = math.round(mp / acct_size * 100, 2)
+        cum_pct = math.round(cum / acct_size * 100, 2)
+        // Per-month pass: did THIS calendar month alone clear +8% (Phase 1 in-month)?
+        month_pass = mp_pct >= 8.0
+        c_pnl = mp >= 0 ? color.new(color.green, 20) : color.new(color.red, 20)
+        c_cum = cum >= 0 ? color.new(color.teal, 40) : color.new(color.maroon, 40)
+        row = i + 1
+        table.cell(mt, 0, row, array.get(mn_names, mm-1) + " " + str.tostring(my), text_color=color.white,  text_size=size.small)
+        table.cell(mt, 1, row, (mp>=0?"+":"") + str.tostring(math.round(mp,2)),     text_color=mp>=0?color.lime:color.red, bgcolor=c_pnl, text_size=size.small)
+        table.cell(mt, 2, row, (mp_pct>=0?"+":"") + str.tostring(mp_pct) + "%",     text_color=mp>=0?color.lime:color.red, text_size=size.small)
+        table.cell(mt, 3, row, (cum>=0?"+":"") + str.tostring(math.round(cum,2)),   text_color=cum>=0?color.aqua:color.orange, bgcolor=c_cum, text_size=size.small)
+        table.cell(mt, 4, row, month_pass?"PASS":"-", text_color=month_pass?color.lime:color.gray, bgcolor=month_pass?color.new(color.green,25):na, text_size=size.small)

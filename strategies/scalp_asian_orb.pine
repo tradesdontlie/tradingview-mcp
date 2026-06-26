@@ -1,0 +1,109 @@
+//@version=5
+strategy("Asian ORB [XAUUSD]", overlay=true,
+  default_qty_type=strategy.percent_of_equity, default_qty_value=2,
+  commission_type=strategy.commission.percent, commission_value=0.07, slippage=3)
+
+// === INPUTS ===
+i_tp_atr    = input.float(1.5, "TP (ATR mult)", step=0.1)
+i_sl_atr    = input.float(0.5, "SL (ATR mult)", step=0.05)
+i_body_pct  = input.float(55.0,"Min body % for signal candle", step=5.0)
+i_orb_end   = input.int(8,     "ORB range end (GMT hour)", minval=1, maxval=12)
+i_trade_end = input.int(12,    "Stop trading after (GMT hour)", minval=6, maxval=20)
+i_ny_sess   = input.bool(true, "Also trade NY open (13:00-17:00 GMT)")
+i_min_rng   = input.float(0.3, "Min Asian range (ATR mult) — skip choppy days")
+i_dir       = input.int(0,     "Direction 0=Both 1=Long 2=Short", minval=0, maxval=2)
+i_one_trade = input.bool(true, "Max 1 trade per session per direction")
+
+// === ATR ===
+atr = ta.atr(14)
+
+// === TRACK ASIAN SESSION RANGE ===
+// Asian: 00:00-07:59 GMT; London: 08:00-12:59 GMT; NY: 13:00-19:59 GMT
+h_gmt = hour(time, "GMT")
+
+// Detect new day (midnight GMT)
+is_new_day = h_gmt == 0 and h_gmt[1] != 0
+
+var float asian_high = na
+var float asian_low  = na
+var bool lond_long_done = false
+var bool lond_short_done = false
+var bool ny_long_done   = false
+var bool ny_short_done  = false
+
+// Reset on new day
+if is_new_day
+    asian_high := high
+    asian_low  := low
+    lond_long_done  := false
+    lond_short_done := false
+    ny_long_done    := false
+    ny_short_done   := false
+
+// Build Asian range during Asian hours
+if h_gmt < i_orb_end
+    asian_high := na(asian_high) ? high : math.max(asian_high, high)
+    asian_low  := na(asian_low)  ? low  : math.min(asian_low, low)
+
+// Range validity check
+asian_range = nz(asian_high, close) - nz(asian_low, close)
+range_valid = asian_range >= atr * i_min_rng and not na(asian_high) and not na(asian_low)
+
+// === CANDLE PROPS ===
+body   = math.abs(close - open)
+rng    = high - low
+body_p = rng > 0 ? body / rng * 100 : 0
+is_bull = close >= open
+is_bear = close < open
+bull_candle = is_bull and body_p >= i_body_pct
+bear_candle = is_bear and body_p >= i_body_pct
+
+// === LONDON SESSION SIGNALS (08:00-12:59 GMT) ===
+is_lond_window = h_gmt >= i_orb_end and h_gmt < i_trade_end
+
+// Breakout: close beyond Asian high/low
+lond_long_raw  = is_lond_window and range_valid and bull_candle and close > asian_high
+lond_short_raw = is_lond_window and range_valid and bear_candle and close < asian_low
+lond_long_sig  = lond_long_raw  and (not i_one_trade or not lond_long_done)  and (i_dir == 0 or i_dir == 1)
+lond_short_sig = lond_short_raw and (not i_one_trade or not lond_short_done) and (i_dir == 0 or i_dir == 2)
+
+// === NY SESSION SIGNALS (13:00-17:59 GMT) ===
+// At NY open, trade breakout of London-so-far high/low or continuation of Asian breakout
+// Simplified: reuse the Asian high/low as NY reference (many prop traders do this)
+is_ny_window = i_ny_sess and h_gmt >= 13 and h_gmt < 18
+
+ny_long_sig  = is_ny_window and range_valid and bull_candle and close > asian_high and (not i_one_trade or not ny_long_done)  and (i_dir == 0 or i_dir == 1)
+ny_short_sig = is_ny_window and range_valid and bear_candle and close < asian_low  and (not i_one_trade or not ny_short_done) and (i_dir == 0 or i_dir == 2)
+
+long_sig  = (lond_long_sig  or ny_long_sig)  and strategy.position_size == 0
+short_sig = (lond_short_sig or ny_short_sig) and strategy.position_size == 0
+
+// === ENTRIES ===
+tp_ticks = math.max(math.round(atr * i_tp_atr / syminfo.mintick), 50)
+sl_ticks = math.max(math.round(atr * i_sl_atr / syminfo.mintick), 20)
+
+if long_sig
+    strategy.entry("L", strategy.long)
+    strategy.exit("Lx", "L", profit=tp_ticks, loss=sl_ticks)
+    if lond_long_sig
+        lond_long_done := true
+    if ny_long_sig
+        ny_long_done := true
+
+if short_sig
+    strategy.entry("S", strategy.short)
+    strategy.exit("Sx", "S", profit=tp_ticks, loss=sl_ticks)
+    if lond_short_sig
+        lond_short_done := true
+    if ny_short_sig
+        ny_short_done := true
+
+// === PLOTS ===
+plot(asian_high, "Asian High", color.new(color.red,   50), 1, plot.style_stepline)
+plot(asian_low,  "Asian Low",  color.new(color.green, 50), 1, plot.style_stepline)
+bgcolor(is_lond_window ? color.new(color.blue,   95) : na)
+bgcolor(is_ny_window   ? color.new(color.orange, 95) : na)
+bgcolor(long_sig  ? color.new(color.green, 75) : na)
+bgcolor(short_sig ? color.new(color.red,   75) : na)
+plotshape(long_sig,  "L", shape.triangleup,   location.belowbar, color.green, size=size.tiny)
+plotshape(short_sig, "S", shape.triangledown, location.abovebar, color.red,   size=size.tiny)

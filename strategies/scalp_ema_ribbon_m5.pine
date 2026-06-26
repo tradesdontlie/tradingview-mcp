@@ -1,0 +1,78 @@
+//@version=5
+strategy("EMA Ribbon Pullback M5 [XAUUSD]", overlay=true,
+  default_qty_type=strategy.percent_of_equity, default_qty_value=2,
+  commission_type=strategy.commission.percent, commission_value=0.07, slippage=3)
+
+// === INPUTS ===
+i_e1        = input.int(3,    "EMA Fast")
+i_e2        = input.int(8,    "EMA Mid")
+i_e3        = input.int(21,   "EMA Slow")
+i_tp_atr    = input.float(2.0,"TP (ATR mult)", step=0.1)
+i_sl_atr    = input.float(1.0,"SL (ATR mult)", step=0.1)
+i_touch_pct = input.float(0.3,"Price within % of EMA8 to count as 'touch'", step=0.1)
+i_body_pct  = input.float(30.0,"Min body% for entry candle", step=5.0)
+i_h1_trend  = input.bool(true, "H1 EMA50 Trend Filter")
+i_rsi_p     = input.int(14,    "RSI Period")
+i_rsi_max_l = input.float(60.0,"Long: RSI must be below (not overbought)", step=5.0)
+i_rsi_min_s = input.float(40.0,"Short: RSI must be above (not oversold)", step=5.0)
+i_sess      = input.bool(true,  "Session Filter (GMT+7 7-21)")
+i_dir       = input.int(0, "Direction 0=Both 1=Long 2=Short", minval=0, maxval=2)
+
+// === INDICATORS ===
+e1   = ta.ema(close, i_e1)
+e2   = ta.ema(close, i_e2)
+e3   = ta.ema(close, i_e3)
+atr  = ta.atr(14)
+rsi  = ta.rsi(close, i_rsi_p)
+h1_e = request.security(syminfo.tickerid, "60", ta.ema(close, 50))
+
+// === CANDLE ===
+body = math.abs(close - open)
+rng  = high - low
+bp   = rng > 0 ? body/rng*100 : 0
+bull = close > open and bp >= i_body_pct
+bear = close < open and bp >= i_body_pct
+
+// === EMA RIBBON ALIGNMENT ===
+bull_ribbon = e1 > e2 and e2 > e3   // all EMAs bullish aligned
+bear_ribbon = e1 < e2 and e2 < e3   // all EMAs bearish aligned
+
+// === PRICE NEAR EMA (touch/pullback zone) ===
+touch_dist  = atr * i_touch_pct
+near_e2_l   = low <= e2 + touch_dist and high >= e2 - touch_dist
+near_e2_s   = high >= e2 - touch_dist and low <= e2 + touch_dist
+
+// === FILTERS ===
+h1_up   = not i_h1_trend or close > h1_e
+h1_dn   = not i_h1_trend or close < h1_e
+rsi_l   = rsi < i_rsi_max_l
+rsi_s   = rsi > i_rsi_min_s
+in_sess = not i_sess or (hour(time, "GMT+7") >= 7 and hour(time, "GMT+7") < 21)
+
+// === SIGNALS ===
+// Long: ribbon bullish + price pulled back to EMA8 + bull confirmation candle + H1 up + RSI not OB
+long_sig  = bull_ribbon[1] and near_e2_l[1] and bull and h1_up and rsi_l and in_sess and (i_dir == 0 or i_dir == 1)
+// Short: ribbon bearish + price pulled back to EMA8 + bear confirmation + H1 dn + RSI not OS
+short_sig = bear_ribbon[1] and near_e2_s[1] and bear and h1_dn and rsi_s and in_sess and (i_dir == 0 or i_dir == 2)
+
+tp_ticks = math.max(math.round(atr * i_tp_atr / syminfo.mintick), 20)
+sl_ticks = math.max(math.round(atr * i_sl_atr / syminfo.mintick), 10)
+
+if long_sig and strategy.position_size == 0
+    strategy.entry("L", strategy.long)
+    strategy.exit("Lx", "L", profit=tp_ticks, loss=sl_ticks)
+
+if short_sig and strategy.position_size == 0
+    strategy.entry("S", strategy.short)
+    strategy.exit("Sx", "S", profit=tp_ticks, loss=sl_ticks)
+
+// === PLOTS ===
+p1 = plot(e1, "EMA3",  color.new(color.blue,  20), 1)
+p2 = plot(e2, "EMA8",  color.new(color.orange, 0), 2)
+p3 = plot(e3, "EMA21", color.new(color.red,   20), 1)
+fill(p1, p3, color = bull_ribbon ? color.new(color.green,90) : bear_ribbon ? color.new(color.red,90) : na)
+plot(h1_e, "H1 EMA50", color.new(color.gray, 50), 2)
+bgcolor(long_sig  ? color.new(color.lime, 75) : na)
+bgcolor(short_sig ? color.new(color.red,  75) : na)
+plotshape(long_sig,  "L", shape.triangleup,   location.belowbar, color.green, size=size.tiny)
+plotshape(short_sig, "S", shape.triangledown, location.abovebar, color.red,   size=size.tiny)

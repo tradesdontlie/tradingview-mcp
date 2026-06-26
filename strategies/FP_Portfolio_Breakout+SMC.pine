@@ -1,0 +1,172 @@
+//@version=6
+// PORTFOLIO: Breakout (stop/momentum) + SMC FVG-MTF (limit/reversal) combined
+strategy("FP Portfolio: Breakout + SMC", overlay=true,
+     initial_capital   = 5000,
+     default_qty_type  = strategy.fixed,
+     default_qty_value = 1,
+     commission_type   = strategy.commission.percent,
+     commission_value  = 0.01,
+     slippage          = 3,
+     margin_long       = 1,
+     margin_short      = 1,
+     process_orders_on_close = true)
+
+// ── Shared ───────────────────────────────────────────────────────────────────
+acct_size = input.float(5000, "Account USD")
+risk_pct  = input.float(0.5,  "Risk % per trade")
+size_mult = input.float(1.0,  "Size multiplier")
+en_bo     = input.bool(true,  "Enable Breakout module")
+en_fvg    = input.bool(true,  "Enable SMC FVG module")
+
+atr  = ta.atr(14)
+ema50  = ta.ema(close, 50)
+ema200 = ta.ema(close, 200)
+
+// ── Breakout module (1H, no-trail, RR3) ──────────────────────────────────────
+bo_lb   = 30
+swing_hi = ta.highest(high, bo_lb)[1]
+swing_lo = ta.lowest(low,  bo_lb)[1]
+vol_ma  = ta.sma(volume, 20)
+h = hour(time, "UTC")
+sess = (h>=7 and h<12) or (h>=13 and h<20)
+bo_bull = ema50>ema200 and close>ema50 and ta.crossover(close, swing_hi) and volume>vol_ma*1.2 and sess
+bo_bear = ema50<ema200 and close<ema50 and ta.crossunder(close, swing_lo) and volume>vol_ma*1.2 and sess
+
+// ── SMC FVG-MTF module (1H entry, 4H bias, limit, RR3) ───────────────────────
+htf_f = request.security(syminfo.tickerid, "240", ta.ema(close,50),  lookahead=barmerge.lookahead_off)
+htf_s = request.security(syminfo.tickerid, "240", ta.ema(close,200), lookahead=barmerge.lookahead_off)
+htf_bull = htf_f > htf_s
+htf_bear = htf_f < htf_s
+hi20 = ta.highest(high,20)[1]
+lo20 = ta.lowest(low,20)[1]
+bull_fvg = low>high[2] and (low-high[2])>0.3*atr
+bear_fvg = high<low[2] and (low[2]-high)>0.3*atr
+swept_lo = low<lo20 and close>lo20
+swept_hi = high>hi20 and close<hi20
+var int lsl=na
+var int lsh=na
+var float swlo=na
+var float swhi=na
+if swept_lo
+    lsl:=bar_index
+    swlo:=low
+if swept_hi
+    lsh:=bar_index
+    swhi:=high
+rs_lo = not na(lsl) and bar_index-lsl<=8
+rs_hi = not na(lsh) and bar_index-lsh<=8
+fvg_bull = bull_fvg and rs_lo and htf_bull
+fvg_bear = bear_fvg and rs_hi and htf_bear
+
+// ── State ────────────────────────────────────────────────────────────────────
+var float a_sl=na    // active BO stop/target
+var float a_tp=na
+var float p_entry=na // pending FVG limit
+var float p_sl=na
+var float p_tp=na
+var float p_qty=na
+var int   p_bar=na
+var int   p_dir=0
+flat = strategy.position_size==0
+
+qty_of(dist) => math.max(0.01, (acct_size*risk_pct/100*size_mult)/dist)
+
+// FVG: arm pending limit (when flat, nothing pending, breakout not firing)
+if en_fvg and fvg_bull and flat and na(p_entry) and not bo_bull
+    e=high[2]+0.5*(low-high[2])
+    s=math.min(high[2], nz(swlo,high[2]))-0.5*atr
+    if e-s>0
+        p_entry:=e
+        p_sl:=s
+        p_tp:=e+3.0*(e-s)
+        p_qty:=qty_of(e-s)
+        p_bar:=bar_index
+        p_dir:=1
+if en_fvg and fvg_bear and flat and na(p_entry) and not bo_bear
+    e=high+0.5*(low[2]-high)
+    s=math.max(low[2], nz(swhi,low[2]))+0.5*atr
+    if s-e>0
+        p_entry:=e
+        p_sl:=s
+        p_tp:=e-3.0*(s-e)
+        p_qty:=qty_of(s-e)
+        p_bar:=bar_index
+        p_dir:=-1
+
+// Breakout: immediate market entry (priority — cancels pending FVG)
+if en_bo and bo_bull and flat
+    strategy.cancel("FVG_L")
+    strategy.cancel("FVG_S")
+    p_entry:=na
+    a_sl:=close-1.5*atr
+    a_tp:=close+4.5*atr
+    strategy.entry("BO_L", strategy.long, qty=qty_of(1.5*atr))
+if en_bo and bo_bear and flat
+    strategy.cancel("FVG_L")
+    strategy.cancel("FVG_S")
+    p_entry:=na
+    a_sl:=close+1.5*atr
+    a_tp:=close-4.5*atr
+    strategy.entry("BO_S", strategy.short, qty=qty_of(1.5*atr))
+
+// Place FVG limit while flat & pending
+if not na(p_entry) and flat and p_dir==1
+    strategy.entry("FVG_L", strategy.long, qty=p_qty, limit=p_entry)
+if not na(p_entry) and flat and p_dir==-1
+    strategy.entry("FVG_S", strategy.short, qty=p_qty, limit=p_entry)
+
+// Exits — apply both; only the open entry responds
+if strategy.position_size>0
+    strategy.exit("BOX",  from_entry="BO_L",  stop=a_sl, limit=a_tp)
+    strategy.exit("FVX",  from_entry="FVG_L", stop=p_sl, limit=p_tp)
+if strategy.position_size<0
+    strategy.exit("BOXs", from_entry="BO_S",  stop=a_sl, limit=a_tp)
+    strategy.exit("FVXs", from_entry="FVG_S", stop=p_sl, limit=p_tp)
+
+// FVG expiry cancel
+if not na(p_entry) and flat and not na(p_bar) and bar_index-p_bar>=15
+    strategy.cancel("FVG_L")
+    strategy.cancel("FVG_S")
+    p_entry:=na
+    p_dir:=0
+    p_bar:=na
+// reset pending after a trade closes
+if flat and strategy.position_size[1]!=0
+    p_entry:=na
+    p_dir:=0
+    p_bar:=na
+
+// ── Visuals ──────────────────────────────────────────────────────────────────
+plot(ema50,  "EMA50",  color=color.new(color.yellow,40))
+plot(ema200, "EMA200", color=color.new(color.orange,0), linewidth=2)
+plotshape(bo_bull, "BO buy",  location=location.belowbar, style=shape.triangleup,   color=color.aqua, size=size.tiny)
+plotshape(bo_bear, "BO sell", location=location.abovebar, style=shape.triangledown, color=color.fuchsia, size=size.tiny)
+plotshape(fvg_bull and flat, "FVG buy",  location=location.belowbar, style=shape.circle, color=color.lime, size=size.tiny)
+plotshape(fvg_bear and flat, "FVG sell", location=location.abovebar, style=shape.circle, color=color.red,  size=size.tiny)
+
+// ── DD tracker (realized) + dashboard ────────────────────────────────────────
+var float peak = strategy.initial_capital
+req = strategy.initial_capital + strategy.netprofit
+peak := math.max(peak, req)
+ddp = (peak-req)/acct_size*100
+
+var table t = table.new(position.top_right, 2, 7, bgcolor=color.new(color.black,25), border_width=1)
+if barstate.islast
+    pnl_pct = strategy.netprofit/acct_size*100
+    wr = strategy.closedtrades>0 ? math.round(strategy.wintrades/strategy.closedtrades*100,1):0.0
+    pf = strategy.grossloss!=0 ? math.abs(math.round(strategy.grossprofit/strategy.grossloss,2)):0.0
+    maxdd = math.round(strategy.max_drawdown/acct_size*100,2)
+    table.cell(t,0,0,"PORTFOLIO",text_color=color.white,bgcolor=color.new(color.blue,30),text_size=size.normal)
+    table.cell(t,1,0,(pnl_pct>=0?"+":"")+str.tostring(math.round(pnl_pct,1))+"%",text_color=pnl_pct>=0?color.lime:color.red,bgcolor=color.new(color.blue,30),text_size=size.normal)
+    table.cell(t,0,1,"Modules",text_color=color.silver,text_size=size.normal)
+    table.cell(t,1,1,(en_bo?"BO ":"")+(en_fvg?"FVG":""),text_color=color.white,text_size=size.normal)
+    table.cell(t,0,2,"Trades",text_color=color.silver,text_size=size.normal)
+    table.cell(t,1,2,str.tostring(strategy.closedtrades),text_color=color.white,text_size=size.normal)
+    table.cell(t,0,3,"Win Rate",text_color=color.silver,text_size=size.normal)
+    table.cell(t,1,3,str.tostring(wr)+"%",text_color=color.white,text_size=size.normal)
+    table.cell(t,0,4,"Profit Factor",text_color=color.silver,text_size=size.normal)
+    table.cell(t,1,4,str.tostring(pf),text_color=pf>=1.5?color.lime:pf>=1.0?color.yellow:color.red,text_size=size.normal)
+    table.cell(t,0,5,"Max DD",text_color=color.silver,text_size=size.normal)
+    table.cell(t,1,5,str.tostring(maxdd)+"%",text_color=maxdd<10?color.lime:color.red,text_size=size.normal)
+    table.cell(t,0,6,"Net $",text_color=color.silver,text_size=size.normal)
+    table.cell(t,1,6,"$"+str.tostring(math.round(strategy.netprofit,0)),text_color=color.white,text_size=size.normal)

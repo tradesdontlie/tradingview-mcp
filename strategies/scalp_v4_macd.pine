@@ -1,0 +1,70 @@
+//@version=5
+strategy("Scalp MACD v4 [XAUUSD M5]",
+    overlay=false,
+    default_qty_type=strategy.percent_of_equity,
+    default_qty_value=2,
+    commission_type=strategy.commission.percent,
+    commission_value=0.07,
+    slippage=3,
+    max_bars_back=500)
+
+// === DATE RANGE ===
+i_start = input.time(timestamp("2025-01-01"), "Start")
+i_end   = input.time(timestamp("2026-06-25"), "End")
+in_range = time >= i_start and time <= i_end
+
+// === INPUTS ===
+i_fast     = input.int(12,  "MACD Fast")
+i_slow     = input.int(26,  "MACD Slow")
+i_sig      = input.int(9,   "MACD Signal")
+i_atr_len  = input.int(14,  "ATR Length")
+i_tp_atr   = input.float(1.8, "TP (ATR mult)", step=0.1)
+i_sl_atr   = input.float(0.9, "SL (ATR mult)", step=0.1)
+i_rsi_len  = input.int(14,  "RSI Length")
+i_ema_t    = input.int(200, "Trend EMA")
+i_sess     = input.bool(true, "Session Filter")
+i_trend_f  = input.bool(true, "Trend Filter (EMA200)")
+i_zero_x   = input.bool(false, "Zero-line Cross Filter")
+
+// === INDICATORS ===
+[macd_line, signal_line, hist] = ta.macd(close, i_fast, i_slow, i_sig)
+atr   = ta.atr(i_atr_len)
+rsi   = ta.rsi(close, i_rsi_len)
+ema_t = ta.ema(close, i_ema_t)
+
+// === SESSION ===
+in_sess = not i_sess or (hour(time, "GMT+7") >= 7 and hour(time, "GMT+7") < 21)
+
+// === TREND ===
+bull = not i_trend_f or close > ema_t
+bear = not i_trend_f or close < ema_t
+
+// === ZERO LINE FILTER ===
+macd_pos = not i_zero_x or macd_line > 0
+macd_neg = not i_zero_x or macd_line < 0
+
+// === SIGNALS: MACD signal line cross ===
+cross_up = ta.crossover(macd_line, signal_line)
+cross_dn = ta.crossunder(macd_line, signal_line)
+
+long_sig  = cross_up and bull and macd_pos and rsi < 65 and in_sess and in_range
+short_sig = cross_dn and bear and macd_neg and rsi > 35 and in_sess and in_range
+
+// === ENTRIES ===
+if long_sig and strategy.position_size == 0
+    strategy.entry("L", strategy.long)
+    strategy.exit("Lx", "L",
+        profit = math.round(atr * i_tp_atr / syminfo.mintick),
+        loss   = math.round(atr * i_sl_atr / syminfo.mintick))
+
+if short_sig and strategy.position_size == 0
+    strategy.entry("S", strategy.short)
+    strategy.exit("Sx", "S",
+        profit = math.round(atr * i_tp_atr / syminfo.mintick),
+        loss   = math.round(atr * i_sl_atr / syminfo.mintick))
+
+// === PLOTS ===
+plot(macd_line,   "MACD",   color.blue)
+plot(signal_line, "Signal", color.orange)
+plot(hist, "Hist", color=hist >= 0 ? color.green : color.red, style=plot.style_columns)
+bgcolor(long_sig ? color.new(color.green, 85) : short_sig ? color.new(color.red, 85) : na)

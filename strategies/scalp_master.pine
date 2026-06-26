@@ -1,0 +1,99 @@
+//@version=5
+strategy("Scalp Master [XAUUSD M5]", overlay=true, default_qty_type=strategy.percent_of_equity, default_qty_value=2, commission_type=strategy.commission.percent, commission_value=0.07, slippage=3)
+
+// === SIGNAL TYPE ===
+// 0=EMA Cross, 1=BB Reversion, 2=Supertrend, 3=MACD
+i_sig_type = input.int(0, "Signal Type (0=EMA 1=BB 2=ST 3=MACD)", minval=0, maxval=3)
+
+// === EMA PARAMS ===
+i_ema_f = input.int(8,  "EMA Fast", minval=3)
+i_ema_s = input.int(21, "EMA Slow", minval=5)
+i_ema_t = input.int(50, "EMA Trend", minval=10)
+
+// === BB PARAMS ===
+i_bb_len  = input.int(20,   "BB Length")
+i_bb_mult = input.float(2.0, "BB Mult", step=0.1)
+
+// === SUPERTREND PARAMS ===
+i_st_atr  = input.int(10,   "ST ATR Period")
+i_st_mult = input.float(2.0, "ST Multiplier", step=0.1)
+
+// === MACD PARAMS ===
+i_macd_f   = input.int(12, "MACD Fast")
+i_macd_s   = input.int(26, "MACD Slow")
+i_macd_sig = input.int(9,  "MACD Signal")
+
+// === ATR EXIT ===
+i_atr_len = input.int(14,   "ATR Length")
+i_tp_atr  = input.float(1.5, "TP ATR mult", step=0.1)
+i_sl_atr  = input.float(1.0, "SL ATR mult", step=0.1)
+
+// === FILTERS ===
+i_rsi_len  = input.int(14, "RSI Length")
+i_rsi_on   = input.bool(true, "RSI Filter")
+i_sess_on  = input.bool(true, "Session Filter (London+NY)")
+i_trend_on = input.bool(false, "H1 Trend Filter")
+i_dir      = input.int(0, "Direction 0=Both 1=Long 2=Short", minval=0, maxval=2)
+
+// === INDICATORS ===
+ema_f = ta.ema(close, i_ema_f)
+ema_s = ta.ema(close, i_ema_s)
+ema_t = ta.ema(close, i_ema_t)
+[bb_m, bb_u, bb_d] = ta.bb(close, i_bb_len, i_bb_mult)
+[st_ln, st_dir] = ta.supertrend(i_st_mult, i_st_atr)
+[macd_l, macd_s_, _] = ta.macd(close, i_macd_f, i_macd_s, i_macd_sig)
+rsi   = ta.rsi(close, i_rsi_len)
+atr   = ta.atr(i_atr_len)
+h1_ema = request.security(syminfo.tickerid, "60", ta.ema(close, 50))
+
+// === SESSION ===
+in_sess = not i_sess_on or (hour(time, "GMT+7") >= 7 and hour(time, "GMT+7") < 21)
+
+// === TREND ===
+h1_bull = not i_trend_on or close > h1_ema
+h1_bear = not i_trend_on or close < h1_ema
+
+// === RSI ===
+rsi_l = not i_rsi_on or (rsi > 35 and rsi < 68)
+rsi_s = not i_rsi_on or (rsi < 65 and rsi > 32)
+
+// === SIGNAL GENERATION ===
+var bool raw_long  = false
+var bool raw_short = false
+
+if i_sig_type == 0 // EMA Cross
+    raw_long  := ta.crossover(ema_f, ema_s)  and close > ema_t
+    raw_short := ta.crossunder(ema_f, ema_s) and close < ema_t
+else if i_sig_type == 1 // BB Reversion
+    raw_long  := ta.crossover(close, bb_d)  and rsi < 45
+    raw_short := ta.crossunder(close, bb_u) and rsi > 55
+else if i_sig_type == 2 // Supertrend flip
+    raw_long  := st_dir == 1  and st_dir[1] == -1
+    raw_short := st_dir == -1 and st_dir[1] == 1
+else if i_sig_type == 3 // MACD signal cross
+    raw_long  := ta.crossover(macd_l, macd_s_)  and macd_l < 0
+    raw_short := ta.crossunder(macd_l, macd_s_) and macd_l > 0
+
+// === FINAL SIGNALS WITH FILTERS ===
+tp_ticks = math.round(atr * i_tp_atr / syminfo.mintick)
+sl_ticks = math.round(atr * i_sl_atr / syminfo.mintick)
+
+long_sig  = raw_long  and h1_bull and rsi_l and in_sess and (i_dir == 0 or i_dir == 1)
+short_sig = raw_short and h1_bear and rsi_s and in_sess and (i_dir == 0 or i_dir == 2)
+
+// === ENTRIES ===
+if long_sig and strategy.position_size == 0
+    strategy.entry("L", strategy.long)
+    strategy.exit("Lx", "L", profit=tp_ticks, loss=sl_ticks)
+
+if short_sig and strategy.position_size == 0
+    strategy.entry("S", strategy.short)
+    strategy.exit("Sx", "S", profit=tp_ticks, loss=sl_ticks)
+
+// === PLOTS ===
+plot(i_sig_type == 0 ? ema_f : na, "EMA Fast", color.blue)
+plot(i_sig_type == 0 ? ema_s : na, "EMA Slow", color.orange)
+plot(i_sig_type == 1 ? bb_u : na, "BB Up",  color.new(color.red, 50))
+plot(i_sig_type == 1 ? bb_d : na, "BB Dn",  color.new(color.green, 50))
+plot(i_sig_type == 2 ? st_ln : na, "ST", st_dir == 1 ? color.green : color.red, 2)
+bgcolor(long_sig ? color.new(color.green, 90) : short_sig ? color.new(color.red, 90) : na)

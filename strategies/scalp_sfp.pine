@@ -1,0 +1,86 @@
+//@version=5
+strategy("SFP Scalp M5 [XAUUSD]", overlay=true, default_qty_type=strategy.percent_of_equity, default_qty_value=2, commission_type=strategy.commission.percent, commission_value=0.07, slippage=3)
+
+// === INPUTS ===
+i_swing_n    = input.int(10,    "Swing lookback bars (N)", minval=3, maxval=50)
+i_body_pct   = input.float(30.0,"Max body % of range (rejection candle)", step=5, minval=5, maxval=80)
+i_tp_atr     = input.float(2.0, "TP (ATR mult)", step=0.1)
+i_sl_atr     = input.float(0.75,"SL (ATR mult)", step=0.05)
+i_h1_trend   = input.bool(true, "H1 EMA Trend Filter")
+i_h1_ema_p   = input.int(50,    "H1 EMA Period", minval=10)
+i_sess       = input.bool(true, "Session Filter (London+NY)")
+i_dir        = input.int(0,     "Direction 0=Both 1=Long 2=Short", minval=0, maxval=2)
+i_min_sweep  = input.float(0.3, "Min sweep size vs ATR", step=0.05)
+
+// === INDICATORS ===
+atr     = ta.atr(14)
+h1_ema  = request.security(syminfo.tickerid, "60", ta.ema(close, i_h1_ema_p))
+
+// === CANDLE PROPS ===
+body    = math.abs(close - open)
+rng     = high - low
+body_p  = rng > 0 ? body / rng * 100 : 0
+is_bull = close >= open
+is_bear = close < open
+
+// === SESSION ===
+in_sess = not i_sess or (hour(time, "GMT+7") >= 7 and hour(time, "GMT+7") < 21)
+
+// === H1 TREND ===
+h1_bull = not i_h1_trend or close > h1_ema
+h1_bear = not i_h1_trend or close < h1_ema
+
+// === SWING HIGH/LOW ===
+// Swing high N bars ago (using ta.highest over lookback to find the reference)
+swing_high = ta.highest(high, i_swing_n)[1]  // previous N-bar high (exclude current bar)
+swing_low  = ta.lowest(low,  i_swing_n)[1]   // previous N-bar low
+
+// === SFP DETECTION ===
+// Bearish SFP: price sweeps above swing high then closes BACK BELOW it
+// = current bar HIGH > swing_high AND current bar CLOSE < swing_high
+// = AND it's a bearish/rejection candle (small body)
+swept_high   = high > swing_high
+closed_below = close < swing_high
+sweep_size_h = high - swing_high  // how much above swing high we swept
+
+// Bullish SFP: price sweeps below swing low then closes BACK ABOVE it
+swept_low    = low < swing_low
+closed_above = close > swing_low
+sweep_size_l = swing_low - low   // how much below swing low we swept
+
+// Min sweep size check
+enough_sweep_h = sweep_size_h >= atr * i_min_sweep
+enough_sweep_l = sweep_size_l >= atr * i_min_sweep
+
+// Rejection candle check (small body = pin bar / wick-heavy candle)
+is_rejection = body_p <= i_body_pct
+
+// === SIGNALS (on CLOSE of SFP candle) ===
+// Bearish SFP → Short
+bear_sfp = swept_high and closed_below and enough_sweep_h and is_rejection and h1_bear and in_sess
+// Bullish SFP → Long
+bull_sfp = swept_low  and closed_above and enough_sweep_l and is_rejection and h1_bull and in_sess
+
+// Apply direction filter
+long_sig  = bull_sfp and (i_dir == 0 or i_dir == 1)
+short_sig = bear_sfp and (i_dir == 0 or i_dir == 2)
+
+// === ENTRIES (enter on next bar open) ===
+tp_ticks = math.round(atr * i_tp_atr / syminfo.mintick)
+sl_ticks = math.round(atr * i_sl_atr / syminfo.mintick)
+
+if long_sig[1] and strategy.position_size == 0
+    strategy.entry("L", strategy.long)
+    strategy.exit("Lx", "L", profit=tp_ticks, loss=sl_ticks)
+
+if short_sig[1] and strategy.position_size == 0
+    strategy.entry("S", strategy.short)
+    strategy.exit("Sx", "S", profit=tp_ticks, loss=sl_ticks)
+
+// === PLOTS ===
+plot(swing_high, "Swing High", color.new(color.red, 60), 1, plot.style_stepline)
+plot(swing_low,  "Swing Low",  color.new(color.green, 60), 1, plot.style_stepline)
+plot(h1_ema, "H1 EMA", color.new(color.gray, 40))
+bgcolor(bear_sfp ? color.new(color.red, 80) : bull_sfp ? color.new(color.green, 80) : na)
+plotshape(long_sig[1],  "L Entry", shape.triangleup,   location.belowbar, color.green, size=size.tiny)
+plotshape(short_sig[1], "S Entry", shape.triangledown, location.abovebar, color.red,   size=size.tiny)

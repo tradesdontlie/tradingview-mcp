@@ -1,0 +1,262 @@
+//@version=6
+// ═══════════════════════════════════════════════════════════════════════════
+// MOMENTUM CANDLE SCALPER v3  — Sekolah Trading method
+// Strategy by Risitama / Mas Tama  |  Pine backtest by Claude
+//
+// v3 additions vs v2:
+//   • H4 EMA50 trend filter (both H1 + H4 must agree)
+//   • Volume filter (MC must have above-average volume)
+//   • Market structure break (MC close must break N-bar high/low)
+//   • ADX filter (optional — trade only in trending markets)
+//   • Immediate entry default (enter at MC close, not 23.6% pullback)
+//   • Trailing stop at break-even (optional)
+//   • Position size 2% (to make FP target realistic)
+// ═══════════════════════════════════════════════════════════════════════════
+strategy("MC Scalper v3 [Sekolah Trading]",
+     overlay              = true,
+     initial_capital      = 5000,
+     default_qty_type     = strategy.percent_of_equity,
+     default_qty_value    = 2,
+     commission_type      = strategy.commission.cash_per_contract,
+     commission_value     = 0.5,
+     slippage             = 2,
+     calc_on_every_tick   = false,
+     process_orders_on_close = false,
+     max_bars_back        = 500)
+
+// ───────────────────────────────────────────────────────────────────────────
+// INPUTS — Backtest Period
+// ───────────────────────────────────────────────────────────────────────────
+grpBT = "Backtest Period"
+i_from = input.time(timestamp("2025-01-01 00:00"), "Start date", group=grpBT)
+i_to   = input.time(timestamp("2026-12-31 23:59"), "End date",   group=grpBT)
+in_period = time >= i_from and time <= i_to
+
+// ───────────────────────────────────────────────────────────────────────────
+// INPUTS — Momentum Candle Detection
+// ───────────────────────────────────────────────────────────────────────────
+grpMC = "Momentum Candle Detection"
+i_body_min  = input.float(75.0, "Min Body % of Range",  50.0, 95.0, 5.0, group=grpMC)
+i_wick_max  = input.float(15.0, "Max Wick % of Range",   5.0, 50.0, 5.0, group=grpMC)
+i_min_pip   = input.float(60.0, "Min Body (pips, 0=off)", 0, 500, 5.0, group=grpMC,
+     tooltip="1 pip = 0.1 for XAUUSD. 60 pips = $6 minimum candle body.")
+i_consol    = input.bool(false, "Consolidation filter (prev N bars smaller body)", group=grpMC)
+i_consol_n  = input.int(3, "  Lookback bars", 1, 10, group=grpMC)
+
+// ───────────────────────────────────────────────────────────────────────────
+// INPUTS — Entry & Exit
+// ───────────────────────────────────────────────────────────────────────────
+grpEntry = "Entry & Exit"
+i_entry_mode = input.string("Immediate", "Entry Mode",
+     options=["Immediate", "Pullback"], group=grpEntry,
+     tooltip="Immediate: market order on MC close.\nPullback: limit at Fib 23.6% retrace.")
+i_fib_e     = input.float(23.6, "Pullback entry %",  group=grpEntry)
+i_fib_sl    = input.float(74.5, "SL retrace %",      group=grpEntry,
+     tooltip="For Immediate mode: SL is fib_sl% below MC high (bull) or above MC low (bear).")
+i_fib_tp    = input.float(70.0, "TP extension %",    group=grpEntry,
+     tooltip="Extension beyond MC high/low. 70% gives ~1.8:1 RR on Immediate entry.")
+i_expire    = input.int(10,  "Pullback expiry (bars)", 1, 50, group=grpEntry)
+i_trail_on  = input.bool(true, "Break-even trailing stop at 1:1", group=grpEntry,
+     tooltip="Once trade profits equal the initial risk, stop moves to break-even.")
+
+// ───────────────────────────────────────────────────────────────────────────
+// INPUTS — Filters
+// ───────────────────────────────────────────────────────────────────────────
+grpF = "Filters"
+i_sess_on   = input.bool(true,  "London + NY session filter", group=grpF)
+i_h1ema_on  = input.bool(true,  "H1 EMA50 trend filter", group=grpF)
+i_h4ema_on  = input.bool(true,  "H4 EMA50 trend filter", group=grpF,
+     tooltip="Both H1 and H4 EMAs must agree on direction.")
+i_vol_on    = input.bool(true,  "Volume filter (above N× average)", group=grpF)
+i_vol_mult  = input.float(1.5, "  Volume multiplier", 1.0, 5.0, 0.5, group=grpF)
+i_ms_on     = input.bool(true,  "Market structure break filter", group=grpF,
+     tooltip="MC close must break above the last N-bar high (bull) or below N-bar low (bear). Ensures the MC is a structural breakout, not a random push.")
+i_ms_bars   = input.int(5,  "  Lookback bars", 3, 30, group=grpF)
+i_adx_on    = input.bool(false, "ADX trend strength filter", group=grpF)
+i_adx_min   = input.int(20, "  Min ADX value", 10, 50, group=grpF)
+i_short_only = input.bool(false, "Short-only mode (disable longs)", group=grpF)
+i_long_only  = input.bool(false, "Long-only mode (disable shorts)", group=grpF)
+
+// ───────────────────────────────────────────────────────────────────────────
+// SESSION
+// ───────────────────────────────────────────────────────────────────────────
+_h       = hour(time, "UTC")
+london   = _h >= 7  and _h < 12
+new_york = _h >= 13 and _h < 20
+in_sess  = not i_sess_on or (london or new_york)
+
+// ───────────────────────────────────────────────────────────────────────────
+// MULTI-TIMEFRAME TREND
+// ───────────────────────────────────────────────────────────────────────────
+ema50_h1 = request.security(syminfo.tickerid, i_h1ema_on ? "60"  : timeframe.period, ta.ema(close, 50), lookahead=barmerge.lookahead_off)
+ema50_h4 = request.security(syminfo.tickerid, i_h4ema_on ? "240" : timeframe.period, ta.ema(close, 50), lookahead=barmerge.lookahead_off)
+
+bull_h1 = close > ema50_h1
+bear_h1 = close < ema50_h1
+bull_h4 = close > ema50_h4
+bear_h4 = close < ema50_h4
+
+trend_bull = (not i_h1ema_on or bull_h1) and (not i_h4ema_on or bull_h4)
+trend_bear = (not i_h1ema_on or bear_h1) and (not i_h4ema_on or bear_h4)
+
+// ───────────────────────────────────────────────────────────────────────────
+// VOLUME FILTER
+// ───────────────────────────────────────────────────────────────────────────
+vol_sma = ta.sma(volume, 20)
+vol_ok  = not i_vol_on or (volume >= i_vol_mult * vol_sma)
+
+// ───────────────────────────────────────────────────────────────────────────
+// MARKET STRUCTURE BREAK
+// MC close must break above recent swing high (bull) or below swing low (bear)
+// ───────────────────────────────────────────────────────────────────────────
+swing_high = ta.highest(high, i_ms_bars)[1]
+swing_low  = ta.lowest(low,  i_ms_bars)[1]
+ms_bull_ok = not i_ms_on or (close > swing_high)
+ms_bear_ok = not i_ms_on or (close < swing_low)
+
+// ───────────────────────────────────────────────────────────────────────────
+// ADX
+// ───────────────────────────────────────────────────────────────────────────
+[_, _, adx_val] = ta.dmi(14, 14)
+adx_ok = not i_adx_on or (adx_val >= i_adx_min)
+
+// ───────────────────────────────────────────────────────────────────────────
+// MOMENTUM CANDLE DETECTION
+// ───────────────────────────────────────────────────────────────────────────
+c_range = high - low
+c_body  = math.abs(close - open)
+c_wick  = c_range - c_body
+
+pip_val  = syminfo.mintick * 10
+min_body = i_min_pip * pip_val
+
+body_ok = c_range > 0 and (c_body / c_range * 100) >= i_body_min
+wick_ok = c_range > 0 and (c_wick / c_range * 100) <= i_wick_max
+pip_ok  = i_min_pip <= 0 or c_body >= min_body
+
+consol_ok = true
+if i_consol
+    _all_small = true
+    for _i = 1 to i_consol_n
+        if math.abs(close[_i] - open[_i]) >= c_body
+            _all_small := false
+    consol_ok := _all_small
+
+is_mc = body_ok and wick_ok and pip_ok and consol_ok and in_sess and vol_ok and adx_ok
+
+bull_mc = is_mc and close > open and trend_bull and ms_bull_ok and in_period and not i_short_only
+bear_mc = is_mc and close < open and trend_bear and ms_bear_ok and in_period and not i_long_only
+
+// ───────────────────────────────────────────────────────────────────────────
+// PENDING ORDER STATE (Pullback mode)
+// ───────────────────────────────────────────────────────────────────────────
+var float b_entry = na, var float b_sl = na, var float b_tp = na
+var float s_entry = na, var float s_sl = na, var float s_tp = na
+var int   b_exp   = 0,  var int   s_exp = 0
+var bool  b_pend  = false, var bool s_pend = false
+
+// Track entry price + initial risk for trailing stop
+var float entry_price = na
+var float initial_risk = na
+var bool  be_triggered = false
+
+no_pos = strategy.position_size == 0
+
+if bull_mc and no_pos
+    _r      = c_range
+    b_entry := high - (i_fib_e  / 100) * _r
+    b_sl    := high - (i_fib_sl / 100) * _r
+    b_tp    := high + (i_fib_tp / 100) * _r
+    b_exp   := bar_index + i_expire
+    b_pend  := true
+    s_pend  := false
+    strategy.cancel("S")
+
+if bear_mc and no_pos
+    _r      = c_range
+    s_entry := low  + (i_fib_e  / 100) * _r
+    s_sl    := low  + (i_fib_sl / 100) * _r
+    s_tp    := low  - (i_fib_tp / 100) * _r
+    s_exp   := bar_index + i_expire
+    s_pend  := true
+    b_pend  := false
+    strategy.cancel("L")
+
+// ───────────────────────────────────────────────────────────────────────────
+// ORDERS
+// ───────────────────────────────────────────────────────────────────────────
+if i_entry_mode == "Pullback"
+    if b_pend and no_pos
+        if bar_index <= b_exp
+            strategy.entry("L", strategy.long,  limit=b_entry, comment="MC↑pull")
+            strategy.exit("LX", "L", stop=b_sl, limit=b_tp)
+        else
+            strategy.cancel("L")
+            b_pend := false
+
+    if s_pend and no_pos
+        if bar_index <= s_exp
+            strategy.entry("S", strategy.short, limit=s_entry, comment="MC↓pull")
+            strategy.exit("SX", "S", stop=s_sl, limit=s_tp)
+        else
+            strategy.cancel("S")
+            s_pend := false
+
+else  // Immediate
+    if bull_mc and no_pos
+        _r = c_range
+        _sl = high - (i_fib_sl / 100) * _r
+        _tp = high + (i_fib_tp / 100) * _r
+        strategy.entry("L", strategy.long, comment="MC↑imm")
+        strategy.exit("LX", "L", stop=_sl, limit=_tp)
+        entry_price  := close
+        initial_risk := close - _sl
+        be_triggered := false
+
+    if bear_mc and no_pos
+        _r = c_range
+        _sl = low + (i_fib_sl / 100) * _r
+        _tp = low - (i_fib_tp / 100) * _r
+        strategy.entry("S", strategy.short, comment="MC↓imm")
+        strategy.exit("SX", "S", stop=_sl, limit=_tp)
+        entry_price  := close
+        initial_risk := _sl - close
+        be_triggered := false
+
+// Break-even trailing: move stop to entry once profit = initial risk
+if i_trail_on and not no_pos and not be_triggered and not na(entry_price) and not na(initial_risk)
+    if strategy.position_size > 0
+        if high >= entry_price + initial_risk
+            strategy.exit("LX", "L", stop=entry_price + syminfo.mintick, limit=strategy.position_avg_price + (initial_risk * (i_fib_tp / i_fib_sl)))
+            be_triggered := true
+    else if strategy.position_size < 0
+        if low <= entry_price - initial_risk
+            strategy.exit("SX", "S", stop=entry_price - syminfo.mintick, limit=strategy.position_avg_price - (initial_risk * (i_fib_tp / i_fib_sl)))
+            be_triggered := true
+
+if no_pos
+    b_pend := false
+    s_pend := false
+    be_triggered := false
+
+// ───────────────────────────────────────────────────────────────────────────
+// VISUALS
+// ───────────────────────────────────────────────────────────────────────────
+plotshape(bull_mc, "Bull MC", shape.triangleup,   location.belowbar, color.new(color.blue, 0), size=size.small)
+plotshape(bear_mc, "Bear MC", shape.triangledown, location.abovebar, color.new(color.red,  0), size=size.small)
+
+// Pending Fib levels (pullback mode)
+plot(i_entry_mode == "Pullback" and b_pend ? b_entry : na, "Bull Entry", color.new(color.lime,   0), 1, plot.style_linebr)
+plot(i_entry_mode == "Pullback" and b_pend ? b_sl    : na, "Bull SL",    color.new(color.red,    0), 1, plot.style_linebr)
+plot(i_entry_mode == "Pullback" and b_pend ? b_tp    : na, "Bull TP",    color.new(color.teal,   0), 1, plot.style_linebr)
+plot(i_entry_mode == "Pullback" and s_pend ? s_entry : na, "Bear Entry", color.new(color.orange, 0), 1, plot.style_linebr)
+plot(i_entry_mode == "Pullback" and s_pend ? s_sl    : na, "Bear SL",    color.new(color.red,    0), 1, plot.style_linebr)
+plot(i_entry_mode == "Pullback" and s_pend ? s_tp    : na, "Bear TP",    color.new(color.teal,   0), 1, plot.style_linebr)
+
+// EMAs
+plot(ema50_h1, "H1 EMA50", color.new(color.orange, 60), 1)
+plot(ema50_h4, "H4 EMA50", color.new(color.purple, 50), 2)
+
+// Session
+bgcolor(london   and i_sess_on ? color.new(color.blue,  93) : na, title="London")
+bgcolor(new_york and i_sess_on ? color.new(color.green, 93) : na, title="NY")

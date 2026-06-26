@@ -272,8 +272,20 @@ export async function setSource({ source }) {
     (function() {
       var m = ${FIND_MONACO};
       if (!m) return false;
-      m.editor.setValue(${escaped});
-      return true;
+      var model = m.editor.getModel();
+      if (!model) return false;
+      // Temporarily disable read-only to allow programmatic edits
+      try { m.editor.updateOptions({ readOnly: false }); } catch(e) {}
+      var fullRange = model.getFullModelRange();
+      var result = m.editor.executeEdits('pine-mcp-set', [{
+        range: fullRange,
+        text: ${escaped},
+        forceMoveMarkers: true
+      }]);
+      m.editor.pushUndoStop();
+      // Trigger content change event that TradingView listens to
+      model.applyEdits([]);
+      return result !== false;
     })()
   `);
 
@@ -287,6 +299,12 @@ export async function compile() {
 
   const clicked = await evaluate(`
     (function() {
+      // First: icon-based add-to-chart button
+      var qaAddBtn = document.querySelector('[data-qa-id="add-script-to-chart"]');
+      if (qaAddBtn && qaAddBtn.offsetParent !== null) {
+        qaAddBtn.click();
+        return 'Add to chart (qa-id)';
+      }
       var btns = document.querySelectorAll('button');
       var fallback = null;
       var saveBtn = null;
@@ -442,6 +460,12 @@ export async function smartCompile() {
 
   const buttonClicked = await evaluate(`
     (function() {
+      // First priority: the icon-based add-to-chart button (no text, uses data-qa-id)
+      var qaAddBtn = document.querySelector('[data-qa-id="add-script-to-chart"]');
+      if (qaAddBtn && qaAddBtn.offsetParent !== null) {
+        qaAddBtn.click();
+        return 'Add to chart (qa-id)';
+      }
       var btns = document.querySelectorAll('button');
       var addBtn = null;
       var updateBtn = null;
@@ -616,4 +640,24 @@ export async function listScripts() {
     source: 'internal_api',
     error: scripts?.error,
   };
+}
+
+export async function saveAsNew({ source, name }) {
+  const escapedSource = JSON.stringify(source);
+  const escapedName = JSON.stringify(name || 'MC Scalper');
+  const result = await evaluateAsync(`
+    (function() {
+      var body = new URLSearchParams();
+      body.append('source', ${escapedSource});
+      body.append('scriptName', ${escapedName});
+      return fetch('https://pine-facade.tradingview.com/pine-facade/create', {
+        method: 'POST',
+        credentials: 'include',
+        body: body
+      })
+      .then(function(r) { return r.text().then(function(t) { return { status: r.status, body: t.substring(0, 500) }; }); })
+      .catch(function(e) { return { error: e.message }; });
+    })()
+  `);
+  return { success: true, result };
 }

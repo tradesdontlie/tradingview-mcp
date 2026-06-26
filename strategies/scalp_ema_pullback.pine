@@ -1,0 +1,74 @@
+//@version=5
+strategy("EMA Pullback M5 [XAUUSD]", overlay=true, default_qty_type=strategy.percent_of_equity, default_qty_value=2, commission_type=strategy.commission.percent, commission_value=0.07, slippage=3)
+
+// === INPUTS ===
+i_pb_ema     = input.int(21,    "Pullback EMA Period", minval=5)
+i_trend_ema  = input.int(50,    "Trend EMA Period", minval=10)
+i_atr_len    = input.int(14,    "ATR Length")
+i_touch_atr  = input.float(0.4, "Near-EMA threshold (ATR mult)", step=0.05)
+i_away_atr   = input.float(0.5, "Min away from EMA (recent bars)", step=0.1)
+i_away_bars  = input.int(5,     "Look-back bars for away-check", minval=2, maxval=20)
+i_body_pct   = input.float(55.0,"Min body % for confirmation candle", step=5)
+i_tp_atr     = input.float(1.5, "TP (ATR mult)", step=0.1)
+i_sl_atr     = input.float(0.75,"SL (ATR mult)", step=0.05)
+i_h1_trend   = input.bool(true, "H1 EMA Trend Filter")
+i_h1_ema_p   = input.int(50,    "H1 EMA Period", minval=10)
+i_sess       = input.bool(true, "Session Filter (London+NY)")
+i_dir        = input.int(0,     "Direction 0=Both 1=Long 2=Short", minval=0, maxval=2)
+
+// === INDICATORS ===
+pb_ema  = ta.ema(close, i_pb_ema)
+tr_ema  = ta.ema(close, i_trend_ema)
+atr     = ta.atr(i_atr_len)
+h1_ema  = request.security(syminfo.tickerid, "60", ta.ema(close, i_h1_ema_p))
+
+// === CANDLE PROPS ===
+body    = math.abs(close - open)
+rng     = high - low
+body_p  = rng > 0 ? body / rng * 100 : 0
+is_bull = close > open
+is_bear = close < open
+
+// === SESSION ===
+in_sess = not i_sess or (hour(time, "GMT+7") >= 7 and hour(time, "GMT+7") < 21)
+
+// === H1 TREND ===
+h1_up = not i_h1_trend or close > h1_ema
+h1_dn = not i_h1_trend or close < h1_ema
+
+// === PULLBACK LOGIC ===
+// Price must have been AWAY from pb_ema (trending), then returned to it
+near_pb_ema   = math.abs(close - pb_ema) <= atr * i_touch_atr
+was_above_ema = ta.highest(close - pb_ema, i_away_bars)[1] > atr * i_away_atr
+was_below_ema = ta.lowest(close - pb_ema, i_away_bars)[1] < -(atr * i_away_atr)
+
+// Trend alignment for pullback (price should be above/below trend EMA)
+price_in_uptrend = close > tr_ema
+price_in_dntrend = close < tr_ema
+
+// Confirmation candle: momentum in direction of trend
+bull_confirm = is_bull and body_p >= i_body_pct
+bear_confirm = is_bear and body_p >= i_body_pct
+
+// === SIGNALS ===
+long_sig  = near_pb_ema and was_above_ema and bull_confirm and price_in_uptrend and h1_up and in_sess and (i_dir == 0 or i_dir == 1)
+short_sig = near_pb_ema and was_below_ema and bear_confirm and price_in_dntrend and h1_dn and in_sess and (i_dir == 0 or i_dir == 2)
+
+// === ENTRIES ===
+tp_ticks = math.round(atr * i_tp_atr / syminfo.mintick)
+sl_ticks = math.round(atr * i_sl_atr / syminfo.mintick)
+
+if long_sig and strategy.position_size == 0
+    strategy.entry("L", strategy.long)
+    strategy.exit("Lx", "L", profit=tp_ticks, loss=sl_ticks)
+
+if short_sig and strategy.position_size == 0
+    strategy.entry("S", strategy.short)
+    strategy.exit("Sx", "S", profit=tp_ticks, loss=sl_ticks)
+
+// === PLOTS ===
+plot(pb_ema, "Pullback EMA", color.new(color.blue, 20), 2)
+plot(tr_ema, "Trend EMA", color.new(color.orange, 30), 1)
+plot(h1_ema, "H1 EMA", color.new(color.gray, 40), 1)
+bgcolor(long_sig ? color.new(color.lime, 75) : short_sig ? color.new(color.orange, 75) : na)
+bgcolor(near_pb_ema ? color.new(color.yellow, 92) : na)

@@ -1,0 +1,66 @@
+//@version=5
+strategy("Scalp BB v2 [XAUUSD M5]",
+    overlay=true,
+    default_qty_type=strategy.percent_of_equity,
+    default_qty_value=2,
+    commission_type=strategy.commission.percent,
+    commission_value=0.07,
+    slippage=3,
+    max_bars_back=500)
+
+// === DATE RANGE ===
+i_start = input.time(timestamp("2025-01-01"), "Start")
+i_end   = input.time(timestamp("2026-06-25"), "End")
+in_range = time >= i_start and time <= i_end
+
+// === INPUTS ===
+i_bb_len   = input.int(20,  "BB Length")
+i_bb_mult  = input.float(2.0, "BB Mult", step=0.1)
+i_atr_len  = input.int(14,  "ATR Length")
+i_tp_atr   = input.float(1.2, "TP (ATR mult)", step=0.1)
+i_sl_atr   = input.float(0.8, "SL (ATR mult)", step=0.1)
+i_rsi_len  = input.int(14,  "RSI Length")
+i_trend_ma = input.int(100, "Trend MA (EMA)")
+i_sess     = input.bool(true, "Session Filter")
+i_trend_f  = input.bool(true, "Trend Filter")
+
+// === INDICATORS ===
+[bb_mid, bb_up, bb_dn] = ta.bb(close, i_bb_len, i_bb_mult)
+atr    = ta.atr(i_atr_len)
+rsi    = ta.rsi(close, i_rsi_len)
+ema_t  = ta.ema(close, i_trend_ma)
+
+// === SESSION ===
+in_sess = not i_sess or (hour(time, "GMT+7") >= 7 and hour(time, "GMT+7") < 21)
+
+// === TREND ===
+bull_trend = not i_trend_f or close > ema_t
+bear_trend = not i_trend_f or close < ema_t
+
+// === SIGNALS: mean reversion from band extremes ===
+// Long: price touches/crosses below lower BB, then closes back above it
+touch_lower = low <= bb_dn
+touch_upper = high >= bb_up
+
+long_sig  = ta.crossover(close, bb_dn) and bull_trend and rsi < 45 and in_sess and in_range
+short_sig = ta.crossunder(close, bb_up) and bear_trend and rsi > 55 and in_sess and in_range
+
+// === ENTRIES ===
+if long_sig and strategy.position_size == 0
+    strategy.entry("L", strategy.long)
+    strategy.exit("Lx", "L",
+        profit = math.round(atr * i_tp_atr / syminfo.mintick),
+        loss   = math.round(atr * i_sl_atr / syminfo.mintick))
+
+if short_sig and strategy.position_size == 0
+    strategy.entry("S", strategy.short)
+    strategy.exit("Sx", "S",
+        profit = math.round(atr * i_tp_atr / syminfo.mintick),
+        loss   = math.round(atr * i_sl_atr / syminfo.mintick))
+
+// === PLOTS ===
+p_mid = plot(bb_mid, "BB Mid", color.new(color.gray, 0))
+p_up  = plot(bb_up,  "BB Up",  color.new(color.red, 40))
+p_dn  = plot(bb_dn,  "BB Dn",  color.new(color.green, 40))
+fill(p_up, p_dn, color.new(color.blue, 95))
+bgcolor(long_sig ? color.new(color.green, 85) : short_sig ? color.new(color.red, 85) : na)

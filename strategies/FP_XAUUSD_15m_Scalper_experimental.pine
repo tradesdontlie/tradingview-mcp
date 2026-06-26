@@ -1,0 +1,149 @@
+//@version=6
+// FP XAUUSD 15m Scalper — Phase-1 in ~2 months, hard DD guard (never breach)
+strategy("FP XAUUSD 15m Scalper", overlay=true,
+     initial_capital   = 5000,
+     default_qty_type  = strategy.fixed,
+     default_qty_value = 1,
+     commission_type   = strategy.commission.percent,
+     commission_value  = 0.01,
+     slippage          = 3,
+     pyramiding        = 0,
+     margin_long       = 1,
+     margin_short      = 1,
+     process_orders_on_close = true)
+
+// ── Challenge Rules (with safety buffer) ─────────────────────────────────────
+acct_size      = input.float(5000, "Account Size USD")
+phase          = input.int(1,      "Phase (1=8% / 2=5%)", minval=1, maxval=2)
+risk_pct       = input.float(1.0,  "Risk Per Trade %",    minval=0.1, maxval=3.0)
+halt_dd_pct    = input.float(8.0,  "Halt at Total DD %",  minval=3, maxval=10) // buffer under 10%
+halt_daily_pct = input.float(4.0,  "Halt at Daily Loss %",minval=2, maxval=5)  // buffer under 5%
+stop_after_tgt = input.bool(true,  "Stop after Phase target hit")
+
+phase_target_usd = acct_size * (phase == 1 ? 0.08 : 0.05)
+halt_dd_usd      = acct_size * halt_dd_pct    / 100
+halt_daily_usd   = acct_size * halt_daily_pct / 100
+
+// ── Scalp Inputs ─────────────────────────────────────────────────────────────
+ema_micro = input.int(9,    "EMA Micro")
+ema_fast  = input.int(21,   "EMA Fast")
+ema_bias  = input.int(50,   "EMA Bias")
+ema_trend = input.int(200,  "EMA Trend")
+rsi_len   = input.int(14,   "RSI Length")
+atr_len   = input.int(14,   "ATR Length")
+sl_atr    = input.float(1.0,"SL ATR Mult", minval=0.5, maxval=3.0)
+rr        = input.float(2.0,"Risk:Reward", minval=1.0, maxval=4.0)
+use_trail = input.bool(false,"Trailing Stop")
+trail_atr = input.float(0.7,"Trail ATR Mult")
+sess_filt = input.bool(true,"Session Filter (London+NY)")
+
+// ── Indicators ───────────────────────────────────────────────────────────────
+e9   = ta.ema(close, ema_micro)
+e21  = ta.ema(close, ema_fast)
+e50  = ta.ema(close, ema_bias)
+e200 = ta.ema(close, ema_trend)
+rsi  = ta.rsi(close, rsi_len)
+atr  = ta.atr(atr_len)
+
+// ── Session (UTC) ────────────────────────────────────────────────────────────
+hh = hour(time, "UTC")
+active = (hh >= 7 and hh < 11) or (hh >= 13 and hh < 20)
+sess_ok = not sess_filt or active
+
+// ── Trend bias ───────────────────────────────────────────────────────────────
+bull = e21 > e50 and close > e200
+bear = e21 < e50 and close < e200
+
+// ── Risk Guard (hard, never breach) — based on REALIZED equity ───────────────
+var float peak_eq      = strategy.initial_capital
+var float day_start_eq = strategy.initial_capital
+var int   last_day     = na
+var bool  target_done  = false
+
+// Realized equity only (no floating P&L) so leverage can't false-trip the guard
+real_eq = strategy.initial_capital + strategy.netprofit
+d  = dayofmonth(time, "UTC")
+if na(last_day) or d != last_day
+    day_start_eq := real_eq
+    last_day     := d
+peak_eq := math.max(peak_eq, real_eq)
+
+daily_loss = math.max(0.0, day_start_eq - real_eq)
+total_dd   = math.max(0.0, peak_eq - real_eq)
+if strategy.netprofit >= phase_target_usd
+    target_done := true
+
+daily_ok  = daily_loss < halt_daily_usd
+dd_ok     = total_dd   < halt_dd_usd
+tgt_block = stop_after_tgt and target_done
+guard_ok  = daily_ok and dd_ok and not tgt_block
+can_trade = guard_ok and sess_ok and strategy.position_size == 0
+
+// ── Entries: breakout-continuation (the proven 1H edge, on 15m) ──────────────
+brk_len    = input.int(20, "Breakout Lookback")
+swing_hi   = ta.highest(high, brk_len)[1]
+swing_lo   = ta.lowest(low,  brk_len)[1]
+brk_up     = ta.crossover(close, swing_hi)
+brk_dn     = ta.crossunder(close, swing_lo)
+vol_ok     = volume > ta.sma(volume, 20) * 1.1
+long_sig  = bull and brk_up and vol_ok
+short_sig = bear and brk_dn and vol_ok
+
+// ── Sizing (risk-based, compounding) ─────────────────────────────────────────
+sl_pts = atr * sl_atr
+tp_pts = sl_pts * rr
+risk_d = real_eq * risk_pct / 100
+qty    = sl_pts > 0 ? math.max(0.01, risk_d / sl_pts) : 0.01
+
+// ── Execute ──────────────────────────────────────────────────────────────────
+if long_sig and can_trade
+    strategy.entry("L", strategy.long, qty=qty)
+    if use_trail
+        strategy.exit("LX", "L", stop=close-sl_pts, limit=close+tp_pts, trail_points=trail_atr*atr/syminfo.mintick, trail_offset=trail_atr*atr/syminfo.mintick)
+    else
+        strategy.exit("LX", "L", stop=close-sl_pts, limit=close+tp_pts)
+
+if short_sig and can_trade
+    strategy.entry("S", strategy.short, qty=qty)
+    if use_trail
+        strategy.exit("SX", "S", stop=close+sl_pts, limit=close-tp_pts, trail_points=trail_atr*atr/syminfo.mintick, trail_offset=trail_atr*atr/syminfo.mintick)
+    else
+        strategy.exit("SX", "S", stop=close+sl_pts, limit=close-tp_pts)
+
+// ── Plots ─────────────────────────────────────────────────────────────────────
+plot(e9,   "E9",   color=color.new(color.aqua,0))
+plot(e21,  "E21",  color=color.new(color.yellow,0))
+plot(e50,  "E50",  color=color.new(color.orange,0))
+plot(e200, "E200", color=color.new(color.red,0), linewidth=2)
+bgcolor(not guard_ok ? color.new(color.red,75) : na)
+plotshape(long_sig and can_trade,  style=shape.triangleup,   location=location.belowbar, color=color.lime, size=size.tiny)
+plotshape(short_sig and can_trade, style=shape.triangledown, location=location.abovebar, color=color.red,  size=size.tiny)
+
+// ── Dashboard ─────────────────────────────────────────────────────────────────
+var table t = table.new(position.top_right, 2, 10, bgcolor=color.new(color.black,60), border_width=1)
+if barstate.islast or barstate.islastconfirmedhistory
+    pnl_pct = strategy.netprofit/acct_size*100
+    wr = strategy.closedtrades>0 ? math.round(strategy.wintrades/strategy.closedtrades*100,1) : 0.0
+    pf = strategy.grossloss!=0 ? math.abs(math.round(strategy.grossprofit/strategy.grossloss,2)) : 0.0
+    maxdd_pct = math.round(strategy.max_drawdown/acct_size*100,2)
+    days = (time - time(timeframe.period))
+    table.cell(t,0,0,"FP Scalper P"+str.tostring(phase), text_color=color.white,bgcolor=color.new(color.blue,30),text_size=size.tiny)
+    table.cell(t,1,0,(pnl_pct>=0?"+":"")+str.tostring(math.round(pnl_pct,2))+"%", text_color=pnl_pct>=0?color.lime:color.red,bgcolor=color.new(color.blue,30),text_size=size.tiny)
+    table.cell(t,0,1,"Net P&L",text_color=color.silver,text_size=size.tiny)
+    table.cell(t,1,1,"$"+str.tostring(math.round(strategy.netprofit,0)),text_color=strategy.netprofit>=0?color.lime:color.red,text_size=size.tiny)
+    table.cell(t,0,2,"Phase Target",text_color=color.silver,text_size=size.tiny)
+    table.cell(t,1,2,"$"+str.tostring(phase_target_usd)+(target_done?" HIT":""),text_color=target_done?color.lime:color.white,text_size=size.tiny)
+    table.cell(t,0,3,"Max DD (real)",text_color=color.silver,text_size=size.tiny)
+    table.cell(t,1,3,str.tostring(maxdd_pct)+"%",text_color=maxdd_pct<8?color.lime:maxdd_pct<10?color.yellow:color.red,text_size=size.tiny)
+    table.cell(t,0,4,"DD Limit",text_color=color.silver,text_size=size.tiny)
+    table.cell(t,1,4,"Halt "+str.tostring(halt_dd_pct)+"% / Rule 10%",text_color=color.white,text_size=size.tiny)
+    table.cell(t,0,5,"Trades",text_color=color.silver,text_size=size.tiny)
+    table.cell(t,1,5,str.tostring(strategy.closedtrades),text_color=color.white,text_size=size.tiny)
+    table.cell(t,0,6,"Win Rate",text_color=color.silver,text_size=size.tiny)
+    table.cell(t,1,6,str.tostring(wr)+"%",text_color=color.white,text_size=size.tiny)
+    table.cell(t,0,7,"Profit Factor",text_color=color.silver,text_size=size.tiny)
+    table.cell(t,1,7,str.tostring(pf),text_color=pf>=1.5?color.lime:pf>=1.1?color.yellow:color.red,text_size=size.tiny)
+    table.cell(t,0,8,"Risk/Trade",text_color=color.silver,text_size=size.tiny)
+    table.cell(t,1,8,str.tostring(risk_pct)+"% | RR 1:"+str.tostring(rr),text_color=color.white,text_size=size.tiny)
+    table.cell(t,0,9,"Breached 10%?",text_color=color.silver,text_size=size.tiny)
+    table.cell(t,1,9,maxdd_pct>=10?"YES!":"NO - SAFE",text_color=maxdd_pct>=10?color.red:color.lime,text_size=size.tiny)

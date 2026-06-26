@@ -1,0 +1,111 @@
+//@version=5
+strategy("MC Scalp Sessions [XAUUSD]", overlay=true,
+  default_qty_type=strategy.percent_of_equity, default_qty_value=2,
+  commission_type=strategy.commission.percent, commission_value=0.07, slippage=3)
+
+// === CORE (same as v3 best settings) ===
+i_body_pct  = input.float(75.0, "Min Body % of Range", step=5.0)
+i_wick_pct  = input.float(15.0, "Max Wick % of Range", step=5.0)
+i_min_atr   = input.float(1.5,  "Min Size (ATR mult)", step=0.1)
+i_tp_pct    = input.float(100.0,"TP % of candle range", step=10.0)
+i_sl_pct    = input.float(60.0, "SL % of candle range", step=10.0)
+i_atr_len   = input.int(14, "ATR Length")
+
+// === TREND ===
+i_h1_ema    = input.bool(true, "H1 EMA Trend Filter")
+i_h1_ema_p  = input.int(50, "H1 EMA Period")
+i_dir       = input.int(0, "Direction 0=Both 1=Long 2=Short", minval=0, maxval=2)
+
+// === RSI FILTER (from best v3) ===
+i_rsi_on    = input.bool(true, "RSI Filter")
+i_rsi_bull  = input.float(55.0, "Long: RSI must be above", step=5.0)
+i_rsi_bear  = input.float(45.0, "Short: RSI must be below", step=5.0)
+
+// === EXIT (from best v3: BE+trail) ===
+i_exit_mode = input.int(2, "Exit 0=Fixed 1=Trail 2=BE+Trail", minval=0, maxval=2)
+i_trail_atr = input.float(1.0, "Trail ATR mult", step=0.1)
+i_be_pct    = input.float(80.0, "BE trigger % of TP", step=10.0)
+
+// === SESSION (configurable in UTC/GMT) ===
+i_sess_on   = input.bool(true, "Session Filter", group="Session (UTC/GMT)")
+// Session A: e.g. London open 08-10 UTC
+i_sa_on     = input.bool(true,  "Session A ON",    group="Session (UTC/GMT)")
+i_sa_start  = input.int(8,   "Session A Start (UTC hour)", minval=0, maxval=23, group="Session (UTC/GMT)")
+i_sa_end    = input.int(16,  "Session A End   (UTC hour)", minval=0, maxval=23, group="Session (UTC/GMT)")
+// Session B: e.g. NY open 13-16 UTC
+i_sb_on     = input.bool(false, "Session B ON",    group="Session (UTC/GMT)")
+i_sb_start  = input.int(13,  "Session B Start (UTC hour)", minval=0, maxval=23, group="Session (UTC/GMT)")
+i_sb_end    = input.int(22,  "Session B End   (UTC hour)", minval=0, maxval=23, group="Session (UTC/GMT)")
+
+// ─────────────────────────────────────────────────────
+atr      = ta.atr(i_atr_len)
+h1_ema_v = request.security(syminfo.tickerid, "60", ta.ema(close, i_h1_ema_p))
+h1_ema_p5= request.security(syminfo.tickerid, "60", ta.ema(close, i_h1_ema_p)[5])
+rsi_v    = ta.rsi(close, 14)
+[_, _, adx_v] = ta.dmi(14, 14)
+
+// Candle
+c_range  = high - low
+body     = math.abs(close - open)
+up_wick  = high - math.max(close, open)
+dn_wick  = math.min(close, open) - low
+body_p   = c_range > 0 ? body / c_range * 100 : 0
+up_wp    = c_range > 0 ? up_wick / c_range * 100 : 0
+dn_wp    = c_range > 0 ? dn_wick / c_range * 100 : 0
+is_bull  = close > open
+is_bear  = close < open
+
+mc_bull = is_bull and body_p >= i_body_pct and up_wp <= i_wick_pct and c_range >= atr * i_min_atr
+mc_bear = is_bear and body_p >= i_body_pct and dn_wp <= i_wick_pct and c_range >= atr * i_min_atr
+
+// Trend
+h1_up = not i_h1_ema or close > h1_ema_v
+h1_dn = not i_h1_ema or close < h1_ema_v
+
+// RSI
+rsi_l = not i_rsi_on or rsi_v[1] > i_rsi_bull
+rsi_s = not i_rsi_on or rsi_v[1] < i_rsi_bear
+
+// Session (UTC hours)
+h_utc    = hour(time, "UTC")
+in_sa    = i_sa_on and h_utc >= i_sa_start and h_utc < i_sa_end
+in_sb    = i_sb_on and h_utc >= i_sb_start and h_utc < i_sb_end
+in_sess  = not i_sess_on or in_sa or in_sb
+
+// Signals
+long_sig  = mc_bull[1] and h1_up and rsi_l and in_sess and (i_dir == 0 or i_dir == 1)
+short_sig = mc_bear[1] and h1_dn and rsi_s and in_sess and (i_dir == 0 or i_dir == 2)
+
+// TP/SL
+var float sig_range = na
+if long_sig or short_sig
+    sig_range := high[1] - low[1]
+
+tp_ticks    = math.max(math.round(sig_range * (i_tp_pct/100) / syminfo.mintick), 30)
+sl_ticks    = math.max(math.round(sig_range * (i_sl_pct/100) / syminfo.mintick), 15)
+trail_ticks = math.max(math.round(atr * i_trail_atr / syminfo.mintick), 20)
+be_ticks    = math.round(tp_ticks * (i_be_pct/100))
+
+if long_sig and strategy.position_size == 0
+    strategy.entry("L", strategy.long)
+    if i_exit_mode == 0
+        strategy.exit("Lx", "L", profit=tp_ticks, loss=sl_ticks)
+    else if i_exit_mode == 1
+        strategy.exit("Lx", "L", loss=sl_ticks, trail_offset=trail_ticks, trail_points=trail_ticks)
+    else
+        strategy.exit("Lx", "L", profit=tp_ticks, loss=sl_ticks, trail_offset=trail_ticks, trail_points=be_ticks)
+
+if short_sig and strategy.position_size == 0
+    strategy.entry("S", strategy.short)
+    if i_exit_mode == 0
+        strategy.exit("Sx", "S", profit=tp_ticks, loss=sl_ticks)
+    else if i_exit_mode == 1
+        strategy.exit("Sx", "S", loss=sl_ticks, trail_offset=trail_ticks, trail_points=trail_ticks)
+    else
+        strategy.exit("Sx", "S", profit=tp_ticks, loss=sl_ticks, trail_offset=trail_ticks, trail_points=be_ticks)
+
+plot(h1_ema_v, "H1 EMA", color.new(color.gray, 40))
+bgcolor(long_sig  ? color.new(color.lime,   75) : na)
+bgcolor(short_sig ? color.new(color.orange, 75) : na)
+plotshape(long_sig,  "L", shape.triangleup,   location.belowbar, color.green, size=size.tiny)
+plotshape(short_sig, "S", shape.triangledown, location.abovebar, color.red,   size=size.tiny)

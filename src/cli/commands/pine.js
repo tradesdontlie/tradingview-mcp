@@ -94,6 +94,25 @@ register('pine', {
       description: 'List saved Pine Scripts',
       handler: () => core.listScripts(),
     }],
+    ['save-as-new', {
+      description: 'Save current Monaco source as a new Pine Script via pine-facade API',
+      options: {
+        file: { type: 'string', short: 'f', description: 'Source file to save' },
+        name: { type: 'string', short: 'n', description: 'Script name' },
+      },
+      handler: async (opts) => {
+        let source;
+        if (opts.file) {
+          const { readFileSync } = await import('fs');
+          source = readFileSync(opts.file, 'utf-8');
+        } else {
+          const pineGet = await import('../../../src/core/pine.js');
+          const got = await pineGet.getSource();
+          source = got.source;
+        }
+        return core.saveAsNew({ source, name: opts.name || 'MC Scalper Sekolah Trading' });
+      },
+    }],
     ['errors', {
       description: 'Get Pine Script compilation errors',
       handler: () => core.getErrors(),
