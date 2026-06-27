@@ -1,5 +1,5 @@
 const REGIME_POLL_MS = 400;   // matches the server's 300ms CDP tick loop
-const ASIA_POLL_MS   = 15000;
+const ASIA_POLL_MS   = 10000;
 const NEWS_POLL_MS   = 30000;
 
 function fmt(n, dec = 2) {
@@ -95,15 +95,36 @@ function renderAsiaCard(key, idx) {
   if (!idx || idx.error) {
     return el('div', 'card idx-card', `<div class="card-title"><span class="symbol">${key}</span></div><div class="empty">${idx ? idx.error : 'no data'}</div>`);
   }
-  const dir = idx.changePct < 0 ? 'down' : 'up';
+  const dir = idx.changeFromPrevClosePct < 0 ? 'down' : 'up';
+  const dirOpen = idx.changeFromOpenPct < 0 ? 'down' : 'up';
+  const dirDD = idx.dropFromHighPct < 0 ? 'down' : 'up';
+  const statusBadge = idx.marketOpen
+    ? `<span class="badge badge-continue">LIVE</span>`
+    : `<span class="badge badge-wait">CLOSED</span>`;
+  const asOfTime = idx.asOf ? new Date(idx.asOf).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' }) : '--';
+
   const card = el('div', 'card idx-card' + (idx.bigDrop ? ' big-drop' : ''),
-    `<div class="card-title"><span class="symbol">${idx.name}</span><span class="meta">${key}</span></div>` +
-    `<div class="change ${dir}">${idx.changePct > 0 ? '+' : ''}${fmt(idx.changePct)}%</div>` +
+    `<div class="card-title"><span class="symbol">${idx.name}</span>${statusBadge}</div>` +
+    `<div class="change ${dir}">${idx.changeFromPrevClosePct > 0 ? '+' : ''}${fmt(idx.changeFromPrevClosePct)}%</div>` +
+    `<div class="reason" style="margin-top:-4px">vs prev close · as of ${asOfTime} local</div>` +
     `<div class="row"><span class="label">Price</span><span class="value">${fmt(idx.price)}</span></div>` +
-    `<div class="row"><span class="label">Prev close</span><span class="value">${fmt(idx.prevClose)}</span></div>` +
+    `<div class="row"><span class="label">From open</span><span class="value ${dirOpen}">${idx.changeFromOpenPct > 0 ? '+' : ''}${fmt(idx.changeFromOpenPct)}%</span></div>` +
+    `<div class="row"><span class="label">From session high</span><span class="value ${dirDD}">${idx.dropFromHighPct > 0 ? '+' : ''}${fmt(idx.dropFromHighPct)}%</span></div>` +
+    `<div class="row"><span class="label">Session range</span><span class="value">${fmt(idx.sessionLow)} – ${fmt(idx.sessionHigh)}</span></div>` +
     (idx.bigDrop ? `<div class="alert">⚠ Big drop — possible MNQ spillover risk</div>` : '')
   );
   return card;
+}
+
+function renderImpactCard(impact) {
+  if (!impact) return '';
+  const levelClass = impact.level === 'HIGH' ? 'badge-fade' : impact.level === 'MEDIUM' ? 'badge-mixed' : 'badge-wait';
+  return `
+    <div class="card-title"><span class="symbol">Asia → MNQ spillover risk</span></div>
+    <div class="row"><span class="label">Risk level</span><span class="badge ${levelClass}">${impact.level}</span></div>
+    <div class="row"><span class="label">Indices showing big drop</span><span class="value">${impact.redCount}/3</span></div>
+    <div class="row"><span class="label">Combined drop score</span><span class="value">${fmt(impact.score)}</span></div>
+  `;
 }
 
 async function pollAsia() {
@@ -112,6 +133,11 @@ async function pollAsia() {
     const data = await res.json();
     const container = document.getElementById('asia-cards');
     container.innerHTML = '';
+
+    if (data._impact) {
+      const impactCard = el('div', 'card' + (data._impact.level === 'HIGH' ? ' big-drop' : ''), renderImpactCard(data._impact));
+      container.appendChild(impactCard);
+    }
     for (const key of Object.keys(data)) {
       if (key.startsWith('_')) continue;
       container.appendChild(renderAsiaCard(key, data[key]));

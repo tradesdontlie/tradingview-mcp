@@ -1,7 +1,9 @@
 /**
- * Asian index cache (Hang Seng, Nikkei 225, KOSPI), sourced from yfinance.
- * A large overnight drop in any of these during Asia hours can spill over
- * into MNQ/ES before NY open — refreshed periodically in the background.
+ * Asian index cache (Hang Seng, Nikkei 225, KOSPI), sourced from yfinance
+ * intraday 1-minute bars — not daily candles. A sharp drop or reversal
+ * *during* the Asian session is what can spill over into MNQ/ES before NY
+ * open, so we track change-from-open and drawdown-from-session-high, not
+ * just yesterday's close-to-close move. Refreshed periodically in the background.
  */
 import { spawn } from 'node:child_process';
 import path from 'node:path';
@@ -11,8 +13,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT = path.resolve(__dirname, '../../strategies/asia_indices.py');
 const PYTHON_BIN = process.env.PYTHON_BIN || 'python3';
 
-const REFRESH_INTERVAL_MS = 60 * 1000; // 1 minute — close to real-time without hammering yfinance
-const DROP_THRESHOLD = -1.5;
+const REFRESH_INTERVAL_MS = 30 * 1000; // 30s — yfinance intraday bars themselves lag ~1min on the free tier
+const DROP_THRESHOLD = -1.0;
 
 let cache = {};
 let lastRefresh = 0;

@@ -98,7 +98,7 @@ app.get('/api/regime', (req, res) => {
 });
 
 // Proactive background refresh so data is fresh even if the dashboard tab is closed
-setInterval(() => { getAsiaIndices().catch(() => {}); }, 60 * 1000);
+setInterval(() => { getAsiaIndices().catch(() => {}); }, 30 * 1000);
 setInterval(() => { getNews().catch(() => {}); }, 2 * 60 * 1000);
 getAsiaIndices().catch(() => {});
 getNews().catch(() => {});
