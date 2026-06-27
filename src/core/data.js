@@ -429,6 +429,220 @@ export async function getPineTables({ study_filter } = {}) {
   return { success: true, study_count: studies.length, studies };
 }
 
+/**
+ * Single-call snapshot: quote + chart state + study values + pine graphics + ohlcv summary.
+ * Replaces 7 sequential tool calls with one CDP round-trip.
+ */
+export async function getSnapshot({ study_filter, ohlcv_count } = {}) {
+  const filter = study_filter || '';
+  const bars_limit = Math.min(ohlcv_count || 20, MAX_OHLCV_BARS);
+
+  const data = await evaluate(`
+    (function() {
+      var FILTER = ${safeString(filter)};
+      var BARS_LIMIT = ${bars_limit};
+      var api = window.TradingViewApi._activeChartWidgetWV.value();
+      var chart = api._chartWidget;
+      var model = chart.model();
+      var sources = model.model().dataSources();
+      var bars = model.mainSeries().bars();
+
+      // ── 1. State ──
+      var state = { symbol: null, resolution: null, chartType: null, studies: [] };
+      try { state.symbol = api.symbol(); } catch(e) {}
+      try { state.resolution = api.resolution(); } catch(e) {}
+      try { state.chartType = api.chartType(); } catch(e) {}
+      try {
+        var all = api.getAllStudies();
+        state.studies = all.map(function(s) { return { id: s.id, name: s.name || s.title || 'unknown' }; });
+      } catch(e) {}
+
+      // ── 2. Quote ──
+      var quote = { symbol: state.symbol };
+      try {
+        if (bars && typeof bars.lastIndex === 'function') {
+          var last = bars.valueAt(bars.lastIndex());
+          if (last) { quote.time = last[0]; quote.open = last[1]; quote.high = last[2]; quote.low = last[3]; quote.close = last[4]; quote.last = last[4]; quote.volume = last[5] || 0; }
+        }
+      } catch(e) {}
+
+      // ── 3. OHLCV summary ──
+      var ohlcv = null;
+      try {
+        if (bars && typeof bars.lastIndex === 'function') {
+          var end = bars.lastIndex();
+          var start = Math.max(bars.firstIndex(), end - BARS_LIMIT + 1);
+          var barsArr = [];
+          for (var bi = start; bi <= end; bi++) {
+            var bv = bars.valueAt(bi);
+            if (bv) barsArr.push({ time: bv[0], open: bv[1], high: bv[2], low: bv[3], close: bv[4], volume: bv[5] || 0 });
+          }
+          if (barsArr.length > 0) {
+            var maxH = barsArr[0].high, minL = barsArr[0].low, totalVol = 0;
+            for (var oi = 0; oi < barsArr.length; oi++) { if (barsArr[oi].high > maxH) maxH = barsArr[oi].high; if (barsArr[oi].low < minL) minL = barsArr[oi].low; totalVol += barsArr[oi].volume; }
+            var first = barsArr[0], lastBar = barsArr[barsArr.length - 1];
+            ohlcv = {
+              bar_count: barsArr.length,
+              period: { from: first.time, to: lastBar.time },
+              open: first.open, close: lastBar.close,
+              high: Math.round(maxH * 100) / 100, low: Math.round(minL * 100) / 100,
+              range: Math.round((maxH - minL) * 100) / 100,
+              change: Math.round((lastBar.close - first.open) * 100) / 100,
+              change_pct: Math.round(((lastBar.close - first.open) / first.open) * 10000) / 100 + '%',
+              avg_volume: Math.round(totalVol / barsArr.length),
+              last_5_bars: barsArr.slice(-5),
+            };
+          }
+        }
+      } catch(e) {}
+
+      // ── 4. Study values ──
+      var studyValues = [];
+      try {
+        for (var si = 0; si < sources.length; si++) {
+          var s = sources[si];
+          if (!s.metaInfo) continue;
+          try {
+            var meta = s.metaInfo();
+            var name = meta.description || meta.shortDescription || '';
+            if (!name) continue;
+            var values = {};
+            try {
+              var dwv = s.dataWindowView();
+              if (dwv) {
+                var items = dwv.items();
+                if (items) { for (var ii = 0; ii < items.length; ii++) { var item = items[ii]; if (item._value && item._value !== '∅' && item._title) values[item._title] = item._value; } }
+              }
+            } catch(e) {}
+            if (Object.keys(values).length > 0) studyValues.push({ name: name, values: values });
+          } catch(e) {}
+        }
+      } catch(e) {}
+
+      // ── 5. Pine graphics (lines, labels, tables, boxes) helper ──
+      function getGraphics(collName, mapKey) {
+        var results = [];
+        try {
+          for (var si = 0; si < sources.length; si++) {
+            var s = sources[si];
+            if (!s.metaInfo) continue;
+            try {
+              var meta = s.metaInfo();
+              var name = meta.description || meta.shortDescription || '';
+              if (!name) continue;
+              if (FILTER && name.indexOf(FILTER) === -1) continue;
+              var g = s._graphics;
+              if (!g || !g._primitivesCollection) continue;
+              var pc = g._primitivesCollection;
+              var items = [];
+              try {
+                var outer = pc[collName];
+                if (outer) {
+                  var inner = outer.get(mapKey);
+                  if (inner) {
+                    var coll = inner.get(false);
+                    if (coll && coll._primitivesDataById && coll._primitivesDataById.size > 0) {
+                      coll._primitivesDataById.forEach(function(v, id) { items.push({ id: id, raw: v }); });
+                    }
+                  }
+                }
+              } catch(e) {}
+              if (items.length > 0) results.push({ name: name, count: items.length, items: items });
+            } catch(e) {}
+          }
+        } catch(e) {}
+        return results;
+      }
+
+      // Lines
+      var linesRaw = getGraphics('dwglines', 'lines');
+      var pineLines = linesRaw.map(function(s) {
+        var hLevels = [], seen = {};
+        for (var i = 0; i < s.items.length; i++) {
+          var v = s.items[i].raw;
+          var y1 = v.y1 != null ? Math.round(v.y1 * 100) / 100 : null;
+          if (y1 != null && v.y1 === v.y2 && !seen[y1]) { hLevels.push(y1); seen[y1] = true; }
+        }
+        hLevels.sort(function(a, b) { return b - a; });
+        return { name: s.name, total_lines: s.count, horizontal_levels: hLevels };
+      });
+
+      // Labels
+      var labelsRaw = getGraphics('dwglabels', 'labels');
+      var pineLabels = labelsRaw.map(function(s) {
+        var labels = s.items.map(function(item) {
+          var v = item.raw;
+          return { text: v.t || '', price: v.y != null ? Math.round(v.y * 100) / 100 : null };
+        }).filter(function(l) { return l.text || l.price != null; });
+        if (labels.length > 50) labels = labels.slice(-50);
+        return { name: s.name, total_labels: s.count, showing: labels.length, labels: labels };
+      });
+
+      // Tables
+      var tablesRaw = getGraphics('dwgtablecells', 'tableCells');
+      var pineTables = tablesRaw.map(function(s) {
+        var tables = {};
+        for (var i = 0; i < s.items.length; i++) {
+          var v = s.items[i].raw;
+          var tid = v.tid || 0;
+          if (!tables[tid]) tables[tid] = {};
+          if (!tables[tid][v.row]) tables[tid][v.row] = {};
+          tables[tid][v.row][v.col] = v.t || '';
+        }
+        var tableList = Object.keys(tables).map(function(tid) {
+          var rows = tables[tid];
+          var rowNums = Object.keys(rows).map(Number).sort(function(a,b){return a-b;});
+          var formatted = rowNums.map(function(rn) {
+            var cols = rows[rn];
+            var colNums = Object.keys(cols).map(Number).sort(function(a,b){return a-b;});
+            return colNums.map(function(cn){return cols[cn];}).filter(Boolean).join(' | ');
+          }).filter(Boolean);
+          return { rows: formatted };
+        });
+        return { name: s.name, tables: tableList };
+      });
+
+      // Boxes
+      var boxesRaw = getGraphics('dwgboxes', 'boxes');
+      var pineBoxes = boxesRaw.map(function(s) {
+        var zones = [], seen = {};
+        for (var i = 0; i < s.items.length; i++) {
+          var v = s.items[i].raw;
+          var high = v.y1 != null && v.y2 != null ? Math.round(Math.max(v.y1, v.y2) * 100) / 100 : null;
+          var low = v.y1 != null && v.y2 != null ? Math.round(Math.min(v.y1, v.y2) * 100) / 100 : null;
+          if (high != null && low != null) { var key = high + ':' + low; if (!seen[key]) { zones.push({ high: high, low: low }); seen[key] = true; } }
+        }
+        zones.sort(function(a, b) { return b.high - a.high; });
+        return { name: s.name, total_boxes: s.count, zones: zones };
+      });
+
+      return {
+        state: state,
+        quote: quote,
+        ohlcv: ohlcv,
+        study_values: studyValues,
+        pine_lines: pineLines,
+        pine_labels: pineLabels,
+        pine_tables: pineTables,
+        pine_boxes: pineBoxes,
+      };
+    })()
+  `);
+
+  return {
+    success: true,
+    _note: 'Single-call snapshot. Use individual tools only when you need data not included here.',
+    state: data?.state,
+    quote: data?.quote ? { success: true, ...data.quote } : null,
+    ohlcv: data?.ohlcv ? { success: true, ...data.ohlcv } : null,
+    study_values: { success: true, study_count: data?.study_values?.length || 0, studies: data?.study_values || [] },
+    pine_lines: { success: true, study_count: data?.pine_lines?.length || 0, studies: data?.pine_lines || [] },
+    pine_labels: { success: true, study_count: data?.pine_labels?.length || 0, studies: data?.pine_labels || [] },
+    pine_tables: { success: true, study_count: data?.pine_tables?.length || 0, studies: data?.pine_tables || [] },
+    pine_boxes: { success: true, study_count: data?.pine_boxes?.length || 0, studies: data?.pine_boxes || [] },
+  };
+}
+
 export async function getPineBoxes({ study_filter, verbose } = {}) {
   const filter = study_filter || '';
   const raw = await evaluate(buildGraphicsJS('dwgboxes', 'boxes', filter));

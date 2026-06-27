@@ -83,4 +83,17 @@ export function registerDataTools(server) {
     try { return jsonResult(await core.getStudyValues()); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
+
+  server.tool(
+    'chart_snapshot',
+    'FASTEST WAY to analyze a chart. Single CDP call that returns everything at once: chart state (symbol/timeframe/studies), real-time quote, OHLCV summary, all indicator values, and all Pine Script graphics (lines, labels, tables, boxes). Use this INSTEAD of calling chart_get_state + quote_get + data_get_study_values + data_get_pine_* separately. Reduces ~7 sequential tool calls to 1.',
+    {
+      study_filter: z.string().optional().describe('Filter pine graphics to this study name substring. Omit for all studies.'),
+      ohlcv_count: z.coerce.number().optional().describe('Number of recent bars to summarize (default 20, max 500)'),
+    },
+    async ({ study_filter, ohlcv_count }) => {
+      try { return jsonResult(await core.getSnapshot({ study_filter, ohlcv_count })); }
+      catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+    }
+  );
 }

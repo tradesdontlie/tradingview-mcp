@@ -1,10 +1,13 @@
 # TradingView MCP — Claude Instructions
 
-68 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
+79 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
 
 ## Decision Tree — Which Tool When
 
-### "What's on my chart right now?"
+### START HERE — any chart read/analysis task
+- `chart_snapshot` → **one call returns everything**: state (symbol/timeframe/studies) + quote + OHLCV summary + all indicator values + all pine graphics (lines/labels/tables/boxes). Replaces 7 sequential tool calls. Always try this first.
+
+### "What's on my chart right now?" (fallback — only if chart_snapshot is insufficient)
 1. `chart_get_state` → symbol, timeframe, chart type, list of all indicators with entity IDs
 2. `data_get_study_values` → current numeric values from all visible indicators (RSI, MACD, BBands, EMAs, etc.)
 3. `quote_get` → real-time price, OHLC, volume for current symbol
@@ -25,13 +28,8 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 - `quote_get` → single latest price snapshot
 
 ### "Analyze my chart" (full report workflow)
-1. `quote_get` → current price
-2. `data_get_study_values` → all indicator readings
-3. `data_get_pine_lines` → key price levels from custom indicators
-4. `data_get_pine_labels` → labeled levels with context (e.g., "Settlement", "ASN O/U")
-5. `data_get_pine_tables` → session stats, analytics tables
-6. `data_get_ohlcv` with `summary: true` → price action summary
-7. `capture_screenshot` → visual confirmation
+1. `chart_snapshot` → **single call** — returns state + quote + OHLCV + study values + all pine graphics
+2. `capture_screenshot` → visual confirmation (optional)
 
 ### "Change the chart"
 - `chart_set_symbol` → switch ticker (e.g., "AAPL", "ES1!", "NYMEX:CL1!")
