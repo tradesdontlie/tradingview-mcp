@@ -277,9 +277,27 @@ describe('stop()', () => {
     assert.equal(stopCall, undefined, 'stopReplay not called');
   });
 
-  it('does not call hideReplayToolbar', () => {
+  // NOTE (#10 complete-dependency-injection-and-tests): this assertion was
+  // originally "hideReplayToolbar must not appear anywhere", but a later
+  // committed change to replay.js intentionally added a GUARDED, best-effort
+  // hideReplayToolbar() call after stopReplay() to fully restore realtime UI
+  // chrome ("Guarded: hideReplayToolbar may be absent on some TV builds.").
+  // Wiring this orphaned suite into the npm scripts surfaced the stale
+  // assertion. The current, deliberate contract is: stopReplay() is the
+  // primary action and any hideReplayToolbar() call MUST be wrapped in a
+  // try/catch so it can never break stop(). We assert that contract instead
+  // of forbidding the call outright.
+  it('keeps any hideReplayToolbar() call guarded in a try/catch', () => {
     const source = readFileSync(new URL('../src/core/replay.js', import.meta.url), 'utf8');
-    assert.ok(!source.includes('hideReplayToolbar'), 'hideReplayToolbar must not appear anywhere');
+    if (source.includes('hideReplayToolbar')) {
+      assert.match(
+        source,
+        /try\s*\{\s*await evaluate\(`\$\{rp\}\.hideReplayToolbar\(\)`\);?\s*\}\s*catch\s*\{?\s*\}?/,
+        'hideReplayToolbar() must be a guarded best-effort call (try/catch)',
+      );
+    }
+    // stopReplay() remains the primary stop action regardless.
+    assert.ok(source.includes('stopReplay'), 'stopReplay() must be invoked by stop()');
   });
 });
 

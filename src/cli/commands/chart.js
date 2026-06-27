@@ -1,6 +1,7 @@
 import { register } from '../router.js';
 import * as core from '../../core/chart.js';
 import * as healthCore from '../../core/health.js';
+import { requireFinite } from '../../connection.js';
 
 register('state', {
   description: 'Get current chart state (symbol, TF, studies)',
@@ -58,7 +59,12 @@ register('range', {
     to: { type: 'string', description: 'End timestamp (unix seconds)' },
   },
   handler: async (opts) => {
-    if (opts.from && opts.to) return core.setVisibleRange({ from: Number(opts.from), to: Number(opts.to) });
+    if (opts.from !== undefined || opts.to !== undefined) {
+      if (opts.from === undefined || opts.to === undefined) {
+        throw new Error('Both --from and --to are required to set the range.');
+      }
+      return core.setVisibleRange({ from: requireFinite(opts.from, 'from'), to: requireFinite(opts.to, 'to') });
+    }
     return core.getVisibleRange();
   },
 });

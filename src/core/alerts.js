@@ -1,9 +1,23 @@
 /**
  * Core alert logic.
  */
-import { evaluate, evaluateAsync, getClient, safeString } from '../connection.js';
+import { evaluate as _evaluate, evaluateAsync as _evaluateAsync, getClient as _getClient, safeString } from '../connection.js';
 
-export async function create({ condition, price, message }) {
+function _resolve(deps) {
+  return {
+    evaluate: deps?.evaluate || _evaluate,
+    evaluateAsync: deps?.evaluateAsync || _evaluateAsync,
+    getClient: deps?.getClient || _getClient,
+  };
+}
+
+// Wait for the Create Alert dialog to mount before populating price/message fields.
+const ALERT_DIALOG_OPEN_MS = 1000;
+// Wait after filling fields before clicking Create, so input events settle.
+const ALERT_FIELDS_SETTLE_MS = 500;
+
+export async function create({ condition, price, message, _deps }) {
+  const { evaluate, getClient } = _resolve(_deps);
   const opened = await evaluate(`
     (function() {
       var btn = document.querySelector('[aria-label="Create Alert"]')
@@ -19,7 +33,7 @@ export async function create({ condition, price, message }) {
     await client.Input.dispatchKeyEvent({ type: 'keyUp', key: 'a', code: 'KeyA' });
   }
 
-  await new Promise(r => setTimeout(r, 1000));
+  await new Promise(r => setTimeout(r, ALERT_DIALOG_OPEN_MS));
 
   const priceSet = await evaluate(`
     (function() {
@@ -58,7 +72,7 @@ export async function create({ condition, price, message }) {
     `);
   }
 
-  await new Promise(r => setTimeout(r, 500));
+  await new Promise(r => setTimeout(r, ALERT_FIELDS_SETTLE_MS));
   const created = await evaluate(`
     (function() {
       var btns = document.querySelectorAll('button[data-name="submit"], button');
@@ -69,10 +83,12 @@ export async function create({ condition, price, message }) {
     })()
   `);
 
-  return { success: !!created, price, condition, message: message || '(none)', price_set: !!priceSet, source: 'dom_fallback' };
+  if (!created) throw new Error('Could not find Create button in alert dialog');
+  return { success: true, price, condition, message: message || '(none)', price_set: !!priceSet, source: 'dom_fallback' };
 }
 
-export async function list() {
+export async function list({ _deps } = {}) {
+  const { evaluateAsync } = _resolve(_deps);
   // Use pricealerts REST API — returns structured data with alert_id, symbol, price, conditions
   const result = await evaluateAsync(`
     fetch('https://pricealerts.tradingview.com/list_alerts', { credentials: 'include' })
@@ -100,10 +116,12 @@ export async function list() {
       })
       .catch(function(e) { return { alerts: [], error: e.message }; })
   `);
-  return { success: true, alert_count: result?.alerts?.length || 0, source: 'internal_api', alerts: result?.alerts || [], error: result?.error };
+  if (result?.error) throw new Error(result.error);
+  return { success: true, alert_count: result?.alerts?.length || 0, source: 'internal_api', alerts: result?.alerts || [] };
 }
 
-export async function deleteAlerts({ delete_all }) {
+export async function deleteAlerts({ delete_all = false, _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
   if (delete_all) {
     const result = await evaluate(`
       (function() {
@@ -119,5 +137,5 @@ export async function deleteAlerts({ delete_all }) {
     `);
     return { success: true, note: 'Alert deletion requires manual confirmation in the context menu.', context_menu_opened: result?.context_menu_opened || false, source: 'dom_fallback' };
   }
-  throw new Error('Individual alert deletion not yet supported. Use delete_all: true.');
+  throw new Error('Individual alert deletion not supported; pass delete_all:true');
 }

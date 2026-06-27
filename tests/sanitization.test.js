@@ -5,7 +5,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { safeString, requireFinite } from '../src/connection.js';
 import { setSymbol, setTimeframe, setType, manageIndicator, setVisibleRange } from '../src/core/chart.js';
 import { drawShape } from '../src/core/drawing.js';
@@ -287,7 +288,12 @@ describe('drawing.js — sanitized evaluate calls', () => {
 // ── Source-level audit ───────────────────────────────────────────────────
 
 describe('source audit — no unsafe interpolation patterns', () => {
-  const CORE_DIR = new URL('../src/core/', import.meta.url).pathname;
+  // Derive the core dir from this test file's real filesystem path. Using
+  // `new URL(...).pathname` yields a leading-slash, percent-encoded path
+  // (e.g. "/C:/...") that breaks readdirSync/join on Windows. fileURLToPath
+  // gives a native path on every platform.
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const CORE_DIR = join(__dirname, '..', 'src', 'core');
   const coreFiles = readdirSync(CORE_DIR).filter(f => f.endsWith('.js'));
 
   for (const file of coreFiles) {
@@ -316,13 +322,22 @@ describe('source audit — no unsafe interpolation patterns', () => {
 // ── Path traversal prevention ────────────────────────────────────────────
 
 describe('path traversal prevention', () => {
-  it('capture.js strips path separators from filename', () => {
-    const source = readFileSync(new URL('../src/core/capture.js', import.meta.url), 'utf8');
-    assert.ok(source.includes(".replace(/[\\/\\\\]/g, '_')"));
+  // capture.js now sanitizes filenames via safeScreenshotName(), which reduces
+  // the name to a basename() and then restricts it to an [A-Za-z0-9._-] allowlist
+  // (a strictly stronger guard than the old `.replace(/[\/\\]/g, '_')`). Assert
+  // the live behavior of that helper rather than an outdated source pattern.
+  it('capture.js safeScreenshotName strips path separators and traversal', async () => {
+    const { safeScreenshotName } = await import('../src/core/capture.js');
+    assert.ok(!safeScreenshotName('..\\..\\etc\\hosts').includes('\\'), 'no backslashes survive');
+    assert.ok(!safeScreenshotName('../../etc/passwd').includes('/'), 'no forward slashes survive');
+    assert.ok(!/[\\/]/.test(safeScreenshotName('a/b\\c')), 'mixed separators stripped');
+    assert.equal(safeScreenshotName('...'), 'screenshot', 'leading-dot-only name falls back');
   });
 
-  it('batch.js strips path separators from filename', () => {
-    const source = readFileSync(new URL('../src/core/batch.js', import.meta.url), 'utf8');
-    assert.ok(source.includes(".replace(/[\\/\\\\]/g, '_')"));
+  it('batch.js reuses safeScreenshotName for filenames', () => {
+    const __dirname = dirname(fileURLToPath(import.meta.url));
+    const source = readFileSync(join(__dirname, '..', 'src', 'core', 'batch.js'), 'utf8');
+    assert.ok(source.includes('safeScreenshotName('),
+      'batch.js must route screenshot filenames through safeScreenshotName()');
   });
 });

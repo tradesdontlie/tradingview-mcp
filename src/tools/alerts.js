@@ -4,7 +4,7 @@ import * as core from '../core/alerts.js';
 
 export function registerAlertTools(server) {
   server.tool('alert_create', 'Create a price alert via the TradingView alert dialog', {
-    condition: z.string().describe('Alert condition (e.g., "crossing", "greater_than", "less_than")'),
+    condition: z.enum(['crossing', 'greater_than', 'less_than']).describe('Alert condition (e.g., "crossing", "greater_than", "less_than")'),
     price: z.coerce.number().describe('Price level for the alert'),
     message: z.string().optional().describe('Alert message'),
   }, async ({ condition, price, message }) => {

@@ -59,6 +59,8 @@ Gives your AI assistant eyes and hands on your own chart:
 - **Pine Script development** — write, inject, compile, debug, and iterate on scripts with AI assistance
 - **Chart navigation** — change symbols, timeframes, zoom to dates, add/remove indicators
 - **Visual analysis** — read your chart's indicator values, price levels, and annotations
+- **Backtest readout** — pull Strategy Tester metrics, trade lists, and equity curves
+- **Order-book depth** — read DOM (Depth of Market) snapshots
 - **Draw on charts** — trend lines, horizontal lines, rectangles, text annotations
 - **Manage alerts** — create, list, and delete price alerts
 - **Replay practice** — step through historical bars, practice entries/exits
@@ -68,15 +70,56 @@ Gives your AI assistant eyes and hands on your own chart:
 - **CLI access** — every MCP tool is also a `tv` CLI command, pipe-friendly with JSON output
 - **Launch TradingView** — auto-detect and launch with debug mode from any platform
 
-## Install with Claude Code
+## Install via npm (recommended)
 
-Paste this into Claude Code and it will handle the rest:
+The server is published to npm — you don't need to clone anything. Claude launches it on
+demand with `npx`.
 
-> Install the TradingView MCP server. Clone https://github.com/tradesdontlie/tradingview-mcp.git, run npm install, add it to my MCP config at ~/.claude/.mcp.json, and launch TradingView with the debug port. Then verify the connection with tv_health_check.
+**One-liner (Claude Code):**
 
-Or follow the manual steps below.
+```bash
+claude mcp add tradingview -- npx -y @specialagentk/tradingview-mcp
+```
 
-## Quick Start
+**Or add it to your MCP config manually** (`~/.claude/.mcp.json` or project `.mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "tradingview": {
+      "command": "npx",
+      "args": ["-y", "@specialagentk/tradingview-mcp"]
+    }
+  }
+}
+```
+
+That's it — restart Claude and ask *"Use tv_health_check to verify TradingView is connected."*
+
+You still need TradingView Desktop running with the debug port (see [Launch TradingView with
+CDP](#2-launch-tradingview-with-cdp) below, or use the `tv_launch` tool). The package has a single
+entrypoint — `npx -y @specialagentk/tradingview-mcp` runs the MCP server, and
+`npx -y @specialagentk/tradingview-mcp cli <command>` exposes every tool as a pipe-friendly command.
+
+**If `npx` can't launch it** — some Node runners (e.g. Volta on Windows) don't resolve package bins
+on the fly, and offline/proxied setups can't fetch on demand — install it once and point Claude at
+the installed command:
+
+```bash
+npm i -g @specialagentk/tradingview-mcp
+```
+
+```bash
+# macOS / Linux
+claude mcp add tradingview -- tradingview-mcp
+
+# Windows (run from PowerShell, not git-bash, so the /c isn't path-mangled)
+claude mcp add tradingview -- cmd /c tradingview-mcp
+```
+
+## Quick Start (from source)
+
+Prefer to run from a clone (for development or to pin a local version)?
 
 ### 1. Install
 
@@ -136,15 +179,22 @@ Ask Claude: *"Use tv_health_check to verify TradingView is connected"*
 
 ## CLI
 
-Every MCP tool is also accessible as a `tv` CLI command. All output is JSON for piping with `jq`.
+Every MCP tool is also reachable through the package's CLI. All output is JSON for piping with `jq`.
 
 ```bash
-# Install globally (optional)
-npm link
+# Installed from npm
+tradingview-mcp cli <command>
 
-# Or run directly
-node src/cli/index.js <command>
+# From a source clone
+node src/bin.js cli <command>      # or: npm run tv -- <command>
 ```
+
+> **Migration (2.x):** the CLI is now a subcommand of the single `tradingview-mcp` entrypoint. The
+> separate `tradingview-mcp-cli` bin was removed — replace `tradingview-mcp-cli <command>` with
+> `tradingview-mcp cli <command>`.
+
+In the examples below, **`tv`** is shorthand for whichever entrypoint you use — `tradingview-mcp cli`
+(installed) or `node src/bin.js cli` (from source).
 
 ### Quick Examples
 
@@ -166,7 +216,7 @@ tv stream quote | jq '.close'      # monitor price changes
 tv status / launch / state / symbol / timeframe / type / info / search
 tv quote / ohlcv / values
 tv data lines/labels/tables/boxes/strategy/trades/equity/depth/indicator
-tv pine get/set/compile/analyze/check/save/new/open/list/errors/console
+tv pine get/set/compile/raw-compile/analyze/check/save/new/open/list/errors/console
 tv draw shape/list/get/remove/clear
 tv alert list/create/delete
 tv watchlist get/add
@@ -217,6 +267,8 @@ Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project
 
 ## Tool Reference (78 MCP tools)
 
+The 78 tools are registered across 14 modules. Every tool below is live in the current build.
+
 ### Chart Reading
 
 | Tool | When to use | Output size |
@@ -225,6 +277,8 @@ Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project
 | `data_get_study_values` | Read current RSI, MACD, BB, EMA values from all indicators | ~500B |
 | `quote_get` | Get latest price, OHLC, volume | ~200B |
 | `data_get_ohlcv` | Get price bars. **Use `summary: true`** for compact stats | 500B (summary) / 8KB (100 bars) |
+| `data_get_indicator` | Get a study's input values/config (skip for encrypted commercial indicators) | varies |
+| `depth_get` | Read order book / DOM (Depth of Market) | ~1KB |
 
 ### Custom Indicator Data (Pine Drawings)
 
@@ -239,6 +293,16 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 
 **Always use `study_filter`** to target a specific indicator: `study_filter: "Profiler"`.
 
+### Strategy Tester
+
+Read backtest output from a strategy script loaded on the chart.
+
+| Tool | When to use |
+|------|------------|
+| `data_get_strategy_results` | Performance metrics (net profit, win rate, drawdown, profit factor) |
+| `data_get_trades` | Trade list from the Strategy Tester (capped at 20 per request) |
+| `data_get_equity` | Equity-curve data points |
+
 ### Chart Control
 
 | Tool | What it does |
@@ -248,7 +312,7 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 | `chart_set_type` | Change style (Candles, HeikinAshi, Line, Area, Renko) |
 | `chart_manage_indicator` | Add/remove indicators. **Use full names**: "Relative Strength Index" not "RSI" |
 | `chart_scroll_to_date` | Jump to a date (ISO: "2025-01-15") |
-| `chart_set_visible_range` | Zoom to exact range (unix timestamps) |
+| `chart_get_visible_range` / `chart_set_visible_range` | Read / zoom to exact range (unix timestamps) |
 | `symbol_info` / `symbol_search` | Symbol metadata and search |
 | `indicator_set_inputs` / `indicator_toggle_visibility` | Change indicator settings, show/hide |
 
@@ -274,7 +338,8 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 | Tool | Step |
 |------|------|
 | `pine_set_source` | 1. Inject code into editor |
-| `pine_smart_compile` | 2. Compile with auto-detection + error check |
+| `pine_smart_compile` | 2. Compile with auto-detection + error check (preferred) |
+| `pine_compile` | Raw compile/add-to-chart (no auto-detection or error summary) |
 | `pine_get_errors` | 3. Read compilation errors if any |
 | `pine_get_console` | 4. Read log.info() output |
 | `pine_save` | 5. Save to TradingView cloud |
@@ -295,19 +360,49 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 | `replay_status` | Check position, P&L, date |
 | `replay_stop` | Return to realtime |
 
-### Drawing, Alerts, UI Automation
+### Drawing & Alerts
 
 | Tool | What it does |
 |------|-------------|
 | `draw_shape` | Draw horizontal_line, trend_line, rectangle, text |
-| `draw_list` / `draw_remove_one` / `draw_clear` | Manage drawings |
+| `draw_list` / `draw_remove_one` / `draw_clear` | List, remove one, or clear all drawings |
+| `draw_get_properties` | Read a drawing's points and properties by entity ID |
 | `alert_create` / `alert_list` / `alert_delete` | Manage price alerts |
+
+### Screenshots, Batch & Watchlist
+
+| Tool | What it does |
+|------|-------------|
 | `capture_screenshot` | Screenshot (regions: full, chart, strategy_tester) |
-| `batch_run` | Run action across multiple symbols/timeframes |
-| `watchlist_get` / `watchlist_add` | Read/modify watchlist |
-| `layout_list` / `layout_switch` | Manage saved layouts |
-| `ui_open_panel` / `ui_click` / `ui_evaluate` | UI automation |
-| `tv_launch` / `tv_health_check` / `tv_discover` | Connection management |
+| `batch_run` | Run an action (screenshot, get_ohlcv) across multiple symbols/timeframes |
+| `watchlist_get` / `watchlist_add` | Read / add to the watchlist |
+| `layout_list` / `layout_switch` | List / switch saved chart layouts |
+
+### UI Automation
+
+Generic DOM/keyboard/mouse control for actions without a purpose-built tool.
+
+| Tool | What it does |
+|------|-------------|
+| `ui_open_panel` | Open/close/toggle panels (pine-editor, strategy-tester, watchlist, alerts, trading) |
+| `ui_click` | Click an element by aria-label, data-name, text, or class substring |
+| `ui_find_element` | Locate elements and return their on-screen positions |
+| `ui_hover` | Hover over an element |
+| `ui_scroll` | Scroll the chart/page up/down/left/right |
+| `ui_keyboard` | Press keys/shortcuts (Enter, Escape, Alt+S, Ctrl+Z) |
+| `ui_type_text` | Type into the focused input/textarea |
+| `ui_mouse_click` | Click at raw x,y coordinates |
+| `ui_fullscreen` | Toggle fullscreen |
+| `ui_evaluate` | **Escape hatch** — run raw JS in the page (bypasses all input sanitization; full DOM/account access) |
+
+### Connection & Diagnostics
+
+| Tool | What it does |
+|------|-------------|
+| `tv_launch` | Auto-detect and launch TradingView Desktop with CDP enabled (Mac/Win/Linux) |
+| `tv_health_check` | Verify CDP connection and return chart state |
+| `tv_discover` | Report which known TradingView API paths are available |
+| `tv_ui_state` | Report which panels are open and which buttons are visible/enabled |
 
 ## Context Management
 
@@ -351,7 +446,7 @@ npm test
 Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  TradingView Desktop (Electron)
 ```
 
-- **Transport**: MCP over stdio (78 tools) + CLI (`tv` command, 30 commands with 66 subcommands)
+- **Transport**: MCP over stdio (78 tools) + CLI (`tv` command, 28 commands with 69 subcommands)
 - **Connection**: Chrome DevTools Protocol on localhost:9222
 - **Streaming**: Poll-and-diff loop with deduplication, JSONL output to stdout
 - **No dependencies** beyond `@modelcontextprotocol/sdk` and `chrome-remote-interface`

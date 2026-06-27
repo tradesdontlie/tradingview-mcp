@@ -1,5 +1,6 @@
 import { register } from '../router.js';
 import * as core from '../../core/tab.js';
+import { requireFinite } from '../../connection.js';
 
 register('tab', {
   description: 'Tab management (list, new, close, switch)',
@@ -20,7 +21,7 @@ register('tab', {
       description: 'Switch to a tab by index',
       handler: (opts, positionals) => {
         if (positionals[0] === undefined) throw new Error('Index required. Usage: tv tab switch 0');
-        return core.switchTab({ index: positionals[0] });
+        return core.switchTab({ index: requireFinite(positionals[0], 'index') });
       },
     }],
   ]),

@@ -1033,13 +1033,29 @@ val = array.get(a, 5)`;
       const bwb = await apiExists(BOTTOM_BAR);
       assert.ok(bwb, 'bottomWidgetBar exists');
 
-      // Open
-      await evaluate(`${BOTTOM_BAR}.showWidget('pine-editor')`);
+      // Open via the same path src/core/ui.js openPanel uses: click the
+      // Pine toolbar button (mounts Monaco if needed) and ensure the panel
+      // isn't minimized. The older bwb.showWidget/hideWidget methods this
+      // test used to call don't exist on current TV builds — see
+      // src/core/ui.js for the full rationale.
+      await evaluate(`
+        (function() {
+          var mounted = !!document.querySelector('.monaco-editor.pine-editor-monaco');
+          if (!mounted) {
+            var btn = document.querySelector('[data-name="pine-dialog-button"]') || document.querySelector('[aria-label="Pine"]');
+            if (btn) btn.click();
+          }
+          var bwb = ${BOTTOM_BAR};
+          if (bwb._mode && bwb._mode.value() === 'minimized') bwb._mode.setValue('normal');
+          if (bwb._isHidden) bwb._isHidden.setValue(false);
+        })()
+      `);
       await sleep(500);
       const isOpen = await evaluate(`!!document.querySelector('.monaco-editor.pine-editor-monaco')`);
 
-      // Close
-      await evaluate(`${BOTTOM_BAR}.hideWidget('pine-editor')`);
+      // Close by minimizing the panel (the only available collapse mechanism
+      // on current builds — bwb.hide() only un-shows already-active widgets).
+      await evaluate(`${BOTTOM_BAR}._mode.setValue('minimized')`);
       await sleep(300);
 
       assert.ok(typeof isOpen === 'boolean', 'Panel toggle works');

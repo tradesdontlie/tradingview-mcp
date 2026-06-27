@@ -58,6 +58,15 @@ register('data', {
       },
       handler: (opts) => core.getPineBoxes({ study_filter: opts.filter, verbose: opts.verbose }),
     }],
+    ['graphics', {
+      description: 'Get ALL Pine graphics (lines, labels, tables, boxes) in one round-trip',
+      options: {
+        filter: { type: 'string', short: 'f', description: 'Filter by study name substring' },
+        max: { type: 'string', short: 'n', description: 'Max labels per study (default 50)' },
+        verbose: { type: 'boolean', short: 'v', description: 'Include raw graphics data' },
+      },
+      handler: (opts) => core.getAllGraphicsShaped({ study_filter: opts.filter, max_labels: opts.max ? Number(opts.max) : undefined, verbose: opts.verbose }),
+    }],
     ['strategy', {
       description: 'Get strategy performance metrics',
       handler: () => core.getStrategyResults(),

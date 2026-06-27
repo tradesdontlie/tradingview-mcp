@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { registerHealthTools } from './tools/health.js';
@@ -18,7 +19,7 @@ import { registerTabTools } from './tools/tab.js';
 const server = new McpServer(
   {
     name: 'tradingview',
-    version: '2.0.0',
+    version: '3.0.0',
     description: 'AI-assisted TradingView chart analysis and Pine Script development via Chrome DevTools Protocol',
   },
   {

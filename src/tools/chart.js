@@ -23,7 +23,13 @@ export function registerChartTools(server) {
   });
 
   server.tool('chart_set_type', 'Change chart type', {
-    chart_type: z.string().describe('Chart type: Bars(0), Candles(1), Line(2), Area(3), Renko(4), Kagi(5), PointAndFigure(6), LineBreak(7), HeikinAshi(8), HollowCandles(9) — pass name or number'),
+    // Accept either a canonical type name (mapped in core.setType's typeMap) or a
+    // numeric code 0-9 (passed as number or numeric string). A union keeps the
+    // documented "pass name or number" contract while rejecting arbitrary strings.
+    chart_type: z.union([
+      z.enum(['Bars', 'Candles', 'Line', 'Area', 'Renko', 'Kagi', 'PointAndFigure', 'LineBreak', 'HeikinAshi', 'HollowCandles']),
+      z.coerce.number().int().min(0).max(9),
+    ]).describe('Chart type: Bars(0), Candles(1), Line(2), Area(3), Renko(4), Kagi(5), PointAndFigure(6), LineBreak(7), HeikinAshi(8), HollowCandles(9) — pass name or number'),
   }, async ({ chart_type }) => {
     try { return jsonResult(await core.setType({ chart_type })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }

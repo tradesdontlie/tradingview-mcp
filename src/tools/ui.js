@@ -85,8 +85,8 @@ export function registerUiTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('ui_evaluate', 'Execute JavaScript code in the TradingView page context for advanced automation', {
-    expression: z.string().describe('JavaScript expression to evaluate in the page context. Wrap in IIFE for complex logic.'),
+  server.tool('ui_evaluate', 'Execute raw JavaScript in the TradingView page context. ESCAPE HATCH: this bypasses all input sanitization and runs with full page/DOM/account access (it can place trades, change settings, and read account data). Use ONLY when no typed tool fits the task; prefer the purpose-built tools otherwise.', {
+    expression: z.string().describe('JavaScript expression to evaluate in the page context. Wrap in IIFE for complex logic. WARNING: not sanitized — runs with full page/DOM/account privileges.'),
   }, async ({ expression }) => {
     try { return jsonResult(await core.uiEvaluate({ expression })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }

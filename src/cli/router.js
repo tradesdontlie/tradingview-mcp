@@ -89,7 +89,7 @@ export async function run(argv) {
         args: args.slice(2),
         options: { help: { type: 'boolean', short: 'h' }, ...options },
         allowPositionals: true,
-        strict: false,
+        strict: true,
       });
       if (values.help) {
         console.log(`Usage: tv ${cmdName} ${subName} [options]\n`);
@@ -115,7 +115,7 @@ export async function run(argv) {
         args: args.slice(1),
         options: { help: { type: 'boolean', short: 'h' }, ...options },
         allowPositionals: true,
-        strict: false,
+        strict: true,
       });
       if (values.help) {
         printCommandHelp(cmdName, cmd);
@@ -128,11 +128,22 @@ export async function run(argv) {
   }
 }
 
+/**
+ * Maps a handler result to a process exit code. A result object that carries
+ * an explicit `success === false` is a logical failure → exit 1; everything
+ * else (including non-object results) is treated as success → exit 0.
+ * Exported as a pure function so the exit-code decision is unit-testable
+ * without spawning a process.
+ */
+export function exitCodeFor(result) {
+  return result && typeof result === 'object' && result.success === false ? 1 : 0;
+}
+
 async function execute(handler, values, positionals) {
   try {
     const result = await handler(values, positionals);
     console.log(JSON.stringify(result, null, 2));
-    process.exit(0);
+    process.exit(exitCodeFor(result));
   } catch (err) {
     handleError(err);
   }

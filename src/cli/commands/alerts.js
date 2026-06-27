@@ -1,5 +1,6 @@
 import { register } from '../router.js';
 import * as core from '../../core/alerts.js';
+import { requireFinite } from '../../connection.js';
 
 register('alert', {
   description: 'Alert tools (list, create, delete)',
@@ -15,11 +16,14 @@ register('alert', {
         condition: { type: 'string', short: 'c', description: 'Condition: crossing, greater_than, less_than' },
         message: { type: 'string', short: 'm', description: 'Alert message' },
       },
-      handler: (opts) => core.create({
-        price: Number(opts.price),
-        condition: opts.condition || 'crossing',
-        message: opts.message,
-      }),
+      handler: (opts) => {
+        if (opts.price === undefined) throw new Error('Price required. Usage: tv alert create -p 24500 -c crossing');
+        return core.create({
+          price: requireFinite(opts.price, 'price'),
+          condition: opts.condition || 'crossing',
+          message: opts.message,
+        });
+      },
     }],
     ['delete', {
       description: 'Delete alerts',
