@@ -22,12 +22,15 @@ const server = new McpServer(
     description: 'AI-assisted TradingView chart analysis and Pine Script development via Chrome DevTools Protocol',
   },
   {
-    instructions: `TradingView MCP — 78 tools for reading and controlling a live TradingView Desktop chart.
+    instructions: `TradingView MCP — 79 tools for reading and controlling a live TradingView Desktop chart.
 
 TOOL SELECTION GUIDE — use this to pick the right tool:
 
-Reading your chart:
-- chart_get_state → get symbol, timeframe, all indicator names + entity IDs (call first)
+## START HERE for any chart analysis task:
+- chart_snapshot → SINGLE CALL that returns everything: state + quote + OHLCV + study values + all pine graphics (lines/labels/tables/boxes). Use this FIRST before any other read tools. Only fall back to individual tools if you need something not in the snapshot.
+
+Reading your chart (individual tools — only if chart_snapshot is insufficient):
+- chart_get_state → get symbol, timeframe, all indicator names + entity IDs
 - data_get_study_values → get current numeric values from ALL visible indicators (RSI, MACD, BB, EMA, etc.)
 - quote_get → get real-time price snapshot (last, OHLC, volume)
 - data_get_ohlcv → get price bars. ALWAYS pass summary=true unless you need individual bars

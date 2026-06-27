@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Trading Agent Dashboard</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>Trading Agent Dashboard</h1>
+    <div id="clock"></div>
+  </header>
+
+  <main>
+    <section id="regime-section">
+      <h2>Regime — Trend vs Range</h2>
+      <div id="regime-cards" class="card-row"></div>
+    </section>
+
+    <section id="asia-section">
+      <h2>Asian Indices (Asia-hours spillover risk)</h2>
+      <div id="asia-cards" class="card-row"></div>
+    </section>
+
+    <section id="news-section">
+      <h2>News &amp; Oil</h2>
+      <div id="oil-cards" class="card-row"></div>
+      <div id="news-columns" class="news-columns"></div>
+    </section>
+  </main>
+
+  <footer>
+    <span>Not affiliated with TradingView Inc. or Anthropic. Use subject to TradingView's Terms of Use.</span>
+  </footer>
+
+  <script src="dashboard.js"></script>
+</body>
+</html>
