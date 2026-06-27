@@ -2,9 +2,17 @@
  * Core watchlist logic.
  * Uses TradingView's internal widget API with DOM fallback.
  */
-import { evaluate, evaluateAsync, getClient } from '../connection.js';
+import { evaluate as _evaluate, getClient as _getClient } from '../connection.js';
 
-export async function get() {
+function _resolve(deps) {
+  return {
+    evaluate: deps?.evaluate || _evaluate,
+    getClient: deps?.getClient || _getClient,
+  };
+}
+
+export async function get({ _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
   // Try internal API first — reads from the active watchlist widget
   const symbols = await evaluate(`
     (function() {
@@ -62,7 +70,8 @@ export async function get() {
   };
 }
 
-export async function add({ symbol }) {
+export async function add({ symbol, _deps }) {
+  const { evaluate, getClient } = _resolve(_deps);
   // Use keyboard shortcut to open symbol search in watchlist, type symbol, press Enter
   const c = await getClient();
 

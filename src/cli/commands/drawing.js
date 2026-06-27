@@ -1,5 +1,6 @@
 import { register } from '../router.js';
 import * as core from '../../core/drawing.js';
+import { requireFinite } from '../../connection.js';
 
 register('draw', {
   description: 'Drawing tools (shape, list, get, remove, clear)',
@@ -16,8 +17,14 @@ register('draw', {
         overrides: { type: 'string', description: 'JSON style overrides' },
       },
       handler: (opts) => {
-        const point = { time: Number(opts.time), price: Number(opts.price) };
-        const point2 = opts.price2 ? { time: Number(opts.time2), price: Number(opts.price2) } : undefined;
+        if (opts.time === undefined) throw new Error('--time required (unix timestamp).');
+        if (opts.price === undefined) throw new Error('--price required.');
+        const point = { time: requireFinite(opts.time, 'time'), price: requireFinite(opts.price, 'price') };
+        let point2;
+        if (opts.price2 !== undefined) {
+          if (opts.time2 === undefined) throw new Error('--time2 required when --price2 is given.');
+          point2 = { time: requireFinite(opts.time2, 'time2'), price: requireFinite(opts.price2, 'price2') };
+        }
         return core.drawShape({ shape: opts.type || 'horizontal_line', point, point2, overrides: opts.overrides, text: opts.text });
       },
     }],

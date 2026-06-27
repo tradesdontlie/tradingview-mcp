@@ -28,7 +28,7 @@ export function registerReplayTools(server) {
   });
 
   server.tool('replay_trade', 'Execute a trade action in replay mode (buy, sell, or close position)', {
-    action: z.string().describe('Trade action: buy, sell, or close'),
+    action: z.enum(['buy', 'sell', 'close']).describe('Trade action: buy, sell, or close'),
   }, async ({ action }) => {
     try { return jsonResult(await core.trade({ action })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }

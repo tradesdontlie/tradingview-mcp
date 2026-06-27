@@ -1,5 +1,6 @@
 import { register } from '../router.js';
 import * as core from '../../core/ui.js';
+import { requireFinite } from '../../connection.js';
 
 register('ui', {
   description: 'UI automation tools (click, keyboard, hover, scroll, find, eval, type, panel, fullscreen, mouse)',
@@ -92,8 +93,8 @@ register('ui', {
       handler: (opts, positionals) => {
         if (positionals.length < 2) throw new Error('Usage: tv ui mouse 400 400 [--right] [--double]');
         return core.mouseClick({
-          x: Number(positionals[0]),
-          y: Number(positionals[1]),
+          x: requireFinite(positionals[0], 'x'),
+          y: requireFinite(positionals[1], 'y'),
           button: opts.right ? 'right' : 'left',
           double_click: opts.double,
         });

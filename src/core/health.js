@@ -1,11 +1,96 @@
 /**
  * Core health/discovery/launch logic.
  */
-import { getClient, getTargetInfo, evaluate } from '../connection.js';
+import { getClient as _getClient, getTargetInfo as _getTargetInfo, evaluate as _evaluate } from '../connection.js';
 import { existsSync } from 'fs';
-import { execSync, spawn } from 'child_process';
+import { execSync, execFileSync, spawn } from 'child_process';
 
-export async function healthCheck() {
+function _resolve(deps) {
+  return {
+    getClient: deps?.getClient || _getClient,
+    getTargetInfo: deps?.getTargetInfo || _getTargetInfo,
+    evaluate: deps?.evaluate || _evaluate,
+  };
+}
+
+// PID of the TradingView process this tool last spawned, persisted for the
+// lifetime of the MCP server process. We only ever force-kill THIS pid on a
+// restart — never processes the tool did not start (e.g. windows the user
+// opened themselves). See launchDecision()/killCommandFor() below.
+let lastSpawnedPid = null;
+// Async spawn error (binary unreadable, permission denied, etc.) captured by the
+// child's 'error' handler so a true spawn failure isn't misreported as a generic
+// "CDP not responding" timeout.
+let lastSpawnError = null;
+
+// Test-only seam: reset the module-level spawn state between unit tests.
+export function __resetLaunchStateForTest() {
+  lastSpawnedPid = null;
+  lastSpawnError = null;
+}
+
+/**
+ * Pure helper: build the PID-targeted kill command for a given platform.
+ * Returns { cmd, args } where args is an argv array. The command MUST target a
+ * specific PID — never the TradingView image name (no `taskkill /IM`, no
+ * `pkill -f TradingView`), so we never terminate processes we didn't spawn.
+ *
+ * @param {string} platform  process.platform value ('win32' | 'darwin' | 'linux')
+ * @param {number} pid       the PID to terminate
+ */
+export function killCommandFor(platform, pid) {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    throw new Error(`killCommandFor: invalid pid ${pid}`);
+  }
+  if (platform === 'win32') {
+    // taskkill scoped to a single PID (the tree it owns), never /IM <image>.
+    return { cmd: 'taskkill', args: ['/F', '/PID', String(pid), '/T'] };
+  }
+  // darwin + linux: kill the single PID. No `pkill -f`/image-name matching.
+  return { cmd: 'kill', args: ['-9', String(pid)] };
+}
+
+/**
+ * Pure decision helper: given the observed state, decide what launch() should do.
+ *   - port responding + !killExisting        -> 'already_running' (skip)
+ *   - port responding + killExisting + pid    -> 'restart' (kill known pid, respawn)
+ *   - port responding + killExisting + no pid -> 'refuse_kill_unknown' (don't kill foreign instance)
+ *   - port not responding                     -> 'spawn'
+ *
+ * @param {object}  o
+ * @param {boolean} o.portResponding  whether the CDP port currently answers
+ * @param {boolean} o.killExisting    caller's kill_existing flag (already defaulted)
+ * @param {?number} o.knownPid        PID the tool previously spawned, if any
+ * @returns {'already_running'|'restart'|'spawn'|'refuse_kill_unknown'}
+ */
+export function launchDecision({ portResponding, killExisting, knownPid }) {
+  if (!portResponding) return 'spawn';
+  if (!killExisting) return 'already_running';
+  if (knownPid) return 'restart';
+  return 'refuse_kill_unknown';
+}
+
+// Quick offline-friendly CDP port probe used by launch(). Resolves true if the
+// /json/version endpoint answers, false otherwise. Never throws.
+async function probeCdpPort(cdpPort) {
+  try {
+    const http = await import('http');
+    return await new Promise((resolve) => {
+      const req = http.get(`http://localhost:${cdpPort}/json/version`, (res) => {
+        let data = '';
+        res.on('data', (chunk) => (data += chunk));
+        res.on('end', () => resolve(!!data));
+      });
+      req.on('error', () => resolve(false));
+      req.setTimeout(2000, () => { req.destroy(); resolve(false); });
+    });
+  } catch {
+    return false;
+  }
+}
+
+export async function healthCheck({ _deps } = {}) {
+  const { getClient, getTargetInfo, evaluate } = _resolve(_deps);
   await getClient();
   const target = await getTargetInfo();
 
@@ -42,7 +127,8 @@ export async function healthCheck() {
   };
 }
 
-export async function discover() {
+export async function discover({ _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
   const paths = await evaluate(`
     (function() {
       var results = {};
@@ -88,7 +174,8 @@ export async function discover() {
   return { success: true, apis_available: available, apis_total: total, apis: paths };
 }
 
-export async function uiState() {
+export async function uiState({ _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
   const state = await evaluate(`
     (function() {
       var ui = {};
@@ -161,8 +248,40 @@ export async function uiState() {
 
 export async function launch({ port, kill_existing } = {}) {
   const cdpPort = port || 9222;
-  const killFirst = kill_existing !== false;
+  // Non-destructive default: kill_existing defaults to FALSE.
+  const killExisting = kill_existing === true;
   const platform = process.platform;
+
+  // Decide up front whether we should even touch any processes. If the CDP port
+  // is already answering and the caller didn't request a restart, do nothing.
+  const portResponding = await probeCdpPort(cdpPort);
+  const decision = launchDecision({ portResponding, killExisting, knownPid: lastSpawnedPid });
+
+  if (decision === 'already_running') {
+    return {
+      success: true,
+      action: 'already_running',
+      platform,
+      cdp_port: cdpPort,
+      cdp_url: `http://localhost:${cdpPort}`,
+      cdp_ready: true,
+      note: 'TradingView already running — pass kill_existing:true to restart',
+    };
+  }
+
+  if (decision === 'refuse_kill_unknown') {
+    // Port is up but WE didn't spawn it. Refuse to force-kill a process we don't
+    // own; the user can close it themselves or we leave it running.
+    return {
+      success: true,
+      action: 'external_instance',
+      platform,
+      cdp_port: cdpPort,
+      cdp_url: `http://localhost:${cdpPort}`,
+      cdp_ready: true,
+      note: 'A TradingView instance the tool did not start is already running. This tool will not force-kill processes it did not spawn. Close it manually and re-run, or use it as-is.',
+    };
+  }
 
   const pathMap = {
     darwin: [
@@ -211,15 +330,24 @@ export async function launch({ port, kill_existing } = {}) {
     throw new Error(`TradingView not found on ${platform}. Searched: ${candidates.join(', ')}. Launch manually with: /path/to/TradingView --remote-debugging-port=${cdpPort}`);
   }
 
-  if (killFirst) {
+  // decision === 'restart': kill ONLY the PID we previously spawned, never the
+  // image name. (decision === 'spawn' falls straight through to spawn.)
+  if (decision === 'restart' && lastSpawnedPid) {
     try {
-      if (platform === 'win32') execSync('taskkill /F /IM TradingView.exe', { timeout: 5000 });
-      else execSync('pkill -f TradingView', { timeout: 5000 });
+      const { cmd, args } = killCommandFor(platform, lastSpawnedPid);
+      // execFileSync (no shell) — args are passed directly, never interpolated.
+      execFileSync(cmd, args, { timeout: 5000 });
       await new Promise(r => setTimeout(r, 1500));
-    } catch { /* may not be running */ }
+    } catch { /* may already be gone */ }
+    lastSpawnedPid = null;
   }
 
+  lastSpawnError = null;
   const child = spawn(tvPath, [`--remote-debugging-port=${cdpPort}`], { detached: true, stdio: 'ignore' });
+  // Capture async spawn failures (ENOENT, EACCES, ...) BEFORE unref so we don't
+  // misreport them as a CDP timeout below.
+  child.on('error', (err) => { lastSpawnError = err; });
+  lastSpawnedPid = child.pid || null;
   child.unref();
 
   for (let i = 0; i < 15; i++) {
@@ -236,7 +364,8 @@ export async function launch({ port, kill_existing } = {}) {
       if (ready) {
         const info = JSON.parse(ready);
         return {
-          success: true, platform, binary: tvPath, pid: child.pid,
+          success: true, action: decision === 'restart' ? 'restarted' : 'spawned',
+          platform, binary: tvPath, pid: child.pid,
           cdp_port: cdpPort, cdp_url: `http://localhost:${cdpPort}`,
           browser: info.Browser, user_agent: info['User-Agent'],
         };
@@ -244,8 +373,18 @@ export async function launch({ port, kill_existing } = {}) {
     } catch { /* retry */ }
   }
 
+  // CDP never came up. If the child emitted a spawn error, that's the real
+  // cause — surface it instead of a misleading "CDP not responding" notice.
+  if (lastSpawnError) {
+    return {
+      success: false, platform, binary: tvPath, cdp_port: cdpPort,
+      error: 'TradingView failed to start: ' + lastSpawnError.message,
+    };
+  }
+
   return {
-    success: true, platform, binary: tvPath, pid: child.pid, cdp_port: cdpPort, cdp_ready: false,
+    success: true, action: decision === 'restart' ? 'restarted' : 'spawned',
+    platform, binary: tvPath, pid: child.pid, cdp_port: cdpPort, cdp_ready: false,
     warning: 'TradingView launched but CDP not responding yet. It may still be loading. Try tv_health_check in a few seconds.',
   };
 }

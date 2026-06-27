@@ -3,7 +3,37 @@
  * All functions accept plain options objects and return plain JS objects.
  * They throw on error (callers catch and format).
  */
-import { evaluate, evaluateAsync, getClient } from '../connection.js';
+import { evaluate as _evaluate, evaluateAsync as _evaluateAsync, getClient as _getClient, KNOWN_PATHS } from '../connection.js';
+import { pollUntil as _pollUntil } from '../wait.js';
+
+function _resolve(deps) {
+  return {
+    evaluate: deps?.evaluate || _evaluate,
+    evaluateAsync: deps?.evaluateAsync || _evaluateAsync,
+    getClient: deps?.getClient || _getClient,
+    pollUntil: deps?.pollUntil || _pollUntil,
+  };
+}
+
+// Base URL for the Pine REST facade (compile/translate/list/get/save). Overridable
+// via PINE_FACADE_URL so air-gapped / proxied setups can point at a mirror; defaults
+// to the public TradingView endpoint. Trailing slash is trimmed for safe concat.
+const PINE_FACADE_BASE = KNOWN_PATHS.pineFacadeApi;
+const CHART_API = KNOWN_PATHS.chartApi;
+
+// How long to wait after clicking compile/add-to-chart before reading markers —
+// gives TV's server-side compile round-trip time to populate Monaco error markers.
+const COMPILE_SETTLE_MS = 2000;
+// smartCompile waits a bit longer: it also checks whether a study was added,
+// which can lag the compile response.
+const SMART_COMPILE_SETTLE_MS = 2500;
+// After dispatching Ctrl+S, wait for the save (or the save-name dialog) to appear.
+const SAVE_SETTLE_MS = 800;
+// After confirming the save-name dialog, wait for it to close.
+const SAVE_DIALOG_SETTLE_MS = 500;
+// Pine editor / Monaco mount poll: up to ~10s (50 × 200ms) for the editor to render.
+const MONACO_POLL_INTERVAL_MS = 200;
+const MONACO_POLL_TIMEOUT_MS = 10000;
 
 // ── Monaco finder (injected into TV page) ──
 const FIND_MONACO = `
@@ -39,38 +69,65 @@ const FIND_MONACO = `
  * Opens the Pine Editor panel and waits for Monaco to become available.
  * Returns true if editor is accessible, false on timeout.
  */
-export async function ensurePineEditorOpen() {
+export async function ensurePineEditorOpen({ _deps } = {}) {
+  const { evaluate, pollUntil } = _resolve(_deps);
+  // Short-circuit: editor already rendered AND bottom panel visible.
+  // Monaco can be present in the DOM while the bottom panel is minimized
+  // (height 0), in which case clicks on the editor's toolbar buttons no-op,
+  // so we also require the panel to be in a visible mode before returning.
   const already = await evaluate(`
     (function() {
       var m = ${FIND_MONACO};
-      return m !== null;
+      if (m === null) return false;
+      var bwb = window.TradingView && window.TradingView.bottomWidgetBar;
+      if (!bwb) return true;
+      var visible = bwb.isVisible && bwb.isVisible().value && bwb.isVisible().value();
+      var mode = bwb._mode && bwb._mode.value && bwb._mode.value();
+      return visible !== false && mode !== 'minimized';
     })()
   `);
   if (already) return true;
 
+  // Two cases to handle:
+  //   (a) Pine Editor was never opened in this session — Monaco isn't in
+  //       the DOM yet. We need to click the Pine toolbar button to activate
+  //       the tab, which mounts Monaco.
+  //   (b) Pine Editor was previously opened but the bottom panel is now
+  //       minimized — Monaco is already in the DOM. We must NOT click the
+  //       Pine button again: when Pine is already the active tab, the
+  //       button toggles the panel off (closing Pine).
+  // In both cases we then un-minimize / un-hide the panel so that the
+  // editor's toolbar buttons (compile/save) are clickable.
+  //
+  // The internal bottomWidgetBar methods (open/show/hide/close) only operate
+  // on already-active widgets — they can't switch tabs or activate Pine from
+  // scratch — and the older activateScriptEditorTab/showWidget methods don't
+  // exist on current TV builds, so the DOM click is unavoidable for case (a).
   await evaluate(`
     (function() {
+      var monacoMounted = !!document.querySelector('.monaco-editor.pine-editor-monaco');
+      if (!monacoMounted) {
+        var btn = document.querySelector('[data-name="pine-dialog-button"]')
+          || document.querySelector('[aria-label="Pine"]');
+        if (btn) btn.click();
+      }
       var bwb = window.TradingView && window.TradingView.bottomWidgetBar;
-      if (!bwb) return;
-      if (typeof bwb.activateScriptEditorTab === 'function') bwb.activateScriptEditorTab();
-      else if (typeof bwb.showWidget === 'function') bwb.showWidget('pine-editor');
+      if (bwb) {
+        if (bwb._mode && bwb._mode.value && bwb._mode.value() === 'minimized' && bwb._mode.setValue) bwb._mode.setValue('normal');
+        if (bwb._isHidden && bwb._isHidden.setValue) bwb._isHidden.setValue(false);
+      }
     })()
   `);
 
-  await evaluate(`
-    (function() {
-      var btn = document.querySelector('[aria-label="Pine"]')
-        || document.querySelector('[data-name="pine-dialog-button"]');
-      if (btn) btn.click();
-    })()
-  `);
-
-  for (let i = 0; i < 50; i++) {
-    await new Promise(r => setTimeout(r, 200));
-    const ready = await evaluate(`(function() { return ${FIND_MONACO} !== null; })()`);
-    if (ready) return true;
-  }
-  return false;
+  // Poll until Monaco mounts. FIND_MONACO starts with a newline, so
+  // `return ${FIND_MONACO} !== null` would trigger Automatic Semicolon Insertion
+  // after `return` — the function would silently return undefined and polling
+  // would never succeed even with the editor fully open. Assign to a var first.
+  const ready = await pollUntil(
+    () => evaluate(`(function() { var m = ${FIND_MONACO}; return m !== null; })()`),
+    { interval: MONACO_POLL_INTERVAL_MS, timeout: MONACO_POLL_TIMEOUT_MS },
+  );
+  return !!ready;
 }
 
 // ── Pure / offline functions ──
@@ -188,7 +245,7 @@ export async function check({ source }) {
   formData.append('source', source);
 
   const response = await fetch(
-    'https://pine-facade.tradingview.com/pine-facade/translate_light?user_name=Guest&pine_id=00000000-0000-0000-0000-000000000000',
+    `${PINE_FACADE_BASE}/translate_light?user_name=Guest&pine_id=00000000-0000-0000-0000-000000000000`,
     {
       method: 'POST',
       headers: {
@@ -244,8 +301,9 @@ export async function check({ source }) {
 
 // ── Functions requiring TradingView connection ──
 
-export async function getSource() {
-  const editorReady = await ensurePineEditorOpen();
+export async function getSource({ _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
+  const editorReady = await ensurePineEditorOpen({ _deps });
   if (!editorReady) throw new Error('Could not open Pine Editor or Monaco not found in React fiber tree.');
 
   const source = await evaluate(`
@@ -263,8 +321,9 @@ export async function getSource() {
   return { success: true, source, line_count: source.split('\n').length, char_count: source.length };
 }
 
-export async function setSource({ source }) {
-  const editorReady = await ensurePineEditorOpen();
+export async function setSource({ source, _deps }) {
+  const { evaluate } = _resolve(_deps);
+  const editorReady = await ensurePineEditorOpen({ _deps });
   if (!editorReady) throw new Error('Could not open Pine Editor.');
 
   const escaped = JSON.stringify(source);
@@ -281,14 +340,20 @@ export async function setSource({ source }) {
   return { success: true, lines_set: source.split('\n').length };
 }
 
-export async function compile() {
-  const editorReady = await ensurePineEditorOpen();
-  if (!editorReady) throw new Error('Could not open Pine Editor.');
-
-  const clicked = await evaluate(`
+/**
+ * Builds the page-side snippet that locates the Pine editor's
+ * compile / add-to-chart / save button and clicks the highest-priority match,
+ * returning the action label (or null so the caller can fall back to Ctrl+Enter).
+ * `exact`: smartCompile matches "Add to chart"/"Update on chart" exactly and
+ * reports canonical labels; compile prefix-matches and echoes the button's text.
+ * Shared by compile() and smartCompile() so the button scan lives in one place.
+ */
+export function findCompileButton({ exact = false } = {}) {
+  return `
     (function() {
       var btns = document.querySelectorAll('button');
-      var fallback = null;
+      var addBtn = null;
+      var updateBtn = null;
       var saveBtn = null;
       for (var i = 0; i < btns.length; i++) {
         var text = btns[i].textContent.trim();
@@ -296,18 +361,29 @@ export async function compile() {
           btns[i].click();
           return 'Save and add to chart';
         }
-        if (!fallback && /^(Add to chart|Update on chart)/i.test(text)) {
-          fallback = btns[i];
-        }
+        ${exact
+          ? `if (!addBtn && /^add to chart$/i.test(text)) addBtn = btns[i];
+        if (!updateBtn && /^update on chart$/i.test(text)) updateBtn = btns[i];`
+          : `if (!addBtn && /^(Add to chart|Update on chart)/i.test(text)) addBtn = btns[i];`}
         if (!saveBtn && btns[i].className.indexOf('saveButton') !== -1 && btns[i].offsetParent !== null) {
           saveBtn = btns[i];
         }
       }
-      if (fallback) { fallback.click(); return fallback.textContent.trim(); }
+      ${exact
+        ? `if (addBtn) { addBtn.click(); return 'Add to chart'; }
+      if (updateBtn) { updateBtn.click(); return 'Update on chart'; }`
+        : `if (addBtn) { addBtn.click(); return addBtn.textContent.trim(); }`}
       if (saveBtn) { saveBtn.click(); return 'Pine Save'; }
       return null;
-    })()
-  `);
+    })()`;
+}
+
+export async function compile({ _deps } = {}) {
+  const { evaluate, getClient } = _resolve(_deps);
+  const editorReady = await ensurePineEditorOpen({ _deps });
+  if (!editorReady) throw new Error('Could not open Pine Editor.');
+
+  const clicked = await evaluate(findCompileButton());
 
   if (!clicked) {
     const c = await getClient();
@@ -315,12 +391,13 @@ export async function compile() {
     await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 'Enter', code: 'Enter' });
   }
 
-  await new Promise(r => setTimeout(r, 2000));
+  await new Promise(r => setTimeout(r, COMPILE_SETTLE_MS));
   return { success: true, button_clicked: clicked || 'keyboard_shortcut', source: 'dom_fallback' };
 }
 
-export async function getErrors() {
-  const editorReady = await ensurePineEditorOpen();
+export async function getErrors({ _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
+  const editorReady = await ensurePineEditorOpen({ _deps });
   if (!editorReady) throw new Error('Could not open Pine Editor.');
 
   const errors = await evaluate(`
@@ -344,14 +421,15 @@ export async function getErrors() {
   };
 }
 
-export async function save() {
-  const editorReady = await ensurePineEditorOpen();
+export async function save({ _deps } = {}) {
+  const { evaluate, getClient } = _resolve(_deps);
+  const editorReady = await ensurePineEditorOpen({ _deps });
   if (!editorReady) throw new Error('Could not open Pine Editor.');
 
   const c = await getClient();
   await c.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: 2, key: 's', code: 'KeyS', windowsVirtualKeyCode: 83 });
   await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 's', code: 'KeyS' });
-  await new Promise(r => setTimeout(r, 800));
+  await new Promise(r => setTimeout(r, SAVE_SETTLE_MS));
 
   // Handle "Save Script" name dialog that appears for new/unsaved scripts
   const dialogHandled = await evaluate(`
@@ -371,13 +449,14 @@ export async function save() {
     })()
   `);
 
-  if (dialogHandled) await new Promise(r => setTimeout(r, 500));
+  if (dialogHandled) await new Promise(r => setTimeout(r, SAVE_DIALOG_SETTLE_MS));
 
   return { success: true, action: dialogHandled ? 'saved_with_dialog' : 'Ctrl+S_dispatched' };
 }
 
-export async function getConsole() {
-  const editorReady = await ensurePineEditorOpen();
+export async function getConsole({ _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
+  const editorReady = await ensurePineEditorOpen({ _deps });
   if (!editorReady) throw new Error('Could not open Pine Editor.');
 
   const entries = await evaluate(`
@@ -426,42 +505,22 @@ export async function getConsole() {
   return { success: true, entries: entries || [], entry_count: entries?.length || 0 };
 }
 
-export async function smartCompile() {
-  const editorReady = await ensurePineEditorOpen();
+export async function smartCompile({ _deps } = {}) {
+  const { evaluate, getClient } = _resolve(_deps);
+  const editorReady = await ensurePineEditorOpen({ _deps });
   if (!editorReady) throw new Error('Could not open Pine Editor.');
 
   const studiesBefore = await evaluate(`
     (function() {
       try {
-        var chart = window.TradingViewApi._activeChartWidgetWV.value();
+        var chart = ${CHART_API};
         if (chart && typeof chart.getAllStudies === 'function') return chart.getAllStudies().length;
       } catch(e) {}
       return null;
     })()
   `);
 
-  const buttonClicked = await evaluate(`
-    (function() {
-      var btns = document.querySelectorAll('button');
-      var addBtn = null;
-      var updateBtn = null;
-      var saveBtn = null;
-      for (var i = 0; i < btns.length; i++) {
-        var text = btns[i].textContent.trim();
-        if (/save and add to chart/i.test(text)) {
-          btns[i].click();
-          return 'Save and add to chart';
-        }
-        if (!addBtn && /^add to chart$/i.test(text)) addBtn = btns[i];
-        if (!updateBtn && /^update on chart$/i.test(text)) updateBtn = btns[i];
-        if (!saveBtn && btns[i].className.indexOf('saveButton') !== -1 && btns[i].offsetParent !== null) saveBtn = btns[i];
-      }
-      if (addBtn) { addBtn.click(); return 'Add to chart'; }
-      if (updateBtn) { updateBtn.click(); return 'Update on chart'; }
-      if (saveBtn) { saveBtn.click(); return 'Pine Save'; }
-      return null;
-    })()
-  `);
+  const buttonClicked = await evaluate(findCompileButton({ exact: true }));
 
   if (!buttonClicked) {
     const c = await getClient();
@@ -469,7 +528,7 @@ export async function smartCompile() {
     await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 'Enter', code: 'Enter' });
   }
 
-  await new Promise(r => setTimeout(r, 2500));
+  await new Promise(r => setTimeout(r, SMART_COMPILE_SETTLE_MS));
 
   const errors = await evaluate(`
     (function() {
@@ -487,7 +546,7 @@ export async function smartCompile() {
   const studiesAfter = await evaluate(`
     (function() {
       try {
-        var chart = window.TradingViewApi._activeChartWidgetWV.value();
+        var chart = ${CHART_API};
         if (chart && typeof chart.getAllStudies === 'function') return chart.getAllStudies().length;
       } catch(e) {}
       return null;
@@ -505,8 +564,9 @@ export async function smartCompile() {
   };
 }
 
-export async function newScript({ type }) {
-  const editorReady = await ensurePineEditorOpen();
+export async function newScript({ type, _deps }) {
+  const { evaluate } = _resolve(_deps);
+  const editorReady = await ensurePineEditorOpen({ _deps });
   if (!editorReady) throw new Error('Could not open Pine Editor.');
 
   const typeMap = { indicator: 'indicator', strategy: 'strategy', library: 'library' };
@@ -534,8 +594,9 @@ export async function newScript({ type }) {
   return { success: true, type, action: 'new_script_created', template: typeMap[type] };
 }
 
-export async function openScript({ name }) {
-  const editorReady = await ensurePineEditorOpen();
+export async function openScript({ name, _deps }) {
+  const { evaluateAsync } = _resolve(_deps);
+  const editorReady = await ensurePineEditorOpen({ _deps });
   if (!editorReady) throw new Error('Could not open Pine Editor.');
 
   const escapedName = JSON.stringify(name.toLowerCase());
@@ -543,7 +604,7 @@ export async function openScript({ name }) {
   const result = await evaluateAsync(`
     (function() {
       var target = ${escapedName};
-      return fetch('https://pine-facade.tradingview.com/pine-facade/list/?filter=saved', { credentials: 'include' })
+      return fetch('${PINE_FACADE_BASE}/list/?filter=saved', { credentials: 'include' })
         .then(function(r) { return r.json(); })
         .then(function(scripts) {
           if (!Array.isArray(scripts)) return {error: 'pine-facade returned unexpected data'};
@@ -564,7 +625,7 @@ export async function openScript({ name }) {
 
           var id = match.scriptIdPart;
           var ver = match.version || 1;
-          return fetch('https://pine-facade.tradingview.com/pine-facade/get/' + id + '/' + ver, { credentials: 'include' })
+          return fetch('${PINE_FACADE_BASE}/get/' + id + '/' + ver, { credentials: 'include' })
             .then(function(r2) { return r2.json(); })
             .then(function(data) {
               var source = data.source || '';
@@ -588,9 +649,10 @@ export async function openScript({ name }) {
   return { success: true, name: result.name, script_id: result.id, lines: result.lines, source: 'internal_api', opened: true };
 }
 
-export async function listScripts() {
+export async function listScripts({ _deps } = {}) {
+  const { evaluateAsync } = _resolve(_deps);
   const scripts = await evaluateAsync(`
-    fetch('https://pine-facade.tradingview.com/pine-facade/list/?filter=saved', { credentials: 'include' })
+    fetch('${PINE_FACADE_BASE}/list/?filter=saved', { credentials: 'include' })
       .then(function(r) { return r.json(); })
       .then(function(data) {
         if (!Array.isArray(data)) return {scripts: [], error: 'Unexpected response from pine-facade'};
@@ -609,11 +671,11 @@ export async function listScripts() {
       .catch(function(e) { return {scripts: [], error: e.message}; })
   `);
 
+  if (scripts?.error) throw new Error(scripts.error);
   return {
     success: true,
     scripts: scripts?.scripts || [],
     count: scripts?.scripts?.length || 0,
     source: 'internal_api',
-    error: scripts?.error,
   };
 }

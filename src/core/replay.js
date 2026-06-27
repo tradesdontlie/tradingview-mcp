@@ -5,6 +5,11 @@ import { evaluate as _evaluate, getReplayApi as _getReplayApi } from '../connect
 
 export const VALID_AUTOPLAY_DELAYS = [100, 143, 200, 300, 1000, 2000, 3000, 5000, 10000];
 
+// Poll interval while waiting for replay state (selectDate / doStep) to settle.
+// selectDate's promise resolves before the data series is ready, and doStep is
+// async internally, so we re-check currentDate at this cadence.
+const REPLAY_POLL_INTERVAL_MS = 250;
+
 function wv(path) {
   return `(function(){ var v = ${path}; return (v && typeof v === 'object' && typeof v.value === 'function') ? v.value() : v; })()`;
 }
@@ -45,7 +50,7 @@ export async function start({ date, _deps } = {}) {
     started = await evaluate(wv(`${rp}.isReplayStarted()`));
     currentDate = await evaluate(wv(`${rp}.currentDate()`));
     if (started && currentDate !== null) break;
-    await new Promise(r => setTimeout(r, 250));
+    await new Promise(r => setTimeout(r, REPLAY_POLL_INTERVAL_MS));
   }
 
   if (!started) {
@@ -67,7 +72,7 @@ export async function step({ _deps } = {}) {
   // Poll until it changes or timeout after 3s.
   let currentDate = before;
   for (let i = 0; i < 12; i++) {
-    await new Promise(r => setTimeout(r, 250));
+    await new Promise(r => setTimeout(r, REPLAY_POLL_INTERVAL_MS));
     currentDate = await evaluate(wv(`${rp}.currentDate()`));
     if (currentDate !== before) break;
   }
@@ -100,6 +105,9 @@ export async function stop({ _deps } = {}) {
     return { success: true, action: 'already_stopped' };
   }
   await evaluate(`${rp}.stopReplay()`);
+  // Also collapse the replay toolbar so the UI returns fully to realtime chrome.
+  // Guarded: hideReplayToolbar may be absent on some TV builds.
+  try { await evaluate(`${rp}.hideReplayToolbar()`); } catch {}
   return { success: true, action: 'replay_stopped' };
 }
 

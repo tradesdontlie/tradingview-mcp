@@ -1,5 +1,6 @@
 import { register } from '../router.js';
 import * as core from '../../core/pane.js';
+import { requireFinite } from '../../connection.js';
 
 register('pane', {
   description: 'Chart pane/layout tools (list, layout, focus, symbol)',
@@ -19,14 +20,14 @@ register('pane', {
       description: 'Focus a specific pane by index',
       handler: (opts, positionals) => {
         if (positionals[0] === undefined) throw new Error('Index required. Usage: tv pane focus 0');
-        return core.focus({ index: positionals[0] });
+        return core.focus({ index: requireFinite(positionals[0], 'index') });
       },
     }],
     ['symbol', {
       description: 'Set symbol on a specific pane',
       handler: (opts, positionals) => {
         if (positionals.length < 2) throw new Error('Usage: tv pane symbol 1 ES1!');
-        return core.setSymbol({ index: positionals[0], symbol: positionals[1] });
+        return core.setSymbol({ index: requireFinite(positionals[0], 'index'), symbol: positionals[1] });
       },
     }],
   ]),

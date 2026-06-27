@@ -5,6 +5,14 @@ import * as core from '../../core/stream.js';
 // The router's execute() wrapper won't work since these never resolve.
 // We override the handler to call the stream directly and never return.
 
+// CLI output sink: JSONL to stdout, banner/errors to stderr. The core stream
+// functions only write through this sink, so off-CLI callers (e.g. the MCP stdio
+// path) that omit it never touch the process stdio streams.
+const cliSink = {
+  out: (s) => process.stdout.write(s),
+  err: (s) => process.stderr.write(s),
+};
+
 register('stream', {
   description: 'Monitor your local TradingView chart for changes (JSONL output)',
   subcommands: new Map([
@@ -14,7 +22,7 @@ register('stream', {
         interval: { type: 'string', short: 'i', description: 'Poll interval in ms (default 300)' },
       },
       handler: async (opts) => {
-        await core.streamQuote({ interval: opts.interval ? Number(opts.interval) : undefined });
+        await core.streamQuote({ interval: opts.interval ? Number(opts.interval) : undefined, sink: cliSink });
         process.exit(0); // unreachable unless stopped
       },
     }],
@@ -24,7 +32,7 @@ register('stream', {
         interval: { type: 'string', short: 'i', description: 'Poll interval in ms (default 500)' },
       },
       handler: async (opts) => {
-        await core.streamBars({ interval: opts.interval ? Number(opts.interval) : undefined });
+        await core.streamBars({ interval: opts.interval ? Number(opts.interval) : undefined, sink: cliSink });
         process.exit(0);
       },
     }],
@@ -34,7 +42,7 @@ register('stream', {
         interval: { type: 'string', short: 'i', description: 'Poll interval in ms (default 500)' },
       },
       handler: async (opts) => {
-        await core.streamValues({ interval: opts.interval ? Number(opts.interval) : undefined });
+        await core.streamValues({ interval: opts.interval ? Number(opts.interval) : undefined, sink: cliSink });
         process.exit(0);
       },
     }],
@@ -45,7 +53,7 @@ register('stream', {
         interval: { type: 'string', short: 'i', description: 'Poll interval in ms (default 1000)' },
       },
       handler: async (opts) => {
-        await core.streamLines({ interval: opts.interval ? Number(opts.interval) : undefined, filter: opts.filter });
+        await core.streamLines({ interval: opts.interval ? Number(opts.interval) : undefined, filter: opts.filter, sink: cliSink });
         process.exit(0);
       },
     }],
@@ -56,7 +64,7 @@ register('stream', {
         interval: { type: 'string', short: 'i', description: 'Poll interval in ms (default 1000)' },
       },
       handler: async (opts) => {
-        await core.streamLabels({ interval: opts.interval ? Number(opts.interval) : undefined, filter: opts.filter });
+        await core.streamLabels({ interval: opts.interval ? Number(opts.interval) : undefined, filter: opts.filter, sink: cliSink });
         process.exit(0);
       },
     }],
@@ -67,7 +75,7 @@ register('stream', {
         interval: { type: 'string', short: 'i', description: 'Poll interval in ms (default 2000)' },
       },
       handler: async (opts) => {
-        await core.streamTables({ interval: opts.interval ? Number(opts.interval) : undefined, filter: opts.filter });
+        await core.streamTables({ interval: opts.interval ? Number(opts.interval) : undefined, filter: opts.filter, sink: cliSink });
         process.exit(0);
       },
     }],
@@ -77,7 +85,7 @@ register('stream', {
         interval: { type: 'string', short: 'i', description: 'Poll interval in ms (default 500)' },
       },
       handler: async (opts) => {
-        await core.streamAllPanes({ interval: opts.interval ? Number(opts.interval) : undefined });
+        await core.streamAllPanes({ interval: opts.interval ? Number(opts.interval) : undefined, sink: cliSink });
         process.exit(0);
       },
     }],

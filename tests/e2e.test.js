@@ -1033,13 +1033,29 @@ val = array.get(a, 5)`;
       const bwb = await apiExists(BOTTOM_BAR);
       assert.ok(bwb, 'bottomWidgetBar exists');
 
-      // Open
-      await evaluate(`${BOTTOM_BAR}.showWidget('pine-editor')`);
+      // Open via the same path src/core/ui.js openPanel uses: click the
+      // Pine toolbar button (mounts Monaco if needed) and ensure the panel
+      // isn't minimized. The older bwb.showWidget/hideWidget methods this
+      // test used to call don't exist on current TV builds — see
+      // src/core/ui.js for the full rationale.
+      await evaluate(`
+        (function() {
+          var mounted = !!document.querySelector('.monaco-editor.pine-editor-monaco');
+          if (!mounted) {
+            var btn = document.querySelector('[data-name="pine-dialog-button"]') || document.querySelector('[aria-label="Pine"]');
+            if (btn) btn.click();
+          }
+          var bwb = ${BOTTOM_BAR};
+          if (bwb._mode && bwb._mode.value() === 'minimized') bwb._mode.setValue('normal');
+          if (bwb._isHidden) bwb._isHidden.setValue(false);
+        })()
+      `);
       await sleep(500);
       const isOpen = await evaluate(`!!document.querySelector('.monaco-editor.pine-editor-monaco')`);
 
-      // Close
-      await evaluate(`${BOTTOM_BAR}.hideWidget('pine-editor')`);
+      // Close by minimizing the panel (the only available collapse mechanism
+      // on current builds — bwb.hide() only un-shows already-active widgets).
+      await evaluate(`${BOTTOM_BAR}._mode.setValue('minimized')`);
       await sleep(300);
 
       assert.ok(typeof isOpen === 'boolean', 'Panel toggle works');
@@ -1248,12 +1264,49 @@ val = array.get(a, 5)`;
 
   describe('Alerts', () => {
 
-    it('alert_create — find Create Alert button', async () => {
-      const found = await evaluate(`
-        !!(document.querySelector('[aria-label="Create Alert"]')
-          || document.querySelector('[data-name="alerts"]'))
-      `);
-      assert.ok(typeof found === 'boolean', 'Alert button detection works');
+    it('alert_create — applies and reads back the requested condition (non-destructive)', async () => {
+      // Drive the real apply+verify path the rewritten create() uses, but Cancel
+      // at the end so no alert is created. The dialog only honours trusted CDP
+      // mouse input, so open it via right-click -> "Add alert" context-menu row,
+      // then select an operator and confirm the dialog reflects it.
+      const realClick = async (x, y) => {
+        await Input.dispatchMouseEvent({ type: 'mouseMoved', x, y });
+        await Input.dispatchMouseEvent({ type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
+        await Input.dispatchMouseEvent({ type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
+      };
+      const rectOf = (find) => `(function(){ var el=${find}; if(!el) return null; var r=el.getBoundingClientRect(); return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}; })()`;
+      const escape = async () => {
+        await Input.dispatchKeyEvent({ type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+        await Input.dispatchKeyEvent({ type: 'keyUp', key: 'Escape', code: 'Escape' });
+      };
+      try {
+        await escape(); await sleep(300);
+        const pane = await evaluate(rectOf(`document.querySelector('[class*="chart-gui-wrapper"]') || document.querySelector('table.chart-markup-table') || document.querySelector('canvas')`));
+        if (!pane) { assert.ok(true, 'no chart pane in this environment — skipping'); return; }
+        await Input.dispatchMouseEvent({ type: 'mouseMoved', x: pane.x, y: pane.y });
+        await Input.dispatchMouseEvent({ type: 'mousePressed', x: pane.x, y: pane.y, button: 'right', clickCount: 1 });
+        await Input.dispatchMouseEvent({ type: 'mouseReleased', x: pane.x, y: pane.y, button: 'right', clickCount: 1 });
+        await sleep(800);
+        const row = await evaluate(rectOf(`(function(){var t=document.querySelectorAll('tr,[role="menuitem"],[class*="item"]');for(var i=0;i<t.length;i++){if(/^Add alert on/i.test((t[i].textContent||'').trim()))return t[i];}return null;})()`));
+        if (!row) { assert.ok(true, 'no "Add alert" menu entry — skipping'); return; }
+        await realClick(row.x, row.y);
+        await sleep(1200);
+        const op = await evaluate(rectOf(`document.querySelector('[class*="operatorRow"]')`));
+        assert.ok(op, 'alert dialog opened with a condition control');
+        await realClick(op.x, op.y);
+        await sleep(700);
+        const opt = await evaluate(rectOf(`(function(){var n=document.querySelectorAll('[role="option"]');for(var i=0;i<n.length;i++){if((n[i].textContent||'').trim()==='Crossing Up')return n[i];}return null;})()`));
+        assert.ok(opt, '"Crossing Up" is offered by the dialog');
+        await realClick(opt.x, opt.y);
+        await sleep(700);
+        const confirmed = await evaluate(`(function(){var e=document.querySelector('[class*="operatorRow"]');return e?(e.textContent||'').trim():null;})()`);
+        assert.equal(confirmed, 'Crossing Up', 'dialog holds the condition that was selected');
+      } finally {
+        // Cancel so the probe never leaves an alert behind.
+        const cancel = await evaluate(rectOf(`(function(){var b=document.querySelectorAll('button,[role="button"]');for(var i=0;i<b.length;i++){if((b[i].textContent||'').trim()==='Cancel')return b[i];}return null;})()`));
+        if (cancel) await realClick(cancel.x, cancel.y);
+        await sleep(300); await escape();
+      }
     });
 
     it('alert_list — scrape alert items', async () => {

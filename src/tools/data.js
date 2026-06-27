@@ -4,7 +4,7 @@ import * as core from '../core/data.js';
 
 export function registerDataTools(server) {
   server.tool('data_get_ohlcv', 'Get OHLCV bar data from the chart. Use summary=true for compact stats instead of all bars (saves context).', {
-    count: z.coerce.number().optional().describe('Number of bars to retrieve (max 500, default 100)'),
+    count: z.coerce.number().int().positive().max(500).optional().describe('Number of bars to retrieve (max 500, default 100)'),
     summary: z.coerce.boolean().optional().describe('Return summary stats (high, low, open, close, avg volume, range) instead of all bars — much smaller output'),
   }, async ({ count, summary }) => {
     try { return jsonResult(await core.getOhlcv({ count, summary })); }
@@ -24,7 +24,7 @@ export function registerDataTools(server) {
   });
 
   server.tool('data_get_trades', 'Get trade list from Strategy Tester', {
-    max_trades: z.coerce.number().optional().describe('Maximum trades to return'),
+    max_trades: z.coerce.number().int().positive().max(20).optional().describe('Maximum trades to return (max 20)'),
   }, async ({ max_trades }) => {
     try { return jsonResult(await core.getTrades({ max_trades })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
@@ -57,7 +57,7 @@ export function registerDataTools(server) {
 
   server.tool('data_get_pine_labels', 'Read text labels drawn by Pine Script indicators (label.new). Returns text and price pairs. Use study_filter to target a specific indicator.', {
     study_filter: z.string().optional().describe('Substring to match study name. Omit for all.'),
-    max_labels: z.coerce.number().optional().describe('Max labels per study (default 50). Set higher if you need all.'),
+    max_labels: z.coerce.number().int().positive().max(200).optional().describe('Max labels per study (default 50, max 200). Set higher if you need all.'),
     verbose: z.coerce.boolean().optional().describe('Return raw label data with IDs, colors, positions (default false — returns only text + price)'),
   }, async ({ study_filter, max_labels, verbose }) => {
     try { return jsonResult(await core.getPineLabels({ study_filter, max_labels, verbose })); }
@@ -79,8 +79,19 @@ export function registerDataTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('data_get_study_values', 'Get current indicator values from the data window for all visible studies (RSI, MACD, Bollinger Bands, EMAs, custom indicators with plot()).', {}, async () => {
-    try { return jsonResult(await core.getStudyValues()); }
+  server.tool('data_get_pine_graphics', 'Read ALL Pine Script graphics — lines, labels, tables, boxes — in ONE CDP round-trip (one model.dataSources() scan). Preferred for the full-report / "analyze my chart" pass instead of four separate per-type calls. Use the per-type tools when you only need one kind.', {
+    study_filter: z.string().optional().describe('Substring to match study name. Omit for all.'),
+    max_labels: z.coerce.number().int().positive().max(200).optional().describe('Max labels per study (default 50, max 200)'),
+    verbose: z.coerce.boolean().optional().describe('Return raw data with IDs, coordinates, colors (default false)'),
+  }, async ({ study_filter, max_labels, verbose }) => {
+    try { return jsonResult({ success: true, ...(await core.getAllGraphicsShaped({ study_filter, max_labels, verbose })) }); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('data_get_study_values', 'Get current indicator values for visible studies (RSI, MACD, Bollinger Bands, EMAs, custom indicators with plot()). Values are returned as numbers (rounded to 2 decimals), not strings. Use study_filter to target a specific indicator.', {
+    study_filter: z.string().optional().describe('Substring to match study name (case-insensitive, e.g. "RSI", "Bollinger"). Omit for all visible studies.'),
+  }, async ({ study_filter }) => {
+    try { return jsonResult(await core.getStudyValues({ study_filter })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 }

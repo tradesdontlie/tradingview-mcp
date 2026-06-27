@@ -1,24 +1,86 @@
 /**
  * Core UI automation logic.
  */
-import { evaluate, evaluateAsync, getClient } from '../connection.js';
+import { evaluate as _evaluate, evaluateAsync as _evaluateAsync, getClient as _getClient, safeString } from '../connection.js';
 
-export async function click({ by, value }) {
-  const escaped = JSON.stringify(value);
+function _resolve(deps) {
+  return {
+    evaluate: deps?.evaluate || _evaluate,
+    evaluateAsync: deps?.evaluateAsync || _evaluateAsync,
+    getClient: deps?.getClient || _getClient,
+  };
+}
+
+/**
+ * Page-side helper source: given a CSS attribute value, return it escaped for safe
+ * embedding inside a double-quoted attribute selector ([attr="<value>"]). Backslashes
+ * are doubled first, then double-quotes escaped. Defined as a string so it can be
+ * inlined into evaluated payloads. The VALUE itself always reaches the page via
+ * safeString() (a JS string literal), so it can never break out of the evaluate
+ * payload; this only guards against the value terminating the CSS selector.
+ */
+const ATTR_ESCAPE_FN = `function __escAttr(v){return String(v).replace(/\\\\/g,'\\\\\\\\').replace(/"/g,'\\\\"');}`;
+
+/**
+ * Map a keyboard key name to its DOM `code` and Windows virtual-key code.
+ * Pure + exported for unit testing. Returns null for keys outside the supported
+ * set (named keys in KEY_MAP, single letters a-z/A-Z, single digits 0-9) so the
+ * caller can reject clearly-unsupported keys instead of dispatching a wrong code.
+ */
+const KEY_MAP = {
+  'Enter': { code: 'Enter', vk: 13 }, 'Escape': { code: 'Escape', vk: 27 }, 'Tab': { code: 'Tab', vk: 9 },
+  'Backspace': { code: 'Backspace', vk: 8 }, 'Delete': { code: 'Delete', vk: 46 },
+  'ArrowUp': { code: 'ArrowUp', vk: 38 }, 'ArrowDown': { code: 'ArrowDown', vk: 40 },
+  'ArrowLeft': { code: 'ArrowLeft', vk: 37 }, 'ArrowRight': { code: 'ArrowRight', vk: 39 },
+  'Space': { code: 'Space', vk: 32 }, 'Home': { code: 'Home', vk: 36 }, 'End': { code: 'End', vk: 35 },
+  'PageUp': { code: 'PageUp', vk: 33 }, 'PageDown': { code: 'PageDown', vk: 34 },
+  'F1': { code: 'F1', vk: 112 }, 'F2': { code: 'F2', vk: 113 }, 'F3': { code: 'F3', vk: 114 },
+  'F4': { code: 'F4', vk: 115 }, 'F5': { code: 'F5', vk: 116 }, 'F6': { code: 'F6', vk: 117 },
+  'F7': { code: 'F7', vk: 118 }, 'F8': { code: 'F8', vk: 119 }, 'F9': { code: 'F9', vk: 120 },
+  'F10': { code: 'F10', vk: 121 }, 'F11': { code: 'F11', vk: 122 }, 'F12': { code: 'F12', vk: 123 },
+};
+
+export function mapKey(key) {
+  if (typeof key !== 'string' || key.length === 0) return null;
+  if (KEY_MAP[key]) return KEY_MAP[key];
+  if (/^[0-9]$/.test(key)) return { code: 'Digit' + key, vk: key.charCodeAt(0) };
+  if (/^[a-zA-Z]$/.test(key)) {
+    const upper = key.toUpperCase();
+    return { code: 'Key' + upper, vk: upper.charCodeAt(0) };
+  }
+  return null;
+}
+
+// Bound the getSavedCharts() callback wait so a never-firing callback can't hang
+// the layout list/switch promise indefinitely.
+const SAVED_CHARTS_TIMEOUT_MS = 5000;
+// After loadChartFromServer(), wait before scanning for an "unsaved changes" dialog.
+const LAYOUT_DIALOG_SETTLE_MS = 500;
+// After dismissing the unsaved-changes dialog, wait for the layout to finish loading.
+const LAYOUT_LOAD_SETTLE_MS = 1000;
+// Gap between the two clicks of a synthesized double-click.
+const DOUBLE_CLICK_GAP_MS = 50;
+
+export async function click({ by, value, _deps }) {
+  const { evaluate } = _resolve(_deps);
+  // The value reaches the page only via safeString() (a JS string literal) — it
+  // can never terminate the evaluate payload. __escAttr() then escapes it for the
+  // CSS attribute selector so it can't break out of the selector either.
   const result = await evaluate(`
     (function() {
-      var by = ${JSON.stringify(by)};
-      var value = ${escaped};
+      ${ATTR_ESCAPE_FN}
+      var by = ${safeString(by)};
+      var value = ${safeString(value)};
       var el = null;
-      if (by === 'aria-label') el = document.querySelector('[aria-label="' + value.replace(/"/g, '\\\\"') + '"]');
-      else if (by === 'data-name') el = document.querySelector('[data-name="' + value.replace(/"/g, '\\\\"') + '"]');
+      if (by === 'aria-label') el = document.querySelector('[aria-label="' + __escAttr(value) + '"]');
+      else if (by === 'data-name') el = document.querySelector('[data-name="' + __escAttr(value) + '"]');
       else if (by === 'text') {
         var candidates = document.querySelectorAll('button, a, [role="button"], [role="menuitem"], [role="tab"]');
         for (var i = 0; i < candidates.length; i++) {
           var text = candidates[i].textContent.trim();
           if (text === value || text.toLowerCase() === value.toLowerCase()) { el = candidates[i]; break; }
         }
-      } else if (by === 'class-contains') el = document.querySelector('[class*="' + value.replace(/"/g, '\\\\"') + '"]');
+      } else if (by === 'class-contains') el = document.querySelector('[class*="' + __escAttr(value) + '"]');
       if (!el) return { found: false };
       el.click();
       return { found: true, tag: el.tagName.toLowerCase(), text: (el.textContent || '').trim().substring(0, 80), aria_label: el.getAttribute('aria-label') || null, data_name: el.getAttribute('data-name') || null };
@@ -28,28 +90,46 @@ export async function click({ by, value }) {
   return { success: true, clicked: result };
 }
 
-export async function openPanel({ panel, action }) {
+export async function openPanel({ panel, action, _deps }) {
+  const { evaluate } = _resolve(_deps);
   const isBottomPanel = panel === 'pine-editor' || panel === 'strategy-tester';
   if (isBottomPanel) {
-    const widgetName = panel === 'pine-editor' ? 'pine-editor' : 'backtesting';
+    // Bottom panels (Pine Editor, Strategy Tester) live in bottomWidgetBar.
+    // Current TV builds expose open/close/show/hide/toggleMinimize/
+    // toggleMaximize on bwb, but the older showWidget/hideWidget/
+    // activateScriptEditorTab methods this file used to call don't exist.
+    // To switch tabs we click the toolbar button (same path the user takes);
+    // to hide/show we minimize via _mode.setValue, which actually drives the
+    // panel layout (bwb.hide() only un-shows already-active widgets and
+    // doesn't collapse the panel).
+    const btnSelector = panel === 'pine-editor'
+      ? '[data-name="pine-dialog-button"]'
+      : '[data-name="backtesting-button"]';
+    const ariaLabel = panel === 'pine-editor' ? 'Pine' : 'Strategy Tester';
+    const monacoSelector = panel === 'pine-editor'
+      ? '.monaco-editor.pine-editor-monaco'
+      : '[data-name="backtesting"]';
     const result = await evaluate(`
       (function() {
         var bwb = window.TradingView && window.TradingView.bottomWidgetBar;
         if (!bwb) return { error: 'bottomWidgetBar not available' };
-        var panel = ${JSON.stringify(panel)};
-        var widgetName = ${JSON.stringify(widgetName)};
         var action = ${JSON.stringify(action)};
+        var btn = document.querySelector(${JSON.stringify(btnSelector)})
+          || document.querySelector('[aria-label=' + ${JSON.stringify(JSON.stringify(ariaLabel))} + ']');
+        var mounted = !!document.querySelector(${JSON.stringify(monacoSelector)});
+        var mode = bwb._mode && bwb._mode.value && bwb._mode.value();
         var bottomArea = document.querySelector('[class*="layout__area--bottom"]');
-        var isOpen = !!(bottomArea && bottomArea.offsetHeight > 50);
-        if (panel === 'pine-editor') { var monacoEl = document.querySelector('.monaco-editor.pine-editor-monaco'); isOpen = isOpen && !!monacoEl; }
-        if (panel === 'strategy-tester') { var stratPanel = document.querySelector('[data-name="backtesting"]') || document.querySelector('[class*="strategyReport"]'); isOpen = isOpen && !!(stratPanel && stratPanel.offsetParent); }
+        var visible = !!(bottomArea && bottomArea.offsetHeight > 50);
+        var isOpen = mounted && visible && mode !== 'minimized';
+
         var performed = 'none';
         if (action === 'open' || (action === 'toggle' && !isOpen)) {
-          if (panel === 'pine-editor') { if (typeof bwb.activateScriptEditorTab === 'function') bwb.activateScriptEditorTab(); else if (typeof bwb.showWidget === 'function') bwb.showWidget(widgetName); }
-          else { if (typeof bwb.showWidget === 'function') bwb.showWidget(widgetName); }
+          if (!mounted && btn) btn.click();
+          if (bwb._mode && bwb._mode.value && bwb._mode.value() === 'minimized' && bwb._mode.setValue) bwb._mode.setValue('normal');
+          if (bwb._isHidden && bwb._isHidden.setValue) bwb._isHidden.setValue(false);
           performed = 'opened';
         } else if (action === 'close' || (action === 'toggle' && isOpen)) {
-          if (typeof bwb.hideWidget === 'function') bwb.hideWidget(widgetName);
+          if (bwb._mode && bwb._mode.setValue) bwb._mode.setValue('minimized');
           performed = 'closed';
         }
         return { was_open: isOpen, performed: performed };
@@ -88,7 +168,8 @@ export async function openPanel({ panel, action }) {
   }
 }
 
-export async function fullscreen() {
+export async function fullscreen({ _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
   const result = await evaluate(`
     (function() {
       var btn = document.querySelector('[data-name="header-toolbar-fullscreen"]');
@@ -101,7 +182,8 @@ export async function fullscreen() {
   return { success: true, action: 'fullscreen_toggled' };
 }
 
-export async function layoutList() {
+export async function layoutList({ _deps } = {}) {
+  const { evaluateAsync } = _resolve(_deps);
   const layouts = await evaluateAsync(`
     new Promise(function(resolve) {
       try {
@@ -110,14 +192,16 @@ export async function layoutList() {
           var result = charts.map(function(c) { return { id: c.id || c.chartId || null, name: c.name || c.title || 'Untitled', symbol: c.symbol || null, resolution: c.resolution || null, modified: c.timestamp || c.modified || null }; });
           resolve({layouts: result, source: 'internal_api'});
         });
-        setTimeout(function() { resolve({layouts: [], source: 'internal_api', error: 'getSavedCharts timed out'}); }, 5000);
+        setTimeout(function() { resolve({layouts: [], source: 'internal_api', error: 'getSavedCharts timed out'}); }, ${SAVED_CHARTS_TIMEOUT_MS});
       } catch(e) { resolve({layouts: [], source: 'internal_api', error: e.message}); }
     })
   `);
-  return { success: true, layout_count: layouts?.layouts?.length || 0, source: layouts?.source, layouts: layouts?.layouts || [], error: layouts?.error };
+  if (layouts?.error) throw new Error(layouts.error);
+  return { success: true, layout_count: layouts?.layouts?.length || 0, source: layouts?.source, layouts: layouts?.layouts || [] };
 }
 
-export async function layoutSwitch({ name }) {
+export async function layoutSwitch({ name, _deps }) {
+  const { evaluate, evaluateAsync } = _resolve(_deps);
   const escaped = JSON.stringify(name);
   const result = await evaluateAsync(`
     new Promise(function(resolve) {
@@ -134,14 +218,14 @@ export async function layoutSwitch({ name }) {
           window.TradingViewApi.loadChartFromServer(chartId);
           resolve({success: true, method: 'loadChartFromServer', id: chartId, name: match.name || match.title, source: 'internal_api'});
         });
-        setTimeout(function() { resolve({success: false, error: 'getSavedCharts timed out', source: 'internal_api'}); }, 5000);
+        setTimeout(function() { resolve({success: false, error: 'getSavedCharts timed out', source: 'internal_api'}); }, ${SAVED_CHARTS_TIMEOUT_MS});
       } catch(e) { resolve({success: false, error: e.message, source: 'internal_api'}); }
     })
   `);
   if (!result?.success) throw new Error(result?.error || 'Unknown error switching layout');
 
   // Handle "unsaved changes" confirmation dialog
-  await new Promise(r => setTimeout(r, 500));
+  await new Promise(r => setTimeout(r, LAYOUT_DIALOG_SETTLE_MS));
   const dismissed = await evaluate(`
     (function() {
       var btns = document.querySelectorAll('button');
@@ -156,11 +240,12 @@ export async function layoutSwitch({ name }) {
     })()
   `);
 
-  if (dismissed) await new Promise(r => setTimeout(r, 1000));
+  if (dismissed) await new Promise(r => setTimeout(r, LAYOUT_LOAD_SETTLE_MS));
   return { success: true, layout: result.name || name, layout_id: result.id, source: result.source, action: 'switched', unsaved_dialog_dismissed: dismissed };
 }
 
-export async function keyboard({ key, modifiers }) {
+export async function keyboard({ key, modifiers, _deps }) {
+  const { getClient } = _resolve(_deps);
   const c = await getClient();
   let mod = 0;
   if (modifiers) {
@@ -169,42 +254,42 @@ export async function keyboard({ key, modifiers }) {
     if (modifiers.includes('meta')) mod |= 4;
     if (modifiers.includes('shift')) mod |= 8;
   }
-  const keyMap = {
-    'Enter': { code: 'Enter', vk: 13 }, 'Escape': { code: 'Escape', vk: 27 }, 'Tab': { code: 'Tab', vk: 9 },
-    'Backspace': { code: 'Backspace', vk: 8 }, 'Delete': { code: 'Delete', vk: 46 },
-    'ArrowUp': { code: 'ArrowUp', vk: 38 }, 'ArrowDown': { code: 'ArrowDown', vk: 40 },
-    'ArrowLeft': { code: 'ArrowLeft', vk: 37 }, 'ArrowRight': { code: 'ArrowRight', vk: 39 },
-    'Space': { code: 'Space', vk: 32 }, 'Home': { code: 'Home', vk: 36 }, 'End': { code: 'End', vk: 35 },
-    'PageUp': { code: 'PageUp', vk: 33 }, 'PageDown': { code: 'PageDown', vk: 34 },
-    'F1': { code: 'F1', vk: 112 }, 'F2': { code: 'F2', vk: 113 }, 'F5': { code: 'F5', vk: 116 },
-  };
-  const mapped = keyMap[key] || { code: 'Key' + key.toUpperCase(), vk: key.toUpperCase().charCodeAt(0) };
+  const mapped = mapKey(key);
+  if (!mapped) {
+    throw new Error(
+      `Unsupported key: "${key}". Use a named key (Enter, Escape, Tab, Arrow*, F1-F12, etc.), ` +
+      `a single letter (a-z), or a single digit (0-9).`
+    );
+  }
   await c.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: mod, key, code: mapped.code, windowsVirtualKeyCode: mapped.vk });
   await c.Input.dispatchKeyEvent({ type: 'keyUp', key, code: mapped.code });
   return { success: true, key, modifiers: modifiers || [] };
 }
 
-export async function typeText({ text }) {
+export async function typeText({ text, _deps }) {
+  const { getClient } = _resolve(_deps);
   const c = await getClient();
   await c.Input.insertText({ text });
   return { success: true, typed: text.substring(0, 100), length: text.length };
 }
 
-export async function hover({ by, value }) {
+export async function hover({ by, value, _deps }) {
+  const { evaluate, getClient } = _resolve(_deps);
   const coords = await evaluate(`
     (function() {
-      var by = ${JSON.stringify(by)};
-      var value = ${JSON.stringify(value)};
+      ${ATTR_ESCAPE_FN}
+      var by = ${safeString(by)};
+      var value = ${safeString(value)};
       var el = null;
       if (by === 'aria-label') {
-        el = document.querySelector('[aria-label="' + value.replace(/"/g, '\\\\"') + '"]');
-        if (!el) el = document.querySelector('[aria-label*="' + value.replace(/"/g, '\\\\"') + '"]');
+        el = document.querySelector('[aria-label="' + __escAttr(value) + '"]');
+        if (!el) el = document.querySelector('[aria-label*="' + __escAttr(value) + '"]');
       }
-      else if (by === 'data-name') el = document.querySelector('[data-name="' + value.replace(/"/g, '\\\\"') + '"]');
+      else if (by === 'data-name') el = document.querySelector('[data-name="' + __escAttr(value) + '"]');
       else if (by === 'text') {
         var candidates = document.querySelectorAll('button, a, [role="button"], [role="menuitem"], [role="tab"], span, div');
         for (var i = 0; i < candidates.length; i++) { var text = candidates[i].textContent.trim(); if (text === value || text.toLowerCase() === value.toLowerCase()) { el = candidates[i]; break; } }
-      } else if (by === 'class-contains') el = document.querySelector('[class*="' + value.replace(/"/g, '\\\\"') + '"]');
+      } else if (by === 'class-contains') el = document.querySelector('[class*="' + __escAttr(value) + '"]');
       if (!el) return null;
       var rect = el.getBoundingClientRect();
       return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2, tag: el.tagName.toLowerCase() };
@@ -216,7 +301,8 @@ export async function hover({ by, value }) {
   return { success: true, hovered: { by, value, tag: coords.tag, x: coords.x, y: coords.y } };
 }
 
-export async function scroll({ direction, amount }) {
+export async function scroll({ direction, amount, _deps }) {
+  const { evaluate, getClient } = _resolve(_deps);
   const c = await getClient();
   const px = amount || 300;
   const center = await evaluate(`
@@ -234,7 +320,8 @@ export async function scroll({ direction, amount }) {
   return { success: true, direction, amount: px };
 }
 
-export async function mouseClick({ x, y, button, double_click }) {
+export async function mouseClick({ x, y, button, double_click, _deps }) {
+  const { getClient } = _resolve(_deps);
   const c = await getClient();
   const btn = button === 'right' ? 'right' : button === 'middle' ? 'middle' : 'left';
   const btnNum = btn === 'right' ? 2 : btn === 'middle' ? 1 : 0;
@@ -242,28 +329,33 @@ export async function mouseClick({ x, y, button, double_click }) {
   await c.Input.dispatchMouseEvent({ type: 'mousePressed', x, y, button: btn, buttons: btnNum, clickCount: 1 });
   await c.Input.dispatchMouseEvent({ type: 'mouseReleased', x, y, button: btn });
   if (double_click) {
-    await new Promise(r => setTimeout(r, 50));
+    await new Promise(r => setTimeout(r, DOUBLE_CLICK_GAP_MS));
     await c.Input.dispatchMouseEvent({ type: 'mousePressed', x, y, button: btn, buttons: btnNum, clickCount: 2 });
     await c.Input.dispatchMouseEvent({ type: 'mouseReleased', x, y, button: btn });
   }
   return { success: true, x, y, button: btn, double_click: !!double_click };
 }
 
-export async function findElement({ query, strategy }) {
+export async function findElement({ query, strategy, _deps }) {
+  const { evaluate } = _resolve(_deps);
   const strat = strategy || 'text';
   const results = await evaluate(`
     (function() {
-      var query = ${JSON.stringify(query)};
-      var strategy = ${JSON.stringify(strat)};
+      ${ATTR_ESCAPE_FN}
+      var query = ${safeString(query)};
+      var strategy = ${safeString(strat)};
       var results = [];
       if (strategy === 'css') {
+        // 'css' strategy intentionally treats query as a raw CSS selector. The
+        // value still reaches the page only via safeString() so it cannot break
+        // out of the evaluate payload; an invalid selector simply throws below.
         var els = document.querySelectorAll(query);
         for (var i = 0; i < Math.min(els.length, 20); i++) {
           var rect = els[i].getBoundingClientRect();
           results.push({ tag: els[i].tagName.toLowerCase(), text: (els[i].textContent || '').trim().substring(0, 80), aria_label: els[i].getAttribute('aria-label') || null, data_name: els[i].getAttribute('data-name') || null, x: rect.x, y: rect.y, width: rect.width, height: rect.height, visible: els[i].offsetParent !== null });
         }
       } else if (strategy === 'aria-label') {
-        var els = document.querySelectorAll('[aria-label*="' + query.replace(/"/g, '\\\\"') + '"]');
+        var els = document.querySelectorAll('[aria-label*="' + __escAttr(query) + '"]');
         for (var i = 0; i < Math.min(els.length, 20); i++) {
           var rect = els[i].getBoundingClientRect();
           results.push({ tag: els[i].tagName.toLowerCase(), text: (els[i].textContent || '').trim().substring(0, 80), aria_label: els[i].getAttribute('aria-label') || null, data_name: els[i].getAttribute('data-name') || null, x: rect.x, y: rect.y, width: rect.width, height: rect.height, visible: els[i].offsetParent !== null });
@@ -287,7 +379,8 @@ export async function findElement({ query, strategy }) {
   return { success: true, query, strategy: strat, count: results?.length || 0, elements: results || [] };
 }
 
-export async function uiEvaluate({ expression }) {
+export async function uiEvaluate({ expression, _deps }) {
+  const { evaluate } = _resolve(_deps);
   const result = await evaluate(expression);
   return { success: true, result };
 }
