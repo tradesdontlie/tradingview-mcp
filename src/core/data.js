@@ -570,8 +570,9 @@ export async function getPineLabels({ study_filter, max_labels, verbose } = {}) 
       const v = item.raw;
       const text = v.t || '';
       const price = roundPrice(v.y);
-      if (verbose) return { id: item.id, text, price, x: v.x, yloc: v.yl, size: v.sz, textColor: v.tci, color: v.ci };
-      return { text, price };
+      const tooltip = v.tt || '';
+      if (verbose) return { id: item.id, text, price, tooltip, x: v.x, yloc: v.yl, size: v.sz, textColor: v.tci, color: v.ci };
+      return { text, price, ...(tooltip ? { tooltip } : {}) };
     }).filter(l => l.text || l.price != null);
     if (labels.length > limit) labels = labels.slice(-limit);
     return { name: s.name, total_labels: s.count, showing: labels.length, labels };

@@ -289,12 +289,18 @@ export async function launch({ port, kill_existing, _deps } = {}) {
   const killFirst = kill_existing !== false;
   const platform = process.platform;
 
+  // Allow override via env var: TRADINGVIEW_PATH=C:\path\to\TradingView.exe
+  const envOverride = process.env.TRADINGVIEW_PATH;
+
   const pathMap = {
     darwin: [
       '/Applications/TradingView.app/Contents/MacOS/TradingView',
       `${process.env.HOME}/Applications/TradingView.app/Contents/MacOS/TradingView`,
     ],
     win32: [
+      // Env override takes highest priority (for non-standard installs)
+      ...(envOverride ? [envOverride] : []),
+      // Standard installer paths
       `${process.env.LOCALAPPDATA}\\TradingView\\TradingView.exe`,
       `${process.env.PROGRAMFILES}\\TradingView\\TradingView.exe`,
       `${process.env['PROGRAMFILES(X86)']}\\TradingView\\TradingView.exe`,
@@ -325,6 +331,32 @@ export async function launch({ port, kill_existing, _deps } = {}) {
         if (deps.existsSync(candidate)) tvPath = candidate;
       }
     } catch { /* ignore */ }
+  }
+
+  // Windows Store (MSIX) detection — version-independent.
+  // Get-AppxPackage queries the MSIX package registry, so it works across
+  // TradingView updates without needing a hardcoded version path.
+  // C:\Program Files\WindowsApps is permission-locked for normal processes,
+  // so readdirSync won't work there — this PowerShell query is the reliable way.
+  if (!tvPath && platform === 'win32') {
+    try {
+      const appxCmd = `powershell -NoProfile -Command "(Get-AppxPackage -Name 'TradingView.Desktop').InstallLocation"`;
+      const appxLoc = execSync(appxCmd, { timeout: 8000 }).toString().trim();
+      if (appxLoc) {
+        const appxExe = `${appxLoc}\\TradingView.exe`;
+        if (existsSync(appxExe)) tvPath = appxExe;
+      }
+    } catch { /* TradingView MSIX package not installed */ }
+  }
+
+  // Secondary fallback: query the running process path via WMI.
+  // Works if TradingView is already running, regardless of install method.
+  if (!tvPath && platform === 'win32') {
+    try {
+      const wmiCmd = `powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \\"Name='TradingView.exe'\\" | Select-Object -First 1 -ExpandProperty ExecutablePath"`;
+      const wmiPath = execSync(wmiCmd, { timeout: 8000 }).toString().trim();
+      if (wmiPath && existsSync(wmiPath)) tvPath = wmiPath;
+    } catch { /* TradingView not running or WMI unavailable */ }
   }
 
   if (!tvPath) {
