@@ -13,6 +13,11 @@ function wv(path) {
   return `(function(){ var v = ${path}; return (v && typeof v === 'object' && typeof v.value === 'function') ? v.value() : v; })()`;
 }
 
+// Drift beyond this (seconds) between requested and landed date signals a clamp
+// (target predates the loaded history buffer) rather than a normal time-convention
+// offset (session-close vs midnight ~1 day, or a weekend/holiday gap).
+const DRIFT_WARN_SECONDS = 4 * 86400;
+
 function _resolve(deps) {
   return {
     evaluate: deps?.evaluate || _evaluate,
@@ -27,6 +32,15 @@ export async function start({ date, _deps } = {}) {
   const rp = await getReplayApi();
   const available = await evaluate(wv(`${rp}.isReplayAvailable()`));
   if (!available) throw new Error('Replay is not available for the current symbol/timeframe');
+
+  // Re-jump safety: if replay is already running, a second selectDate() can be
+  // absorbed and the cursor stays pinned. Stop and let it settle before
+  // re-selecting so the new start lands where asked (T113a).
+  const alreadyRunning = await evaluate(wv(`${rp}.isReplayStarted()`));
+  if (alreadyRunning) {
+    try { await evaluate(`${rp}.stopReplay()`); } catch {}
+    await new Promise(r => setTimeout(r, 300));
+  }
 
   await evaluate(`${rp}.showReplayToolbar()`);
 
@@ -59,7 +73,22 @@ export async function start({ date, _deps } = {}) {
     throw new Error('Replay failed to start. The selected date may not have data for this timeframe. Try a more recent date or a higher timeframe (e.g., Daily).');
   }
 
-  return { success: true, replay_started: true, date: date || '(first available)', current_date: currentDate };
+  // Drift-warning: surface a silent clamp instead of pretending success. If the
+  // landed cursor is far from the requested date, the target likely predates the
+  // loaded history buffer (scroll_back to pre-load history is T113b).
+  let warning;
+  if (date && typeof currentDate === 'number') {
+    const reqSec = Math.floor(new Date(date).getTime() / 1000);
+    const driftSec = Math.abs(currentDate - reqSec);
+    if (driftSec > DRIFT_WARN_SECONDS) {
+      const landed = new Date(currentDate * 1000).toISOString().slice(0, 10);
+      warning = `Replay landed ~${Math.round(driftSec / 86400)}d from the requested date (requested ${date}, cursor ${landed}). The target may predate the loaded history buffer.`;
+    }
+  }
+
+  const result = { success: true, replay_started: true, date: date || '(first available)', current_date: currentDate };
+  if (warning) result.warning = warning;
+  return result;
 }
 
 export async function step({ _deps } = {}) {

@@ -4,6 +4,28 @@
 > This queue starts at T112. Historical shipped work (T1–T111) predates the queue and is
 > narrated in `../FORK_NOTES.md` (the fork's divergence log) — not migrated here.
 
+## T113a — replay re-jump guard + drift-warning (safe subset of T113)
+
+**Status:** DONE (2026-07-01)
+**Priority:** Tier-A (high)
+**Effort:** S (actual — scoped down from the L original)
+**Phase:** 1
+**Supersedes scope:** partial of original T113; remainder → T113b
+
+### Outcome
+Shipped the two safe, high-value pieces of T113: a **re-jump guard** in `start()` (stopReplay + settle before re-selecting so a re-start lands correctly) and a **drift-warning** (flags a likely clamp when the landed cursor is >4 days from the requested date). Both validated.
+
+The aggressive parts of the original T113 (nulling `_replaySessionState`, `goToRealtime()` in `stop()`) were implemented, found to **regress normal stop→start→step re-use** (proven — 2nd cycle couldn't step), and reverted. `stop()` is back to the proven `stopReplay()`-only. Full analysis + the S5 finding (no `_linking` copy on TV 3.1.0) in FORK_NOTES §18.
+
+### Verification (actual)
+- `tests/replay.test.js` 48/48 (re-jump-stop, drift-warn, no-drift-warn added); full suite 60/60.
+- Live: 4 forward start/stop/step cycles clean; drift-warning correctly silent on a correct deep-history landing; `replay_walk` unaffected.
+
+### Files touched
+- `src/core/replay.js`, `tests/replay.test.js`, `FORK_NOTES.md`, `TASKS.md`, `tasks/{active,done,backlog}.md`.
+
+---
+
 ## T115 — replay_walk (capture-during-replay backtest loop)
 
 **Status:** DONE (2026-07-01)

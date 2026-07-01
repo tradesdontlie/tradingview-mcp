@@ -661,6 +661,29 @@ Composes RULEBOOK §11's 5-step save cycle (compile → save → cache-bust → 
 
 ---
 
+### 18. T113a — replay re-jump guard + drift-warning (safe subset of T113)
+
+Partial ship of the T113 hardening. Two safe, validated pieces landed; the aggressive session-recovery + teardown were **tried, found to regress normal re-use, and reverted** (see below). Remainder tracked as T113b.
+
+**Shipped:**
+- **Re-jump guard** in `start()`: if replay is already running, `stopReplay()` + 300ms settle before the new `selectDate()`, so a re-start lands where asked instead of the second selectDate being absorbed (cursor pinned).
+- **Drift-warning** in `start()`: if the landed cursor is >4 days from the requested date, return a `warning` field flagging a likely clamp (target predates the loaded history buffer). Threshold avoids false positives from the normal session-close-vs-midnight (~1 day) and weekend/holiday offsets. Read-only; validated it stays silent on correct landings (e.g. `start@2005-01-01` on a deep-history symbol lands at 2005 with no warning).
+
+**Tried and reverted (important — do not re-attempt naively in T113b):**
+- Adding `goToRealtime()` + nulling `_chartWidgetCollection._replaySessionState` inside `stop()` (and a session-clear in the re-jump path) **broke normal stop→start→step re-use** — the 2nd cycle's `step()` could no longer advance. All prior smokes (T112/114/115/116) did repeated stop→start with the plain `stopReplay()`-only `stop()` and worked; the additions caused the regression. TV's replay-state lifecycle is more involved than "null one field" — `_replaySessionState` is live state, not a stale cache, and clearing it mid-life desyncs the next session. `stop()` reverted to `stopReplay()`-only.
+
+**Live finding for T113b:** repeated start/stop cycles degrade after ~4 (the 5th cycle's `step()` can't advance) — a pre-existing TV behavior, independent of this fork (earlier smokes never ran 5 rapid cycles). `step()` fails loud (throws) rather than returning stale, which is correct (T112). A TV restart clears it. Proper recovery needs investigating TV's actual replay-session teardown (likely `leaveReplay()` + `_replayContainer` handling), not blind field-nulling.
+
+**S5 probe note:** the iliaal "two-path clear" (`_linking._chartWidgetCollection._replaySessionState`) does **not** apply to TV 3.1.0 — there is no `_chartWidgetCollection._linking`; only `_linkingGroupsCharts`/`_activeLinkingGroupWV` and a single `_replaySessionState` (+ `_replayContainer`).
+
+**Validated:** `tests/replay.test.js` 48/48 (added re-jump-stop, drift-warn, no-drift-warn; full suite 60/60 with snapshot+backtest). Live: 4 forward start/stop/step cycles clean; `replay_walk` unaffected.
+
+**Files touched:** `src/core/replay.js` (`start()` re-jump guard + drift-warning, `DRIFT_WARN_SECONDS`), `tests/replay.test.js`.
+
+**Spec ref:** task queue T113a (`tasks/done.md`); remainder T113b (`tasks/backlog.md`).
+
+---
+
 ### Replay API surface (live probe, TV 3.1.0) — reference for T113/T114/T115/T119
 
 `Object.getOwnPropertyNames(Object.getPrototypeOf(window.TradingViewApi._replayApi))` on TV Desktop 3.1.0 exposes (beyond the already-used methods) several undocumented capabilities worth building on:

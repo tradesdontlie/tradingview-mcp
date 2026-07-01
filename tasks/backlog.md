@@ -6,6 +6,38 @@
 
 ---
 
+## T113b — replay session recovery + scroll_back (deep remainder of T113)
+
+**Status:** TODO
+**Priority:** Tier-B (normal — nice-to-have; the backtest engine works without it)
+**Effort:** L (<3d)
+**Phase:** 2
+**Dependencies:** None
+**Supersedes:** remainder of T113 (T113a shipped the safe subset)
+**Audit ref:** FORK_NOTES §18 (what was tried + reverted); live findings during T113a
+
+### Why
+Two hard problems T113a deliberately left alone because naive fixes regressed re-use:
+1. **Repeated-cycle corruption / recovery.** After ~4–5 rapid start/stop cycles, replay degrades (5th `step()` can't advance); only a TV restart clears it today. Nulling `_chartWidgetCollection._replaySessionState` and/or `goToRealtime()` in `stop()` made it WORSE (broke the 2nd cycle) — so recovery needs real investigation of TV 3.1.0's replay-session teardown, not blind field-nulling. Candidates to probe: `leaveReplay()`, `_replayContainer` lifecycle, the `_replayUIController._restoreReplaySessionState` / `_updateReplaySessionState` methods (seen in the live prototype dump).
+2. **scroll_back for backward jumps past the loaded buffer.** A `selectDate()` to a target earlier than the loaded history buffer clamps (cursor stalls, `step()` then can't advance). Needs pre-loading older history via synthetic `Input.dispatchMouseEvent({type:'mouseWheel', deltaX:-120})` batches at the pane canvas until `bars().valueAt(firstIndex())[0] <= targetTs`, BEFORE `showReplayToolbar()`. iliaal's `_scrollBackToTarget` is the reference (but re-verify paths on 3.1.0).
+
+### Acceptance criteria
+- [ ] A safe replay-session reset that lets ≥10 consecutive start/stop cycles step cleanly with no TV restart — WITHOUT regressing normal stop→start→step (guard with a repeated-cycle live test).
+- [ ] `scroll_back` option on `start()`: backward jump past the buffer pre-loads history and lands correctly (drift-warning from T113a should then NOT fire).
+- [ ] Robust `stop()` teardown that doesn't break the next start (only add `goToRealtime`/`leaveReplay` if proven safe via the repeated-cycle test).
+- [ ] Tests + live smoke (10 cycles; a deep backward jump). **Standards S1–S5**, esp. S5 (probe the teardown methods live first).
+
+### Files to touch
+- `src/core/replay.js`, `src/connection.js` (wheel-dispatch pane target), `tests/replay.test.js`, `FORK_NOTES.md`.
+
+### Implementation notes
+Start by live-probing `_replayUIController` teardown methods and the `_replayContainer` lifecycle — do NOT re-attempt the reverted `_replaySessionState = null` approach without understanding why it desyncs. The repeated-cycle degradation may even be a TV bug with no clean client-side fix; if so, document that and cap `replay_walk` guidance accordingly.
+
+### Verification / Rollback / Resume
+Live 10-cycle test must pass; `replay_walk` must remain green. Additive/guarded changes — revert commit if a regression appears. Natural split: (a) session recovery, (b) scroll_back — ship independently.
+
+---
+
 ## T117 — Mathieu2301 headless-socket viability spike (gate)
 
 **Status:** TODO

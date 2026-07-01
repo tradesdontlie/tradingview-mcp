@@ -381,6 +381,49 @@ describe('stop()', () => {
   });
 });
 
+// ── T113 hardening: re-jump clear, drift-warning, robust teardown ─────────
+
+describe('start() — re-jump safety & drift-warning (T113a)', () => {
+  it('stops before re-selecting when replay already running', async () => {
+    const calls = [];
+    const evaluate = async (expr) => {
+      calls.push(expr);
+      if (expr.includes('isReplayAvailable')) return true;
+      if (expr.includes('isReplayStarted')) return true;       // running at entry + poll
+      if (expr.includes('currentDate')) return 1740959999;      // ~requested (no warning)
+      return undefined;
+    };
+    await start({ date: '2025-03-03', _deps: { evaluate, getReplayApi: mockGetReplayApi() } });
+    const stopIdx = calls.findIndex(c => c.includes('stopReplay'));
+    const selIdx = calls.findIndex(c => c.includes('selectDate'));
+    assert.ok(stopIdx >= 0 && selIdx >= 0, 'stopReplay and selectDate both happened');
+    assert.ok(stopIdx < selIdx, 'stop precedes re-select');
+  });
+
+  it('warns when the landed cursor is far from the requested date (clamp)', async () => {
+    const evaluate = async (expr) => {
+      if (expr.includes('isReplayAvailable')) return true;
+      if (expr.includes('isReplayStarted')) return true;
+      if (expr.includes('currentDate')) return 1740959999;      // ~2025, requested 2015
+      return undefined;
+    };
+    const r = await start({ date: '2015-01-01', _deps: { evaluate, getReplayApi: mockGetReplayApi() } });
+    assert.ok(r.warning && r.warning.includes('predate'), 'clamp warning surfaced');
+  });
+
+  it('does not warn when the landing matches the requested date', async () => {
+    let n = 0;
+    const evaluate = async (expr) => {
+      if (expr.includes('isReplayAvailable')) return true;
+      if (expr.includes('isReplayStarted')) { n++; return n > 1; } // entry false (skip re-jump), poll true
+      if (expr.includes('currentDate')) return 1740960000;         // exactly requested
+      return undefined;
+    };
+    const r = await start({ date: '2025-03-03', _deps: { evaluate, getReplayApi: mockGetReplayApi() } });
+    assert.equal(r.warning, undefined);
+  });
+});
+
 // ── trade() ──────────────────────────────────────────────────────────────
 
 describe('trade()', () => {
