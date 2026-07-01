@@ -23,3 +23,6 @@ id_ed25519*
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# crash artifacts
+*.stackdump

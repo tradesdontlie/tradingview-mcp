@@ -4,6 +4,27 @@
 > This queue starts at T112. Historical shipped work (T1–T111) predates the queue and is
 > narrated in `../FORK_NOTES.md` (the fork's divergence log) — not migrated here.
 
+## T116 — chart_snapshot (single-call per-bar capture)
+
+**Status:** DONE (2026-07-01)
+**Priority:** Tier-A (high)
+**Effort:** M (<1d)
+**Phase:** 1
+**Dependencies:** None (enables fast T115)
+
+### Outcome
+New `chart_snapshot` MCP tool + `tv snapshot` CLI + `src/core/snapshot.js`. One concurrent capture of state + current-bar OHLCV + study values + Pine lines/labels/tables/boxes, filtered by `study_filter`, section-selectable via `include`, error-isolated per section, with `bar_time` surfaced. Reuses the existing tested `data.js`/`chart.js` decoders (concurrent `Promise.all`, not a fused IIFE — rationale in FORK_NOTES §16) so no fragile-decode duplication. Fetchers injectable via `_deps` for unit testing.
+
+### Verification (actual)
+- `node --test tests/snapshot.test.js` → 5/5 (sections, study_filter, unknown-section-throws, per-section error isolation, bar_time).
+- Live smoke: realtime 111ms all 7 sections (4 studies, pine labels×4/lines×2); in-replay 6ms.
+- Finding for T115: `current_date` (replay cursor, period-end) ≠ OHLCV `bar.time` (bar start) — same bar, different convention. Key the walk series on `bar.time`.
+
+### Files touched
+- `src/core/snapshot.js` (new), `src/tools/data.js`, `src/cli/commands/data.js`, `tests/snapshot.test.js` (new), `CLAUDE.md`, `README.md`, `FORK_NOTES.md`, `TASKS.md`, `tasks/{active,done}.md`.
+
+---
+
 ## T114 — replay_set_resolution (tick/second/minute granularity)
 
 **Status:** DONE (2026-07-01)

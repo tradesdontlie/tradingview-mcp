@@ -1,6 +1,6 @@
 # TradingView MCP — Claude Instructions
 
-83 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
+84 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
 
 ## Decision Tree — Which Tool When
 
@@ -23,6 +23,9 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 - `data_get_ohlcv` with `summary: true` → compact stats (high, low, range, change%, avg volume, last 5 bars)
 - `data_get_ohlcv` without summary → all bars (use `count` to limit, default 100)
 - `quote_get` → single latest price snapshot
+
+### "Snapshot everything at once" (fast, one call)
+- `chart_snapshot` → state + current-bar OHLCV + study values + Pine lines/labels/tables/boxes in a single concurrent capture. Use `study_filter` to target one indicator and `include` to pick sections. This is the per-bar capture primitive behind `replay_walk` — prefer it over calling the individual data tools in sequence.
 
 ### "Analyze my chart" (full report workflow)
 1. `quote_get` → current price

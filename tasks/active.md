@@ -69,51 +69,6 @@ Standard. Commit `T113 shipped — replay hardening: scroll_back, drift-warning,
 
 ---
 
-## T116 — `chart_snapshot` single-round-trip per-bar capture
-
-**Status:** TODO
-**Priority:** Tier-A (high)
-**Effort:** M (<1d)
-**Phase:** 1
-**Dependencies:** None (enables fast T115)
-**Audit ref:** 2026-07-01 fork-commit deep-dive — `niwang` PR #297 (collapses state+quote+OHLCV+study-values+pine-graphics into one CDP round-trip)
-**KB ref:** our `src/core/data.js` (existing decoders for study values + pine lines/labels/boxes/tables)
-
-### Why
-The T115 capture loop reads several data points at every replayed bar. Doing that as N separate CDP `evaluate` calls per bar makes a several-hundred-bar walk painfully slow. A single `evaluate` that returns state + current-bar OHLCV + filtered study values + pine graphics in one round-trip cuts per-bar latency dramatically. It's also independently useful for any "analyze my chart" flow. Upstream PR #297 already demonstrates the consolidation.
-
-### Acceptance criteria
-- [ ] New `chart_snapshot({ study_filter?, include? })` returns, in ONE CDP call: symbol/TF, current-bar OHLCV (`bars().valueAt(lastIndex())`), study values (via `dataWindowView`), and pine lines/labels/boxes/tables — filtered by `study_filter`.
-- [ ] `include` lets callers drop sections they don't need (keep payload small — honor the CLAUDE.md context rules).
-- [ ] Reuses existing decoders from `data.js` (no logic fork); prefer the `study._study || study` + `_source._graphics` fallback traversal (more robust during replay).
-- [ ] Tests pass; live smoke: snapshot on a chart with a custom multi-output indicator, confirm one round-trip returns all sections and matches the individual tools.
-- [ ] **Standards (S1–S5) applied.**
-
-### Files to touch
-- `src/core/data.js` or new `src/core/snapshot.js` — the combined reader.
-- `src/tools/` — `chart_snapshot` registration.
-- `tests/`, `CLAUDE.md`, `README.md`, `FORK_NOTES.md`.
-
-### Implementation notes
-Build the combined page-context IIFE by composing the existing extraction expressions, not by re-implementing them — the field decoding in `data.js` is load-bearing and already correct. Return a compact JSON; large arrays (labels) still respect caps + `truncated` flags.
-
-### Verification
-```
-npm test
-# live: chart_snapshot vs data_get_study_values + data_get_pine_* — values must match
-```
-
-### Rollback
-Additive tool — revert commit.
-
-### Resume notes
-Break: land the core reader + a CLI smoke first, then the MCP tool wrapper + tests.
-
-### Completion checklist
-Standard. Commit `T116 shipped — chart_snapshot single-round-trip capture`.
-
----
-
 ## T115 — `replay_walk` capture-during-replay loop → JSONL series
 
 **Status:** TODO

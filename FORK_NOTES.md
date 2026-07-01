@@ -621,6 +621,28 @@ Composes RULEBOOK §11's 5-step save cycle (compile → save → cache-bust → 
 
 ---
 
+### 16. T116 — `chart_snapshot` (one-call per-bar capture)
+
+**New tool.** Captures, in one concurrent call, everything needed to record a bar: chart state + current-bar OHLCV + study values + Pine graphics (lines/labels/tables/boxes). This is the per-bar capture primitive the T115 `replay_walk` loop is built on.
+
+- **Reuses the tested decoders** in `data.js`/`chart.js` (getState, getOhlcv, getStudyValues, getPineLines/Labels/Tables/Boxes) rather than re-implementing the fragile undocumented-path extraction. Section fetchers run concurrently via `Promise.all`; not a literal single CDP round-trip, but per-bar latency is dominated by replay stepping (~180ms) so fusing into one IIFE would only duplicate the decoders for no measurable gain. New `src/core/snapshot.js`.
+- `study_filter` applies across ALL sections (getStudyValues has no filter param, so we post-filter the studies array by name substring to keep behavior consistent).
+- `include` selects a subset of sections (unknown names throw — fail loud). `max_labels` passes through to the labels section.
+- Each section is error-isolated: a section that throws is captured as `{ error }` so one failure doesn't lose the whole snapshot.
+- Surfaces `bar_time` (the last OHLCV bar's start time) as the natural per-bar key.
+
+**Live finding (feeds T115):** during replay, `step().current_date` (the replay cursor) and the OHLCV bar's `time` use **different conventions** — on `BATS:F` 1D they differed by exactly one RTH session (6.5h): `current_date` is the session-close-ish period end (`…:59:59`), `bar.time` is the session open. They reference the **same bar**. → T115 should key its capture series on the canonical OHLCV `bar.time` and record `current_date` as a secondary field.
+
+**Validated:** unit `tests/snapshot.test.js` 5/5 (section selection, study_filter, unknown-section throws, per-section error isolation, bar_time). Live smoke: realtime snapshot 111ms returning all 7 sections (4 studies, pine labels on 4 / lines on 2); in-replay snapshot 6ms.
+
+**Files touched:** `src/core/snapshot.js` (new), `src/tools/data.js` (`chart_snapshot`), `src/cli/commands/data.js` (`tv snapshot`), `tests/snapshot.test.js` (new), `CLAUDE.md` (decision tree + count 84), `README.md`.
+
+**Source:** concept from `niwang` PR #297 (single-call state+quote+ohlcv+studies+pine); our impl composes existing fork decoders concurrently.
+
+**Spec ref:** task queue T116 (`tasks/done.md`).
+
+---
+
 ### Replay API surface (live probe, TV 3.1.0) — reference for T113/T114/T115/T119
 
 `Object.getOwnPropertyNames(Object.getPrototypeOf(window.TradingViewApi._replayApi))` on TV Desktop 3.1.0 exposes (beyond the already-used methods) several undocumented capabilities worth building on:
