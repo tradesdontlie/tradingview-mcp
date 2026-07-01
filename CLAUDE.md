@@ -1,6 +1,6 @@
 # TradingView MCP — Claude Instructions
 
-84 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
+85 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
 
 ## Decision Tree — Which Tool When
 
@@ -62,6 +62,9 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 5. `replay_trade` with `action: "buy"/"sell"/"close"` → execute trades
 6. `replay_status` → check position, P&L, current date
 7. `replay_stop` → return to realtime
+
+### "Backtest a theory over history" (the capture loop)
+- `replay_walk` with `from`, `to`, and `capture: "<indicator name>"` → steps the whole range and records every bar's study values + Pine labels/lines into a timestamped series (keyed on OHLCV bar time). Pass `out: "path.jsonl"` to stream to disk (recommended for long ranges); omit to get the series inline. `sections` selects what to capture; `max_bars` caps the walk (result flags `truncated`). This is the systematic backtest primitive — it composes reliable stepping + chart_snapshot. Note: the first captured bar is a warm-up bar (indicators need lookback before values populate).
 
 ### "Screen multiple symbols"
 - `batch_run` with `symbols: ["ES1!", "NQ1!", "YM1!"]` and `action: "screenshot"` or `"get_ohlcv"`

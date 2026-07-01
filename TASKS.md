@@ -17,8 +17,8 @@ Fixes the "replay isn't working great" complaint and makes browser-replay backte
 1. ~~**T112** — Reliable stepping (forward-progress currentDate watch, replaces fragile timer poll).~~ ✅ DONE 2026-07-01. *Foundation for T115.*
 2. ~~**T114** — `replay_set_resolution` (tick/second/minute granularity).~~ ✅ DONE 2026-07-01.
 3. ~~**T116** — `chart_snapshot` per-bar capture.~~ ✅ DONE 2026-07-01. *Enables fast T115.*
-4. **T115** — `replay_walk(from, to, capture=[…])` capture loop → JSONL time-series. *The key deliverable.* Depends T112, T116.
-5. **T113** — Adopt iliaal replay hardening (scroll_back + drift-warning, intraday ISO start, two-path session clear, robust stop + dialog dismiss, higher-TF start-sequence). *Independent; can ship anytime in the block.*
+4. ~~**T115** — `replay_walk(from, to, capture)` capture loop → JSONL time-series. *The key deliverable.*~~ ✅ DONE 2026-07-01.
+5. **T113** — Adopt iliaal replay hardening (scroll_back + drift-warning, intraday ISO start, two-path session clear, robust stop + dialog dismiss, higher-TF start-sequence). *Only remaining Block A task.*
 
 ### Block B — Headless backtest engine (Phase 2, socket path)
 The scale unlock: array-speed full-history backtests, no browser. Gated on a viability spike.
@@ -34,7 +34,6 @@ The scale unlock: array-speed full-history backtests, no browser. Gated on a via
 
 ## Active
 - T113 — Adopt iliaal replay hardening (scroll_back, drift, session clear) — Tier-A / L — see `tasks/active.md`
-- T115 — `replay_walk` capture-during-replay loop → JSONL series — Tier-S / L — see `tasks/active.md`
 
 ## Backlog
 - T117 — Mathieu2301 headless-socket viability spike — Tier-A / M — see `tasks/backlog.md`
@@ -43,6 +42,7 @@ The scale unlock: array-speed full-history backtests, no browser. Gated on a via
 - T120 — Strategy-tester DOM-scrape fallback — Tier-Q / S — see `tasks/backlog.md`
 
 ## Recently done
+- T115 — replay_walk (capture-during-replay backtest loop) ⭐ — DONE 2026-07-01 — see `tasks/done.md`
 - T116 — chart_snapshot (single-call per-bar capture) — DONE 2026-07-01 — see `tasks/done.md`
 - T114 — replay_set_resolution (tick/second/minute granularity) — DONE 2026-07-01 — see `tasks/done.md`
 - T112 — Reliable replay stepping (forward-progress currentDate watch) — DONE 2026-07-01 — see `tasks/done.md`

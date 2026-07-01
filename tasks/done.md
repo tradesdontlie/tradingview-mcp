@@ -4,6 +4,30 @@
 > This queue starts at T112. Historical shipped work (T1–T111) predates the queue and is
 > narrated in `../FORK_NOTES.md` (the fork's divergence log) — not migrated here.
 
+## T115 — replay_walk (capture-during-replay backtest loop)
+
+**Status:** DONE (2026-07-01)
+**Priority:** Tier-S (critical — the headline deliverable)
+**Effort:** L (<3d)
+**Phase:** 1
+**Dependencies:** T112, T116 (both done)
+
+### Outcome
+New `replay_walk` MCP tool + `tv replay walk` CLI + `src/core/backtest.js`. Steps replay `from`→`to`, capturing each bar's studies + Pine graphics (via chart_snapshot) into a timestamped JSONL series keyed on OHLCV bar time. Explicit termination reasons (reached_end_date / no_more_data / max_bars+truncated), streams to `out` file or returns inline, `waitReady` warm-up poll so the first bar is real. Composes T112/T114/T116; all deps injectable for tests. First net-new capture-during-replay capability in the fork ecosystem — the core backtest primitive.
+
+### Verification (actual)
+- `node --test tests/backtest.test.js` → 7/7 (termination reasons, JSONL streaming, capture+sections passthrough, resolution, date validation).
+- Live smoke (`BATS:F` 1D → JSONL): 9 rows, strictly ascending bar times, zero nulls, reached_end_date, ~250ms/bar; per-bar study/label/line counts grow as indicators warm up (correct signal evolution).
+
+### Notes
+- First captured bar is a warm-up bar (OHLCV present, indicators need lookback) — captured as empty studies, not null.
+- current_date (cursor) vs bar.time (bar start) differ by convention (see T116); series keyed on bar.time, current_date recorded alongside.
+
+### Files touched
+- `src/core/backtest.js` (new), `src/tools/replay.js`, `src/cli/commands/replay.js`, `tests/backtest.test.js` (new), `CLAUDE.md`, `README.md`, `FORK_NOTES.md`, `TASKS.md`, `tasks/{active,done}.md`.
+
+---
+
 ## T116 — chart_snapshot (single-call per-bar capture)
 
 **Status:** DONE (2026-07-01)

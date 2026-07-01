@@ -643,6 +643,24 @@ Composes RULEBOOK §11's 5-step save cycle (compile → save → cache-bust → 
 
 ---
 
+### 17. T115 — `replay_walk` (capture-during-replay backtest loop) ⭐
+
+**The headline feature.** Steps replay from `from` to `to` and captures every bar's study values + Pine graphics (via `chart_snapshot`) into a timestamped series keyed on the canonical OHLCV bar time. This is what makes systematic backtesting of custom Pine theories possible — **no fork or upstream has this**; it's net-new. New `src/core/backtest.js`.
+
+- Composes T112 (reliable `step` that throws at end-of-data), T114 (`setResolution`), T116 (`chart_snapshot`). All collaborators injectable via `_deps` for unit testing.
+- `capture` = indicator name substring (→ `chart_snapshot` study_filter). `sections` selects what to record (default `ohlcv, studies, pine_labels, pine_lines`). `resolution` sets stepping granularity.
+- **Termination reasons** (explicit, never silent): `reached_end_date` (cursor ≥ `to`), `no_more_data` (step threw — end of available history), `max_bars` (safety cap hit → `truncated:true` + note). Default `max_bars` 1000.
+- **Output:** `out` path → streams one JSONL row per bar to disk (survives interruption; recommended for long ranges) and omits the inline series; no `out` → returns the (bounded) series inline.
+- **Warm-up:** after `start()` the chart series/studies take ~200ms to materialize, so we poll a cheap ohlcv-only snapshot (`waitReady`) before the loop. The first captured bar is still a warm-up bar — OHLCV present but indicators need lookback before values populate (captured honestly as empty, not null).
+
+**Validated:** unit `tests/backtest.test.js` 7/7 (end-date/no-more-data/max_bars termination, JSONL streaming, capture+sections passthrough, resolution, date validation). Live smoke (`BATS:F` 1D, ~9-bar range → JSONL): 9 rows, strictly ascending bar times, zero nulls, `reached_end_date`, ~250ms/bar. Per-bar evolution captured correctly — study count ramps as indicators warm up and Pine label/line counts grow bar-over-bar, exactly the signal evolution a backtest needs.
+
+**Files touched:** `src/core/backtest.js` (new), `src/tools/replay.js` (`replay_walk`), `src/cli/commands/replay.js` (`tv replay walk`), `tests/backtest.test.js` (new), `CLAUDE.md` (decision tree + count 85), `README.md`.
+
+**Spec ref:** task queue T115 (`tasks/done.md`). Completes Block A (replay reliability + capture).
+
+---
+
 ### Replay API surface (live probe, TV 3.1.0) — reference for T113/T114/T115/T119
 
 `Object.getOwnPropertyNames(Object.getPrototypeOf(window.TradingViewApi._replayApi))` on TV Desktop 3.1.0 exposes (beyond the already-used methods) several undocumented capabilities worth building on:
