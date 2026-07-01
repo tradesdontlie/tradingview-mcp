@@ -22,6 +22,13 @@ export function registerReplayTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
+  server.tool('replay_set_resolution', 'Set the replay stepping granularity (e.g. "1", "1S", "1H", "1D", or "auto"). Valid set depends on the chart symbol/timeframe; invalid values are rejected before touching cloud state.', {
+    resolution: z.string().describe('Replay resolution: "1"/"5"/"15" (min), "1S" (sec), "1H"/"4H", "1D", or "auto".'),
+  }, async ({ resolution }) => {
+    try { return jsonResult(await core.setResolution({ resolution })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
   server.tool('replay_stop', 'Stop replay and return to realtime', {}, async () => {
     try { return jsonResult(await core.stop()); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }

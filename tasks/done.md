@@ -4,6 +4,26 @@
 > This queue starts at T112. Historical shipped work (T1–T111) predates the queue and is
 > narrated in `../FORK_NOTES.md` (the fork's divergence log) — not migrated here.
 
+## T114 — replay_set_resolution (tick/second/minute granularity)
+
+**Status:** DONE (2026-07-01)
+**Priority:** Tier-B (normal)
+**Effort:** S (<2h)
+**Phase:** 1
+**Dependencies:** None
+
+### Outcome
+Added `setResolution()` core fn + `replay_set_resolution` MCP tool + `replay set-resolution` CLI subcommand. Sets replay stepping granularity via `_replayApi.changeReplayResolution()`, validating the requested value against the **live** `replayResolutions()` set before mutating (the set is symbol/timeframe-dependent; invalid values corrupt cloud replay state — S1). `"auto"`→null. Live probe (see FORK_NOTES "Replay API surface") confirmed these methods sit on `_replayApi` directly, so we avoided the private `_replayUIController`.
+
+### Verification (actual)
+- `node --test tests/replay.test.js` → 45/45 (added: valid passthrough, invalid-rejected-before-mutate, auto→null, omitted-throws).
+- Live smoke (`BATS:F` 1D): set `1H`→reads back `1H`; `auto`→null/is_auto; `7M`→rejected with valid list, no mutation; clean stop.
+
+### Files touched
+- `src/core/replay.js`, `src/tools/replay.js`, `src/cli/commands/replay.js`, `tests/replay.test.js`, `CLAUDE.md`, `README.md`, `FORK_NOTES.md`, `TASKS.md`, `tasks/{active,done}.md`.
+
+---
+
 ## T112 — Reliable replay stepping (forward-progress currentDate watch)
 
 **Status:** DONE (2026-07-01)

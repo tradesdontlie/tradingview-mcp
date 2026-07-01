@@ -19,6 +19,13 @@ register('replay', {
       description: 'Stop replay and return to realtime',
       handler: () => core.stop(),
     }],
+    ['set-resolution', {
+      description: 'Set replay stepping granularity (e.g. 1H, 1D, auto)',
+      options: {
+        resolution: { type: 'string', short: 'r', description: 'Replay resolution (1, 1S, 1H, 1D, auto)' },
+      },
+      handler: (opts, positionals) => core.setResolution({ resolution: opts.resolution ?? positionals[0] }),
+    }],
     ['status', {
       description: 'Get current replay state',
       handler: () => core.status(),

@@ -15,7 +15,7 @@
 Fixes the "replay isn't working great" complaint and makes browser-replay backtesting possible for the first time. Ship order:
 
 1. ~~**T112** — Reliable stepping (forward-progress currentDate watch, replaces fragile timer poll).~~ ✅ DONE 2026-07-01. *Foundation for T115.*
-2. **T114** — `replay_set_resolution` (tick/second/minute granularity). *Small, independent.*
+2. ~~**T114** — `replay_set_resolution` (tick/second/minute granularity).~~ ✅ DONE 2026-07-01.
 3. **T116** — `chart_snapshot` single-round-trip per-bar capture. *Enables fast T115.*
 4. **T115** — `replay_walk(from, to, capture=[…])` capture loop → JSONL time-series. *The key deliverable.* Depends T112, T116.
 5. **T113** — Adopt iliaal replay hardening (scroll_back + drift-warning, intraday ISO start, two-path session clear, robust stop + dialog dismiss, higher-TF start-sequence). *Independent; can ship anytime in the block.*
@@ -34,7 +34,6 @@ The scale unlock: array-speed full-history backtests, no browser. Gated on a via
 
 ## Active
 - T113 — Adopt iliaal replay hardening (scroll_back, drift, session clear) — Tier-A / L — see `tasks/active.md`
-- T114 — `replay_set_resolution` tick/second/minute granularity — Tier-B / S — see `tasks/active.md`
 - T115 — `replay_walk` capture-during-replay loop → JSONL series — Tier-S / L — see `tasks/active.md`
 - T116 — `chart_snapshot` single-round-trip per-bar capture — Tier-A / M — see `tasks/active.md`
 
@@ -45,5 +44,6 @@ The scale unlock: array-speed full-history backtests, no browser. Gated on a via
 - T120 — Strategy-tester DOM-scrape fallback — Tier-Q / S — see `tasks/backlog.md`
 
 ## Recently done
+- T114 — replay_set_resolution (tick/second/minute granularity) — DONE 2026-07-01 — see `tasks/done.md`
 - T112 — Reliable replay stepping (forward-progress currentDate watch) — DONE 2026-07-01 — see `tasks/done.md`
 - (historical shipped work T1–T111 is narrated in `FORK_NOTES.md`)

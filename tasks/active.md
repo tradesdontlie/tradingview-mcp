@@ -69,53 +69,6 @@ Standard. Commit `T113 shipped — replay hardening: scroll_back, drift-warning,
 
 ---
 
-## T114 — `replay_set_resolution` (tick/second/minute granularity)
-
-**Status:** TODO
-**Priority:** Tier-B (normal)
-**Effort:** S (<2h)
-**Phase:** 1
-**Dependencies:** None
-**Audit ref:** 2026-07-01 fork-commit deep-dive — `KarmicP@9ba5f9f8` → `iliaal@src/core/replay.js` `setResolution()`; controller path in `iliaal@src/connection.js`
-**KB ref:** our `src/core/replay.js`, `src/connection.js` KNOWN_PATHS
-
-### Why
-Replay currently advances at the chart's timeframe only. Setting the replay update interval (1 tick / 1s / 1,5,15m / 1H,4H / 1D / auto) lets a backtest walk at the granularity a theory needs — e.g. tick-level fills on a 5m structure — without changing the chart TF. Small, clean, self-contained; iliaal already proved the CDP path.
-
-### Acceptance criteria
-- [ ] New `replay_set_resolution(resolution)` tool; `null`/`'auto'` = auto.
-- [ ] Controller path `_replayApi._replayUIController`; validate the value against `._allReplayResolutions.value()` BEFORE calling `.changeReplayResolution(value)` (S1 — invalid values corrupt cloud replay state).
-- [ ] Reads back `._currentReplayResolution.value()` and returns it.
-- [ ] Path resolved via `KNOWN_PATHS` + `verifyAndReturn` (S2).
-- [ ] Tests pass; live smoke: set 1S on an intraday chart, confirm read-back matches; reject a bogus value cleanly.
-- [ ] **Standards (S1–S5) applied.**
-
-### Files to touch
-- `src/core/replay.js` — `setResolution()`.
-- `src/tools/replay.js` — tool registration.
-- `src/connection.js` — `replayUIController` path.
-- `tests/`, `CLAUDE.md`, `README.md`, `FORK_NOTES.md`.
-
-### Implementation notes
-Mirror the validate-before-mutate shape of the existing autoplay-delay guard. Enum the human-facing resolutions but always cross-check against the live `_allReplayResolutions` list (TV's set can vary by symbol).
-
-### Verification
-```
-npm test
-# live: replay_set_resolution 1S ; expect returned current_resolution == "1S"
-```
-
-### Rollback
-Single new tool — revert commit.
-
-### Resume notes
-Trivial; complete in one pass.
-
-### Completion checklist
-Standard. Commit `T114 shipped — replay_set_resolution tick/second/minute granularity`.
-
----
-
 ## T116 — `chart_snapshot` single-round-trip per-bar capture
 
 **Status:** TODO

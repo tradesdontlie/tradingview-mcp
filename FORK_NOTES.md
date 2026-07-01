@@ -602,6 +602,25 @@ Composes RULEBOOK §11's 5-step save cycle (compile → save → cache-bust → 
 
 ---
 
+### 15. T114 — `replay_set_resolution` (tick/second/minute/hour/day granularity)
+
+**New tool.** Sets the replay stepping granularity so a backtest can walk at the interval a theory needs (e.g. 1H fills on a 1D structure) without changing the chart timeframe. Lands directly on `_replayApi`:
+- Valid set read live via `replayResolutions()` (WatchedValue → array incl. `null` = auto). **The set is dynamic** — it depends on the chart symbol/timeframe (a 1D chart offers `["1H","2H","3H","4H","1D"]`; intraday charts expose finer). So we validate against the live list every call, not a hardcoded enum.
+- Mutate via `changeReplayResolution(value)` (string, or `null` for auto). Validated **before** the call — an unsupported value corrupts TradingView's cloud replay state (S1), same footgun class as autoplay delay.
+- Read back via `currentReplayResolution()` / `autoReplayResolution()`.
+
+`"auto"` / `""` / `null` all normalize to auto (null). Returns `{ resolution, is_auto, auto_resolution, valid_resolutions }`.
+
+**Validated:** unit `tests/replay.test.js` (+4: valid-passes-through, invalid-rejected-before-mutate, auto→null, omitted-throws) → 45/45. Live smoke (`BATS:F` 1D replay): set `1H` → reads back `1H`; set `auto` → reads back null/is_auto; set `7M` → rejected with the valid list, no mutation; clean stop.
+
+**Files touched:** `src/core/replay.js` (`setResolution()`), `src/tools/replay.js` (tool), `src/cli/commands/replay.js` (`set-resolution` subcommand), `tests/replay.test.js`, `CLAUDE.md` (replay decision tree + tool count 83), `README.md` (counts).
+
+**Source:** approach from `KarmicP@9ba5f9f8` → `iliaal` `setResolution()`; our impl uses the `_replayApi`-level methods (confirmed via live probe) rather than reaching into the private `_replayUIController`.
+
+**Spec ref:** task queue T114 (`tasks/done.md`).
+
+---
+
 ### Replay API surface (live probe, TV 3.1.0) — reference for T113/T114/T115/T119
 
 `Object.getOwnPropertyNames(Object.getPrototypeOf(window.TradingViewApi._replayApi))` on TV Desktop 3.1.0 exposes (beyond the already-used methods) several undocumented capabilities worth building on:

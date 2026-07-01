@@ -1,7 +1,7 @@
 /**
  * Core replay mode logic.
  */
-import { evaluate as _evaluate, getReplayApi as _getReplayApi } from '../connection.js';
+import { evaluate as _evaluate, getReplayApi as _getReplayApi, safeString } from '../connection.js';
 
 export const VALID_AUTOPLAY_DELAYS = [100, 143, 200, 300, 1000, 2000, 3000, 5000, 10000];
 
@@ -120,6 +120,39 @@ export async function autoplay({ speed, _deps } = {}) {
   const isAutoplay = await evaluate(wv(`${rp}.isAutoplayStarted()`));
   const currentDelay = await evaluate(wv(`${rp}.autoplayDelay()`));
   return { success: true, autoplay_active: !!isAutoplay, delay_ms: currentDelay };
+}
+
+export async function setResolution({ resolution, _deps } = {}) {
+  const { evaluate, getReplayApi } = _resolve(_deps);
+  if (resolution === undefined) throw new Error('resolution is required (e.g. "1H", "1D", or "auto")');
+
+  // Normalize: null / "auto" / "" → auto (null).
+  let target = resolution;
+  if (target === null || target === '' || String(target).toLowerCase() === 'auto') target = null;
+  else target = String(target);
+
+  const rp = await getReplayApi();
+
+  // Validate against the LIVE valid set before mutating — the set is dynamic
+  // (depends on symbol/timeframe) and sending an unsupported value corrupts
+  // TradingView's cloud replay state (S1). replayResolutions() includes null (auto).
+  const valid = await evaluate(wv(`${rp}.replayResolutions()`));
+  const validStrings = Array.isArray(valid) ? valid.filter(v => v != null).map(String) : [];
+  if (target !== null && !validStrings.includes(target)) {
+    throw new Error(`Invalid replay resolution "${target}". Valid for this symbol/timeframe: ${validStrings.join(', ') || '(none — start replay / check symbol)'}, or "auto".`);
+  }
+
+  await evaluate(`${rp}.changeReplayResolution(${target === null ? 'null' : safeString(target)})`);
+
+  const current = await evaluate(wv(`${rp}.currentReplayResolution()`));
+  const auto = await evaluate(wv(`${rp}.autoReplayResolution()`));
+  return {
+    success: true,
+    resolution: current,
+    is_auto: current == null,
+    auto_resolution: auto,
+    valid_resolutions: validStrings,
+  };
 }
 
 export async function stop({ _deps } = {}) {

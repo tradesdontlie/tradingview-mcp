@@ -5,7 +5,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { start, step, autoplay, stop, trade, status, VALID_AUTOPLAY_DELAYS } from '../src/core/replay.js';
+import { start, step, autoplay, setResolution, stop, trade, status, VALID_AUTOPLAY_DELAYS } from '../src/core/replay.js';
 
 // ── Mock helpers ─────────────────────────────────────────────────────────
 
@@ -288,6 +288,66 @@ describe('autoplay() — delay validation', () => {
     await assert.rejects(
       () => autoplay({ speed: 1000, _deps }),
       (err) => err.message.includes('not started'),
+    );
+  });
+});
+
+// ── setResolution() ──────────────────────────────────────────────────────
+
+describe('setResolution() — validate against live set before mutating', () => {
+  function resDeps() {
+    const calls = [];
+    const evaluate = async (expr) => {
+      calls.push(expr);
+      if (expr.includes('replayResolutions()')) return ['1H', '2H', '1D', null];
+      if (expr.includes('changeReplayResolution')) return undefined;
+      if (expr.includes('currentReplayResolution')) return '1H';
+      if (expr.includes('autoReplayResolution')) return '1D';
+      return undefined;
+    };
+    return { _deps: { evaluate, getReplayApi: mockGetReplayApi() }, calls };
+  }
+
+  it('accepts a valid resolution and passes it to changeReplayResolution', async () => {
+    const { _deps, calls } = resDeps();
+    const r = await setResolution({ resolution: '1H', _deps });
+    assert.equal(r.success, true);
+    assert.equal(r.resolution, '1H');
+    assert.equal(r.is_auto, false);
+    const change = calls.find(c => c.includes('changeReplayResolution'));
+    assert.ok(change && change.includes('"1H"'), 'changeReplayResolution called with "1H"');
+  });
+
+  it('rejects an unsupported resolution BEFORE mutating cloud state', async () => {
+    const { _deps, calls } = resDeps();
+    await assert.rejects(
+      () => setResolution({ resolution: '7M', _deps }),
+      (err) => err.message.includes('Invalid replay resolution'),
+    );
+    assert.equal(calls.filter(c => c.includes('changeReplayResolution')).length, 0, 'no mutate on invalid value');
+  });
+
+  it('maps "auto" to null (automatic)', async () => {
+    const calls = [];
+    const evaluate = async (expr) => {
+      calls.push(expr);
+      if (expr.includes('replayResolutions()')) return ['1H', '1D', null];
+      if (expr.includes('currentReplayResolution')) return null;
+      if (expr.includes('autoReplayResolution')) return '1D';
+      return undefined;
+    };
+    const r = await setResolution({ resolution: 'auto', _deps: { evaluate, getReplayApi: mockGetReplayApi() } });
+    assert.equal(r.is_auto, true);
+    assert.equal(r.resolution, null);
+    const change = calls.find(c => c.includes('changeReplayResolution'));
+    assert.ok(change && change.includes('null'), 'changeReplayResolution(null) for auto');
+  });
+
+  it('throws when resolution is omitted', async () => {
+    const { _deps } = resDeps();
+    await assert.rejects(
+      () => setResolution({ _deps }),
+      (err) => err.message.includes('required'),
     );
   });
 });
