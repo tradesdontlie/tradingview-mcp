@@ -132,6 +132,34 @@ export async function disconnect() {
   }
 }
 
+/**
+ * Re-point the cached CDP connection to a specific target id.
+ * Closes the current client (if any) and attaches to the given target, so all
+ * subsequent read/eval tools operate on that tab. Used by tab_switch to make
+ * the connection actually follow the switched-to tab.
+ */
+export async function reconnectTo(targetId) {
+  if (client) {
+    try { await client.close(); } catch {}
+    client = null;
+    targetInfo = null;
+  }
+
+  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
+  const targets = await resp.json();
+  const target = targets.find(t => t.id === targetId);
+  if (!target) {
+    throw new Error(`Target ${targetId} not found in /json/list — is the tab still open?`);
+  }
+
+  targetInfo = target;
+  client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: targetId });
+  await client.Runtime.enable();
+  await client.Page.enable();
+  await client.DOM.enable();
+  return { id: target.id, url: target.url };
+}
+
 // --- Direct API path helpers ---
 // Each returns the STRING expression path after verifying it exists.
 // Callers use the returned string in their own evaluate() calls.
