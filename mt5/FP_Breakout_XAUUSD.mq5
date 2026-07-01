@@ -36,8 +36,7 @@ input bool     InpUseVolFilter    = true;    // Require volume > MA x mult
 input int      InpVolMA           = 20;      // Volume MA length
 input double   InpVolMult         = 1.2;     // Volume must exceed MA x this
 
-//--- Session filter (UTC windows; broker offset converts to server time)
-input int      InpBrokerGMTOffset = 3;       // Broker server hours ahead of UTC (you = +3)
+//--- Session filter (UTC — auto-calculated from TimeGMT, no manual offset needed)
 input bool     InpUseSession      = true;    // Only trade London/NY
 input int      InpLondonOpenUTC   = 7;       // London open (UTC)
 input int      InpLondonCloseUTC  = 12;      // London close (UTC)
@@ -74,7 +73,13 @@ int OnInit()
   {
    trade.SetExpertMagicNumber(InpMagicNumber);
    trade.SetDeviationInPoints(InpSlippage);
-   trade.SetTypeFilling(ORDER_FILLING_FOK);
+
+   // Auto-detect filling mode — FOK may not be supported by all brokers / Strategy Tester
+   uint fillMode = (uint)SymbolInfoInteger(_Symbol, SYMBOL_FILLING_MODE);
+   if((fillMode & SYMBOL_FILLING_FOK) != 0)      trade.SetTypeFilling(ORDER_FILLING_FOK);
+   else if((fillMode & SYMBOL_FILLING_IOC) != 0) trade.SetTypeFilling(ORDER_FILLING_IOC);
+   else                                           trade.SetTypeFilling(ORDER_FILLING_RETURN);
+   if(InpEnableLogging) Print("Order filling mode: ", EnumToString((ENUM_ORDER_TYPE_FILLING)((fillMode & SYMBOL_FILLING_FOK) != 0 ? ORDER_FILLING_FOK : (fillMode & SYMBOL_FILLING_IOC) != 0 ? ORDER_FILLING_IOC : ORDER_FILLING_RETURN)));
 
    accountStartBalance = accountInfo.Balance();
    dailyStartBalance   = accountStartBalance;
@@ -210,26 +215,22 @@ bool IsPhaseTargetReached()
   }
 
 //+------------------------------------------------------------------+
-//| SECTION: Session Filter (UTC via broker GMT offset)              |
+//| SECTION: Session Filter (UTC via TimeGMT)                        |
 //+------------------------------------------------------------------+
-int UtcHourNow()
-  {
-   datetime utc = TimeCurrent() - (datetime)InpBrokerGMTOffset * 3600;
-   MqlDateTime dt;
-   TimeToStruct(utc, dt);
-   return dt.hour;
-  }
-
-// Session check uses the SIGNAL BAR's open time (bar[1]), not current tick time.
-// TradingView does the same: hour(time,"UTC") uses bar open, not bar close.
-// Without this fix, bars closing at 12:00 UTC (end of London) and 20:00 UTC
-// (end of NY) fall in the inter-session gap and get skipped.
+// Returns UTC hour of the signal bar open (bar[1]).
+// Using iTime() bar timestamp (server time) converted to GMT via TimeGMT offset.
+// TimeGMT() is always correct UTC regardless of broker server timezone.
 int UtcHourSignalBar()
   {
-   datetime barOpen = iTime(_Symbol, InpTF, 1);
-   datetime utc = barOpen - (datetime)InpBrokerGMTOffset * 3600;
+   // Offset = server time - UTC = TimeGMT() equivalent offset
+   datetime serverNow = TimeCurrent();
+   datetime gmtNow    = TimeGMT();
+   int offsetSecs     = (int)(serverNow - gmtNow);  // could be negative
+
+   datetime barOpen = iTime(_Symbol, InpTF, 1);      // server time of signal bar
+   datetime barUTC  = barOpen - offsetSecs;           // convert to UTC
    MqlDateTime dt;
-   TimeToStruct(utc, dt);
+   TimeToStruct(barUTC, dt);
    return dt.hour;
   }
 
@@ -243,12 +244,10 @@ bool IsInTradingSession()
 
 bool IsWeekendCloseWindow()
   {
-   datetime utc = TimeCurrent() - (datetime)InpBrokerGMTOffset * 3600;
    MqlDateTime dt;
-   TimeToStruct(utc, dt);
-   // dt.day_of_week: 0=Sun ... 5=Fri 6=Sat. Block Fri after cutoff, all Sat.
-   if(dt.day_of_week == 6) return true;                       // Saturday
-   if(dt.day_of_week == 5 && dt.hour >= InpFriCloseUTC) return true; // Fri evening
+   TimeToStruct(TimeGMT(), dt);
+   if(dt.day_of_week == 6) return true;                        // Saturday (UTC)
+   if(dt.day_of_week == 5 && dt.hour >= InpFriCloseUTC) return true; // Fri after cutoff
    return false;
   }
 

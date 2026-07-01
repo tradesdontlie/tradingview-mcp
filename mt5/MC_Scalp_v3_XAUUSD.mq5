@@ -62,6 +62,9 @@ input ulong  InpMagic     = 20250101; // Magic number
 
 //=== GLOBALS ========================================================
 
+// Dashboard row struct must be at file scope — MQL5 forbids local struct declarations
+struct DashRow { string label; string val; color c; };
+
 CTrade        g_trade;
 CPositionInfo g_pos;
 
@@ -342,22 +345,17 @@ void DrawDashboard()
 {
    string prefix = "MCS3_";
    int    x = 10, y = 20, dy = 18;
-   color  clr_head  = clrGold;
-   color  clr_val   = clrWhite;
-   color  clr_green = clrLimeGreen;
-   color  clr_red   = clrTomato;
+   color  clr_head = clrGold;
+   color  clr_val  = clrWhite;
 
-   struct Row { string label; string val; color c; };
-   Row rows[] =
-   {
-      { "MC Scalp v3",      "XAUUSD H1",                       clr_head  },
-      { "Risk/trade",       DoubleToString(InpRiskPct, 2)+"%", clr_val   },
-      { "Session (UTC)",    IntegerToString(InpSessStart)+"–"+IntegerToString(InpSessEnd)+"h", clr_val },
-      { "Body/Wick/ATR",    DoubleToString(InpBodyPct,0)+"% / "+DoubleToString(InpWickPct,0)+"% / "+DoubleToString(InpMinATR,1)+"×", clr_val },
-      { "RSI filter",       InpRSIOn ? "ON (>"+DoubleToString(InpRSIBull,0)+" / <"+DoubleToString(InpRSIBear,0)+")" : "OFF", clr_val },
-      { "BE trigger",       DoubleToString(InpBEPct,0)+"% of TP", clr_val },
-      { "Trail",            DoubleToString(InpTrailATR,1)+"× ATR", clr_val },
-   };
+   DashRow rows[7];
+   rows[0].label = "MC Scalp v3";   rows[0].val = "XAUUSD H1";                                                                                rows[0].c = clr_head;
+   rows[1].label = "Risk/trade";    rows[1].val = DoubleToString(InpRiskPct,2)+"%";                                                            rows[1].c = clr_val;
+   rows[2].label = "Session (UTC)"; rows[2].val = IntegerToString(InpSessStart)+"-"+IntegerToString(InpSessEnd)+"h";                           rows[2].c = clr_val;
+   rows[3].label = "Body/Wick/ATR"; rows[3].val = DoubleToString(InpBodyPct,0)+"% / "+DoubleToString(InpWickPct,0)+"% / "+DoubleToString(InpMinATR,1)+"x"; rows[3].c = clr_val;
+   rows[4].label = "RSI filter";    rows[4].val = InpRSIOn ? "ON (>"+DoubleToString(InpRSIBull,0)+" / <"+DoubleToString(InpRSIBear,0)+")" : "OFF"; rows[4].c = clr_val;
+   rows[5].label = "BE trigger";    rows[5].val = DoubleToString(InpBEPct,0)+"% of TP";                                                        rows[5].c = clr_val;
+   rows[6].label = "Trail";         rows[6].val = DoubleToString(InpTrailATR,1)+"x ATR";                                                       rows[6].c = clr_val;
 
    for(int i = 0; i < ArraySize(rows); i++)
    {
