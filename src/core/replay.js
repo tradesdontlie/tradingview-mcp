@@ -5,6 +5,10 @@ import { evaluate as _evaluate, getReplayApi as _getReplayApi } from '../connect
 
 export const VALID_AUTOPLAY_DELAYS = [100, 143, 200, 300, 1000, 2000, 3000, 5000, 10000];
 
+// step() completion-wait tuning. Overridable via _deps for fast unit tests.
+export const STEP_POLL_MS = 60;      // how often to re-read the replay cursor
+export const STEP_TIMEOUT_MS = 3000; // hard ceiling before we declare "no advance"
+
 function wv(path) {
   return `(function(){ var v = ${path}; return (v && typeof v === 'object' && typeof v.value === 'function') ? v.value() : v; })()`;
 }
@@ -13,6 +17,8 @@ function _resolve(deps) {
   return {
     evaluate: deps?.evaluate || _evaluate,
     getReplayApi: deps?.getReplayApi || _getReplayApi,
+    pollMs: deps?.pollMs ?? STEP_POLL_MS,
+    stepTimeoutMs: deps?.stepTimeoutMs ?? STEP_TIMEOUT_MS,
   };
 }
 
@@ -57,21 +63,45 @@ export async function start({ date, _deps } = {}) {
 }
 
 export async function step({ _deps } = {}) {
-  const { evaluate, getReplayApi } = _resolve(_deps);
+  const { evaluate, getReplayApi, pollMs, stepTimeoutMs } = _resolve(_deps);
   const rp = await getReplayApi();
   const started = await evaluate(wv(`${rp}.isReplayStarted()`));
   if (!started) throw new Error('Replay is not started. Use replay_start first.');
-  const before = await evaluate(wv(`${rp}.currentDate()`));
+
+  // Completion signal is currentDate() changing. doStep() is async with no return
+  // value; live probing (TV Desktop 3.1.0) confirms bars().lastIndex() does NOT
+  // track the replay cursor — it jumps to the full loaded-series size on the first
+  // step and then freezes — whereas currentDate() advances by exactly one bar each
+  // step (each replay bar has a unique timestamp). The old code polled this on a
+  // fixed 250ms×12 timer and, worse, returned a STALE date on timeout — masking
+  // end-of-data as success. We poll tighter (60ms) and THROW when the cursor never
+  // moves, so callers (and the T115 walk loop) get a real end-of-data signal.
+  const cdExpr = wv(`${rp}.currentDate()`);
+  const before = await evaluate(cdExpr);
+
   await evaluate(`${rp}.doStep()`);
-  // doStep() is async internally — currentDate takes ~500ms to update.
-  // Poll until it changes or timeout after 3s.
-  let currentDate = before;
-  for (let i = 0; i < 12; i++) {
-    await new Promise(r => setTimeout(r, 250));
-    currentDate = await evaluate(wv(`${rp}.currentDate()`));
-    if (currentDate !== before) break;
+
+  // Require FORWARD progress, not just "different". Live probing shows currentDate()
+  // can flicker to a transient/stale lower value mid-transition before settling on
+  // the next bar; replay is strictly forward, so "current > before" rejects those
+  // glitches and only accepts the real next bar. (When `before` isn't numeric —
+  // shouldn't happen post-start — fall back to "changed and non-null".)
+  const advanced = (c) => (typeof before === 'number')
+    ? (typeof c === 'number' && c > before)
+    : (c != null && c !== before);
+
+  let current = before;
+  const deadline = Date.now() + stepTimeoutMs;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, pollMs));
+    current = await evaluate(cdExpr);
+    if (advanced(current)) break;
   }
-  return { success: true, action: 'step', current_date: currentDate };
+  if (!advanced(current)) {
+    throw new Error('Replay bar did not advance (end of available data, or replay not ready). Try a higher timeframe or an earlier start date.');
+  }
+
+  return { success: true, action: 'step', current_date: current };
 }
 
 export async function autoplay({ speed, _deps } = {}) {

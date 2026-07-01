@@ -1234,9 +1234,13 @@ val = array.get(a, 5)`;
       const started = await evaluate(wv(`${REPLAY_API}.isReplayStarted()`));
       if (!started) return;
 
-      await evaluate(`${REPLAY_API}.stopReplay()`);
-      await evaluate(`${REPLAY_API}.goToRealtime()`);
-      await evaluate(`${REPLAY_API}.hideReplayToolbar()`);
+      // TV 3.1.0: goToRealtime() internally re-calls stopReplay() and asserts if
+      // replay is already stopped, so calling both unconditionally throws. Each
+      // teardown step is best-effort — the end-state assertion is what matters.
+      // (Real core stop() hardening for this is tracked in T113.)
+      try { await evaluate(`${REPLAY_API}.stopReplay()`); } catch {}
+      try { await evaluate(`${REPLAY_API}.goToRealtime()`); } catch {}
+      try { await evaluate(`${REPLAY_API}.hideReplayToolbar()`); } catch {}
       await sleep(500);
 
       const stoppedNow = await evaluate(wv(`${REPLAY_API}.isReplayStarted()`));

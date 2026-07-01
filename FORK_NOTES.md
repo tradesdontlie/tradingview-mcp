@@ -578,6 +578,46 @@ Composes RULEBOOK §11's 5-step save cycle (compile → save → cache-bust → 
 
 ---
 
+### 14. T112 — reliable replay stepping (forward-progress `currentDate` watch)
+
+**Bug:** `replay_step` was flaky. `step()` fired `doStep()` (async, no return value) then diffed `currentDate()` on a fixed `250ms × 12` timer, and on timeout **returned the stale date as success** — masking end-of-data as a normal step. Backtest loops built on this can't tell "advanced one bar" from "stuck at the last bar."
+
+**Live findings (TV Desktop 3.1.0 / Electron 38 / Chrome 140, CDP probe):**
+- `bars().lastIndex()` does **NOT** track the replay cursor — on the first step it jumps to the full loaded-series size (e.g. 300) and then freezes. So it is the wrong completion signal (an initial wrong hypothesis for this task, disproven by probing).
+- `currentDate()` advances by exactly one bar per step (each replay bar has a unique timestamp) and is **strictly forward**, including across weekend gaps (Fri→Mon).
+- `currentDate()` can **flicker to a transient/stale lower value** mid-transition before settling on the next bar — so an "any change" check catches garbage. The robust signal is **`current > before`** (forward progress), which rejects the glitch and only accepts the real next bar.
+- `currentDate()` returns a **WatchedValue with `.subscribe`/`.spawn`/`.value`** (confirmed) — a future event-driven upgrade can replace polling entirely.
+
+**Fix:** `step()` now reads `currentDate()`, calls `doStep()`, then polls every **60ms** (was 250ms) up to a 3s ceiling for `current > before`, and **throws** `"Replay bar did not advance (end of available data…)"` when the cursor never moves. Poll interval + ceiling are injectable via `_deps` (`pollMs`, `stepTimeoutMs`) for fast unit tests. Return shape unchanged (`{ success, action:'step', current_date }`).
+
+**Validation:** unit `tests/replay.test.js` 41/41 (added forward-progress + no-stale-return + transient-glitch regression guards). Live smoke: 10 consecutive steps on `BATS:F` 1D, all forward, avg ~180ms/step (min 142 / max 259), clean start→step×10→status→stop.
+
+**Ride-along (test-only):** `tests/e2e.test.js` `replay_stop` was failing on the **baseline** (proven via stash) — the test called `stopReplay()` then `goToRealtime()`, and on TV 3.1.0 `goToRealtime()` internally re-calls `stopReplay()` and asserts if already stopped. Wrapped each teardown step in best-effort try/catch. Real core `stop()` hardening is tracked in **T113**.
+
+**Environment note for T113:** repeated replay start/stop cycles corrupt TV's persistent replay session state — symptom: `start()` returns `current_date = -63072000` (the `getReplayDepth` sentinel, ~Jan 1968) and subsequent steps can't advance. A full TradingView restart clears it. This is exactly the persistent `_replaySessionState` (incl. the `_linking` copy) that T113's `CLEAR_SESSION_STATE_JS` must null. The 70-tool `npm test` e2e suite only runs clean against a freshly-restarted TV for this reason.
+
+**Files touched:** `src/core/replay.js` (`step()` + `STEP_POLL_MS`/`STEP_TIMEOUT_MS` exports), `tests/replay.test.js`, `tests/e2e.test.js` (teardown resilience).
+
+**Spec ref:** task queue T112 (`tasks/done.md`).
+
+---
+
+### Replay API surface (live probe, TV 3.1.0) — reference for T113/T114/T115/T119
+
+`Object.getOwnPropertyNames(Object.getPrototypeOf(window.TradingViewApi._replayApi))` on TV Desktop 3.1.0 exposes (beyond the already-used methods) several undocumented capabilities worth building on:
+
+- `getReplayDepth()` — available replay range/depth (bound a walk, detect end) → **T115**.
+- `isReadyToPlay()` — readiness flag (cleaner start/step gating).
+- `goToRealtime()`, `leaveReplay()` — teardown primitives (confirms **T113** stop hardening).
+- `replayResolutions()`, `changeReplayResolution()`, `currentReplayResolution()`, `autoReplayResolution()` — resolution control lives directly on `_replayApi` (plus the `_replayUIController` own-prop) → simplifies **T114**.
+- `isJumpToBarModeEnabled()`, `toggleJumpToBarMode()` — jump-to-bar navigation mode.
+- `selectRandomDate()` — random start (practice/training).
+- `getReplaySelectedDate()`, `symbolInfo()`, `currency()`, `replayTimingMode()`, `isReplayToolbarVisible()`.
+- `replayStrategyFacade`, `replayStrategyFacadesPerChartModelId` — strategy testing **during replay** → relevant to **T119**.
+- Own props: `_replayUIController`, `_replayAvailability`, `_position`, `_realizedPL`, `_currency`, `_symbolInfo`, `_chartWidgetsCollection`.
+
+---
+
 ## Open upstream-facing work (optional)
 
 Draft issue reports for the two unreported bugs we patched exist in local development notes. Paste at https://github.com/tradesdontlie/tradingview-mcp/issues/new when you want maintainer attention. Issues:

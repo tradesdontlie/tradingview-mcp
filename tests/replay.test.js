@@ -141,38 +141,76 @@ describe('start() — date selection and polling', () => {
 
 // ── step() ───────────────────────────────────────────────────────────────
 
-describe('step() — doStep and polling', () => {
-  it('calls doStep and polls until currentDate changes', async () => {
-    let stepDone = false;
-    let dateReadCount = 0;
+describe('step() — doStep and currentDate advance signal', () => {
+  const fastDeps = (evaluate) => ({
+    evaluate,
+    getReplayApi: mockGetReplayApi(),
+    pollMs: 1,          // fast tests — don't wait the real 60ms
+    stepTimeoutMs: 50,  // fast ceiling
+  });
+
+  it('resolves as soon as currentDate() advances', async () => {
+    let stepped = false;
     const evaluate = async (expr) => {
       if (expr.includes('isReplayStarted')) return true;
-      if (expr.includes('currentDate')) {
-        dateReadCount++;
-        // First read (before) returns 1000, then after doStep: 1000 twice, then 2000
-        if (!stepDone) return 1000;
-        return dateReadCount >= 4 ? 2000 : 1000;
-      }
-      if (expr.includes('doStep')) { stepDone = true; return undefined; }
+      if (expr.includes('currentDate')) return stepped ? 2000 : 1000; // advances after doStep
+      if (expr.includes('doStep')) { stepped = true; return undefined; }
       return undefined;
     };
     evaluate.calls = [];
-    const result = await step({ _deps: { evaluate, getReplayApi: mockGetReplayApi() } });
+    const result = await step({ _deps: fastDeps(evaluate) });
     assert.equal(result.success, true);
-    assert.equal(result.current_date, 2000);
     assert.equal(result.action, 'step');
+    assert.equal(result.current_date, 2000);
   });
 
-  it('returns stale date if poll times out (date never changes)', async () => {
+  it('throws "did not advance" when currentDate never changes (end of data)', async () => {
     const evaluate = async (expr) => {
       if (expr.includes('isReplayStarted')) return true;
-      if (expr.includes('currentDate')) return 5000; // never changes
+      if (expr.includes('currentDate')) return 5000; // frozen
       if (expr.includes('doStep')) return undefined;
       return undefined;
     };
     evaluate.calls = [];
-    const result = await step({ _deps: { evaluate, getReplayApi: mockGetReplayApi() } });
-    assert.equal(result.current_date, 5000);
+    await assert.rejects(
+      () => step({ _deps: fastDeps(evaluate) }),
+      (err) => {
+        assert.ok(err.message.includes('did not advance'));
+        return true;
+      },
+    );
+  });
+
+  it('ignores a transient backward/stale currentDate and waits for the forward bar', async () => {
+    // Live TV flickers to a stale lower value mid-transition; step() must skip it
+    // and settle on the real next (greater) bar.
+    let phase = 0; // 0=before doStep, 1=glitch (lower), 2=real next bar
+    const evaluate = async (expr) => {
+      if (expr.includes('isReplayStarted')) return true;
+      if (expr.includes('doStep')) { phase = 1; return undefined; }
+      if (expr.includes('currentDate')) {
+        if (phase === 0) return 2000;          // before
+        if (phase === 1) { phase = 2; return 1000; } // transient backward glitch
+        return 3000;                            // settled forward bar
+      }
+      return undefined;
+    };
+    evaluate.calls = [];
+    const result = await step({ _deps: fastDeps(evaluate) });
+    assert.equal(result.current_date, 3000, 'settled on forward bar, not the glitch');
+  });
+
+  it('does NOT return a stale date on timeout (old behavior regression guard)', async () => {
+    // The retired implementation returned {current_date: <stale>} on timeout,
+    // masking end-of-data as success. It must now throw instead.
+    const evaluate = async (expr) => {
+      if (expr.includes('isReplayStarted')) return true;
+      if (expr.includes('currentDate')) return 42; // never changes
+      if (expr.includes('doStep')) return undefined;
+      return undefined;
+    };
+    evaluate.calls = [];
+    await assert.rejects(() => step({ _deps: fastDeps(evaluate) }), /did not advance/);
   });
 
   it('throws when replay not started', async () => {

@@ -17,53 +17,6 @@ Cross-cutting requirements shared by every replay/backtest task. Each task refer
 
 ---
 
-## T112 — Reliable replay stepping (bar-index watch)
-
-**Status:** TODO
-**Priority:** Tier-A (high)
-**Effort:** S (<2h)
-**Phase:** 1
-**Dependencies:** None (foundation for T115)
-**Audit ref:** 2026-07-01 replay research — internals agent (bar-index completion signal); our `src/core/replay.js:66-73` fragile poll
-**KB ref:** `src/core/data.js:66-79` (`mainSeries().bars()` API), `src/wait.js:26-28` (bar-count readiness precedent)
-
-### Why
-`step()` currently fires `doStep()` (async, no return signal) then diffs `currentDate()` on a fixed `250ms × 12` timer. `doStep`'s effect lands ~500ms later with no guarantee, so the poll is a guess — the root cause of the flaky stepping. The internal model already exposes a deterministic completion signal: `mainSeries().bars().lastIndex()` increments when a replay bar actually lands (we already rely on this in `waitForChartReady`, `src/wait.js`). Switching the wait to bar-index at a tighter interval makes stepping reliable and ~4× faster, and is the foundation the T115 capture loop stands on.
-
-### Acceptance criteria
-- [ ] `step()` resolves when `mainSeries().bars().lastIndex()` increases past its pre-step value, not on a `currentDate` timer.
-- [ ] Poll interval ≤ 60ms with a hard 3s ceiling; on ceiling with no advance, throw a clear "bar did not advance (end of data?)" error.
-- [ ] Live probe recorded: does `_replayApi.currentDate()` return a WatchedValue exposing `.subscribe`? If yes, note it for a future event-driven upgrade (do NOT block this task on it).
-- [ ] `replay_step` return shape unchanged (`{ success, action:'step', current_date }`) — back-compat.
-- [ ] Tests pass; live smoke: step 10 bars on a liquid symbol, confirm each advance and total wall-time drop vs baseline.
-- [ ] **Standards (S1–S5) applied** — esp. S2 (path guard for the bars path), S5 (WatchedValue probe).
-
-### Files to touch
-- `src/core/replay.js` — rewrite the wait loop in `step()`; add a `barsLastIndex()` helper (or reuse from data/wait layer) via `_resolve(_deps)`.
-- `src/connection.js` — add `mainSeriesBars` path to `KNOWN_PATHS` if not already resolvable (there's a `getMainSeriesBars`).
-- `tests/` — unit test the new wait logic with a mocked `evaluate` that increments `lastIndex` after N polls.
-
-### Implementation notes
-Reuse `getMainSeriesBars()` (already in `connection.js:221`) rather than hand-rolling the path. Approach chosen over subscribing to the `currentDate` WatchedValue because `.subscribe` is unconfirmed in our codebase — bar-index polling is confirmed-working today; the subscription is a later optimization once S5-probed. Keep the `before`/`after` diff on `lastIndex()`, not `currentDate` (currentDate can legitimately repeat across illiquid bars).
-
-### Verification
-```
-npm test
-# live: node src/cli/index.js replay start --date 2025-03-03 ; then step x10, time it
-```
-Expected: all green; 10 steps complete without a single timeout; wall-time materially below the old `250ms`-floor baseline.
-
-### Rollback
-Single-file logic change — `git revert` the commit; old timer poll returns.
-
-### Resume notes
-Safe stop points: after the helper is added (before rewiring `step`), and after `step` is rewired (before touching tests).
-
-### Completion checklist
-Standard (see template in the task-management skill) — mark DONE, move to `done.md`, update `../TASKS.md`, run S4 doc propagation, `npm test`, commit `T112 shipped — reliable replay stepping via bar-index watch`, push (after S3 sweep).
-
----
-
 ## T113 — Adopt iliaal replay hardening (scroll_back, drift-warning, session clear)
 
 **Status:** TODO
