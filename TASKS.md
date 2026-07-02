@@ -9,6 +9,20 @@
 
 ---
 
+## ▶ Resume pointer (2026-07-02)
+
+**State:** Block A (browser replay reliability + capture) shipped; Phase 2 gate passed and the socket engine shipped. Both backtest engines work: `replay_walk` (browser, T115) and `backtest_pull` (headless socket, T118). All pushed to `origin/fixes/draw-api-resolve` (HEAD `b94c549`). 66 unit tests green.
+
+**Next task: T119** — Strategy harness (`strategyReport` + code-side P&L). Turn a captured signal series (from either engine) into net-profit / win-rate / expectancy / equity-curve numbers. Spec in `tasks/backlog.md`. Tier-A, L.
+
+**To resume the socket path (T119 + backtest_pull):** needs a TradingView session token in env `TV_SESSION` (+ `TV_SIGNATURE`). A scratch `.env` may exist at `…/scratchpad/tv-socket-spike/.env`; if expired, re-extract the `sessionid` cookie from the running TradingView Desktop via CDP (`Network.getCookies`) — this requires explicit user authorization (auto-mode classifier blocks credential harvesting). The socket dep is `@mathieuc/tradingview ^3.5.2`; re-smoke before relying (reverse-engineered protocol).
+
+**Also open:** T113b (replay session-recovery + scroll_back — deep, Tier-B). Do NOT re-attempt naive `_replaySessionState` nulling / `goToRealtime` in `stop()` — proven to regress re-use (FORK_NOTES §18).
+
+**Editing this repo (gotchas hit this session):** source files are **LF**. The Edit/Write tools may write CRLF (and once corrupted a new file with NUL bytes). Normalize with `tr -d '\r'` — do **NOT** use `sed -i` on freshly-Written files (it caused the NUL corruption). Check `git diff --cached -w` if a file's diff looks bloated (EOL flip). `npm install` also flips `package.json` EOL — re-normalize before staging.
+
+---
+
 ## Master ship order
 
 ### Block A — Replay reliability & data capture (Phase 1, browser/CDP path)
