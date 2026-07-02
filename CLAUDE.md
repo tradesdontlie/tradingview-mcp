@@ -1,6 +1,6 @@
 # TradingView MCP — Claude Instructions
 
-68 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
+86 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
 
 ## Decision Tree — Which Tool When
 
@@ -23,6 +23,9 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 - `data_get_ohlcv` with `summary: true` → compact stats (high, low, range, change%, avg volume, last 5 bars)
 - `data_get_ohlcv` without summary → all bars (use `count` to limit, default 100)
 - `quote_get` → single latest price snapshot
+
+### "Snapshot everything at once" (fast, one call)
+- `chart_snapshot` → state + current-bar OHLCV + study values + Pine lines/labels/tables/boxes in a single concurrent capture. Use `study_filter` to target one indicator and `include` to pick sections. This is the per-bar capture primitive behind `replay_walk` — prefer it over calling the individual data tools in sequence.
 
 ### "Analyze my chart" (full report workflow)
 1. `quote_get` → current price
@@ -53,11 +56,16 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 
 ### "Practice trading with replay"
 1. `replay_start` with `date: "2025-03-01"` → enter replay mode
-2. `replay_step` → advance one bar
-3. `replay_autoplay` → auto-advance (set speed with `speed` param in ms)
-4. `replay_trade` with `action: "buy"/"sell"/"close"` → execute trades
-5. `replay_status` → check position, P&L, current date
-6. `replay_stop` → return to realtime
+2. `replay_set_resolution` with `resolution: "1H"/"1D"/"auto"` → set stepping granularity (valid set depends on symbol/timeframe; invalid values rejected before touching cloud state)
+3. `replay_step` → advance one bar (waits for the cursor to actually move; **throws at end-of-data** instead of returning a stale date)
+4. `replay_autoplay` → auto-advance (set speed with `speed` param in ms)
+5. `replay_trade` with `action: "buy"/"sell"/"close"` → execute trades
+6. `replay_status` → check position, P&L, current date
+7. `replay_stop` → return to realtime
+
+### "Backtest a theory over history" (the capture loop)
+- `replay_walk` with `from`, `to`, and `capture: "<indicator name>"` → steps the whole range and records every bar's study values + Pine labels/lines into a timestamped series (keyed on OHLCV bar time). Pass `out: "path.jsonl"` to stream to disk (recommended for long ranges); omit to get the series inline. `sections` selects what to capture; `max_bars` caps the walk (result flags `truncated`). This is the systematic backtest primitive — it composes reliable stepping + chart_snapshot. Note: the first captured bar is a warm-up bar (indicators need lookback before values populate).
+- `backtest_pull` (headless / no browser, **array-speed**) → pulls an indicator's full per-bar output over TradingView's WebSocket, returning the same `{t, values}` rows as `replay_walk` but for the whole range in one round-trip (~11× faster on a multi-month pull). `symbol` + `indicator_id` ("STD;RSI" built-in, or "USER;<hash>" for your saved scripts) + `from`/`to`/`timeframe`/`range`. **Requires a TradingView session token in the `TV_SESSION` (+ `TV_SIGNATURE`) environment** (reverse-engineered socket — see FORK_NOTES §19; token is a secret). Use this for large/multi-symbol backtests; use `replay_walk` for visual/fidelity work or when no token is available.
 
 ### "Screen multiple symbols"
 - `batch_run` with `symbols: ["ES1!", "NQ1!", "YM1!"]` and `action: "screenshot"` or `"get_ohlcv"`

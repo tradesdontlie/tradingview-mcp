@@ -4,6 +4,8 @@
  * They throw on error (callers catch and format).
  */
 import { evaluate, evaluateAsync, getClient } from '../connection.js';
+import { manageIndicator, getState as chartGetState } from './chart.js';
+import { getPineTables } from './data.js';
 
 // ── Monaco finder (injected into TV page) ──
 const FIND_MONACO = `
@@ -239,6 +241,274 @@ export async function check({ source }) {
     errors: errors.length > 0 ? errors : undefined,
     warnings: warnings.length > 0 ? warnings : undefined,
     note: compiled ? 'Pine Script compiled successfully.' : undefined,
+  };
+}
+
+/**
+ * Save Pine Script source directly to a saved script via TradingView's REST
+ * API — no Monaco, no editor pane, no DOM activation, no polling.
+ *
+ * T74 (2026-04-26): replaces the Monaco-based `setSource + save` pair.  The
+ * old flow required Monaco to be mounted, which TV lazy-mounts only when
+ * the Pine Editor pane is visibly expanded — different layouts (bottom-bar
+ * vs side-dock) had different mount behaviors and the discovery was slow
+ * (≤10s polling).  This REST call is sub-second, layout-agnostic, and
+ * survives TV UI updates.
+ *
+ * Wire format (captured live via fetch interceptor on TV Desktop 3.1.0.7818
+ * by manually pressing Ctrl+S in the side-docked Pine Editor):
+ *
+ *   POST https://pine-facade.tradingview.com/pine-facade/save/next/USER;{id}
+ *        ?allow_create_new=false&name={url-encoded-name}
+ *   Content-Type: application/x-www-form-urlencoded
+ *   Body: source=<...>
+ *   Response: {"success":true, "result":{"IL":"<encrypted-blob>"}}
+ *
+ * The `IL` field is TradingView's signed/encrypted form of the source
+ * (used by chart-side verification).  We don't need to inspect it.
+ *
+ * Caller passes either `id` (preferred — from `pine_list_scripts`) or
+ * `name` (looked up via the same pine-facade list endpoint that
+ * `openScript` already uses).  After save, calling `chart_manage_indicator`
+ * with remove + re-add will pick up the new cloud version on the chart.
+ */
+export async function saveSource({ id, name, source }) {
+  if (!source || typeof source !== 'string') {
+    throw new Error('saveSource requires a non-empty `source` string.');
+  }
+  if (!id && !name) {
+    throw new Error('saveSource requires either `id` or `name`.');
+  }
+
+  // All fetches must run in the TV page context — pine-facade requires the
+  // user's session cookie, which only exists in the browser, not in this
+  // Node process.  We mirror the pattern used by openScript / listScripts.
+  // Note: scriptIdPart from pine-facade already contains the "USER;" prefix,
+  // so the save URL takes the id as-is (no extra "USER;" concatenation).
+  //
+  // T74 follow-up (2026-04-26): the `name=` URL param on save/next is NOT
+  // cosmetic — pine-facade rewrites the cloud script's `scriptName` field
+  // with whatever is sent.  Earlier versions of this code defaulted the name
+  // to the script id when the caller passed id-only, which silently corrupted
+  // the script's display name to a "USER;..." string.  Fix: if no name is
+  // supplied, look up the current `scriptName` from the pine-facade list and
+  // pass that through.  Idempotent — preserves names by default.
+  const escId = JSON.stringify(id || '');
+  const escName = JSON.stringify(name || '');
+  const escSource = JSON.stringify(source);
+
+  const result = await evaluateAsync(`
+    (function() {
+      var providedId = ${escId};
+      var providedName = ${escName};
+      var src = ${escSource};
+
+      function doSave(scriptId, displayName) {
+        // displayName is REQUIRED here — caller branches must resolve it
+        // (either from caller-supplied name or from pine-facade list lookup)
+        // before invoking doSave.  Falling back to scriptId would corrupt
+        // the cloud's scriptName field; better to fail loudly.
+        if (!displayName) {
+          return Promise.resolve({ error: 'doSave called without resolved displayName — internal bug' });
+        }
+        var url = 'https://pine-facade.tradingview.com/pine-facade/save/next/' +
+          encodeURIComponent(scriptId) +
+          '?allow_create_new=false&name=' + encodeURIComponent(displayName);
+        var body = new URLSearchParams();
+        body.append('source', src);
+        return fetch(url, {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Referer': 'https://www.tradingview.com/'
+          },
+          body: body
+        }).then(function(r) {
+          return r.text().then(function(text) {
+            if (!r.ok) return { error: 'pine-facade save returned ' + r.status + ': ' + text.substring(0, 300) };
+            try {
+              var data = JSON.parse(text);
+              if (data && data.success === true) {
+                return { success: true, id: scriptId, name: displayName, has_il_blob: !!(data.result && data.result.IL) };
+              }
+              return { error: 'pine-facade save responded success=false: ' + text.substring(0, 300) };
+            } catch (parseErr) {
+              return { error: 'pine-facade save returned non-JSON: ' + text.substring(0, 300) };
+            }
+          });
+        });
+      }
+
+      function fetchList() {
+        return fetch('https://pine-facade.tradingview.com/pine-facade/list/?filter=saved', { credentials: 'include' })
+          .then(function(r) {
+            if (!r.ok) throw new Error('pine-facade list returned ' + r.status);
+            return r.json();
+          })
+          .then(function(scripts) {
+            if (!Array.isArray(scripts)) throw new Error('pine-facade list returned unexpected data');
+            return scripts;
+          });
+      }
+
+      if (providedId) {
+        // Caller-supplied name wins (explicit rename intent).  Otherwise
+        // look up the current scriptName so the save preserves it.
+        if (providedName) {
+          return doSave(providedId, providedName);
+        }
+        return fetchList()
+          .then(function(scripts) {
+            var match = null;
+            for (var i = 0; i < scripts.length; i++) {
+              if (scripts[i].scriptIdPart === providedId) { match = scripts[i]; break; }
+            }
+            var resolved = match && match.scriptName;
+            if (!resolved) {
+              return { error: 'Script id "' + providedId + '" not found in pine-facade list — cannot resolve scriptName for save (would corrupt cloud name).' };
+            }
+            return doSave(providedId, resolved);
+          })
+          .catch(function(e) { return { error: e.message }; });
+      }
+
+      var target = providedName.toLowerCase();
+      return fetchList()
+        .then(function(scripts) {
+          var match = null;
+          for (var i = 0; i < scripts.length; i++) {
+            var sn = (scripts[i].scriptName || '').toLowerCase();
+            var st = (scripts[i].scriptTitle || '').toLowerCase();
+            if (sn === target || st === target) { match = scripts[i]; break; }
+          }
+          if (!match) {
+            for (var j = 0; j < scripts.length; j++) {
+              var sn2 = (scripts[j].scriptName || '').toLowerCase();
+              var st2 = (scripts[j].scriptTitle || '').toLowerCase();
+              if (sn2.indexOf(target) !== -1 || st2.indexOf(target) !== -1) { match = scripts[j]; break; }
+            }
+          }
+          if (!match) return { error: 'Script "' + providedName + '" not found. Use pine_list_scripts to see available scripts.' };
+          // Use the cloud's current scriptName — never the provided lookup
+          // string — so a fuzzy-match save doesn't accidentally rename.
+          return doSave(match.scriptIdPart, match.scriptName || match.scriptTitle);
+        })
+        .catch(function(e) { return { error: e.message }; });
+    })()
+  `);
+
+  if (!result || result.error) {
+    throw new Error((result && result.error) || 'pine_save_source returned no result');
+  }
+
+  return {
+    success: true,
+    id: result.id,
+    name: result.name,
+    source_lines: source.split('\n').length,
+    source_chars: source.length,
+    has_il_blob: !!result.has_il_blob,
+    note: 'Saved to TradingView cloud via pine-facade REST. Run chart_manage_indicator(remove + re-add) on the chart to pick up the new version.',
+    raw_url: 'pine-facade/save/next',
+  };
+}
+
+/**
+ * Read Pine Script source directly from a saved script via REST — no Monaco
+ * required.  Uses the same pine-facade endpoints `openScript` already
+ * relies on internally.
+ *
+ * T74 (2026-04-26): companion to `saveSource`, replacing the Monaco-based
+ * `getSource()` for the round-trip case.  Caller passes `id` (preferred)
+ * or `name`.
+ */
+export async function getSourceByREST({ id, name, version }) {
+  if (!id && !name) {
+    throw new Error('getSourceByREST requires either `id` or `name`.');
+  }
+
+  // All fetches must run in the TV page context — same reason as saveSource.
+  const escId = JSON.stringify(id || '');
+  const escName = JSON.stringify((name || '').toLowerCase());
+  const escVersion = JSON.stringify(version != null ? String(version) : '');
+
+  const result = await evaluateAsync(`
+    (function() {
+      var providedId = ${escId};
+      var targetName = ${escName};
+      var providedVersion = ${escVersion};
+
+      function fetchSource(scriptId, scriptVer, displayName) {
+        var ver = scriptVer || '1';
+        var url = 'https://pine-facade.tradingview.com/pine-facade/get/' +
+          encodeURIComponent(scriptId) + '/' + encodeURIComponent(ver);
+        return fetch(url, { credentials: 'include' })
+          .then(function(r) {
+            if (!r.ok) return { error: 'pine-facade get returned ' + r.status };
+            return r.json();
+          })
+          .then(function(data) {
+            if (data && data.error) return data;
+            var source = (data && data.source) || '';
+            if (!source) return { error: 'Script source returned empty.' };
+            return { success: true, id: scriptId, name: displayName, version: ver, source: source };
+          });
+      }
+
+      if (providedId && providedVersion) {
+        return fetchSource(providedId, providedVersion, providedId);
+      }
+
+      return fetch('https://pine-facade.tradingview.com/pine-facade/list/?filter=saved', { credentials: 'include' })
+        .then(function(r) {
+          if (!r.ok) return { error: 'pine-facade list returned ' + r.status };
+          return r.json();
+        })
+        .then(function(scripts) {
+          if (scripts && scripts.error) return scripts;
+          if (!Array.isArray(scripts)) return { error: 'pine-facade list returned unexpected data' };
+          var match = null;
+          if (providedId) {
+            for (var i = 0; i < scripts.length; i++) {
+              if (scripts[i].scriptIdPart === providedId) { match = scripts[i]; break; }
+            }
+            if (!match) return { error: 'Script with id "' + providedId + '" not found in pine-facade list.' };
+          } else {
+            for (var j = 0; j < scripts.length; j++) {
+              var sn = (scripts[j].scriptName || '').toLowerCase();
+              var st = (scripts[j].scriptTitle || '').toLowerCase();
+              if (sn === targetName || st === targetName) { match = scripts[j]; break; }
+            }
+            if (!match) {
+              for (var k = 0; k < scripts.length; k++) {
+                var sn2 = (scripts[k].scriptName || '').toLowerCase();
+                var st2 = (scripts[k].scriptTitle || '').toLowerCase();
+                if (sn2.indexOf(targetName) !== -1 || st2.indexOf(targetName) !== -1) { match = scripts[k]; break; }
+              }
+            }
+            if (!match) return { error: 'Script not found. Use pine_list_scripts to see available scripts.' };
+          }
+          var resolvedVer = providedVersion || match.version || '1';
+          return fetchSource(match.scriptIdPart, resolvedVer, match.scriptName || match.scriptTitle);
+        })
+        .catch(function(e) { return { error: e.message }; });
+    })()
+  `);
+
+  if (!result || result.error) {
+    throw new Error((result && result.error) || 'pine_get_source_rest returned no result');
+  }
+
+  return {
+    success: true,
+    id: result.id,
+    name: result.name,
+    version: result.version,
+    source: result.source,
+    line_count: result.source.split('\n').length,
+    char_count: result.source.length,
   };
 }
 
@@ -615,5 +885,256 @@ export async function listScripts() {
     count: scripts?.scripts?.length || 0,
     source: 'internal_api',
     error: scripts?.error,
+  };
+}
+
+/**
+ * T107 — Cherry-pick from upstream PR #152 commit `63fe862` by `taiwor88`.
+ * (Original location in PR: src/core/alerts.js. Moved here — pine.js is the
+ *  semantically correct home; the alert grouping in the upstream PR is
+ *  incidental to the PR bundling 8 unrelated fixes.)
+ *
+ * Refresh the TV chart-side saved-scripts catalog.
+ *
+ * Problem: `pine_save_source` and other pine-facade REST mutations write
+ * server-side, but the chart's Indicators dialog holds a one-shot Promise
+ * in `TradingViewApi._studyMarket._dialog._initIndicatorsPromises.userScriptsPromise`
+ * that was settled at chart-page load time. Subsequent dialog opens read
+ * from the resolved (stale) Promise; the dialog does not re-hit pine-facade
+ * on open (verified empirically: opening the dialog and clicking the
+ * "My scripts" sidebar produces ZERO pine-facade fetches).
+ *
+ * Findings from PR #152 investigation:
+ *   - `window.TradingViewApi.resetCache()` and `getStudiesList()` exist on
+ *     the prototype but are `$t()` stubs that throw "not implemented" —
+ *     dead ends.
+ *   - `_studyMarket._dialog.resetAllStudies()` (alias `_studyMarket.resetAllPages()`)
+ *     calls the dialog's `_init()` which clears `_studies` and re-runs the
+ *     init promises — but those promises are CACHED, so the re-init repopulates
+ *     `_studies` from the SAME stale resolved Promise. Confirmed: calling
+ *     resetAllStudies() produced zero pine-facade fetches and the cache
+ *     stayed at the pre-mutation contents.
+ *   - The dialog method `_updateUserStudies()` awaits
+ *     `_initIndicatorsPromises.userScriptsPromise`, runs
+ *     `_preparePineUserStudies()` on the result, and replaces
+ *     `_studies['Script$USER']` from the transformed list. If we swap
+ *     `userScriptsPromise` to a FRESH fetch before calling
+ *     `_updateUserStudies()`, the cache is rebuilt from the live REST list.
+ *
+ * Implementation:
+ *   1. Overwrite `_initIndicatorsPromises.userScriptsPromise` with a new
+ *      Promise resolving to `fetch('/pine-facade/list/?filter=saved').json()`.
+ *   2. Call `_updateUserStudies()` and await its completion.
+ *   3. Return the updated cache count so callers can verify.
+ *
+ * No page reload, no chart re-render, no visible UI flash. The next
+ * Indicators dialog open sees fresh data.
+ *
+ * Verified live by PR #152 author: created 5 saved scripts via REST; the
+ * dialog's pre-refresh cache showed 2 of 5 (the two created BEFORE the
+ * page last loaded). After `refreshCatalog()`: cache showed 5/5 including
+ * the 3 created post-load.
+ *
+ * Our T107 probe (2026-05-13) verified every required path exists on
+ * TV Desktop 3.0.0 MSIX (HWM-D chart):
+ *   - userScriptsPromise: present (is a Promise)
+ *   - _updateUserStudies: present (function)
+ *   - _studies['Script$USER']: 6 entries at probe time
+ */
+export async function refreshCatalog() {
+  const result = await evaluateAsync(`
+    (function() {
+      try {
+        var market = window.TradingViewApi && window.TradingViewApi._studyMarket;
+        if (!market) return { error: 'TradingViewApi._studyMarket not initialized' };
+        var dlg = market._dialog;
+        if (!dlg || !dlg._initIndicatorsPromises) {
+          return { error: 'Indicators dialog state not initialized — open the dialog once before refreshing (TV lazy-initializes it).' };
+        }
+        var before = (dlg._studies && dlg._studies['Script$USER']) ? dlg._studies['Script$USER'].length : 0;
+        // Replace the cached promise with a fresh fetch
+        dlg._initIndicatorsPromises.userScriptsPromise = fetch(
+          'https://pine-facade.tradingview.com/pine-facade/list/?filter=saved',
+          { credentials: 'include' }
+        ).then(function(r) { return r.json(); });
+        // _updateUserStudies awaits the (new) promise, transforms, and
+        // replaces _studies['Script$USER']. Return its promise so awaitPromise
+        // resolves only after the cache is rebuilt.
+        return dlg._updateUserStudies().then(function() {
+          var after = (dlg._studies && dlg._studies['Script$USER']) ? dlg._studies['Script$USER'].length : 0;
+          var scripts = (dlg._studies['Script$USER'] || []).map(function(s) {
+            return { id: s.id, title: s.title };
+          });
+          return { ok: true, before: before, after: after, scripts: scripts };
+        }).catch(function(e) { return { error: '_updateUserStudies failed: ' + (e && e.message || String(e)) }; });
+      } catch(e) { return { error: 'refreshCatalog threw: ' + e.message }; }
+    })()
+  `);
+  if (result && result.error) throw new Error(result.error);
+  return {
+    success: true,
+    cache_before_count: result?.before ?? null,
+    cache_after_count: result?.after ?? null,
+    delta: (result?.after ?? 0) - (result?.before ?? 0),
+    scripts: result?.scripts || [],
+    source: 'pine_facade_rest',
+    note: 'TV chart-side Indicators-dialog catalog refreshed. New scripts are now visible in the dialog without page reload.',
+  };
+}
+
+// ── T110 — withPineSave orchestrator ──
+// Composes pine_check + pine_save_source + pine_refresh_catalog +
+// chart_manage_indicator(remove + add) + verify into a single MCP call.
+// Built on top of T107 (cache-bust) + T108 (descriptor lookup + Escape recovery).
+// Replaces the 4-5 manual MCP calls per save cycle with 1; built-in retry on
+// cache miss / verification failure.
+//
+// Signature:
+//   { script_id_or_name, source, expected_version?, indicator_display_name?, max_retries=2 }
+// Response:
+//   { success, steps: [{name, success, ms, detail}], final_verification,
+//     total_ms, source_lines, has_il_blob }
+
+function _stepTimer() {
+  const t = Date.now();
+  return () => Date.now() - t;
+}
+
+export async function withSave({ script_id_or_name, source, expected_version, indicator_display_name, max_retries = 2 } = {}) {
+  if (!script_id_or_name) throw new Error('script_id_or_name required');
+  if (!source) throw new Error('source required');
+  const t0 = Date.now();
+  const steps = [];
+  const recordStep = (name, success, detail, ms) => steps.push({ name, success, ms, detail });
+
+  // (a) pine_check — compile via REST
+  let stepMs = _stepTimer();
+  let checkRes;
+  try {
+    checkRes = await check({ source });
+    const errorCount = checkRes?.error_count ?? checkRes?.errors?.length ?? 0;
+    recordStep('pine_check', !!checkRes?.success && errorCount === 0, {
+      errors: errorCount,
+      warnings: checkRes?.warning_count ?? checkRes?.warnings?.length ?? null,
+    }, stepMs());
+    if (!checkRes?.success || errorCount > 0) {
+      return {
+        success: false,
+        steps,
+        final_verification: 'failed_compile',
+        total_ms: Date.now() - t0,
+        source_lines: source.split('\n').length,
+        has_il_blob: false,
+        error: 'pine_check reported compile errors',
+      };
+    }
+  } catch (err) {
+    recordStep('pine_check', false, { error: err.message }, stepMs());
+    return { success: false, steps, final_verification: 'failed_compile', total_ms: Date.now() - t0, source_lines: source.split('\n').length, has_il_blob: false, error: err.message };
+  }
+
+  // (b) pine_save_source — REST save. Heuristic: TV cloud ids look like
+  // `USER;<hex>` — strict prefix check. Anything else is treated as a name.
+  stepMs = _stepTimer();
+  let saveRes;
+  try {
+    const looksLikeId = /^USER;/i.test(script_id_or_name);
+    saveRes = await saveSource(looksLikeId ? { id: script_id_or_name, source } : { name: script_id_or_name, source });
+    recordStep('pine_save_source', !!saveRes?.success && !!saveRes?.has_il_blob, {
+      id: saveRes?.id,
+      source_chars: saveRes?.source_chars,
+      has_il_blob: saveRes?.has_il_blob,
+    }, stepMs());
+    if (!saveRes?.success || !saveRes?.has_il_blob) {
+      return { success: false, steps, final_verification: 'failed_save', total_ms: Date.now() - t0, source_lines: source.split('\n').length, has_il_blob: !!saveRes?.has_il_blob, error: 'pine_save_source returned no il_blob' };
+    }
+  } catch (err) {
+    recordStep('pine_save_source', false, { error: err.message }, stepMs());
+    return { success: false, steps, final_verification: 'failed_save', total_ms: Date.now() - t0, source_lines: source.split('\n').length, has_il_blob: false, error: err.message };
+  }
+
+  // (c)+(d)+(e) refresh + reload + verify, with retries on cache miss
+  let verification = 'not_attempted';
+  for (let attempt = 0; attempt <= max_retries; attempt++) {
+    const suffix = attempt > 0 ? `[retry${attempt}]` : '';
+
+    // (c) refresh catalog — best-effort
+    stepMs = _stepTimer();
+    try {
+      const refRes = await refreshCatalog();
+      recordStep('pine_refresh_catalog' + suffix, !!refRes?.success, {
+        cache_after_count: refRes?.cache_after_count,
+        delta: refRes?.delta,
+      }, stepMs());
+    } catch (err) {
+      recordStep('pine_refresh_catalog' + suffix, false, { error: err.message, note: 'best-effort; continuing' }, stepMs());
+    }
+
+    // (d) chart_manage_indicator(remove + add) — only if indicator_display_name was passed
+    if (indicator_display_name) {
+      stepMs = _stepTimer();
+      try {
+        const state = await chartGetState();
+        const existing = (state?.studies || []).filter(s => (s.name || '').toLowerCase().includes(indicator_display_name.toLowerCase()));
+        for (const e of existing) {
+          await manageIndicator({ action: 'remove', indicator: indicator_display_name, entity_id: e.id });
+        }
+        const addRes = await manageIndicator({ action: 'add', indicator: indicator_display_name });
+        const reloadOk = !!addRes?.success;
+        recordStep('chart_reload' + suffix, reloadOk, {
+          removed: existing.length,
+          add_resolution: addRes?.resolution,
+          add_entity_id: addRes?.entity_id,
+        }, stepMs());
+        if (!reloadOk) {
+          if (attempt < max_retries) continue;
+          return { success: false, steps, final_verification: 'failed_reload', total_ms: Date.now() - t0, source_lines: source.split('\n').length, has_il_blob: true, error: addRes?.error || 'chart_manage_indicator(add) failed' };
+        }
+      } catch (err) {
+        recordStep('chart_reload' + suffix, false, { error: err.message }, stepMs());
+        if (attempt < max_retries) continue;
+        return { success: false, steps, final_verification: 'failed_reload', total_ms: Date.now() - t0, source_lines: source.split('\n').length, has_il_blob: true, error: err.message };
+      }
+    }
+
+    // (e) verify — by expected_version label (preferred) or by row count
+    stepMs = _stepTimer();
+    if (expected_version && indicator_display_name) {
+      try {
+        const state = await chartGetState();
+        const reloaded = (state?.studies || []).find(s => (s.name || '').toLowerCase().includes(indicator_display_name.toLowerCase()));
+        const found = reloaded ? reloaded.name : null;
+        const matched = found && found.toLowerCase().includes(expected_version.toLowerCase());
+        recordStep('verify' + suffix, !!matched, { expected_version, found, matched }, stepMs());
+        if (matched) { verification = 'passed'; break; }
+      } catch (err) {
+        recordStep('verify' + suffix, false, { error: err.message }, stepMs());
+      }
+    } else if (indicator_display_name) {
+      try {
+        const tables = await getPineTables({ study_filter: indicator_display_name });
+        const rowCount = tables?.studies?.[0]?.rows?.length ?? 0;
+        const ok = rowCount > 0;
+        recordStep('verify' + suffix, ok, { row_count: rowCount, study_filter: indicator_display_name }, stepMs());
+        if (ok) { verification = 'passed'; break; }
+      } catch (err) {
+        recordStep('verify' + suffix, false, { error: err.message }, stepMs());
+      }
+    } else {
+      // No reload-and-verify probe specified — accept save+refresh as terminal success.
+      verification = 'save_only';
+      break;
+    }
+  }
+
+  if (verification === 'not_attempted') verification = 'failed_after_retries';
+
+  return {
+    success: verification === 'passed' || verification === 'save_only',
+    steps,
+    final_verification: verification,
+    total_ms: Date.now() - t0,
+    source_lines: source.split('\n').length,
+    has_il_blob: !!saveRes?.has_il_blob,
   };
 }

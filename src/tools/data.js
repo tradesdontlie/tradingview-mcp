@@ -1,8 +1,18 @@
 import { z } from 'zod';
 import { jsonResult } from './_format.js';
 import * as core from '../core/data.js';
+import { chartSnapshot, SNAPSHOT_SECTIONS } from '../core/snapshot.js';
 
 export function registerDataTools(server) {
+  server.tool('chart_snapshot', `One concurrent capture of the current bar: chart state + current-bar OHLCV + study values + Pine graphics (lines/labels/tables/boxes). Filter with study_filter; limit sections with include (${SNAPSHOT_SECTIONS.join(', ')}). Ideal for per-bar capture during replay.`, {
+    study_filter: z.string().optional().describe('Substring to match study name across all sections. Omit for all studies.'),
+    include: z.array(z.string()).optional().describe(`Sections to capture (subset of: ${SNAPSHOT_SECTIONS.join(', ')}). Omit for all.`),
+    max_labels: z.coerce.number().optional().describe('Cap on Pine labels captured (passed through to the labels section).'),
+  }, async ({ study_filter, include, max_labels }) => {
+    try { return jsonResult(await chartSnapshot({ study_filter, include, max_labels })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
   server.tool('data_get_ohlcv', 'Get OHLCV bar data from the chart. Use summary=true for compact stats instead of all bars (saves context).', {
     count: z.coerce.number().optional().describe('Number of bars to retrieve (max 500, default 100)'),
     summary: z.coerce.boolean().optional().describe('Return summary stats (high, low, open, close, avg volume, range) instead of all bars — much smaller output'),
@@ -45,6 +55,13 @@ export function registerDataTools(server) {
   server.tool('depth_get', 'Get order book / DOM (Depth of Market) data from the chart', {}, async () => {
     try { return jsonResult(await core.getDepth()); }
     catch (err) { return jsonResult({ success: false, error: err.message, hint: 'Open the DOM panel in TradingView before using this tool.' }, true); }
+  });
+
+  server.tool('scanner_enrich', 'Batch-enrich symbols with price + 30d avg volume + market cap + description via the TradingView scanner REST endpoint (T26 quality filter). One cross-origin POST returns data for up to 500 symbols. Used by /refresh-movers to drop sub-$N price, thin-volume, micro-cap tickers BEFORE they reach 3Cs triage. Output.enriched is keyed by UPPER-cased symbol; output.missing lists requested symbols the endpoint did not return (typically delisted or non-US).', {
+    symbols: z.array(z.string()).describe('Array of fully-qualified symbols (e.g., ["NASDAQ:AAPL","NYSE:IBM"]). Max 500 per call.'),
+  }, async ({ symbols }) => {
+    try { return jsonResult(await core.enrichSymbols({ symbols })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
   server.tool('data_get_pine_lines', 'Read horizontal price levels drawn by Pine Script indicators (line.new). Returns deduplicated price levels per study. Use study_filter to target a specific indicator.', {

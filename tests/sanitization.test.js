@@ -8,7 +8,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { safeString, requireFinite } from '../src/connection.js';
 import { setSymbol, setTimeframe, setType, manageIndicator, setVisibleRange } from '../src/core/chart.js';
-import { drawShape } from '../src/core/drawing.js';
+import { drawShape, listDrawings, getProperties, removeOne, clearAll } from '../src/core/drawing.js';
 
 // ── Mock helpers ─────────────────────────────────────────────────────────
 
@@ -281,6 +281,46 @@ describe('drawing.js — sanitized evaluate calls', () => {
     const call = evaluate.calls.find(c => c.includes('createMultipointShape'));
     assert.ok(call, 'createMultipointShape called');
     assert.ok(call.includes('"trend_line"'), 'shape name via safeString');
+  });
+});
+
+// ── drawing.js — read/mutate functions must use DI (regression: f23eb1b) ─
+
+describe('drawing.js — listDrawings/getProperties/removeOne/clearAll DI', () => {
+  it('listDrawings uses injected evaluate + getChartApi (no ReferenceError)', async () => {
+    const { _deps, evaluate } = mockDeps();
+    const result = await listDrawings({ _deps });
+    assert.equal(result.success, true);
+    assert.equal(evaluate.calls.length, 1, 'evaluate called once');
+    assert.ok(evaluate.calls[0].includes('window.__api'), 'uses injected chart api path');
+    assert.ok(evaluate.calls[0].includes('getAllShapes'), 'calls getAllShapes');
+  });
+
+  it('getProperties uses safeString for entity_id + injected deps', async () => {
+    const { _deps, evaluate } = mockDeps();
+    const result = await getProperties({ entity_id: "fib'xss", _deps });
+    assert.equal(result.success, true);
+    assert.equal(evaluate.calls.length, 1);
+    assert.ok(evaluate.calls[0].includes(safeString("fib'xss")), 'entity_id escaped via safeString');
+    assert.ok(evaluate.calls[0].includes('window.__api'));
+  });
+
+  it('removeOne uses safeString for entity_id + injected deps', async () => {
+    const { _deps, evaluate } = mockDeps();
+    const result = await removeOne({ entity_id: 'shape123', _deps });
+    assert.equal(result.success, true);
+    assert.ok(evaluate.calls[0].includes('"shape123"'), 'entity_id wrapped via safeString');
+    assert.ok(evaluate.calls[0].includes('removeEntity'));
+  });
+
+  it('clearAll uses injected evaluate + getChartApi', async () => {
+    const { _deps, evaluate } = mockDeps();
+    const result = await clearAll({ _deps });
+    assert.equal(result.success, true);
+    assert.equal(result.action, 'all_shapes_removed');
+    assert.equal(evaluate.calls.length, 1);
+    assert.ok(evaluate.calls[0].includes('window.__api'));
+    assert.ok(evaluate.calls[0].includes('removeAllShapes'));
   });
 });
 

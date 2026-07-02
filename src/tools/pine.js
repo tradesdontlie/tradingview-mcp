@@ -59,6 +59,16 @@ export function registerPineTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
+  server.tool(
+    'pine_refresh_catalog',
+    'Bust TV\'s chart-side My-scripts metaInfo cache by replacing the cached `userScriptsPromise` with a fresh `/pine-facade/list/` fetch and forcing `_updateUserStudies()` to rebuild `_studies[\'Script$USER\']`. CALL THIS AFTER `pine_save_source` and BEFORE `chart_manage_indicator(remove + add)` so the chart picks up the freshly compiled IL instead of the stale cached version. Returns `{success, cache_before_count, cache_after_count, delta, scripts[{id,title}]}`. Sub-second, no page reload, no UI flash. T107 / cherry-pick of upstream PR #152 commit `63fe862`.',
+    {},
+    async () => {
+      try { return jsonResult(await core.refreshCatalog()); }
+      catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+    }
+  );
+
   server.tool('pine_analyze', 'Run static analysis on Pine Script code WITHOUT compiling — catches array out-of-bounds, unguarded array.first()/last(), bad loop bounds, and implicit bool casts. Works offline, no TradingView connection needed.', {
     source: z.string().describe('Pine Script source code to analyze'),
   }, async ({ source }) => {
@@ -71,5 +81,37 @@ export function registerPineTools(server) {
   }, async ({ source }) => {
     try { return jsonResult(await core.check({ source })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('pine_save_source', 'Save Pine Script source directly to a saved cloud script via TradingView\'s pine-facade REST endpoint. No Monaco editor required — works regardless of editor pane layout (bottom bar / side dock / dialog). Sub-second. Pass `id` (preferred, from pine_list_scripts) or `name` (case-insensitive match). After saving, run `chart_manage_indicator` (remove + re-add) on the chart so the live chart picks up the new cloud version.', {
+    source: z.string().describe('Pine Script source code to save'),
+    id: z.string().optional().describe('Saved-script id (e.g. "d101351d0e8a4c63bbb74d2676077538"). Get from pine_list_scripts. Preferred over `name` since it bypasses a list-and-search step.'),
+    name: z.string().optional().describe('Saved-script display name (case-insensitive match). Used when id is not provided.'),
+  }, async ({ source, id, name }) => {
+    try { return jsonResult(await core.saveSource({ id, name, source })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('pine_get_source_rest', 'Read Pine Script source from a saved cloud script via TradingView\'s pine-facade REST endpoint. No Monaco editor required. Pass `id` (preferred) or `name` (case-insensitive match). Optional `version` (defaults to the current saved version).', {
+    id: z.string().optional().describe('Saved-script id. Get from pine_list_scripts.'),
+    name: z.string().optional().describe('Saved-script display name (case-insensitive match). Used when id is not provided.'),
+    version: z.union([z.string(), z.number()]).optional().describe('Specific version to fetch. Defaults to current.'),
+  }, async ({ id, name, version }) => {
+    try { return jsonResult(await core.getSourceByREST({ id, name, version })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('with_pine_save', 'Orchestrated Pine save: compile + REST save + cache-bust + chart reload + verification, with retry on cache-miss. Replaces the 4-5 manual MCP call dance (pine_check → pine_save_source → pine_refresh_catalog → chart_manage_indicator remove+add → data_get_pine_tables verify) with a single call. Returns per-step timings + final_verification status. Pass `indicator_display_name` to auto-reload the chart; omit to save-only. Pass `expected_version` (e.g. "v2.12.1") to verify the reloaded entity\'s name contains that substring; otherwise verification falls back to pine_tables row count > 0.', {
+    script_id_or_name: z.string().describe('Saved-script id (preferred, starts with `USER;`) or case-insensitive display name.'),
+    source: z.string().describe('Full Pine v6 source. Will be compiled via pine_check before save.'),
+    expected_version: z.string().optional().describe('Version substring to assert in the reloaded entity name (e.g. "v2.12.1"). Most reliable verification probe.'),
+    indicator_display_name: z.string().optional().describe('Display name used by chart_manage_indicator(add). Required for chart reload + verification. Omit for save-only mode.'),
+    max_retries: z.number().int().min(0).max(5).optional().describe('Retries on cache miss / verification failure. Default 2.'),
+  }, async ({ script_id_or_name, source, expected_version, indicator_display_name, max_retries }) => {
+    try {
+      return jsonResult(await core.withSave({ script_id_or_name, source, expected_version, indicator_display_name, max_retries }));
+    } catch (err) {
+      return jsonResult({ success: false, error: err.message }, true);
+    }
   });
 }

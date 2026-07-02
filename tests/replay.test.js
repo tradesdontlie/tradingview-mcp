@@ -5,7 +5,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { start, step, autoplay, stop, trade, status, VALID_AUTOPLAY_DELAYS } from '../src/core/replay.js';
+import { start, step, autoplay, setResolution, stop, trade, status, VALID_AUTOPLAY_DELAYS } from '../src/core/replay.js';
 
 // ── Mock helpers ─────────────────────────────────────────────────────────
 
@@ -141,38 +141,76 @@ describe('start() — date selection and polling', () => {
 
 // ── step() ───────────────────────────────────────────────────────────────
 
-describe('step() — doStep and polling', () => {
-  it('calls doStep and polls until currentDate changes', async () => {
-    let stepDone = false;
-    let dateReadCount = 0;
+describe('step() — doStep and currentDate advance signal', () => {
+  const fastDeps = (evaluate) => ({
+    evaluate,
+    getReplayApi: mockGetReplayApi(),
+    pollMs: 1,          // fast tests — don't wait the real 60ms
+    stepTimeoutMs: 50,  // fast ceiling
+  });
+
+  it('resolves as soon as currentDate() advances', async () => {
+    let stepped = false;
     const evaluate = async (expr) => {
       if (expr.includes('isReplayStarted')) return true;
-      if (expr.includes('currentDate')) {
-        dateReadCount++;
-        // First read (before) returns 1000, then after doStep: 1000 twice, then 2000
-        if (!stepDone) return 1000;
-        return dateReadCount >= 4 ? 2000 : 1000;
-      }
-      if (expr.includes('doStep')) { stepDone = true; return undefined; }
+      if (expr.includes('currentDate')) return stepped ? 2000 : 1000; // advances after doStep
+      if (expr.includes('doStep')) { stepped = true; return undefined; }
       return undefined;
     };
     evaluate.calls = [];
-    const result = await step({ _deps: { evaluate, getReplayApi: mockGetReplayApi() } });
+    const result = await step({ _deps: fastDeps(evaluate) });
     assert.equal(result.success, true);
-    assert.equal(result.current_date, 2000);
     assert.equal(result.action, 'step');
+    assert.equal(result.current_date, 2000);
   });
 
-  it('returns stale date if poll times out (date never changes)', async () => {
+  it('throws "did not advance" when currentDate never changes (end of data)', async () => {
     const evaluate = async (expr) => {
       if (expr.includes('isReplayStarted')) return true;
-      if (expr.includes('currentDate')) return 5000; // never changes
+      if (expr.includes('currentDate')) return 5000; // frozen
       if (expr.includes('doStep')) return undefined;
       return undefined;
     };
     evaluate.calls = [];
-    const result = await step({ _deps: { evaluate, getReplayApi: mockGetReplayApi() } });
-    assert.equal(result.current_date, 5000);
+    await assert.rejects(
+      () => step({ _deps: fastDeps(evaluate) }),
+      (err) => {
+        assert.ok(err.message.includes('did not advance'));
+        return true;
+      },
+    );
+  });
+
+  it('ignores a transient backward/stale currentDate and waits for the forward bar', async () => {
+    // Live TV flickers to a stale lower value mid-transition; step() must skip it
+    // and settle on the real next (greater) bar.
+    let phase = 0; // 0=before doStep, 1=glitch (lower), 2=real next bar
+    const evaluate = async (expr) => {
+      if (expr.includes('isReplayStarted')) return true;
+      if (expr.includes('doStep')) { phase = 1; return undefined; }
+      if (expr.includes('currentDate')) {
+        if (phase === 0) return 2000;          // before
+        if (phase === 1) { phase = 2; return 1000; } // transient backward glitch
+        return 3000;                            // settled forward bar
+      }
+      return undefined;
+    };
+    evaluate.calls = [];
+    const result = await step({ _deps: fastDeps(evaluate) });
+    assert.equal(result.current_date, 3000, 'settled on forward bar, not the glitch');
+  });
+
+  it('does NOT return a stale date on timeout (old behavior regression guard)', async () => {
+    // The retired implementation returned {current_date: <stale>} on timeout,
+    // masking end-of-data as success. It must now throw instead.
+    const evaluate = async (expr) => {
+      if (expr.includes('isReplayStarted')) return true;
+      if (expr.includes('currentDate')) return 42; // never changes
+      if (expr.includes('doStep')) return undefined;
+      return undefined;
+    };
+    evaluate.calls = [];
+    await assert.rejects(() => step({ _deps: fastDeps(evaluate) }), /did not advance/);
   });
 
   it('throws when replay not started', async () => {
@@ -254,6 +292,66 @@ describe('autoplay() — delay validation', () => {
   });
 });
 
+// ── setResolution() ──────────────────────────────────────────────────────
+
+describe('setResolution() — validate against live set before mutating', () => {
+  function resDeps() {
+    const calls = [];
+    const evaluate = async (expr) => {
+      calls.push(expr);
+      if (expr.includes('replayResolutions()')) return ['1H', '2H', '1D', null];
+      if (expr.includes('changeReplayResolution')) return undefined;
+      if (expr.includes('currentReplayResolution')) return '1H';
+      if (expr.includes('autoReplayResolution')) return '1D';
+      return undefined;
+    };
+    return { _deps: { evaluate, getReplayApi: mockGetReplayApi() }, calls };
+  }
+
+  it('accepts a valid resolution and passes it to changeReplayResolution', async () => {
+    const { _deps, calls } = resDeps();
+    const r = await setResolution({ resolution: '1H', _deps });
+    assert.equal(r.success, true);
+    assert.equal(r.resolution, '1H');
+    assert.equal(r.is_auto, false);
+    const change = calls.find(c => c.includes('changeReplayResolution'));
+    assert.ok(change && change.includes('"1H"'), 'changeReplayResolution called with "1H"');
+  });
+
+  it('rejects an unsupported resolution BEFORE mutating cloud state', async () => {
+    const { _deps, calls } = resDeps();
+    await assert.rejects(
+      () => setResolution({ resolution: '7M', _deps }),
+      (err) => err.message.includes('Invalid replay resolution'),
+    );
+    assert.equal(calls.filter(c => c.includes('changeReplayResolution')).length, 0, 'no mutate on invalid value');
+  });
+
+  it('maps "auto" to null (automatic)', async () => {
+    const calls = [];
+    const evaluate = async (expr) => {
+      calls.push(expr);
+      if (expr.includes('replayResolutions()')) return ['1H', '1D', null];
+      if (expr.includes('currentReplayResolution')) return null;
+      if (expr.includes('autoReplayResolution')) return '1D';
+      return undefined;
+    };
+    const r = await setResolution({ resolution: 'auto', _deps: { evaluate, getReplayApi: mockGetReplayApi() } });
+    assert.equal(r.is_auto, true);
+    assert.equal(r.resolution, null);
+    const change = calls.find(c => c.includes('changeReplayResolution'));
+    assert.ok(change && change.includes('null'), 'changeReplayResolution(null) for auto');
+  });
+
+  it('throws when resolution is omitted', async () => {
+    const { _deps } = resDeps();
+    await assert.rejects(
+      () => setResolution({ _deps }),
+      (err) => err.message.includes('required'),
+    );
+  });
+});
+
 // ── stop() ───────────────────────────────────────────────────────────────
 
 describe('stop()', () => {
@@ -280,6 +378,49 @@ describe('stop()', () => {
   it('does not call hideReplayToolbar', () => {
     const source = readFileSync(new URL('../src/core/replay.js', import.meta.url), 'utf8');
     assert.ok(!source.includes('hideReplayToolbar'), 'hideReplayToolbar must not appear anywhere');
+  });
+});
+
+// ── T113 hardening: re-jump clear, drift-warning, robust teardown ─────────
+
+describe('start() — re-jump safety & drift-warning (T113a)', () => {
+  it('stops before re-selecting when replay already running', async () => {
+    const calls = [];
+    const evaluate = async (expr) => {
+      calls.push(expr);
+      if (expr.includes('isReplayAvailable')) return true;
+      if (expr.includes('isReplayStarted')) return true;       // running at entry + poll
+      if (expr.includes('currentDate')) return 1740959999;      // ~requested (no warning)
+      return undefined;
+    };
+    await start({ date: '2025-03-03', _deps: { evaluate, getReplayApi: mockGetReplayApi() } });
+    const stopIdx = calls.findIndex(c => c.includes('stopReplay'));
+    const selIdx = calls.findIndex(c => c.includes('selectDate'));
+    assert.ok(stopIdx >= 0 && selIdx >= 0, 'stopReplay and selectDate both happened');
+    assert.ok(stopIdx < selIdx, 'stop precedes re-select');
+  });
+
+  it('warns when the landed cursor is far from the requested date (clamp)', async () => {
+    const evaluate = async (expr) => {
+      if (expr.includes('isReplayAvailable')) return true;
+      if (expr.includes('isReplayStarted')) return true;
+      if (expr.includes('currentDate')) return 1740959999;      // ~2025, requested 2015
+      return undefined;
+    };
+    const r = await start({ date: '2015-01-01', _deps: { evaluate, getReplayApi: mockGetReplayApi() } });
+    assert.ok(r.warning && r.warning.includes('predate'), 'clamp warning surfaced');
+  });
+
+  it('does not warn when the landing matches the requested date', async () => {
+    let n = 0;
+    const evaluate = async (expr) => {
+      if (expr.includes('isReplayAvailable')) return true;
+      if (expr.includes('isReplayStarted')) { n++; return n > 1; } // entry false (skip re-jump), poll true
+      if (expr.includes('currentDate')) return 1740960000;         // exactly requested
+      return undefined;
+    };
+    const r = await start({ date: '2025-03-03', _deps: { evaluate, getReplayApi: mockGetReplayApi() } });
+    assert.equal(r.warning, undefined);
   });
 });
 

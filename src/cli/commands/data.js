@@ -1,5 +1,18 @@
 import { register } from '../router.js';
 import * as core from '../../core/data.js';
+import { chartSnapshot } from '../../core/snapshot.js';
+
+register('snapshot', {
+  description: 'One-shot capture: state + current bar OHLCV + study values + Pine graphics',
+  options: {
+    filter: { type: 'string', short: 'f', description: 'Substring to match study name' },
+    include: { type: 'string', short: 'i', description: 'Comma-separated sections (state,ohlcv,studies,pine_lines,pine_labels,pine_tables,pine_boxes)' },
+  },
+  handler: (opts) => chartSnapshot({
+    study_filter: opts.filter,
+    include: opts.include ? opts.include.split(',').map(s => s.trim()) : undefined,
+  }),
+});
 
 register('quote', {
   description: 'Get real-time price quote',
