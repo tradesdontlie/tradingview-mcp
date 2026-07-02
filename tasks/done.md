@@ -4,6 +4,31 @@
 > This queue starts at T112. Historical shipped work (T1–T111) predates the queue and is
 > narrated in `../FORK_NOTES.md` (the fork's divergence log) — not migrated here.
 
+## T119 — strategy harness (strategyReport + code-side P&L)
+
+**Status:** DONE (2026-07-02)
+**Priority:** Tier-A
+**Effort:** L
+**Phase:** 2
+**Dependencies:** T118 ✓
+
+### Outcome
+Two backtest engines sharing **one canonical metrics schema** (net profit, gross P/L, profit factor, win rate, expectancy, avg/largest win-loss, max drawdown + %, equity curve, trade list):
+- **`backtest_from_signals`** (new `src/sidecar/signal_pnl.js`, MCP tool + `tv backtest-from-signals` CLI) — pure code-side P&L over a captured `{t,values}` series (inline or JSONL) with declarative entry/exit `rules` (predicate grammar `{field,op,value?|field2?}` + `all/any/not`, ops incl. crosses/rising/falling/truthy). No browser, no token. Sidesteps Pine's 2000-order strategy cap. **The primary path for our indicator-heavy setup.**
+- **`backtest_run_strategy`** (new `src/sidecar/strategy_report.js`, MCP tool + `tv backtest-run-strategy` CLI) — loads a Pine `strategy()` over the socket, reads TV's `study.strategyReport`, normalizes to the same schema (recomputed from the trade list via shared `src/sidecar/metrics.js`) + `tv_native` aggregates. Needs `TV_SESSION`.
+
+**Live dump fixed two real mapping bugs** (the reason the spec demanded a live dump): (1) strategyReport is **zlib-deflate (78 9c), not ZIP** — the lib's jszip `parseCompressed` crashes the study listener (and the MCP process); new `src/sidecar/tv_decompress.js` sniffs magic bytes → zlib/gzip/raw-inflate, installed by patching cached `protocol.js` before `study.js` loads, returns `{report:{}}` on failure (graceful, no crash). (2) max drawdown key is **`maxStrategyDrawDown{,Percent}`** on TV 3.1 (legacy `maxDrawDown` absent → was null); trade times are **ms → normalized to seconds**; `grossLoss` sign-agnostic (`Math.abs`); `percentProfitable` guarded to a 0–1 fraction.
+
+### Verification (actual)
+- **26 new unit tests** (`signal_pnl` 12 incl. a hand-computed multi-trade fixture, `strategy_report` 10, `tv_decompress` 4) + **1 headless CLI e2e** (`cli.test.js`), all with injected I/O — no token. 32/32 across the sidecar files.
+- **Live smoke** (`STD;Supertrend%Strategy`, NASDAQ:AAPL D, 500 bars): decoded cleanly, **no crash**, 338 trades, recomputed net $3.14M / win 37.6% / PF 1.63; `tv_native.max_drawdown` 367,704, `win_rate` 0.377; trade times in seconds. Token extracted via CDP `Network.getCookies` into a gitignored `.env`, then **deleted — never committed** (Critical secret per fork-publishing rules); fork-publishing secret sweep clean.
+
+### Files touched
+- New: `src/sidecar/signal_pnl.js`, `src/sidecar/metrics.js`, `src/sidecar/strategy_report.js`, `src/sidecar/tv_decompress.js`, `tests/signal_pnl.test.js`, `tests/strategy_report.test.js`, `tests/tv_decompress.test.js`.
+- Modified: `src/tools/replay.js`, `src/cli/commands/replay.js`, `tests/cli.test.js`, `CLAUDE.md`, `README.md`, `FORK_NOTES.md` (§20), `TASKS.md`, `tasks/{backlog,done}.md`.
+
+---
+
 ## T118 — headless backtest sidecar (backtest_pull, Block B)
 
 **Status:** DONE (2026-07-02)

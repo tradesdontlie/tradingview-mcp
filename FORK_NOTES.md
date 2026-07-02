@@ -704,6 +704,28 @@ Partial ship of the T113 hardening. Two safe, validated pieces landed; the aggre
 
 ---
 
+### 20. T119 — strategy harness: `backtest_from_signals` + `backtest_run_strategy` ⭐
+
+**The payoff of Block B.** Turns captured series (T115/T118) and Pine strategies into real, queryable backtest numbers — net profit, win rate, expectancy, profit factor, max drawdown, equity curve — so "improve process on back data" has numbers instead of screenshots. Two engines, **one canonical metrics schema** (they're comparable by construction).
+
+- **`backtest_from_signals` (code-side, no browser, no token) — the valuable half.** Takes a `{t, values}` signal series (inline or a JSONL `series_path`) + declarative `rules` and simulates P&L in code, sidestepping Pine's strategy-engine limits (2000-order cap, single-position quirks). Rule grammar: `{side, entry, exit, price_field, qty, fee_per_trade, initial_capital}`; predicates are `{field, op, value?|field2?}` (ops `> < >= <= == != crosses_above crosses_below rising falling truthy falsy`) or `{all|any:[...]}|{not:...}` combinators. One action per bar; open positions force-close at end-of-data (`exit_reason:'end_of_data'`). **Fixture-tested against hand-computed P&L** (`tests/signal_pnl.test.js`) — this is where silent math bugs hide.
+- **`backtest_run_strategy` (headless socket, needs `TV_SESSION`).** Loads a Pine `strategy()` over the socket and reads TV's own `study.strategyReport`, normalizing it into the **same** schema (recomputed from the trade list via the shared `metrics.js`), plus TV's native aggregates under `tv_native`. `script_id` = "USER;<hash>" or built-in "STD;…Strategy".
+- **Shared metrics core (`src/sidecar/metrics.js`).** `computeTradeMetrics` + `computeEquityCurve` + `maxDrawdown`, pure. Unit conventions: money in account currency; `gross_loss` a positive magnitude; rates (`win_rate`, `max_drawdown_pct`) as fractions 0–1; undefined-for-the-data fields are `null` (not `0`/`Infinity`).
+
+**Two live-verified mapping fixes (the reason the spec demanded a live dump):**
+1. **strategyReport compression is zlib-deflate (magic `78 9c`), not ZIP.** The lib's `parseCompressed` feeds the blob to jszip and throws *"Can't find end of central directory"* inside the async study listener — which crashes the MCP process. New `src/sidecar/tv_decompress.js` (`decodeCompressed`, magic-byte sniff → zlib/gzip/raw-inflate, unit-tested) replaces it. Installed at module load in `strategy_report.js` by patching the cached `protocol.js` **before** `study.js` destructures `parseCompressed` — safe because the socket lib is only ever loaded lazily inside the fetch fns, and `tools/replay.js` imports `strategy_report.js` at server startup. On decode failure it returns `{ report: {} }` so the listener degrades gracefully instead of crashing.
+2. **Max-drawdown key is `maxStrategyDrawDown{,Percent}` on TV 3.1**, not `maxDrawDown{,Percent}` (the latter is absent — mapping it read `null`). Now prefers the current key with a legacy fallback. Also: strategy trade times come back in **milliseconds** — normalized to seconds to match the `{t}` convention and the `from`/`to` filter; `grossLoss` can be positive (handled via `Math.abs`); `percentProfitable` is a 0–1 fraction (guarded against a >1 percent).
+
+**Validated:** 26 new unit tests (`signal_pnl` 12, `strategy_report` 10, `tv_decompress` 4) + 1 headless CLI e2e, all with injected I/O — no token. **Live smoke** (built-in `STD;Supertrend%Strategy`, NASDAQ:AAPL D, 500 bars): report decoded cleanly, no crash, 338 trades, recomputed net $3.14M / win 37.6% / PF 1.63, `tv_native.max_drawdown` 367,704, trade times in seconds. The token was extracted from the running Desktop via CDP `Network.getCookies` into a gitignored `.env` for the smoke, then deleted — **never committed** (Critical secret per `~/.claude/rules/fork-publishing.md`).
+
+**When to use which:** `backtest_from_signals` for indicator-signal theories (our indicator-heavy setup — the primary path, no token); `backtest_run_strategy` when the theory is already a Pine `strategy()`. Both emit the same schema, so a signal backtest and a strategy backtest are directly comparable.
+
+**Files touched:** `src/sidecar/signal_pnl.js`, `src/sidecar/metrics.js`, `src/sidecar/strategy_report.js`, `src/sidecar/tv_decompress.js` (new); `src/tools/replay.js` (`backtest_from_signals`, `backtest_run_strategy`); `src/cli/commands/replay.js` (`backtest-from-signals`, `backtest-run-strategy`); `tests/signal_pnl.test.js`, `tests/strategy_report.test.js`, `tests/tv_decompress.test.js` (new), `tests/cli.test.js` (+1); `CLAUDE.md`, `README.md`, `tasks/*`.
+
+**Spec ref:** task queue T119 (`tasks/done.md`). Block B complete. Remaining fork work: T113b (replay session recovery, Tier-B), T120 (strategy-tester DOM-scrape fallback, Tier-Q).
+
+---
+
 ### Replay API surface (live probe, TV 3.1.0) — reference for T113/T114/T115/T119
 
 `Object.getOwnPropertyNames(Object.getPrototypeOf(window.TradingViewApi._replayApi))` on TV Desktop 3.1.0 exposes (beyond the already-used methods) several undocumented capabilities worth building on:

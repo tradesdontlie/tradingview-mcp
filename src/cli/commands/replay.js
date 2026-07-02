@@ -1,7 +1,14 @@
+import { readFileSync } from 'node:fs';
 import { register } from '../router.js';
 import * as core from '../../core/replay.js';
 import { replayWalk } from '../../core/backtest.js';
 import { backtestPull } from '../../sidecar/backtest_socket.js';
+import { backtestFromSignals } from '../../sidecar/signal_pnl.js';
+import { backtestRunStrategy } from '../../sidecar/strategy_report.js';
+
+function loadSeriesJsonl(path) {
+  return readFileSync(path, 'utf-8').split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l));
+}
 
 register('backtest-pull', {
   description: 'Headless socket backtest: pull an indicator\'s full per-bar series (needs TV_SESSION env)',
@@ -22,6 +29,39 @@ register('backtest-pull', {
     timeframe: opts.timeframe,
     range: opts.range ? Number(opts.range) : undefined,
     out: opts.out,
+  }),
+});
+
+register('backtest-from-signals', {
+  description: 'Code-side P&L from a captured signal series (JSONL) + entry/exit rules (JSON). No TV connection needed.',
+  options: {
+    series: { type: 'string', short: 's', description: 'Path to a JSONL series file (from backtest-pull/replay walk)' },
+    rules: { type: 'string', short: 'r', description: 'Path to a JSON rules file ({side,entry,exit,price_field,...})' },
+  },
+  handler: (opts) => {
+    if (!opts.series) throw new Error('--series <path.jsonl> is required.');
+    if (!opts.rules) throw new Error('--rules <path.json> is required.');
+    const series = loadSeriesJsonl(opts.series);
+    const rules = JSON.parse(readFileSync(opts.rules, 'utf-8'));
+    return backtestFromSignals({ series, rules });
+  },
+});
+
+register('backtest-run-strategy', {
+  description: 'Headless strategy() backtest: read TradingView\'s backtest report over the socket (needs TV_SESSION env)',
+  options: {
+    script: { type: 'string', short: 'i', description: 'Strategy script id: USER;<hash> or STD;...' },
+    symbol: { type: 'string', short: 's', description: 'Symbol, e.g. NASDAQ:AAPL' },
+    timeframe: { type: 'string', short: 't', description: 'Timeframe (D, 60, W...)' },
+    range: { type: 'string', short: 'r', description: 'Bar count to load (default 500)' },
+    'initial-capital': { type: 'string', description: 'Starting capital for the equity curve (default 0)' },
+  },
+  handler: (opts) => backtestRunStrategy({
+    scriptId: opts.script,
+    symbol: opts.symbol,
+    timeframe: opts.timeframe,
+    range: opts.range ? Number(opts.range) : undefined,
+    initial_capital: opts['initial-capital'] ? Number(opts['initial-capital']) : undefined,
   }),
 });
 

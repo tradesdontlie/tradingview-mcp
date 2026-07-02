@@ -148,3 +148,29 @@ describe('CLI — pine check (server compile)', () => {
     assert.ok(result.error_count > 0);
   });
 });
+
+describe('CLI — backtest-from-signals (no TV connection needed)', () => {
+  it('computes P&L from a JSONL series + rules file', () => {
+    const { writeFileSync, unlinkSync } = require_fs();
+    const seriesFile = join(__dirname, '_test_series.jsonl');
+    const rulesFile = join(__dirname, '_test_rules.json');
+    writeFileSync(seriesFile, [
+      JSON.stringify({ t: 1, values: { close: 100, e: 1, x: 0 } }),
+      JSON.stringify({ t: 2, values: { close: 110, e: 0, x: 1 } }),
+    ].join('\n'));
+    writeFileSync(rulesFile, JSON.stringify({
+      entry: { field: 'e', op: 'truthy' }, exit: { field: 'x', op: 'truthy' }, price_field: 'close',
+    }));
+    try {
+      const { stdout, exitCode } = run(['backtest-from-signals', '--series', seriesFile, '--rules', rulesFile]);
+      assert.equal(exitCode, 0);
+      const r = JSON.parse(stdout);
+      assert.equal(r.total_trades, 1);
+      assert.equal(r.net_profit, 10);
+      assert.equal(r.trades[0].exit_price, 110);
+    } finally {
+      unlinkSync(seriesFile);
+      unlinkSync(rulesFile);
+    }
+  });
+});

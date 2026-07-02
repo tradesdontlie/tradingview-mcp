@@ -62,6 +62,7 @@ Gives your AI assistant eyes and hands on your own chart:
 - **Draw on charts** — trend lines, horizontal lines, rectangles, text annotations
 - **Manage alerts** — create, list, and delete price alerts
 - **Replay practice** — step through historical bars, practice entries/exits
+- **Backtesting** — capture an indicator's history (browser `replay_walk` or headless `backtest_pull`), then turn it into P&L / win-rate / equity-curve numbers with `backtest_from_signals`, or read a Pine `strategy()`'s own report with `backtest_run_strategy`
 - **Screenshots** — capture chart state for AI visual analysis
 - **Multi-pane layouts** — set up 2x2, 3x1, etc. grids with different symbols per pane
 - **Monitor your chart** — stream JSONL from your locally running chart for local monitoring scripts
@@ -174,7 +175,8 @@ tv indicator add/remove/toggle/set/get
 tv layout list/switch
 tv pane list/layout/focus/symbol
 tv tab list/new/close/switch
-tv replay start/step/stop/status/autoplay/trade
+tv replay start/step/stop/status/autoplay/trade/walk/set-resolution
+tv backtest-pull / backtest-from-signals / backtest-run-strategy
 tv stream quote/bars/values/lines/labels/tables/all
 tv ui click/keyboard/hover/scroll/find/eval/type/panel/fullscreen/mouse
 tv screenshot / discover / ui-state / range / scroll
@@ -351,7 +353,7 @@ npm test
 Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  TradingView Desktop (Electron)
 ```
 
-- **Transport**: MCP over stdio (86 tools) + CLI (`tv` command)
+- **Transport**: MCP over stdio (88 tools) + CLI (`tv` command)
 - **Connection**: Chrome DevTools Protocol on localhost:9222
 - **Streaming**: Poll-and-diff loop with deduplication, JSONL output to stdout
 - **No dependencies** beyond `@modelcontextprotocol/sdk` and `chrome-remote-interface`

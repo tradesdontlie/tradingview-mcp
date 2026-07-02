@@ -11,11 +11,11 @@
 
 ## ▶ Resume pointer (2026-07-02)
 
-**State:** Block A (browser replay reliability + capture) shipped; Phase 2 gate passed and the socket engine shipped. Both backtest engines work: `replay_walk` (browser, T115) and `backtest_pull` (headless socket, T118). All pushed to `origin/fixes/draw-api-resolve` (HEAD `b94c549`). 66 unit tests green.
+**State:** Block A (browser replay reliability + capture) AND Block B (headless socket engine + strategy harness) both shipped. Three backtest surfaces now work: `replay_walk` (browser capture, T115), `backtest_pull` (headless per-bar series, T118), and the **T119 strategy harness** — `backtest_from_signals` (code-side P&L, no token) + `backtest_run_strategy` (reads TV's strategyReport over the socket). T119 added 26 unit tests (`signal_pnl`/`strategy_report`/`tv_decompress`) + 1 headless CLI e2e; sidecar files 32/32 green; live-smoked on `STD;Supertrend%Strategy` (no crash, sane numbers). **Not yet committed/pushed** as of this pointer — see the T119 commit next.
 
-**Next task: T119** — Strategy harness (`strategyReport` + code-side P&L). Turn a captured signal series (from either engine) into net-profit / win-rate / expectancy / equity-curve numbers. Spec in `tasks/backlog.md`. Tier-A, L.
+**Next task: T113b or T120.** With Block B done, the remaining fork work is optional-quality: **T113b** (replay session recovery + scroll_back — deep, Tier-B) and **T120** (strategy-tester DOM-scrape fallback — Tier-Q, opportunistic). Both specs in `tasks/backlog.md`. No hard next task.
 
-**To resume the socket path (T119 + backtest_pull):** needs a TradingView session token in env `TV_SESSION` (+ `TV_SIGNATURE`). A scratch `.env` may exist at `…/scratchpad/tv-socket-spike/.env`; if expired, re-extract the `sessionid` cookie from the running TradingView Desktop via CDP (`Network.getCookies`) — this requires explicit user authorization (auto-mode classifier blocks credential harvesting). The socket dep is `@mathieuc/tradingview ^3.5.2`; re-smoke before relying (reverse-engineered protocol).
+**Socket-token note (backtest_pull + backtest_run_strategy):** both need `TV_SESSION` (+ `TV_SIGNATURE`) in the environment. Extract the `sessionid` / `sessionid_sign` cookies from the running TradingView Desktop via CDP `Network.getCookies` — requires explicit user authorization (auto-mode classifier blocks credential harvesting), write to a **gitignored** `.env`, never commit. The T119 live smoke did this then deleted the `.env`. Socket dep `@mathieuc/tradingview ^3.5.2` (reverse-engineered — re-smoke before relying). **strategyReport gotcha:** TV ships the report as zlib-deflate; `strategy_report.js` patches the lib's ZIP-only `parseCompressed` at load (`tv_decompress.js`) — don't remove that patch or strategy reads crash the server.
 
 **Also open:** T113b (replay session-recovery + scroll_back — deep, Tier-B). Do NOT re-attempt naive `_replaySessionState` nulling / `goToRealtime` in `stop()` — proven to regress re-use (FORK_NOTES §18).
 
@@ -39,7 +39,7 @@ The scale unlock: array-speed full-history backtests, no browser. Gated on a via
 
 6. ~~**T117** — Mathieu2301 socket viability spike (gate).~~ ✅ DONE 2026-07-02 — **GO**.
 7. ~~**T118** — Backtest sidecar: full-history study `periods` + `graphic` → signal series.~~ ✅ DONE 2026-07-02 (`backtest_pull`).
-8. **T119** — Strategy harness: `strategyReport` JSON + code-side P&L for indicator signals. Depends T118.
+8. ~~**T119** — Strategy harness: `strategyReport` JSON + code-side P&L for indicator signals.~~ ✅ DONE 2026-07-02 (`backtest_from_signals` + `backtest_run_strategy`). **Block B complete.**
 
 ### Standalone quality
 - **T120** — Strategy-tester DOM-scrape fallback (TV 3.1+ report reliability). Tier-Q, opportunistic.
@@ -47,16 +47,14 @@ The scale unlock: array-speed full-history backtests, no browser. Gated on a via
 ---
 
 ## Active
-- (none — Block A shipped; next up is Block B / T113b in `tasks/backlog.md`)
+- (none — Blocks A + B shipped; only optional-quality T113b / T120 remain in `tasks/backlog.md`)
 
 ## Backlog
-- T119 — Strategy harness (strategyReport + code-side P&L) — Tier-A / L — **next** — see `tasks/backlog.md`
 - T113b — replay session recovery + scroll_back (deep remainder of T113) — Tier-B / L — see `tasks/backlog.md`
-- T118 — Headless backtest sidecar (full-history study series) — Tier-S / L — see `tasks/backlog.md`
-- T119 — Strategy harness (strategyReport + code-side P&L) — Tier-A / L — see `tasks/backlog.md`
 - T120 — Strategy-tester DOM-scrape fallback — Tier-Q / S — see `tasks/backlog.md`
 
 ## Recently done
+- T119 — strategy harness: `backtest_from_signals` + `backtest_run_strategy` ⭐ — DONE 2026-07-02 (code-side P&L + strategyReport reader, one canonical schema; zlib-decompress + key-mapping fixes) — see `tasks/done.md`
 - T118 — headless backtest sidecar (`backtest_pull`) ⭐ — DONE 2026-07-02 (array-speed socket engine, ~11× faster) — see `tasks/done.md`
 - T117 — headless-socket viability spike — DONE 2026-07-02 (**GO** — socket loads our private indicators headlessly) — see `tasks/done.md`
 - T113a — replay re-jump guard + drift-warning (safe subset of T113; remainder → T113b) — DONE 2026-07-01 — see `tasks/done.md`

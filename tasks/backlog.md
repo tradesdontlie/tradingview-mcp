@@ -131,6 +131,8 @@ Standard (S4). Commit `T118 shipped — headless backtest sidecar (full-history 
 
 ## T119 — Strategy harness (strategyReport + code-side P&L)
 
+**Status:** DONE (2026-07-02) — shipped as `backtest_from_signals` + `backtest_run_strategy`. See tasks/done.md. Kept here for the spec/context.
+
 **Status:** TODO
 **Priority:** Tier-A (high)
 **Effort:** L (<3d)
