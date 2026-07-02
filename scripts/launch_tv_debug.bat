@@ -17,9 +17,13 @@ if exist "%LOCALAPPDATA%\TradingView\TradingView.exe" set "TV_EXE=%LOCALAPPDATA%
 if exist "%PROGRAMFILES%\TradingView\TradingView.exe" set "TV_EXE=%PROGRAMFILES%\TradingView\TradingView.exe"
 if exist "%PROGRAMFILES(x86)%\TradingView\TradingView.exe" set "TV_EXE=%PROGRAMFILES(x86)%\TradingView\TradingView.exe"
 
-REM Check MSIX / Windows Store installs
+REM Check MSIX / Windows Store installs (direct dir listing is usually blocked by ACLs,
+REM so ask the AppX registry via PowerShell instead)
 if "%TV_EXE%"=="" (
     for /f "tokens=*" %%i in ('dir /s /b "%PROGRAMFILES%\WindowsApps\TradingView*\TradingView.exe" 2^>nul') do set "TV_EXE=%%i"
+)
+if "%TV_EXE%"=="" (
+    for /f "usebackq tokens=*" %%i in (`powershell -NoProfile -NonInteractive -Command "$p = (Get-AppxPackage -Name '*TradingView*').InstallLocation; if ($p) { Join-Path $p 'TradingView.exe' }" 2^>nul`) do set "TV_EXE=%%i"
 )
 if "%TV_EXE%"=="" (
     for /f "tokens=*" %%i in ('where TradingView.exe 2^>nul') do set "TV_EXE=%%i"

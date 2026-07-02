@@ -159,55 +159,74 @@ export async function uiState() {
   return { success: true, ...state };
 }
 
+export const BINARY_PATH_CANDIDATES = {
+  darwin: [
+    '/Applications/TradingView.app/Contents/MacOS/TradingView',
+    `${process.env.HOME}/Applications/TradingView.app/Contents/MacOS/TradingView`,
+  ],
+  win32: [
+    `${process.env.LOCALAPPDATA}\\TradingView\\TradingView.exe`,
+    `${process.env.PROGRAMFILES}\\TradingView\\TradingView.exe`,
+    `${process.env['PROGRAMFILES(X86)']}\\TradingView\\TradingView.exe`,
+  ],
+  linux: [
+    '/opt/TradingView/tradingview',
+    '/opt/TradingView/TradingView',
+    `${process.env.HOME}/.local/share/TradingView/TradingView`,
+    '/usr/bin/tradingview',
+    '/snap/tradingview/current/tradingview',
+  ],
+};
+
+/**
+ * Search fixed candidate paths, then platform-specific fallbacks (PATH lookup,
+ * macOS Spotlight, Windows Store/MSIX package install location).
+ */
+export async function locateBinary(platform = process.platform) {
+  const candidates = BINARY_PATH_CANDIDATES[platform] || BINARY_PATH_CANDIDATES.linux;
+  for (const p of candidates) {
+    if (p && existsSync(p)) return p;
+  }
+
+  try {
+    const cmd = platform === 'win32' ? 'where TradingView.exe' : 'which tradingview';
+    const found = execSync(cmd, { timeout: 3000 }).toString().trim().split('\n')[0];
+    if (found && existsSync(found)) return found;
+  } catch { /* ignore */ }
+
+  if (platform === 'darwin') {
+    try {
+      const found = execSync('mdfind "kMDItemFSName == TradingView.app" | head -1', { timeout: 5000 }).toString().trim();
+      if (found) {
+        const candidate = `${found}/Contents/MacOS/TradingView`;
+        if (existsSync(candidate)) return candidate;
+      }
+    } catch { /* ignore */ }
+  }
+
+  if (platform === 'win32') {
+    try {
+      const cmd = 'powershell -NoProfile -NonInteractive -Command "(Get-AppxPackage -Name \'*TradingView*\').InstallLocation"';
+      const installLoc = execSync(cmd, { timeout: 8000 }).toString().trim().split('\n')[0].trim();
+      if (installLoc) {
+        const candidate = `${installLoc}\\TradingView.exe`;
+        if (existsSync(candidate)) return candidate;
+      }
+    } catch { /* ignore */ }
+  }
+
+  return null;
+}
+
 export async function launch({ port, kill_existing } = {}) {
   const cdpPort = port || 9222;
   const killFirst = kill_existing !== false;
   const platform = process.platform;
 
-  const pathMap = {
-    darwin: [
-      '/Applications/TradingView.app/Contents/MacOS/TradingView',
-      `${process.env.HOME}/Applications/TradingView.app/Contents/MacOS/TradingView`,
-    ],
-    win32: [
-      `${process.env.LOCALAPPDATA}\\TradingView\\TradingView.exe`,
-      `${process.env.PROGRAMFILES}\\TradingView\\TradingView.exe`,
-      `${process.env['PROGRAMFILES(X86)']}\\TradingView\\TradingView.exe`,
-    ],
-    linux: [
-      '/opt/TradingView/tradingview',
-      '/opt/TradingView/TradingView',
-      `${process.env.HOME}/.local/share/TradingView/TradingView`,
-      '/usr/bin/tradingview',
-      '/snap/tradingview/current/tradingview',
-    ],
-  };
-
-  let tvPath = null;
-  const candidates = pathMap[platform] || pathMap.linux;
-  for (const p of candidates) {
-    if (p && existsSync(p)) { tvPath = p; break; }
-  }
+  const tvPath = await locateBinary(platform);
 
   if (!tvPath) {
-    try {
-      const cmd = platform === 'win32' ? 'where TradingView.exe' : 'which tradingview';
-      tvPath = execSync(cmd, { timeout: 3000 }).toString().trim().split('\n')[0];
-      if (tvPath && !existsSync(tvPath)) tvPath = null;
-    } catch { /* ignore */ }
-  }
-
-  if (!tvPath && platform === 'darwin') {
-    try {
-      const found = execSync('mdfind "kMDItemFSName == TradingView.app" | head -1', { timeout: 5000 }).toString().trim();
-      if (found) {
-        const candidate = `${found}/Contents/MacOS/TradingView`;
-        if (existsSync(candidate)) tvPath = candidate;
-      }
-    } catch { /* ignore */ }
-  }
-
-  if (!tvPath) {
+    const candidates = BINARY_PATH_CANDIDATES[platform] || BINARY_PATH_CANDIDATES.linux;
     throw new Error(`TradingView not found on ${platform}. Searched: ${candidates.join(', ')}. Launch manually with: /path/to/TradingView --remote-debugging-port=${cdpPort}`);
   }
 
