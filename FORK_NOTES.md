@@ -726,6 +726,26 @@ Partial ship of the T113 hardening. Two safe, validated pieces landed; the aggre
 
 ---
 
+### 21. T113b (safe subset) + T120 (superseded) — replay teardown + strategy-read close-out
+
+Both closed 2026-07-02 as the final fork cleanup. Neither warranted the deep/risky work its full spec described; the reasons are recorded here so they aren't re-litigated.
+
+**T113b — replay session recovery: shipped the safe subset, documented the rest as a TV limitation.**
+- **Live-probed the teardown surface (S5)** on TV Desktop 3.1.0: `_replayApi` proto exposes `destroy`, `goToRealtime`, `stopReplay`, `leaveReplay`; `_replayUIController` has `_updateReplaySessionState` / `_restoreReplaySessionState`; session state lives on the widget collection as `_replayContainer` / `_replaySessionState`.
+- **Shipped:** `stop()` now makes a **best-effort `goToRealtime()` call after `stopReplay()`**, try/catch-wrapped so it can never change the stop result or throw — it matches the tool's "return to realtime" contract and cannot regress the normal stop→start→step path (proven by two new `replay.test.js` cases incl. a throwing-teardown case). 50/50 replay tests green.
+- **Documented + capped (not fixed):** the ~4-5-cycle replay degradation is a **TV-side session-state accumulation** with no verified clean client-side fix (the prior `_replaySessionState = null` attempt regressed re-use — FORK_NOTES §18; the deep experiment to prove a `leaveReplay`-based reset would require destabilizing multi-cycle runs on a live chart, deliberately not done). Guidance: for long or repeated backtests prefer **`backtest_pull`** (headless, no replay session) over many `replay_walk` cycles; restart TV Desktop to clear degradation. `scroll_back` (backward jumps past the loaded buffer) also remains deferred.
+- **Status:** T113b's *safe subset* is DONE; the deep session-recovery + scroll_back remainder stays in `tasks/backlog.md` as a documented TV-limitation item (revisit only if TV changes replay internals).
+
+**T120 — strategy-tester DOM-scrape fallback: closed as superseded, no code.**
+- Purpose was a DOM-scrape fallback for `data_get_strategy_results` / `_trades` / `_equity` when the internal API returns empty on TV 3.1+.
+- **Superseded by T119.** `backtest_run_strategy` now reads a strategy's full report over the socket (net profit, win rate, trades, equity) **without touching the DOM at all** — strictly more robust than scraping TV's hashed, version-specific Strategy-Tester classnames (`backtestingReport-<hash>`, confirmed live to rot per build). The internal-API browser path T120 patched is also rarely exercised (this fork's primary downstream consumer is indicator-based, not `strategy()`-based).
+- **Also confirmed live:** built-in strategies (e.g. "Supertrend Strategy") are **not** locally insertable via `activeChart().createStudy()` — they're server-side pine-facade scripts (`STD;…`), not in the 241-entry internal metainfo repository — so even verifying a DOM scraper requires loading a strategy the hard way. Cost/benefit does not justify a rot-prone scraper.
+- **Status:** WON'T-FIX / superseded. Left in `tasks/backlog.md` with this rationale for traceability.
+
+**Net:** the fork's forward queue (T112–T120) is fully resolved — Blocks A + B shipped, T113b safe subset shipped, T120 superseded. Only the explicitly-deferred T113b deep remainder remains, gated on a TV-side change.
+
+---
+
 ### Replay API surface (live probe, TV 3.1.0) — reference for T113/T114/T115/T119
 
 `Object.getOwnPropertyNames(Object.getPrototypeOf(window.TradingViewApi._replayApi))` on TV Desktop 3.1.0 exposes (beyond the already-used methods) several undocumented capabilities worth building on:

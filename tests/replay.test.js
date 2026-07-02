@@ -379,6 +379,32 @@ describe('stop()', () => {
     const source = readFileSync(new URL('../src/core/replay.js', import.meta.url), 'utf8');
     assert.ok(!source.includes('hideReplayToolbar'), 'hideReplayToolbar must not appear anywhere');
   });
+
+  // T113b (safe subset): best-effort return-to-realtime teardown after stopReplay.
+  it('calls goToRealtime as a best-effort teardown after stopReplay', async () => {
+    const { _deps, evaluate } = mockDeps({
+      'isReplayStarted': true,
+      'stopReplay': undefined,
+      'goToRealtime': undefined,
+    });
+    const result = await stop({ _deps });
+    assert.equal(result.action, 'replay_stopped');
+    const stopIdx = evaluate.calls.findIndex(c => c.includes('stopReplay'));
+    const rtIdx = evaluate.calls.findIndex(c => c.includes('goToRealtime'));
+    assert.ok(rtIdx >= 0, 'goToRealtime was attempted');
+    assert.ok(stopIdx >= 0 && stopIdx < rtIdx, 'goToRealtime runs after stopReplay');
+  });
+
+  it('still returns replay_stopped when the goToRealtime teardown throws (cannot regress)', async () => {
+    const { _deps } = mockDeps({
+      'isReplayStarted': true,
+      'stopReplay': undefined,
+      'goToRealtime': () => { throw new Error('teardown boom'); },
+    });
+    const result = await stop({ _deps });
+    assert.equal(result.success, true);
+    assert.equal(result.action, 'replay_stopped');
+  });
 });
 
 // ── T113 hardening: re-jump clear, drift-warning, robust teardown ─────────

@@ -8,6 +8,8 @@
 
 ## T113b — replay session recovery + scroll_back (deep remainder of T113)
 
+**Status:** SAFE SUBSET DONE (2026-07-02); deep remainder DEFERRED as a documented TV-side limitation. `stop()` now does a guarded best-effort `goToRealtime()` teardown (can't regress; 50/50 replay tests green). The ~4-5-cycle degradation has no verified clean client-side fix (prior `_replaySessionState=null` regressed re-use); guidance is to prefer `backtest_pull` for long/repeated backtests and restart Desktop to clear. `scroll_back` also deferred. See FORK_NOTES §21. Revisit only if TV changes replay internals.
+
 **Status:** TODO
 **Priority:** Tier-B (normal — nice-to-have; the backtest engine works without it)
 **Effort:** L (<3d)
@@ -177,6 +179,8 @@ Standard (S4). Commit `T119 shipped — strategy harness (strategyReport + code-
 ---
 
 ## T120 — Strategy-tester DOM-scrape fallback (TV 3.1+ report reliability)
+
+**Status:** WON'T-FIX / SUPERSEDED (2026-07-02). T119's `backtest_run_strategy` reads a strategy's full report over the socket with no DOM at all — strictly better than scraping TV's hashed, version-specific Strategy-Tester classnames. The internal-API browser path this task patched is also rarely exercised (this fork's primary consumer is indicator-based, not `strategy()`-based). No code shipped. See FORK_NOTES §21.
 
 **Status:** TODO
 **Priority:** Tier-Q (cleanup/quality)

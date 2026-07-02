@@ -192,6 +192,15 @@ export async function stop({ _deps } = {}) {
     return { success: true, action: 'already_stopped' };
   }
   await evaluate(`${rp}.stopReplay()`);
+  // T113b (safe subset): best-effort return-to-realtime teardown. Mirrors what
+  // TV's own UI does on replay exit and matches this tool's "return to realtime"
+  // contract. try/catch-wrapped so it can NEVER change the stop result or throw —
+  // it cannot regress the normal stop→start→step path. NOTE: this does not clear
+  // the TV-side replay-session degradation that accumulates after ~4-5 start/stop
+  // cycles in one session (that needs a Desktop restart — a TV-side limitation;
+  // see FORK_NOTES §21). For long or repeated backtests, prefer backtest_pull
+  // (headless, no replay session) over many replay_walk cycles.
+  try { await evaluate(`${rp}.goToRealtime()`); } catch {}
   return { success: true, action: 'replay_stopped' };
 }
 

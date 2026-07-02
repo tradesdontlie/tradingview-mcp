@@ -75,7 +75,7 @@ export function registerReplayTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('replay_walk', `Backtest capture loop: step replay from a start date to an end date and record every bar's study values + Pine graphics into a timestamped series (keyed on OHLCV bar time). Use capture to target one indicator by name. Writes JSONL to 'out' if given (recommended for long ranges), else returns the series inline. Default sections: ${DEFAULT_WALK_SECTIONS.join(', ')}. Default max_bars: ${DEFAULT_MAX_BARS}.`, {
+  server.tool('replay_walk', `Backtest capture loop: step replay from a start date to an end date and record every bar's study values + Pine graphics into a timestamped series (keyed on OHLCV bar time). Use capture to target one indicator by name. Writes JSONL to 'out' if given (recommended for long ranges), else returns the series inline. Default sections: ${DEFAULT_WALK_SECTIONS.join(', ')}. Default max_bars: ${DEFAULT_MAX_BARS}. NOTE: TradingView's replay session degrades after ~4-5 start/stop cycles in one session (a TV-side limitation — restart Desktop to clear). For long ranges or multi-symbol/repeated backtests, prefer backtest_pull (headless, no replay session); use replay_walk for visual/fidelity work or when no session token is available.`, {
     from: z.string().describe('Start date (YYYY-MM-DD or ISO with offset for intraday).'),
     to: z.string().describe('End date (YYYY-MM-DD or ISO). Walk stops at the first bar on/after this date.'),
     capture: z.string().optional().describe('Substring to match the indicator/study name to capture. Omit to capture all.'),
