@@ -24,7 +24,7 @@ Fixes the "replay isn't working great" complaint and makes browser-replay backte
 The scale unlock: array-speed full-history backtests, no browser. Gated on a viability spike.
 
 6. ~~**T117** — Mathieu2301 socket viability spike (gate).~~ ✅ DONE 2026-07-02 — **GO**.
-7. **T118** — Backtest sidecar: full-history study `periods` + `graphic` → signal series. Depends T117.
+7. ~~**T118** — Backtest sidecar: full-history study `periods` + `graphic` → signal series.~~ ✅ DONE 2026-07-02 (`backtest_pull`).
 8. **T119** — Strategy harness: `strategyReport` JSON + code-side P&L for indicator signals. Depends T118.
 
 ### Standalone quality
@@ -36,14 +36,14 @@ The scale unlock: array-speed full-history backtests, no browser. Gated on a via
 - (none — Block A shipped; next up is Block B / T113b in `tasks/backlog.md`)
 
 ## Backlog
-- T118 — Headless backtest sidecar (full-history study series) — Tier-S / L — **unblocked (T117 GO)** — see `tasks/backlog.md`
-- T119 — Strategy harness (strategyReport + code-side P&L) — Tier-A / L — see `tasks/backlog.md`
+- T119 — Strategy harness (strategyReport + code-side P&L) — Tier-A / L — **next** — see `tasks/backlog.md`
 - T113b — replay session recovery + scroll_back (deep remainder of T113) — Tier-B / L — see `tasks/backlog.md`
 - T118 — Headless backtest sidecar (full-history study series) — Tier-S / L — see `tasks/backlog.md`
 - T119 — Strategy harness (strategyReport + code-side P&L) — Tier-A / L — see `tasks/backlog.md`
 - T120 — Strategy-tester DOM-scrape fallback — Tier-Q / S — see `tasks/backlog.md`
 
 ## Recently done
+- T118 — headless backtest sidecar (`backtest_pull`) ⭐ — DONE 2026-07-02 (array-speed socket engine, ~11× faster) — see `tasks/done.md`
 - T117 — headless-socket viability spike — DONE 2026-07-02 (**GO** — socket loads our private indicators headlessly) — see `tasks/done.md`
 - T113a — replay re-jump guard + drift-warning (safe subset of T113; remainder → T113b) — DONE 2026-07-01 — see `tasks/done.md`
 - T115 — replay_walk (capture-during-replay backtest loop) ⭐ — DONE 2026-07-01 — see `tasks/done.md`

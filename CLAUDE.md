@@ -1,6 +1,6 @@
 # TradingView MCP — Claude Instructions
 
-85 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
+86 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
 
 ## Decision Tree — Which Tool When
 
@@ -65,6 +65,7 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 
 ### "Backtest a theory over history" (the capture loop)
 - `replay_walk` with `from`, `to`, and `capture: "<indicator name>"` → steps the whole range and records every bar's study values + Pine labels/lines into a timestamped series (keyed on OHLCV bar time). Pass `out: "path.jsonl"` to stream to disk (recommended for long ranges); omit to get the series inline. `sections` selects what to capture; `max_bars` caps the walk (result flags `truncated`). This is the systematic backtest primitive — it composes reliable stepping + chart_snapshot. Note: the first captured bar is a warm-up bar (indicators need lookback before values populate).
+- `backtest_pull` (headless / no browser, **array-speed**) → pulls an indicator's full per-bar output over TradingView's WebSocket, returning the same `{t, values}` rows as `replay_walk` but for the whole range in one round-trip (~11× faster on a multi-month pull). `symbol` + `indicator_id` ("STD;RSI" built-in, or "USER;<hash>" for your saved scripts) + `from`/`to`/`timeframe`/`range`. **Requires a TradingView session token in the `TV_SESSION` (+ `TV_SIGNATURE`) environment** (reverse-engineered socket — see FORK_NOTES §19; token is a secret). Use this for large/multi-symbol backtests; use `replay_walk` for visual/fidelity work or when no token is available.
 
 ### "Screen multiple symbols"
 - `batch_run` with `symbols: ["ES1!", "NQ1!", "YM1!"]` and `action: "screenshot"` or `"get_ohlcv"`

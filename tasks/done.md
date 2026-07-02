@@ -4,6 +4,26 @@
 > This queue starts at T112. Historical shipped work (T1–T111) predates the queue and is
 > narrated in `../FORK_NOTES.md` (the fork's divergence log) — not migrated here.
 
+## T118 — headless backtest sidecar (backtest_pull, Block B)
+
+**Status:** DONE (2026-07-02)
+**Priority:** Tier-S (the scale unlock)
+**Effort:** L
+**Phase:** 2
+**Dependencies:** T117 (GO)
+
+### Outcome
+New `src/sidecar/backtest_socket.js` + `backtest_pull` MCP tool + `tv backtest-pull` CLI. Browser-free backtest engine: pulls a Pine indicator's full per-bar output over TradingView's WebSocket and normalizes to the **same `{t, values}` rows as replay_walk** (engines interchangeable). Socket lib dynamically imported (never loads at CDP-server startup); socket I/O injectable for tests. Handles `STD;`/`USER;` id resolution, `1e100`→null, newest-first re-sort, date filter, range-depth note. Auth via `TV_SESSION`/`TV_SIGNATURE` env (Critical secret; reverse-engineered protocol — dep pinned).
+
+### Verification (actual)
+- `tests/backtest_socket.test.js` 6/6 (injected socket I/O, no token).
+- Live: pulled a custom private indicator over ~5 months = 102 bars + graphic (75 labels/7 lines/1 box/1 table) in ~2.3s (~11× faster than replay_walk for the range). JSONL ascending, 7 plot keys/bar.
+
+### Files touched
+- `src/sidecar/backtest_socket.js` (new), `src/tools/replay.js`, `src/cli/commands/replay.js`, `tests/backtest_socket.test.js` (new), `package.json`, `CLAUDE.md`, `README.md`, `FORK_NOTES.md`, `TASKS.md`, `tasks/{backlog,done}.md`.
+
+---
+
 ## T117 — Mathieu2301 headless-socket viability spike (GO)
 
 **Status:** DONE (2026-07-02) — **verdict: GO**

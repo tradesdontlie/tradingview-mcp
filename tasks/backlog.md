@@ -83,6 +83,8 @@ Mark DONE with the go/no-go verdict; if GO, unblock T118/T119 in `../TASKS.md`; 
 
 ## T118 — Headless backtest sidecar (full-history study series)
 
+**Status:** DONE (2026-07-02) — shipped as backtest_pull. See tasks/done.md.
+
 **Status:** TODO
 **Priority:** Tier-S (critical — the scale unlock)
 **Effort:** L (<3d)

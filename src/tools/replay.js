@@ -2,8 +2,22 @@ import { z } from 'zod';
 import { jsonResult } from './_format.js';
 import * as core from '../core/replay.js';
 import { replayWalk, DEFAULT_WALK_SECTIONS, DEFAULT_MAX_BARS } from '../core/backtest.js';
+import { backtestPull } from '../sidecar/backtest_socket.js';
 
 export function registerReplayTools(server) {
+  server.tool('backtest_pull', 'Headless (no-browser) backtest: pull a Pine indicator\'s full per-bar output over TradingView\'s WebSocket — array-speed vs replay_walk. Returns the same {t, values} row shape. Requires a TradingView session token in the TV_SESSION (+ TV_SIGNATURE) environment. indicator_id is "STD;RSI" (built-in) or "USER;<hash>" (your saved/private script).', {
+    symbol: z.string().describe('Symbol, e.g. "NASDAQ:AAPL", "NYSE:F", "BINANCE:BTCUSDT".'),
+    indicator_id: z.string().describe('Indicator id: "STD;RSI" (built-in) or "USER;<hash>" (private/saved).'),
+    from: z.string().optional().describe('Start date (YYYY-MM-DD or ISO). Filters the pulled bars.'),
+    to: z.string().optional().describe('End date (YYYY-MM-DD or ISO).'),
+    timeframe: z.string().optional().describe('Timeframe: "D" (default), "60", "15", "W", etc.'),
+    range: z.coerce.number().optional().describe('Bar count to pull (default 500). Must be deep enough to reach `from`.'),
+    out: z.string().optional().describe('File path to stream JSONL rows to. Omit to return the series inline.'),
+  }, async ({ symbol, indicator_id, from, to, timeframe, range, out }) => {
+    try { return jsonResult(await backtestPull({ symbol, indicatorId: indicator_id, from, to, timeframe, range, out })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
   server.tool('replay_walk', `Backtest capture loop: step replay from a start date to an end date and record every bar's study values + Pine graphics into a timestamped series (keyed on OHLCV bar time). Use capture to target one indicator by name. Writes JSONL to 'out' if given (recommended for long ranges), else returns the series inline. Default sections: ${DEFAULT_WALK_SECTIONS.join(', ')}. Default max_bars: ${DEFAULT_MAX_BARS}.`, {
     from: z.string().describe('Start date (YYYY-MM-DD or ISO with offset for intraday).'),
     to: z.string().describe('End date (YYYY-MM-DD or ISO). Walk stops at the first bar on/after this date.'),

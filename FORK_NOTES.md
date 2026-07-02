@@ -684,6 +684,26 @@ Partial ship of the T113 hardening. Two safe, validated pieces landed; the aggre
 
 ---
 
+### 19. T118 — headless backtest sidecar (`backtest_pull`, Block B) ⭐
+
+**The scale unlock.** A browser-free backtest engine: pulls a Pine indicator's full per-bar output over TradingView's WebSocket (via `@mathieuc/tradingview`) and normalizes it to the **same `{t, values}` JSONL rows as `replay_walk`** (T115), so the browser and socket engines are interchangeable downstream. New `src/sidecar/backtest_socket.js` + `backtest_pull` MCP tool + `tv backtest-pull` CLI.
+
+- **Array-speed:** live pull of a custom indicator over ~5 months = **102 bars + graphic (75 labels/7 lines/1 box/1 table) in ~2.3s total**, vs ~250 ms/bar (~25s) for the same range via `replay_walk`. The socket is ~constant-per-pull; the browser is linear-per-bar, so the gap widens with range/symbol count.
+- **Loose coupling:** the socket lib is **dynamically imported inside the fetch function**, so it never loads at CDP-server startup and a protocol break can't destabilize the rest of the server. Socket I/O (`fetchStudy`) is injectable via `_deps` — the transform layer is fully unit-tested without a socket/token.
+- **Indicator resolution:** built-in `STD;…` load via `getIndicator()`; private `USER;…` must load via the `getPrivateIndicators().get()` descriptor (getIndicator doesn't resolve USER ids) — branched accordingly.
+- **Normalization:** TradingView's `1e100` na sentinel → `null`; socket returns newest-first so rows are re-sorted ascending; date-filtered to `[from, to]`; a `note` fires if `range` (bar count) wasn't deep enough to reach `from`.
+- **Auth:** reads `TV_SESSION` / `TV_SIGNATURE` from the environment (or opts) — **Critical secret, never hardcode/log/commit**. The socket path is a reverse-engineered protocol (can break on TV changes — dep pinned at `@mathieuc/tradingview ^3.5.2`; re-smoke before relying) and a ToS grey area (defensible as personal, local use of one's own account). Graphic labels lack a clean per-bar time in the parsed lib output, so `graphic` is returned as counts/metadata, not per-bar; the per-bar `study.periods` values are the signal series.
+
+**Validated:** `tests/backtest_socket.test.js` 6/6 (na→null, ascending sort, date filter, graphic counts, from-not-reached note, JSONL streaming, arg passthrough, missing-arg guards) — all with injected socket I/O, no token. Live smoke: pulled a custom private indicator (102 bars) — see above.
+
+**When to use which:** `backtest_pull` for large-range / multi-symbol scans (fast, needs token); `replay_walk` (T115) for visual/fidelity work, the ToS-safe own-Desktop path, and when no token is available. Same row shape → same downstream analysis.
+
+**Files touched:** `src/sidecar/backtest_socket.js` (new), `src/tools/replay.js` (`backtest_pull`), `src/cli/commands/replay.js` (`backtest-pull`), `tests/backtest_socket.test.js` (new), `package.json` (`@mathieuc/tradingview` dep), `CLAUDE.md` (decision tree + count 86), `README.md`.
+
+**Spec ref:** task queue T118 (`tasks/done.md`). Remaining Block B: T119 (strategy harness / code-side P&L).
+
+---
+
 ### Replay API surface (live probe, TV 3.1.0) — reference for T113/T114/T115/T119
 
 `Object.getOwnPropertyNames(Object.getPrototypeOf(window.TradingViewApi._replayApi))` on TV Desktop 3.1.0 exposes (beyond the already-used methods) several undocumented capabilities worth building on:
