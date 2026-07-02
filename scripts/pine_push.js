@@ -2,14 +2,15 @@
 // Push scripts/current.pine → TradingView editor, then compile
 import CDP from 'chrome-remote-interface';
 import { readFileSync } from 'fs';
+import { CDP_HOST, CDP_PORT } from '../src/connection.js';
 
 const srcPath = new URL('../scripts/current.pine', import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1');
 const src = readFileSync(srcPath, 'utf-8');
 
-const targets = await (await fetch('http://localhost:9222/json/list')).json();
+const targets = await (await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`)).json();
 const t = targets.find(t => t.url?.includes('tradingview.com'));
 if (!t) { console.error('No TradingView target'); process.exit(1); }
-const c = await CDP({ host: 'localhost', port: 9222, target: t.id });
+const c = await CDP({ host: CDP_HOST, port: CDP_PORT, target: t.id });
 await c.Runtime.enable();
 
 // Inject source

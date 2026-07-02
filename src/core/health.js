@@ -1,7 +1,7 @@
 /**
  * Core health/discovery/launch logic.
  */
-import { getClient, getTargetInfo, evaluate } from '../connection.js';
+import { CDP_PORT, getClient, getTargetInfo, evaluate } from '../connection.js';
 import { existsSync } from 'fs';
 import { execSync, spawn } from 'child_process';
 
@@ -160,7 +160,7 @@ export async function uiState() {
 }
 
 export async function launch({ port, kill_existing } = {}) {
-  const cdpPort = port || 9222;
+  const cdpPort = port || CDP_PORT;
   const killFirst = kill_existing !== false;
   const platform = process.platform;
 
