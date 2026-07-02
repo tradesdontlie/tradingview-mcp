@@ -40,7 +40,7 @@ Live 10-cycle test must pass; `replay_walk` must remain green. Additive/guarded 
 
 ## T117 — Mathieu2301 headless-socket viability spike (gate)
 
-**Status:** TODO
+**Status:** DONE (2026-07-02) — GO. Full outcome in `tasks/done.md`. Kept here for the spec/context; T118/T119 unblocked.
 **Priority:** Tier-A (high — gates all of Block B)
 **Effort:** M (<1d)
 **Phase:** 2
@@ -87,7 +87,7 @@ Mark DONE with the go/no-go verdict; if GO, unblock T118/T119 in `../TASKS.md`; 
 **Priority:** Tier-S (critical — the scale unlock)
 **Effort:** L (<3d)
 **Phase:** 2
-**Dependencies:** T117 (must be GO)
+**Dependencies:** T117 ✅ GO (2026-07-02) — unblocked
 **Audit ref:** 2026-07-01 research — Mathieu2301 `study.periods` + `study.graphic` over a date range in one pull; contrast with browser `replay_walk` (T115) at seconds/bar
 **KB ref:** T117 findings
 
@@ -133,7 +133,7 @@ Standard (S4). Commit `T118 shipped — headless backtest sidecar (full-history 
 **Priority:** Tier-A (high)
 **Effort:** L (<3d)
 **Phase:** 2
-**Dependencies:** T118
+**Dependencies:** T118 (T117 GO ✓)
 **Audit ref:** 2026-07-01 research — Mathieu2301 `study.strategyReport` (netProfit, percentProfitable, profitFactor, maxDrawDown, trades[], equity history); internals agent — code-side P&L avoids Pine's 2000-order cap
 **KB ref:** T118
 

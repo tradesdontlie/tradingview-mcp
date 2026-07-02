@@ -81,3 +81,19 @@ When streaming data changes faster than the agent can respond, the agent's reaso
 - **Toolformer: Language Models Can Teach Themselves to Use Tools** — Schick et al. (2023). Foundational work on LLMs learning to use external tools.
 - **FinGPT: Open-Source Financial Large Language Models** — Yang et al. (2023). Open-source LLMs fine-tuned for financial applications.
 - **Can Large Language Models Provide Useful Advice on How to Invest?** — Pelster & Val (2024). Studies LLM capability in financial reasoning.
+
+## Headless-socket backtest engine — viability spike (T117, 2026-07-02)
+
+**Verdict: GO.** A throwaway spike (outside the repo, no secrets committed) validated the `Mathieu2301/TradingView-API` WebSocket client (`@mathieuc/tradingview`) as a browser-free path to array-speed backtesting:
+
+- **Protocol works (2026-07):** an unauthenticated client pulled real OHLCV (chart bars) immediately — the reverse-engineered socket is not broken.
+- **Auth is required for study/indicator data:** the free/unauth session returns *"maximum number of studies per chart reached for current subscription"*. Supplying a logged-in session token (kept only in a gitignored scratch dir) unlocks it.
+- **Custom private indicators load headlessly:** with auth, the client listed the account's private indicators and, for one of them, returned its **full per-bar `periods` series (160 bars) plus `graphic` output — 75 labels, 7 lines, 1 table, 1 box** — over history in a single round-trip, no browser.
+- **Built-in indicators** (e.g. RSI) also return full `periods` with auth.
+
+**Implication:** the socket path can deliver the whole history of a custom indicator's values + drawings in one pull, versus ~250 ms/bar via browser replay (`replay_walk`). It is the right engine for large-range / multi-symbol backtests, with the browser path remaining the visual/fidelity fallback.
+
+**Caveats (carry into T118/T119):**
+- Reverse-engineered protocol — can break on TradingView changes; pin a lib version and re-smoke before relying.
+- Needs the account session token — treat as a Critical secret (gitignored `.env`, never committed; rotate if leaked). ToS grey area; defensible as personal, local use of one's own account.
+- `strategyReport` (for `strategy()` scripts) not yet probed — our scripts are `indicator()` studies, so the `periods`+`graphic`→code-side-P&L path (T119) is the primary route; strategyReport is a bonus to confirm during T119.

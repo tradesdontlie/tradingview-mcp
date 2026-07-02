@@ -23,7 +23,7 @@ Fixes the "replay isn't working great" complaint and makes browser-replay backte
 ### Block B — Headless backtest engine (Phase 2, socket path)
 The scale unlock: array-speed full-history backtests, no browser. Gated on a viability spike.
 
-6. **T117** — Mathieu2301 socket viability spike (gate). Research/spike.
+6. ~~**T117** — Mathieu2301 socket viability spike (gate).~~ ✅ DONE 2026-07-02 — **GO**.
 7. **T118** — Backtest sidecar: full-history study `periods` + `graphic` → signal series. Depends T117.
 8. **T119** — Strategy harness: `strategyReport` JSON + code-side P&L for indicator signals. Depends T118.
 
@@ -36,13 +36,15 @@ The scale unlock: array-speed full-history backtests, no browser. Gated on a via
 - (none — Block A shipped; next up is Block B / T113b in `tasks/backlog.md`)
 
 ## Backlog
+- T118 — Headless backtest sidecar (full-history study series) — Tier-S / L — **unblocked (T117 GO)** — see `tasks/backlog.md`
+- T119 — Strategy harness (strategyReport + code-side P&L) — Tier-A / L — see `tasks/backlog.md`
 - T113b — replay session recovery + scroll_back (deep remainder of T113) — Tier-B / L — see `tasks/backlog.md`
-- T117 — Mathieu2301 headless-socket viability spike — Tier-A / M — see `tasks/backlog.md`
 - T118 — Headless backtest sidecar (full-history study series) — Tier-S / L — see `tasks/backlog.md`
 - T119 — Strategy harness (strategyReport + code-side P&L) — Tier-A / L — see `tasks/backlog.md`
 - T120 — Strategy-tester DOM-scrape fallback — Tier-Q / S — see `tasks/backlog.md`
 
 ## Recently done
+- T117 — headless-socket viability spike — DONE 2026-07-02 (**GO** — socket loads our private indicators headlessly) — see `tasks/done.md`
 - T113a — replay re-jump guard + drift-warning (safe subset of T113; remainder → T113b) — DONE 2026-07-01 — see `tasks/done.md`
 - T115 — replay_walk (capture-during-replay backtest loop) ⭐ — DONE 2026-07-01 — see `tasks/done.md`
 - T116 — chart_snapshot (single-call per-bar capture) — DONE 2026-07-01 — see `tasks/done.md`

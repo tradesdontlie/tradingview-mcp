@@ -4,6 +4,26 @@
 > This queue starts at T112. Historical shipped work (T1–T111) predates the queue and is
 > narrated in `../FORK_NOTES.md` (the fork's divergence log) — not migrated here.
 
+## T117 — Mathieu2301 headless-socket viability spike (GO)
+
+**Status:** DONE (2026-07-02) — **verdict: GO**
+**Priority:** Tier-A
+**Effort:** M
+**Phase:** 2
+
+### Outcome
+Throwaway spike (scratch dir outside repo, token in gitignored `.env`, nothing committed) confirmed `@mathieuc/tradingview` as a browser-free backtest engine. All probes passed: socket protocol works (2026-07); auth via account session token unlocks study data; a **custom private indicator loaded headlessly and returned its full per-bar `periods` (160 bars) + `graphic` (75 labels / 7 lines / 1 table / 1 box)** in one round-trip; built-in RSI also returned 160 periods. Unblocks T118/T119. Full scrubbed writeup in `RESEARCH.md`.
+
+### Caveats carried forward
+- Reverse-engineered protocol — pin lib version, re-smoke before relying.
+- Session token = Critical secret (gitignored `.env`, never commit, rotate if leaked). ToS grey; defensible as personal local use.
+- `strategyReport` not probed (our scripts are `indicator()` studies) — confirm during T119 alongside the `periods`+`graphic`→code-side-P&L path.
+
+### Files
+- `RESEARCH.md` (scrubbed verdict). No code committed (spike). Scratch: `…/scratchpad/tv-socket-spike/`.
+
+---
+
 ## T113a — replay re-jump guard + drift-warning (safe subset of T113)
 
 **Status:** DONE (2026-07-01)
