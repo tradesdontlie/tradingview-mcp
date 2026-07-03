@@ -1,0 +1,29 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mcp-server (stdio, no port)",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["start"],
+      "port": null
+    },
+    {
+      "name": "test:all",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "test:all"],
+      "port": null
+    },
+    {
+      "name": "test:e2e",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "test:e2e"],
+      "port": null
+    },
+    {
+      "name": "test:unit",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "test:unit"],
+      "port": null
+    }
+  ]
+}
