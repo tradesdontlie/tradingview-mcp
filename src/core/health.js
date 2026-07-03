@@ -2,7 +2,7 @@
  * Core health/discovery/launch logic.
  */
 import { getClient, getTargetInfo, evaluate } from '../connection.js';
-import { existsSync } from 'fs';
+import { existsSync, readdirSync } from 'fs';
 import { execSync, spawn } from 'child_process';
 
 export async function healthCheck() {
@@ -159,6 +159,40 @@ export async function uiState() {
   return { success: true, ...state };
 }
 
+// Resolves the currently installed MSIX package without pinning a version number,
+// since TradingView Desktop auto-updates and the WindowsApps folder name changes with it.
+function findWindowsAppsTradingView() {
+  try {
+    const base = `${process.env.PROGRAMFILES}\\WindowsApps`;
+    const entries = readdirSync(base).filter((d) => /^TradingView\.Desktop_/i.test(d));
+    for (const dir of entries) {
+      const exe = `${base}\\${dir}\\TradingView.exe`;
+      if (existsSync(exe)) {
+        console.error(`[tv_launch] Found TradingView via WindowsApps listing: ${exe}`);
+        return exe;
+      }
+    }
+  } catch { /* WindowsApps listing can be access-restricted; fall through to Get-AppxPackage */ }
+
+  try {
+    const output = execSync(
+      'powershell -NoProfile -Command "(Get-AppxPackage -Name \'*TradingView.Desktop*\').InstallLocation"',
+      { timeout: 5000 }
+    ).toString().trim();
+
+    for (const loc of output.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)) {
+      const exe = `${loc}\\TradingView.exe`;
+      if (existsSync(exe)) {
+        console.error(`[tv_launch] Found TradingView via Get-AppxPackage: ${exe}`);
+        return exe;
+      }
+    }
+  } catch { /* Get-AppxPackage unavailable or package not installed */ }
+
+  console.error('[tv_launch] TradingView not found via WindowsApps listing or Get-AppxPackage');
+  return null;
+}
+
 export async function launch({ port, kill_existing } = {}) {
   const cdpPort = port || 9222;
   const killFirst = kill_existing !== false;
@@ -170,6 +204,7 @@ export async function launch({ port, kill_existing } = {}) {
       `${process.env.HOME}/Applications/TradingView.app/Contents/MacOS/TradingView`,
     ],
     win32: [
+      `${process.env.APPDATA}\\TradingView\\TradingView.exe`,
       `${process.env.LOCALAPPDATA}\\TradingView\\TradingView.exe`,
       `${process.env.PROGRAMFILES}\\TradingView\\TradingView.exe`,
       `${process.env['PROGRAMFILES(X86)']}\\TradingView\\TradingView.exe`,
@@ -185,6 +220,10 @@ export async function launch({ port, kill_existing } = {}) {
 
   let tvPath = null;
   const candidates = pathMap[platform] || pathMap.linux;
+  if (platform === 'win32') {
+    const msixPath = findWindowsAppsTradingView();
+    if (msixPath) candidates.unshift(msixPath);
+  }
   for (const p of candidates) {
     if (p && existsSync(p)) { tvPath = p; break; }
   }
