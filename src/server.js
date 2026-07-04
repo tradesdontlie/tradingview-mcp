@@ -14,6 +14,19 @@ import { registerWatchlistTools } from './tools/watchlist.js';
 import { registerUiTools } from './tools/ui.js';
 import { registerPaneTools } from './tools/pane.js';
 import { registerTabTools } from './tools/tab.js';
+import { registerBinanceTools } from './tools/binance.js';
+import { registerBinanceLiveTools } from './tools/binance_live.js';
+import { registerRiskTools } from './tools/risk.js';
+import { registerSfpTools } from './tools/sfp.js';
+import { registerDivergenceTools } from './tools/divergence.js';
+import { registerLevelsTools } from './tools/levels.js';
+import { registerFibonacciTools } from './tools/fibonacci.js';
+import { registerMarketStructureTools } from './tools/market_structure.js';
+import { registerPinbarTools } from './tools/pinbar.js';
+import { registerChartPatternsTools } from './tools/chart_patterns.js';
+import { registerLadderingTools } from './tools/laddering.js';
+import { registerConfluenceTools } from './tools/confluence.js';
+import { registerVolumeProfileTools } from './tools/volume_profile.js';
 
 const server = new McpServer(
   {
@@ -84,6 +97,19 @@ registerWatchlistTools(server);
 registerUiTools(server);
 registerPaneTools(server);
 registerTabTools(server);
+registerBinanceTools(server);
+registerBinanceLiveTools(server);
+registerRiskTools(server);
+registerSfpTools(server);
+registerDivergenceTools(server);
+registerLevelsTools(server);
+registerFibonacciTools(server);
+registerMarketStructureTools(server);
+registerPinbarTools(server);
+registerChartPatternsTools(server);
+registerLadderingTools(server);
+registerConfluenceTools(server);
+registerVolumeProfileTools(server);
 
 // Startup notice (stderr so it doesn't interfere with MCP stdio protocol)
 process.stderr.write('⚠  tradingview-mcp  |  Unofficial tool. Not affiliated with TradingView Inc. or Anthropic.\n');

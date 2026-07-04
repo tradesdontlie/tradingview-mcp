@@ -38,7 +38,25 @@ After adding, use `indicator_set_inputs` to customize settings (e.g., change EMA
 Use drawing tools to mark up the chart:
 - `draw_shape` with `horizontal_line` for support/resistance
 - `draw_shape` with `trend_line` for trend channels (needs two points)
+- `draw_shape` with `rectangle` for supply/demand zones and the position/risk boxes
 - `draw_shape` with `text` for annotations
+
+**Match the curriculum's house style** — see `CURRICULUM_ANNOTATION_CONVENTIONS.md`
+in this skill folder (distilled from every chart screenshot in Ch 1-18). Key rules:
+- Light/cream chart background, candlesticks.
+- Levels = horizontal lines: **red = resistance/supply, green = support/demand,
+  blue = secondary, dashed = stop/minor**; label each with the level + role + TF
+  (`Monthly Close Resistance`, `Key Low`), anchored at the left edge.
+- Zones = shaded rectangles extended right (red supply / green demand / gray repeated-reaction).
+- Market structure: tag every pivot `HH/HL/LH/LL`, mark `BOS`/`CHoCH` at the break
+  (green line bullish / red line bearish), shade the pullback entry zone green.
+- Fib: native tool swing-to-swing, show ratio+price, emphasize the **0.618-0.786
+  golden pocket** (orders at 0.702).
+- The trade: **green box = reward/entry→target, red-orange box = risk/entry→stop**
+  (TV Long/Short Position tool); laddered `Entry 1/2` + scaled `Target 1/2/3` as
+  right-edge labeled lines. Entry = candle **close** after the trigger; SL = signal-candle wick.
+- Ring the trigger candle (green circle bullish / red bearish; dashed ellipse over an SFP `Sweep` wick).
+- **Frame zoomed out** (~60-120 bars) so the whole swing sequence + level + target fit in one screenshot.
 
 ## Step 5: Capture and Analyze
 

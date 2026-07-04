@@ -1,0 +1,24 @@
+{
+  "_comment": "Control-plane config written by the orchestrator agent and read by both bots at the top of every scan. Each bot reads ONLY its own section and runs ONLY the strategies/filters listed as active, ALWAYS clamped to that bot's hard-coded validated universe (config can narrow behavior, never invent it). A missing or malformed file fails OPEN to all-active (current behavior). Do not hand-edit while the agent is running. Sibling contract files in this dir: trade_ledger.jsonl (bot writes resolved trades, agent reads), bot_events.jsonl (bot writes escalations, agent reads). Seeded 2026-06-13 to exactly mirror current live behavior: spot=6 strategies+4 filters, futures=7 strategies+3 filters.",
+  "version": 1,
+  "updated_at": "2026-06-13T00:00:00Z",
+  "updated_by": "seed",
+  "rationale_ref": null,
+  "spot": {
+    "active_strategies": ["sfp", "divergence", "cvd_divergence", "levels", "fibonacci", "market_structure"],
+    "active_filters": {
+      "pinbar_bias_4h": { "enabled": true },
+      "daily_structure": { "enabled": true },
+      "vwap_bias": { "enabled": true },
+      "value_area_bias": { "enabled": true, "bins": 24, "value_area_percent": 70 }
+    }
+  },
+  "futures": {
+    "active_strategies": ["sfp", "divergence", "cvd_divergence", "levels", "fibonacci", "market_structure", "pinbar"],
+    "active_filters": {
+      "pinbar_bias_4h": { "enabled": true },
+      "vwap_bias": { "enabled": true },
+      "value_area_bias": { "enabled": true, "bins": 24, "value_area_percent": 70 }
+    }
+  }
+}

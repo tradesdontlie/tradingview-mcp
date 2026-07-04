@@ -25,6 +25,19 @@ import './commands/ui.js';
 import './commands/pane.js';
 import './commands/tab.js';
 import './commands/stream.js';
+import './commands/binance.js';
+import './commands/binance_live.js';
+import './commands/risk.js';
+import './commands/sfp.js';
+import './commands/divergence.js';
+import './commands/levels.js';
+import './commands/fibonacci.js';
+import './commands/market_structure.js';
+import './commands/pinbar.js';
+import './commands/chart_patterns.js';
+import './commands/laddering.js';
+import './commands/confluence.js';
+import './commands/volume_profile.js';
 
 // Run
 import { run } from './router.js';

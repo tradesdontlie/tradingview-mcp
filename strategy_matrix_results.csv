@@ -1,0 +1,414 @@
+step,group,strategy,timeframe,win_rate_pct,total_trades,profit_factor,max_drawdown_R,net_R,avg_R,wins,losses,open
+1,Individual,"sfp",1m,35.8,61320,1.77,66.84,30333.16,0.49,21932,39388,296
+1,Individual,"sfp",5m,34.5,14888,1.71,62.39,6958.83,0.47,5135,9753,100
+1,Individual,"sfp",15m,34.1,5236,1.61,42.59,2115.00,0.40,1784,3452,35
+1,Individual,"sfp",1h,34.9,1256,1.96,44.18,786.55,0.63,438,818,12
+1,Individual,"sfp",4h,31.8,277,1.98,26.44,185.57,0.67,88,189,6
+1,Individual,"sfp",1d,20.0,15,0.54,11.00,-5.57,-0.37,3,12,0
+1,Individual,"divergence",1m,47.4,35772,785.72,26.00,14753535.56,412.43,16971,18801,311
+1,Individual,"divergence",5m,46.2,5698,901.93,17.00,2763156.69,484.93,2631,3067,52
+1,Individual,"divergence",15m,42.5,1679,851.59,18.00,821674.40,489.38,713,966,22
+1,Individual,"divergence",1h,42.5,327,15.30,13.00,2688.17,8.22,139,188,5
+1,Individual,"divergence",4h,34.7,49,11.96,9.00,350.71,7.16,17,32,2
+1,Individual,"divergence",1d,100.0,1,∞,0.00,11.25,11.25,1,0,0
+1,Individual,"cvd_divergence",1m,45.3,45501,820.19,18.00,20402796.31,448.40,20595,24906,277
+1,Individual,"cvd_divergence",5m,44.0,9340,701.82,15.90,3665268.26,392.43,4110,5230,78
+1,Individual,"cvd_divergence",15m,42.3,3098,461.67,12.00,822759.48,265.58,1312,1786,31
+1,Individual,"cvd_divergence",1h,43.2,718,21.90,9.00,8529.20,11.88,310,408,8
+1,Individual,"cvd_divergence",4h,30.6,134,7.70,11.00,623.09,4.65,41,93,4
+1,Individual,"cvd_divergence",1d,28.6,7,3.64,5.00,13.21,1.89,2,5,0
+1,Individual,"fibonacci",1m,41.8,71696,1.75,60.27,31442.03,0.44,29977,41719,35
+1,Individual,"fibonacci",5m,39.5,18877,1.53,59.17,6000.77,0.32,7461,11416,12
+1,Individual,"fibonacci",15m,38.7,7095,1.48,58.05,2072.75,0.29,2743,4352,1
+1,Individual,"fibonacci",1h,39.3,1774,1.43,32.90,458.61,0.26,698,1076,1
+1,Individual,"fibonacci",4h,42.9,296,2.19,15.91,201.48,0.68,127,169,1
+1,Individual,"fibonacci",1d,53.3,15,2.06,4.00,7.39,0.49,8,7,0
+1,Individual,"market_structure",1m,86.6,1376,2.11,4.37,205.12,0.15,1192,184,0
+1,Individual,"market_structure",5m,86.2,218,1.63,4.66,18.93,0.09,188,30,0
+1,Individual,"market_structure",15m,89.2,65,2.14,2.20,7.99,0.12,58,7,0
+1,Individual,"market_structure",1h,70.8,24,0.50,4.66,-3.52,-0.15,17,7,0
+1,Individual,"market_structure",4h,66.7,6,0.36,1.72,-1.28,-0.21,4,2,0
+1,Individual,"pinbar",1m,46.5,21348,1.53,75.54,6000.40,0.28,9927,11421,206
+1,Individual,"pinbar",5m,43.5,4543,1.24,63.78,616.89,0.14,1977,2566,58
+1,Individual,"pinbar",15m,44.2,1290,1.40,47.02,285.98,0.22,570,720,21
+1,Individual,"pinbar",1h,44.5,348,1.50,29.57,96.42,0.28,155,193,5
+1,Individual,"pinbar",4h,32.4,37,0.45,20.66,-13.66,-0.37,12,25,1
+1,Individual,"pinbar",1d,33.3,3,1.16,2.00,0.32,0.11,1,2,0
+2,Paired,"sfp+divergence",1m,43.8,8238,2.43,27.49,6607.64,0.80,3609,4629,87
+2,Paired,"sfp+divergence",5m,44.3,1433,2.24,20.44,992.95,0.69,635,798,13
+2,Paired,"sfp+divergence",15m,44.9,479,2.16,11.25,305.53,0.64,215,264,7
+2,Paired,"sfp+divergence",1h,41.9,105,2.04,12.00,63.74,0.61,44,61,1
+2,Paired,"sfp+divergence",4h,22.7,22,1.25,9.00,4.21,0.19,5,17,1
+2,Paired,"sfp+cvd_divergence",1m,43.9,13879,2.28,30.21,9959.72,0.72,6086,7793,67
+2,Paired,"sfp+cvd_divergence",5m,43.2,2825,2.00,19.79,1603.96,0.57,1219,1606,18
+2,Paired,"sfp+cvd_divergence",15m,44.4,952,2.08,13.00,569.83,0.60,423,529,8
+2,Paired,"sfp+cvd_divergence",1h,41.9,215,1.89,13.00,111.60,0.52,90,125,4
+2,Paired,"sfp+cvd_divergence",4h,31.7,41,1.80,8.51,22.51,0.55,13,28,3
+2,Paired,"sfp+cvd_divergence",1d,0.0,3,0.00,3.00,-3.00,-1.00,0,3,0
+2,Paired,"sfp+fibonacci",1m,50.4,19194,1.30,51.81,2850.34,0.15,9672,9522,3
+2,Paired,"sfp+fibonacci",5m,48.8,4506,1.43,32.60,1002.73,0.22,2197,2309,13
+2,Paired,"sfp+fibonacci",15m,46.5,1754,1.34,31.23,314.25,0.18,816,938,2
+2,Paired,"sfp+fibonacci",1h,47.5,396,1.29,26.17,60.39,0.15,188,208,2
+2,Paired,"sfp+fibonacci",4h,55.6,54,2.46,12.29,35.05,0.65,30,24,0
+2,Paired,"sfp+fibonacci",1d,25.0,8,0.18,6.00,-4.90,-0.61,2,6,0
+2,Paired,"sfp+market_structure",1m,87.2,674,2.50,5.00,129.23,0.19,588,86,0
+2,Paired,"sfp+market_structure",5m,88.3,111,2.10,4.73,14.35,0.13,98,13,0
+2,Paired,"sfp+market_structure",15m,91.4,35,2.01,1.00,3.02,0.09,32,3,0
+2,Paired,"sfp+market_structure",1h,66.7,12,0.43,2.59,-2.28,-0.19,8,4,0
+2,Paired,"sfp+market_structure",4h,100.0,2,∞,0.00,0.45,0.23,2,0,0
+2,Paired,"sfp+pinbar",1m,41.4,3286,1.51,47.04,976.25,0.30,1361,1925,21
+2,Paired,"sfp+pinbar",5m,36.7,681,1.12,45.54,53.56,0.08,250,431,6
+2,Paired,"sfp+pinbar",15m,33.0,212,0.87,33.28,-18.29,-0.09,70,142,0
+2,Paired,"sfp+pinbar",1h,45.3,53,3.64,8.00,76.47,1.44,24,29,0
+2,Paired,"sfp+pinbar",4h,0.0,4,0.00,4.00,-4.00,-1.00,0,4,0
+2,Paired,"divergence+cvd_divergence",1m,48.4,19318,832.73,18.81,8287367.35,429.00,9354,9964,133
+2,Paired,"divergence+cvd_divergence",5m,46.7,3047,975.62,13.00,1581803.79,519.13,1424,1623,26
+2,Paired,"divergence+cvd_divergence",15m,42.5,898,1107.99,11.00,571208.81,636.09,382,516,11
+2,Paired,"divergence+cvd_divergence",1h,44.5,173,16.78,7.00,1515.11,8.76,77,96,2
+2,Paired,"divergence+cvd_divergence",4h,36.0,25,17.20,7.00,259.25,10.37,9,16,0
+2,Paired,"divergence+fibonacci",1m,53.4,11977,2.04,22.60,5783.36,0.48,6392,5585,2
+2,Paired,"divergence+fibonacci",5m,53.8,1933,1.96,15.91,861.88,0.45,1039,894,0
+2,Paired,"divergence+fibonacci",15m,50.1,507,1.93,11.18,236.47,0.47,254,253,0
+2,Paired,"divergence+fibonacci",1h,49.5,99,1.14,9.87,6.97,0.07,49,50,0
+2,Paired,"divergence+fibonacci",4h,54.5,11,3.10,2.00,10.48,0.95,6,5,0
+2,Paired,"divergence+fibonacci",1d,100.0,1,∞,0.00,1.03,1.03,1,0,0
+2,Paired,"divergence+market_structure",1m,88.3,103,3.78,2.96,33.36,0.32,91,12,0
+2,Paired,"divergence+market_structure",5m,88.9,9,2.00,1.00,1.00,0.11,8,1,0
+2,Paired,"divergence+market_structure",4h,100.0,1,∞,0.00,0.15,0.15,1,0,0
+2,Paired,"divergence+pinbar",1m,48.7,1094,9.90,14.89,4992.70,4.56,533,561,17
+2,Paired,"divergence+pinbar",5m,52.5,204,2.97,6.74,191.45,0.94,107,97,3
+2,Paired,"divergence+pinbar",15m,56.6,53,2.89,6.53,43.49,0.82,30,23,2
+2,Paired,"divergence+pinbar",1h,41.7,12,1.01,2.87,0.10,0.01,5,7,0
+2,Paired,"divergence+pinbar",1d,100.0,1,∞,0.00,2.32,2.32,1,0,0
+2,Paired,"cvd_divergence+fibonacci",1m,51.4,14788,2.04,21.59,7480.48,0.51,7605,7183,8
+2,Paired,"cvd_divergence+fibonacci",5m,52.3,2859,1.86,23.32,1169.11,0.41,1496,1363,3
+2,Paired,"cvd_divergence+fibonacci",15m,51.4,925,1.91,16.67,407.42,0.44,475,450,0
+2,Paired,"cvd_divergence+fibonacci",1h,49.2,185,1.52,8.95,48.70,0.26,91,94,1
+2,Paired,"cvd_divergence+fibonacci",4h,44.0,25,1.96,5.00,13.50,0.54,11,14,0
+2,Paired,"cvd_divergence+fibonacci",1d,33.3,3,1.06,2.00,0.12,0.04,1,2,0
+2,Paired,"cvd_divergence+market_structure",1m,90.6,170,3.77,2.00,44.25,0.26,154,16,0
+2,Paired,"cvd_divergence+market_structure",5m,76.5,17,0.91,2.21,-0.34,-0.02,13,4,0
+2,Paired,"cvd_divergence+market_structure",15m,100.0,6,∞,0.00,0.57,0.10,6,0,0
+2,Paired,"cvd_divergence+market_structure",1h,50.0,4,0.12,2.00,-1.76,-0.44,2,2,0
+2,Paired,"cvd_divergence+market_structure",4h,100.0,1,∞,0.00,0.15,0.15,1,0,0
+2,Paired,"cvd_divergence+pinbar",1m,48.6,1532,7.70,20.20,5282.61,3.45,744,788,8
+2,Paired,"cvd_divergence+pinbar",5m,48.4,312,2.26,11.08,202.47,0.65,151,161,5
+2,Paired,"cvd_divergence+pinbar",15m,47.8,69,2.69,6.00,60.69,0.88,33,36,1
+2,Paired,"cvd_divergence+pinbar",1h,52.4,21,4.82,3.00,38.19,1.82,11,10,1
+2,Paired,"cvd_divergence+pinbar",4h,0.0,1,0.00,1.00,-1.00,-1.00,0,1,0
+2,Paired,"fibonacci+market_structure",1m,85.5,897,2.04,7.02,134.78,0.15,767,130,0
+2,Paired,"fibonacci+market_structure",5m,82.8,128,1.34,5.24,7.53,0.06,106,22,0
+2,Paired,"fibonacci+market_structure",15m,86.8,53,1.89,2.93,6.24,0.12,46,7,0
+2,Paired,"fibonacci+market_structure",1h,66.7,12,0.40,3.17,-2.40,-0.20,8,4,0
+2,Paired,"fibonacci+market_structure",4h,100.0,3,∞,0.00,0.81,0.27,3,0,0
+2,Paired,"fibonacci+pinbar",1m,47.1,2874,1.35,66.30,529.29,0.18,1355,1519,1
+2,Paired,"fibonacci+pinbar",5m,43.8,683,1.20,47.49,75.86,0.11,299,384,0
+2,Paired,"fibonacci+pinbar",15m,43.6,195,1.33,15.97,35.80,0.18,85,110,0
+2,Paired,"fibonacci+pinbar",1h,35.3,51,0.57,26.43,-14.35,-0.28,18,33,0
+2,Paired,"fibonacci+pinbar",4h,37.5,8,0.34,5.00,-3.28,-0.41,3,5,0
+2,Paired,"fibonacci+pinbar",1d,100.0,1,∞,0.00,1.03,1.03,1,0,0
+2,Paired,"market_structure+pinbar",1m,84.4,77,1.67,3.88,8.01,0.10,65,12,0
+2,Paired,"market_structure+pinbar",5m,100.0,14,∞,0.00,4.04,0.29,14,0,0
+2,Paired,"market_structure+pinbar",15m,100.0,1,∞,0.00,0.10,0.10,1,0,0
+2,Paired,"market_structure+pinbar",1h,0.0,1,0.00,1.00,-1.00,-1.00,0,1,0
+2,Paired,"market_structure+pinbar",4h,100.0,2,∞,0.00,0.04,0.02,2,0,0
+3,Filtered,"sfp | levels",1m,36.7,35039,1.75,58.85,16721.11,0.48,12854,22185,127
+3,Filtered,"sfp | levels",5m,35.3,8443,1.70,57.92,3824.51,0.45,2981,5462,53
+3,Filtered,"sfp | levels",15m,34.6,2924,1.58,52.55,1102.51,0.38,1013,1911,15
+3,Filtered,"sfp | levels",1h,35.7,689,2.25,29.36,554.46,0.80,246,443,8
+3,Filtered,"sfp | levels",4h,27.4,113,1.22,36.11,17.86,0.16,31,82,4
+3,Filtered,"sfp | vwap",1m,38.6,27567,1.83,92.00,14024.60,0.51,10628,16939,44
+3,Filtered,"sfp | vwap",5m,38.6,6249,1.83,45.29,3200.81,0.51,2413,3836,24
+3,Filtered,"sfp | vwap",15m,43.3,1846,1.80,39.46,839.10,0.45,799,1047,8
+3,Filtered,"sfp | vwap",1h,50.2,438,2.31,14.58,285.27,0.65,220,218,6
+3,Filtered,"sfp | vwap",4h,38.3,154,1.66,21.84,62.65,0.41,59,95,3
+3,Filtered,"sfp | vwap",1d,18.2,11,0.33,8.00,-6.05,-0.55,2,9,0
+3,Filtered,"sfp | vpvr",1m,29.7,14914,1.64,81.43,6735.72,0.45,4432,10482,122
+3,Filtered,"sfp | vpvr",5m,30.2,3460,1.59,61.61,1426.28,0.41,1044,2416,36
+3,Filtered,"sfp | vpvr",15m,28.2,1326,1.32,98.19,307.46,0.23,374,952,13
+3,Filtered,"sfp | vpvr",1h,31.1,305,1.51,38.00,106.92,0.35,95,210,2
+3,Filtered,"sfp | vpvr",4h,19.3,88,0.75,30.82,-17.54,-0.20,17,71,3
+3,Filtered,"divergence | levels",1m,49.0,16498,848.66,20.35,7132207.05,432.31,8084,8414,80
+3,Filtered,"divergence | levels",5m,47.7,2605,734.83,11.00,999473.52,383.68,1243,1362,11
+3,Filtered,"divergence | levels",15m,42.2,752,511.99,15.42,222279.37,295.58,317,435,2
+3,Filtered,"divergence | levels",1h,41.5,130,10.67,10.36,734.91,5.65,54,76,3
+3,Filtered,"divergence | levels",4h,25.0,12,6.34,4.00,48.10,4.01,3,9,1
+3,Filtered,"divergence | vwap",1m,54.1,12494,963.91,15.00,5521345.15,441.92,6760,5734,18
+3,Filtered,"divergence | vwap",5m,53.8,1718,1092.20,8.05,866414.05,504.32,924,794,6
+3,Filtered,"divergence | vwap",15m,57.9,380,1158.38,7.00,185181.11,487.32,220,160,0
+3,Filtered,"divergence | vwap",1h,51.5,163,15.60,8.00,1153.44,7.08,84,79,2
+3,Filtered,"divergence | vwap",4h,44.4,36,17.93,8.00,338.59,9.41,16,20,1
+3,Filtered,"divergence | vwap",1d,100.0,1,∞,0.00,11.25,11.25,1,0,0
+3,Filtered,"divergence | vpvr",1m,39.0,8989,635.28,23.00,3477111.76,386.82,3507,5482,150
+3,Filtered,"divergence | vpvr",5m,41.2,1577,1042.03,22.00,966071.31,612.60,649,928,25
+3,Filtered,"divergence | vpvr",15m,35.5,547,553.52,17.00,195040.47,356.56,194,353,13
+3,Filtered,"divergence | vpvr",1h,38.7,119,20.19,13.00,1400.97,11.77,46,73,3
+3,Filtered,"divergence | vpvr",4h,25.9,27,12.71,7.00,234.21,8.67,7,20,1
+3,Filtered,"cvd_divergence | levels",1m,46.1,21485,886.84,17.00,10258933.33,477.49,9904,11581,87
+3,Filtered,"cvd_divergence | levels",5m,43.6,4481,591.01,19.94,1490956.36,332.73,1954,2527,23
+3,Filtered,"cvd_divergence | levels",15m,41.6,1470,384.29,13.36,329245.56,223.98,611,859,11
+3,Filtered,"cvd_divergence | levels",1h,42.8,327,26.75,6.00,4815.40,14.73,140,187,5
+3,Filtered,"cvd_divergence | levels",4h,13.6,44,1.86,23.00,32.66,0.74,6,38,1
+3,Filtered,"cvd_divergence | vwap",1m,49.1,19340,859.26,18.00,8454763.40,437.16,9489,9851,31
+3,Filtered,"cvd_divergence | vwap",5m,49.2,3827,766.10,11.00,1486582.69,388.45,1884,1943,18
+3,Filtered,"cvd_divergence | vwap",15m,52.0,1132,395.61,8.00,214272.61,189.29,589,543,2
+3,Filtered,"cvd_divergence | vwap",1h,55.5,326,27.17,6.00,3794.77,11.64,181,145,6
+3,Filtered,"cvd_divergence | vwap",4h,37.2,86,11.44,9.00,563.89,6.56,32,54,1
+3,Filtered,"cvd_divergence | vwap",1d,33.3,6,4.55,4.00,14.21,2.37,2,4,0
+3,Filtered,"cvd_divergence | vpvr",1m,38.2,9466,733.40,20.00,4281610.35,452.31,3620,5846,119
+3,Filtered,"cvd_divergence | vpvr",5m,38.9,1944,837.24,20.00,993455.71,511.04,756,1188,28
+3,Filtered,"cvd_divergence | vpvr",15m,34.9,679,398.25,18.71,175586.26,258.60,237,442,11
+3,Filtered,"cvd_divergence | vpvr",1h,36.7,150,34.90,9.00,3220.18,21.47,55,95,3
+3,Filtered,"cvd_divergence | vpvr",4h,21.2,33,11.61,9.00,275.78,8.36,7,26,2
+3,Filtered,"fibonacci | levels",1m,42.8,39877,1.83,57.50,18906.46,0.47,17073,22804,13
+3,Filtered,"fibonacci | levels",5m,40.2,10314,1.58,73.95,3576.81,0.35,4151,6163,8
+3,Filtered,"fibonacci | levels",15m,39.0,3863,1.43,66.64,1006.49,0.26,1506,2357,0
+3,Filtered,"fibonacci | levels",1h,37.6,934,1.23,27.91,132.50,0.14,351,583,1
+3,Filtered,"fibonacci | levels",4h,37.9,124,2.01,15.33,77.94,0.63,47,77,1
+3,Filtered,"fibonacci | levels",1d,100.0,1,∞,0.00,0.76,0.76,1,0,0
+3,Filtered,"fibonacci | vwap",1m,42.9,37652,1.71,57.26,15308.62,0.41,16169,21483,17
+3,Filtered,"fibonacci | vwap",5m,41.8,9973,1.64,77.72,3694.82,0.37,4168,5805,9
+3,Filtered,"fibonacci | vwap",15m,44.5,3791,1.65,47.16,1372.46,0.36,1686,2105,1
+3,Filtered,"fibonacci | vwap",1h,51.9,912,1.61,17.26,269.77,0.30,473,439,1
+3,Filtered,"fibonacci | vwap",4h,54.9,184,2.25,6.92,104.10,0.57,101,83,1
+3,Filtered,"fibonacci | vwap",1d,66.7,12,3.60,3.00,10.39,0.87,8,4,0
+3,Filtered,"fibonacci | vpvr",1m,37.6,12174,2.08,143.30,8230.10,0.68,4583,7591,1
+3,Filtered,"fibonacci | vpvr",5m,35.4,3267,1.17,87.78,354.18,0.11,1157,2110,0
+3,Filtered,"fibonacci | vpvr",15m,33.2,1193,1.13,54.00,107.43,0.09,396,797,0
+3,Filtered,"fibonacci | vpvr",1h,29.3,283,0.88,44.96,-23.18,-0.08,83,200,0
+3,Filtered,"fibonacci | vpvr",4h,27.3,66,0.62,29.69,-18.31,-0.28,18,48,1
+3,Filtered,"market_structure | levels",1m,86.4,722,2.10,6.20,107.76,0.15,624,98,0
+3,Filtered,"market_structure | levels",5m,85.9,128,1.67,3.63,12.11,0.09,110,18,0
+3,Filtered,"market_structure | levels",15m,92.9,42,3.55,1.00,7.65,0.18,39,3,0
+3,Filtered,"market_structure | levels",1h,66.7,15,0.40,3.90,-2.99,-0.20,10,5,0
+3,Filtered,"market_structure | levels",4h,75.0,4,0.57,1.00,-0.43,-0.11,3,1,0
+3,Filtered,"market_structure | vwap",1m,88.4,1158,2.41,3.45,188.30,0.16,1024,134,0
+3,Filtered,"market_structure | vwap",5m,88.0,192,2.01,3.09,23.25,0.12,169,23,0
+3,Filtered,"market_structure | vwap",15m,93.2,59,3.65,2.00,10.61,0.18,55,4,0
+3,Filtered,"market_structure | vwap",1h,77.3,22,0.70,3.55,-1.52,-0.07,17,5,0
+3,Filtered,"market_structure | vwap",4h,100.0,4,∞,0.00,0.72,0.18,4,0,0
+3,Filtered,"market_structure | vpvr",1m,66.7,39,1.17,7.55,2.26,0.06,26,13,0
+3,Filtered,"market_structure | vpvr",5m,40.0,5,0.03,3.00,-2.90,-0.58,2,3,0
+3,Filtered,"market_structure | vpvr",15m,100.0,1,∞,0.00,0.05,0.05,1,0,0
+3,Filtered,"market_structure | vpvr",1h,50.0,4,0.17,2.00,-1.66,-0.41,2,2,0
+3,Filtered,"market_structure | vpvr",4h,0.0,1,0.00,1.00,-1.00,-1.00,0,1,0
+3,Filtered,"pinbar | levels",1m,47.4,10151,1.63,38.29,3380.37,0.33,4811,5340,57
+3,Filtered,"pinbar | levels",5m,44.3,2215,1.22,78.94,274.58,0.12,982,1233,12
+3,Filtered,"pinbar | levels",15m,44.8,531,1.18,29.64,51.51,0.10,238,293,3
+3,Filtered,"pinbar | levels",1h,44.7,152,1.68,15.64,56.73,0.37,68,84,0
+3,Filtered,"pinbar | levels",4h,37.5,16,0.84,8.84,-1.63,-0.10,6,10,0
+3,Filtered,"pinbar | vwap",1m,50.7,9855,1.68,46.97,3306.27,0.34,4993,4862,31
+3,Filtered,"pinbar | vwap",5m,50.5,1951,1.62,41.17,595.20,0.31,985,966,17
+3,Filtered,"pinbar | vwap",15m,51.4,566,1.46,24.48,127.59,0.23,291,275,2
+3,Filtered,"pinbar | vwap",1h,62.9,143,2.58,8.86,83.58,0.58,90,53,1
+3,Filtered,"pinbar | vwap",4h,62.5,16,1.33,5.00,1.98,0.12,10,6,0
+3,Filtered,"pinbar | vwap",1d,50.0,2,2.32,1.00,1.32,0.66,1,1,0
+3,Filtered,"pinbar | vpvr",1m,37.9,3932,1.36,137.91,873.19,0.22,1492,2440,90
+3,Filtered,"pinbar | vpvr",5m,38.0,835,1.20,41.11,101.41,0.12,317,518,20
+3,Filtered,"pinbar | vpvr",15m,33.2,211,0.91,28.37,-12.85,-0.06,70,141,13
+3,Filtered,"pinbar | vpvr",1h,35.5,93,0.95,17.45,-3.10,-0.03,33,60,3
+3,Filtered,"pinbar | vpvr",4h,23.1,13,0.15,8.47,-8.47,-0.65,3,10,1
+4,Filtered Pairs,"sfp+divergence | levels",1m,45.2,3802,2.45,21.00,3027.48,0.80,1718,2084,26
+4,Filtered Pairs,"sfp+divergence | levels",5m,47.5,649,2.79,13.00,610.90,0.94,308,341,6
+4,Filtered Pairs,"sfp+divergence | levels",15m,48.3,209,2.42,11.00,153.32,0.73,101,108,1
+4,Filtered Pairs,"sfp+divergence | levels",1h,35.6,45,1.22,11.40,6.32,0.14,16,29,1
+4,Filtered Pairs,"sfp+divergence | levels",4h,0.0,6,0.00,6.00,-6.00,-1.00,0,6,1
+4,Filtered Pairs,"sfp+divergence | vwap",1m,50.0,2036,2.83,13.30,1865.26,0.92,1019,1017,4
+4,Filtered Pairs,"sfp+divergence | vwap",5m,54.6,324,2.73,8.00,254.55,0.79,177,147,4
+4,Filtered Pairs,"sfp+divergence | vwap",15m,69.1,81,4.21,3.00,80.25,0.99,56,25,0
+4,Filtered Pairs,"sfp+divergence | vwap",1h,49.1,57,2.75,7.62,50.79,0.89,28,29,1
+4,Filtered Pairs,"sfp+divergence | vwap",4h,31.3,16,1.93,6.00,10.21,0.64,5,11,1
+4,Filtered Pairs,"sfp+divergence | vpvr",1m,37.8,2690,2.02,29.80,1714.37,0.64,1017,1673,41
+4,Filtered Pairs,"sfp+divergence | vpvr",5m,42.4,483,2.09,17.85,302.17,0.63,205,278,5
+4,Filtered Pairs,"sfp+divergence | vpvr",15m,39.2,181,1.83,10.61,90.89,0.50,71,110,3
+4,Filtered Pairs,"sfp+divergence | vpvr",1h,36.6,41,1.57,10.00,14.75,0.36,15,26,0
+4,Filtered Pairs,"sfp+divergence | vpvr",4h,9.1,11,0.58,9.00,-4.23,-0.38,1,10,0
+4,Filtered Pairs,"sfp+cvd_divergence | levels",1m,44.2,6779,2.24,23.24,4675.94,0.69,2994,3785,23
+4,Filtered Pairs,"sfp+cvd_divergence | levels",5m,43.8,1406,2.13,18.36,890.97,0.63,616,790,4
+4,Filtered Pairs,"sfp+cvd_divergence | levels",15m,43.3,496,1.90,10.82,253.63,0.51,215,281,1
+4,Filtered Pairs,"sfp+cvd_divergence | levels",1h,46.1,102,2.35,6.33,74.51,0.73,47,55,3
+4,Filtered Pairs,"sfp+cvd_divergence | levels",4h,0.0,10,0.00,10.00,-10.00,-1.00,0,10,2
+4,Filtered Pairs,"sfp+cvd_divergence | vwap",1m,44.7,5500,2.29,22.16,3912.00,0.71,2461,3039,10
+4,Filtered Pairs,"sfp+cvd_divergence | vwap",5m,44.4,1113,2.00,16.32,619.19,0.56,494,619,4
+4,Filtered Pairs,"sfp+cvd_divergence | vwap",15m,57.6,297,2.37,4.38,173.16,0.58,171,126,2
+4,Filtered Pairs,"sfp+cvd_divergence | vwap",1h,54.5,99,2.66,5.00,74.79,0.76,54,45,4
+4,Filtered Pairs,"sfp+cvd_divergence | vwap",4h,37.9,29,1.68,6.51,12.27,0.42,11,18,0
+4,Filtered Pairs,"sfp+cvd_divergence | vwap",1d,0.0,3,0.00,3.00,-3.00,-1.00,0,3,0
+4,Filtered Pairs,"sfp+cvd_divergence | vpvr",1m,40.7,3038,2.20,37.55,2157.59,0.71,1236,1802,23
+4,Filtered Pairs,"sfp+cvd_divergence | vpvr",5m,40.9,558,1.97,14.60,318.56,0.57,228,330,6
+4,Filtered Pairs,"sfp+cvd_divergence | vpvr",15m,38.0,208,1.54,11.83,70.29,0.34,79,129,1
+4,Filtered Pairs,"sfp+cvd_divergence | vpvr",1h,40.4,47,1.89,8.56,25.01,0.53,19,28,0
+4,Filtered Pairs,"sfp+cvd_divergence | vpvr",4h,18.2,11,0.30,6.85,-6.32,-0.57,2,9,2
+4,Filtered Pairs,"sfp+fibonacci | levels",1m,51.7,10418,1.29,40.68,1456.34,0.14,5387,5031,3
+4,Filtered Pairs,"sfp+fibonacci | levels",5m,50.1,2404,1.42,30.01,498.85,0.21,1204,1200,9
+4,Filtered Pairs,"sfp+fibonacci | levels",15m,46.7,946,1.28,32.63,142.28,0.15,442,504,0
+4,Filtered Pairs,"sfp+fibonacci | levels",1h,50.3,181,1.50,10.09,44.77,0.25,91,90,2
+4,Filtered Pairs,"sfp+fibonacci | levels",4h,56.0,25,2.97,7.09,21.68,0.87,14,11,0
+4,Filtered Pairs,"sfp+fibonacci | vwap",1m,53.0,9294,1.28,41.67,1231.84,0.13,4927,4367,0
+4,Filtered Pairs,"sfp+fibonacci | vwap",5m,51.0,2174,1.43,23.01,453.34,0.21,1108,1066,7
+4,Filtered Pairs,"sfp+fibonacci | vwap",15m,53.4,815,1.03,40.68,12.27,0.02,435,380,2
+4,Filtered Pairs,"sfp+fibonacci | vwap",1h,60.6,198,1.24,11.56,18.87,0.10,120,78,1
+4,Filtered Pairs,"sfp+fibonacci | vwap",4h,55.6,36,1.25,9.82,3.92,0.11,20,16,0
+4,Filtered Pairs,"sfp+fibonacci | vwap",1d,40.0,5,0.37,3.00,-1.90,-0.38,2,3,0
+4,Filtered Pairs,"sfp+fibonacci | vpvr",1m,44.3,3432,1.28,76.91,535.93,0.16,1521,1911,0
+4,Filtered Pairs,"sfp+fibonacci | vpvr",5m,46.2,783,1.55,31.77,230.61,0.29,362,421,4
+4,Filtered Pairs,"sfp+fibonacci | vpvr",15m,42.1,328,1.16,21.64,30.74,0.09,138,190,0
+4,Filtered Pairs,"sfp+fibonacci | vpvr",1h,35.2,71,0.82,10.63,-8.10,-0.11,25,46,0
+4,Filtered Pairs,"sfp+fibonacci | vpvr",4h,21.4,14,0.20,9.21,-8.77,-0.63,3,11,0
+4,Filtered Pairs,"sfp+market_structure | levels",1m,89.0,355,3.33,4.73,90.97,0.26,316,39,0
+4,Filtered Pairs,"sfp+market_structure | levels",5m,91.3,69,2.76,2.00,10.54,0.15,63,6,0
+4,Filtered Pairs,"sfp+market_structure | levels",15m,90.9,22,2.09,1.00,2.18,0.10,20,2,0
+4,Filtered Pairs,"sfp+market_structure | levels",1h,57.1,7,0.31,2.38,-2.06,-0.29,4,3,0
+4,Filtered Pairs,"sfp+market_structure | levels",4h,100.0,2,∞,0.00,0.45,0.23,2,0,0
+4,Filtered Pairs,"sfp+market_structure | vwap",1m,87.3,567,2.60,3.37,115.28,0.20,495,72,0
+4,Filtered Pairs,"sfp+market_structure | vwap",5m,88.8,98,2.12,2.94,12.34,0.13,87,11,0
+4,Filtered Pairs,"sfp+market_structure | vwap",15m,91.2,34,1.94,1.00,2.82,0.08,31,3,0
+4,Filtered Pairs,"sfp+market_structure | vwap",1h,72.7,11,0.57,2.03,-1.28,-0.12,8,3,0
+4,Filtered Pairs,"sfp+market_structure | vwap",4h,100.0,2,∞,0.00,0.45,0.23,2,0,0
+4,Filtered Pairs,"sfp+market_structure | vpvr",1m,63.6,11,0.16,3.85,-3.37,-0.31,7,4,0
+4,Filtered Pairs,"sfp+market_structure | vpvr",5m,50.0,2,0.01,1.00,-0.99,-0.49,1,1,0
+4,Filtered Pairs,"sfp+market_structure | vpvr",1h,0.0,1,0.00,1.00,-1.00,-1.00,0,1,0
+4,Filtered Pairs,"sfp+pinbar | levels",1m,43.8,1684,1.68,29.92,646.95,0.38,737,947,2
+4,Filtered Pairs,"sfp+pinbar | levels",5m,33.0,358,0.82,53.57,-44.37,-0.12,118,240,2
+4,Filtered Pairs,"sfp+pinbar | levels",15m,38.5,96,0.81,17.13,-11.22,-0.12,37,59,0
+4,Filtered Pairs,"sfp+pinbar | levels",1h,51.6,31,3.52,5.62,37.87,1.22,16,15,0
+4,Filtered Pairs,"sfp+pinbar | levels",4h,0.0,2,0.00,2.00,-2.00,-1.00,0,2,0
+4,Filtered Pairs,"sfp+pinbar | vwap",1m,45.4,1465,1.66,34.09,524.07,0.36,665,800,1
+4,Filtered Pairs,"sfp+pinbar | vwap",5m,41.9,265,1.43,29.96,66.83,0.25,111,154,0
+4,Filtered Pairs,"sfp+pinbar | vwap",15m,36.3,80,0.97,18.25,-1.64,-0.02,29,51,0
+4,Filtered Pairs,"sfp+pinbar | vwap",1h,46.7,15,3.21,5.37,17.67,1.18,7,8,0
+4,Filtered Pairs,"sfp+pinbar | vwap",4h,0.0,1,0.00,1.00,-1.00,-1.00,0,1,0
+4,Filtered Pairs,"sfp+pinbar | vpvr",1m,38.0,623,1.51,40.39,196.15,0.31,237,386,18
+4,Filtered Pairs,"sfp+pinbar | vpvr",5m,44.4,108,1.83,9.00,50.07,0.46,48,60,2
+4,Filtered Pairs,"sfp+pinbar | vpvr",15m,27.9,43,0.65,13.74,-10.95,-0.25,12,31,0
+4,Filtered Pairs,"sfp+pinbar | vpvr",1h,14.3,7,2.90,5.00,11.42,1.63,1,6,0
+4,Filtered Pairs,"sfp+pinbar | vpvr",4h,0.0,3,0.00,3.00,-3.00,-1.00,0,3,0
+4,Filtered Pairs,"divergence+cvd_divergence | levels",1m,49.5,8949,885.23,13.87,3999366.93,446.91,4426,4523,35
+4,Filtered Pairs,"divergence+cvd_divergence | levels",5m,48.0,1392,615.80,11.00,445117.83,319.77,668,724,4
+4,Filtered Pairs,"divergence+cvd_divergence | levels",15m,42.9,396,648.38,10.00,146308.84,369.47,170,226,1
+4,Filtered Pairs,"divergence+cvd_divergence | levels",1h,42.2,64,8.69,9.00,284.35,4.44,27,37,2
+4,Filtered Pairs,"divergence+cvd_divergence | levels",4h,33.3,3,10.99,1.00,19.98,6.66,1,2,0
+4,Filtered Pairs,"divergence+cvd_divergence | vwap",1m,54.9,6497,939.50,12.00,2750733.81,423.39,3566,2931,8
+4,Filtered Pairs,"divergence+cvd_divergence | vwap",5m,55.1,864,1015.09,8.00,393466.17,455.40,476,388,3
+4,Filtered Pairs,"divergence+cvd_divergence | vwap",15m,56.1,180,1068.43,10.00,84326.73,468.48,101,79,0
+4,Filtered Pairs,"divergence+cvd_divergence | vwap",1h,52.7,93,20.71,6.00,867.29,9.33,49,44,2
+4,Filtered Pairs,"divergence+cvd_divergence | vwap",4h,45.0,20,25.02,6.00,264.25,13.21,9,11,0
+4,Filtered Pairs,"divergence+cvd_divergence | vpvr",1m,40.1,5025,666.07,20.28,2001863.85,398.38,2015,3010,61
+4,Filtered Pairs,"divergence+cvd_divergence | vpvr",5m,42.7,907,1411.65,13.00,733540.15,808.75,387,520,13
+4,Filtered Pairs,"divergence+cvd_divergence | vpvr",15m,34.9,318,762.01,16.00,157528.48,495.37,111,207,5
+4,Filtered Pairs,"divergence+cvd_divergence | vpvr",1h,39.3,61,13.82,6.00,474.46,7.78,24,37,1
+4,Filtered Pairs,"divergence+cvd_divergence | vpvr",4h,28.6,14,22.51,5.00,215.06,15.36,4,10,0
+4,Filtered Pairs,"divergence+fibonacci | levels",1m,54.7,5818,2.17,16.94,3088.87,0.53,3184,2634,1
+4,Filtered Pairs,"divergence+fibonacci | levels",5m,54.7,935,1.82,11.65,348.16,0.37,511,424,0
+4,Filtered Pairs,"divergence+fibonacci | levels",15m,50.2,243,2.22,9.91,147.04,0.61,122,121,0
+4,Filtered Pairs,"divergence+fibonacci | levels",1h,53.5,43,1.17,5.00,3.41,0.08,23,20,0
+4,Filtered Pairs,"divergence+fibonacci | levels",4h,0.0,2,0.00,2.00,-2.00,-1.00,0,2,0
+4,Filtered Pairs,"divergence+fibonacci | vwap",1m,55.8,4270,2.31,17.48,2477.11,0.58,2384,1886,0
+4,Filtered Pairs,"divergence+fibonacci | vwap",5m,59.5,624,2.56,10.82,395.55,0.63,371,253,0
+4,Filtered Pairs,"divergence+fibonacci | vwap",15m,60.0,120,1.94,6.00,45.17,0.38,72,48,0
+4,Filtered Pairs,"divergence+fibonacci | vwap",1h,57.1,56,1.20,4.00,4.85,0.09,32,24,0
+4,Filtered Pairs,"divergence+fibonacci | vwap",4h,66.7,9,5.16,2.00,12.48,1.39,6,3,0
+4,Filtered Pairs,"divergence+fibonacci | vwap",1d,100.0,1,∞,0.00,1.03,1.03,1,0,0
+4,Filtered Pairs,"divergence+fibonacci | vpvr",1m,50.2,2617,1.77,16.87,1000.03,0.38,1314,1303,0
+4,Filtered Pairs,"divergence+fibonacci | vpvr",5m,50.2,478,1.52,17.25,124.35,0.26,240,238,0
+4,Filtered Pairs,"divergence+fibonacci | vpvr",15m,44.6,166,1.25,9.80,23.46,0.14,74,92,0
+4,Filtered Pairs,"divergence+fibonacci | vpvr",1h,43.5,23,1.08,5.48,1.09,0.05,10,13,0
+4,Filtered Pairs,"divergence+fibonacci | vpvr",4h,50.0,6,3.17,2.00,6.50,1.08,3,3,0
+4,Filtered Pairs,"divergence+market_structure | levels",1m,90.2,41,3.61,1.24,10.43,0.25,37,4,0
+4,Filtered Pairs,"divergence+market_structure | levels",5m,83.3,6,1.42,1.00,0.42,0.07,5,1,0
+4,Filtered Pairs,"divergence+market_structure | vwap",1m,92.7,82,5.11,2.92,24.67,0.30,76,6,0
+4,Filtered Pairs,"divergence+market_structure | vwap",5m,85.7,7,1.78,1.00,0.78,0.11,6,1,0
+4,Filtered Pairs,"divergence+market_structure | vwap",4h,100.0,1,∞,0.00,0.15,0.15,1,0,0
+4,Filtered Pairs,"divergence+market_structure | vpvr",1m,0.0,1,0.00,1.00,-1.00,-1.00,0,1,0
+4,Filtered Pairs,"divergence+pinbar | levels",1m,50.3,505,18.80,9.56,4468.51,8.85,254,251,2
+4,Filtered Pairs,"divergence+pinbar | levels",5m,56.0,100,3.61,6.24,114.84,1.15,56,44,1
+4,Filtered Pairs,"divergence+pinbar | levels",15m,54.5,22,3.48,3.00,24.80,1.13,12,10,0
+4,Filtered Pairs,"divergence+pinbar | levels",1h,33.3,6,0.85,3.33,-0.61,-0.10,2,4,0
+4,Filtered Pairs,"divergence+pinbar | vwap",1m,50.2,313,2.62,10.67,252.43,0.81,157,156,2
+4,Filtered Pairs,"divergence+pinbar | vwap",5m,48.3,60,3.25,6.24,69.84,1.16,29,31,0
+4,Filtered Pairs,"divergence+pinbar | vwap",15m,77.8,9,7.31,1.00,12.63,1.40,7,2,0
+4,Filtered Pairs,"divergence+pinbar | vwap",1h,20.0,5,0.22,3.14,-3.14,-0.63,1,4,0
+4,Filtered Pairs,"divergence+pinbar | vwap",1d,100.0,1,∞,0.00,2.32,2.32,1,0,0
+4,Filtered Pairs,"divergence+pinbar | vpvr",1m,41.7,314,2.46,14.64,266.43,0.85,131,183,10
+4,Filtered Pairs,"divergence+pinbar | vpvr",5m,56.6,53,3.16,6.00,49.75,0.94,30,23,2
+4,Filtered Pairs,"divergence+pinbar | vpvr",15m,13.3,15,0.25,9.81,-9.81,-0.65,2,13,1
+4,Filtered Pairs,"divergence+pinbar | vpvr",1h,33.3,6,0.71,2.00,-1.15,-0.19,2,4,0
+4,Filtered Pairs,"cvd_divergence+fibonacci | levels",1m,52.3,7351,2.13,21.39,3976.92,0.54,3847,3504,3
+4,Filtered Pairs,"cvd_divergence+fibonacci | levels",5m,50.6,1439,1.64,18.49,455.43,0.32,728,711,3
+4,Filtered Pairs,"cvd_divergence+fibonacci | levels",15m,48.7,454,1.89,19.63,208.11,0.46,221,233,0
+4,Filtered Pairs,"cvd_divergence+fibonacci | levels",1h,49.4,89,1.66,9.06,29.60,0.33,44,45,1
+4,Filtered Pairs,"cvd_divergence+fibonacci | levels",4h,14.3,7,1.57,3.00,3.43,0.49,1,6,0
+4,Filtered Pairs,"cvd_divergence+fibonacci | vwap",1m,52.1,6825,2.21,25.04,3947.89,0.58,3553,3272,2
+4,Filtered Pairs,"cvd_divergence+fibonacci | vwap",5m,55.1,1340,2.06,14.55,636.07,0.47,738,602,3
+4,Filtered Pairs,"cvd_divergence+fibonacci | vwap",15m,59.1,423,2.29,9.45,222.73,0.53,250,173,0
+4,Filtered Pairs,"cvd_divergence+fibonacci | vwap",1h,55.0,111,1.40,12.17,20.01,0.18,61,50,1
+4,Filtered Pairs,"cvd_divergence+fibonacci | vwap",4h,50.0,20,2.67,5.00,16.67,0.83,10,10,0
+4,Filtered Pairs,"cvd_divergence+fibonacci | vwap",1d,33.3,3,1.06,2.00,0.12,0.04,1,2,0
+4,Filtered Pairs,"cvd_divergence+fibonacci | vpvr",1m,50.2,2420,1.82,23.69,987.42,0.41,1214,1206,0
+4,Filtered Pairs,"cvd_divergence+fibonacci | vpvr",5m,49.7,485,1.77,12.58,189.07,0.39,241,244,0
+4,Filtered Pairs,"cvd_divergence+fibonacci | vpvr",15m,47.3,169,1.50,8.96,44.88,0.27,80,89,0
+4,Filtered Pairs,"cvd_divergence+fibonacci | vpvr",1h,52.2,23,1.73,3.58,8.04,0.35,12,11,0
+4,Filtered Pairs,"cvd_divergence+fibonacci | vpvr",4h,50.0,8,2.51,3.00,6.03,0.75,4,4,0
+4,Filtered Pairs,"cvd_divergence+market_structure | levels",1m,91.8,85,3.21,1.64,15.50,0.18,78,7,0
+4,Filtered Pairs,"cvd_divergence+market_structure | levels",5m,72.7,11,0.67,2.55,-0.98,-0.09,8,3,0
+4,Filtered Pairs,"cvd_divergence+market_structure | levels",15m,100.0,2,∞,0.00,0.11,0.06,2,0,0
+4,Filtered Pairs,"cvd_divergence+market_structure | levels",1h,50.0,4,0.12,2.00,-1.76,-0.44,2,2,0
+4,Filtered Pairs,"cvd_divergence+market_structure | vwap",1m,91.1,135,3.62,2.07,31.44,0.23,123,12,0
+4,Filtered Pairs,"cvd_divergence+market_structure | vwap",5m,73.3,15,0.76,2.21,-0.97,-0.06,11,4,0
+4,Filtered Pairs,"cvd_divergence+market_structure | vwap",15m,100.0,6,∞,0.00,0.57,0.10,6,0,0
+4,Filtered Pairs,"cvd_divergence+market_structure | vwap",1h,66.7,3,0.24,1.00,-0.76,-0.25,2,1,0
+4,Filtered Pairs,"cvd_divergence+market_structure | vwap",4h,100.0,1,∞,0.00,0.15,0.15,1,0,0
+4,Filtered Pairs,"cvd_divergence+market_structure | vpvr",1m,80.0,5,0.44,1.00,-0.56,-0.11,4,1,0
+4,Filtered Pairs,"cvd_divergence+market_structure | vpvr",1h,0.0,1,0.00,1.00,-1.00,-1.00,0,1,0
+4,Filtered Pairs,"cvd_divergence+pinbar | levels",1m,49.9,753,13.02,18.75,4532.70,6.02,376,377,0
+4,Filtered Pairs,"cvd_divergence+pinbar | levels",5m,51.0,149,2.54,7.08,112.14,0.75,76,73,0
+4,Filtered Pairs,"cvd_divergence+pinbar | levels",15m,58.1,31,3.34,3.29,30.42,0.98,18,13,0
+4,Filtered Pairs,"cvd_divergence+pinbar | levels",1h,57.1,7,4.35,2.00,10.06,1.44,4,3,0
+4,Filtered Pairs,"cvd_divergence+pinbar | levels",4h,0.0,1,0.00,1.00,-1.00,-1.00,0,1,0
+4,Filtered Pairs,"cvd_divergence+pinbar | vwap",1m,49.9,633,3.09,12.73,662.60,1.05,316,317,1
+4,Filtered Pairs,"cvd_divergence+pinbar | vwap",5m,55.1,136,3.16,7.82,131.64,0.97,75,61,2
+4,Filtered Pairs,"cvd_divergence+pinbar | vwap",15m,53.8,26,3.40,3.10,28.83,1.11,14,12,0
+4,Filtered Pairs,"cvd_divergence+pinbar | vwap",1h,66.7,9,9.06,3.00,24.19,2.69,6,3,0
+4,Filtered Pairs,"cvd_divergence+pinbar | vwap",4h,0.0,1,0.00,1.00,-1.00,-1.00,0,1,0
+4,Filtered Pairs,"cvd_divergence+pinbar | vpvr",1m,44.3,296,2.34,13.97,221.77,0.75,131,165,7
+4,Filtered Pairs,"cvd_divergence+pinbar | vpvr",5m,53.6,56,2.34,6.00,34.95,0.62,30,26,3
+4,Filtered Pairs,"cvd_divergence+pinbar | vpvr",15m,12.5,8,0.41,5.00,-4.13,-0.52,1,7,0
+4,Filtered Pairs,"cvd_divergence+pinbar | vpvr",1h,37.5,8,3.08,2.00,10.40,1.30,3,5,0
+4,Filtered Pairs,"fibonacci+market_structure | levels",1m,86.4,469,2.21,5.33,77.19,0.16,405,64,0
+4,Filtered Pairs,"fibonacci+market_structure | levels",5m,82.1,78,1.29,3.41,4.00,0.05,64,14,0
+4,Filtered Pairs,"fibonacci+market_structure | levels",15m,87.1,31,1.85,1.98,3.38,0.11,27,4,0
+4,Filtered Pairs,"fibonacci+market_structure | levels",1h,62.5,8,0.33,2.77,-2.01,-0.25,5,3,0
+4,Filtered Pairs,"fibonacci+market_structure | levels",4h,100.0,2,∞,0.00,0.61,0.30,2,0,0
+4,Filtered Pairs,"fibonacci+market_structure | vwap",1m,86.9,735,2.33,5.76,127.68,0.17,639,96,0
+4,Filtered Pairs,"fibonacci+market_structure | vwap",5m,84.7,111,1.61,4.24,10.43,0.09,94,17,0
+4,Filtered Pairs,"fibonacci+market_structure | vwap",15m,89.6,48,2.51,2.93,7.54,0.16,43,5,0
+4,Filtered Pairs,"fibonacci+market_structure | vwap",1h,72.7,11,0.53,2.38,-1.40,-0.13,8,3,0
+4,Filtered Pairs,"fibonacci+market_structure | vwap",4h,100.0,3,∞,0.00,0.81,0.27,3,0,0
+4,Filtered Pairs,"fibonacci+market_structure | vpvr",1m,65.2,23,0.45,5.81,-4.39,-0.19,15,8,0
+4,Filtered Pairs,"fibonacci+market_structure | vpvr",5m,66.7,3,0.10,1.00,-0.90,-0.30,2,1,0
+4,Filtered Pairs,"fibonacci+market_structure | vpvr",1h,0.0,1,0.00,1.00,-1.00,-1.00,0,1,0
+4,Filtered Pairs,"fibonacci+pinbar | levels",1m,48.4,1417,1.47,49.04,343.65,0.24,686,731,1
+4,Filtered Pairs,"fibonacci+pinbar | levels",5m,46.6,348,1.32,31.70,59.32,0.17,162,186,0
+4,Filtered Pairs,"fibonacci+pinbar | levels",15m,43.4,76,1.08,10.32,3.54,0.05,33,43,0
+4,Filtered Pairs,"fibonacci+pinbar | levels",1h,33.3,27,0.59,14.61,-7.42,-0.27,9,18,0
+4,Filtered Pairs,"fibonacci+pinbar | levels",4h,0.0,3,0.00,3.00,-3.00,-1.00,0,3,0
+4,Filtered Pairs,"fibonacci+pinbar | vwap",1m,50.8,1385,1.54,34.81,368.95,0.27,704,681,1
+4,Filtered Pairs,"fibonacci+pinbar | vwap",5m,50.8,305,1.53,30.60,79.45,0.26,155,150,0
+4,Filtered Pairs,"fibonacci+pinbar | vwap",15m,35.6,59,0.52,19.20,-18.22,-0.31,21,38,0
+4,Filtered Pairs,"fibonacci+pinbar | vwap",1h,47.4,19,0.43,8.00,-5.72,-0.30,9,10,0
+4,Filtered Pairs,"fibonacci+pinbar | vwap",4h,100.0,3,∞,0.00,1.72,0.57,3,0,0
+4,Filtered Pairs,"fibonacci+pinbar | vwap",1d,100.0,1,∞,0.00,1.03,1.03,1,0,0
+4,Filtered Pairs,"fibonacci+pinbar | vpvr",1m,40.5,504,1.13,51.29,39.59,0.08,204,300,0
+4,Filtered Pairs,"fibonacci+pinbar | vpvr",5m,37.2,121,0.89,18.61,-8.50,-0.07,45,76,0
+4,Filtered Pairs,"fibonacci+pinbar | vpvr",15m,46.9,32,1.28,7.96,4.80,0.15,15,17,0
+4,Filtered Pairs,"fibonacci+pinbar | vpvr",1h,12.5,8,0.03,6.79,-6.79,-0.85,1,7,0
+4,Filtered Pairs,"fibonacci+pinbar | vpvr",4h,50.0,6,0.57,3.00,-1.28,-0.21,3,3,0
+4,Filtered Pairs,"market_structure+pinbar | levels",1m,90.7,43,2.58,2.00,6.30,0.15,39,4,0
+4,Filtered Pairs,"market_structure+pinbar | levels",5m,100.0,7,∞,0.00,1.71,0.24,7,0,0
+4,Filtered Pairs,"market_structure+pinbar | levels",15m,100.0,1,∞,0.00,0.10,0.10,1,0,0
+4,Filtered Pairs,"market_structure+pinbar | levels",4h,100.0,1,∞,0.00,0.02,0.02,1,0,0
+4,Filtered Pairs,"market_structure+pinbar | vwap",1m,86.1,72,1.95,3.88,9.47,0.13,62,10,0
+4,Filtered Pairs,"market_structure+pinbar | vwap",5m,100.0,12,∞,0.00,2.91,0.24,12,0,0
+4,Filtered Pairs,"market_structure+pinbar | vwap",15m,100.0,1,∞,0.00,0.10,0.10,1,0,0
+4,Filtered Pairs,"market_structure+pinbar | vwap",1h,0.0,1,0.00,1.00,-1.00,-1.00,0,1,0
+4,Filtered Pairs,"market_structure+pinbar | vwap",4h,100.0,2,∞,0.00,0.04,0.02,2,0,0

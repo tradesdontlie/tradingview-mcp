@@ -1,8 +1,71 @@
-# TradingView MCP — Claude Instructions
+# CLAUDE.md
 
-68 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Decision Tree — Which Tool When
+## What this project is
+
+An MCP server (and mirrored `tv` CLI) that bridges Claude Code to a locally running TradingView Desktop app via the Chrome DevTools Protocol (CDP, port 9222). It exposes 78 tools for reading chart state, controlling the chart, developing Pine Script, drawing, alerts, replay mode, and multi-pane/tab layouts — all by evaluating JS against TradingView's internal (undocumented) Electron APIs.
+
+```
+Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  TradingView Desktop (Electron)
+```
+
+## Development Commands
+
+```bash
+npm install
+
+# Tests (node:test, no extra runner)
+npm run test:unit            # pine_analyze + cli — offline, no TradingView needed
+npm run test:cli             # cli routing tests only
+npm test                     # e2e + pine_analyze — e2e REQUIRES TradingView running with --remote-debugging-port=9222
+npm run test:e2e             # e2e only (70+ tool tests against a live chart)
+npm run test:verbose         # spec reporter for e2e + pine_analyze
+
+# Run a single test file or a single test by name
+node --test tests/cli.test.js
+node --test --test-name-pattern="<name substring>" tests/pine_analyze.test.js
+
+# CLI (mirrors every MCP tool as a `tv` subcommand, JSON output)
+node src/cli/index.js <command>      # or: npm link && tv <command>
+tv status                            # verify CDP connection — run before e2e tests
+
+# Launch TradingView Desktop with the debug port enabled
+scripts\launch_tv_debug.bat          # Windows
+./scripts/launch_tv_debug_mac.sh     # Mac
+./scripts/launch_tv_debug_linux.sh   # Linux
+# or use the tv_launch / `tv launch` tool to auto-detect the install
+```
+
+There is no linter configured. `tests/sanitization.test.js` and `tests/cli.test.js` run offline; `tests/e2e.test.js` and `tests/replay.test.js` need a live, CDP-enabled TradingView instance with a chart open.
+
+## Architecture
+
+Three-layer design, with the CLI as a parallel transport over the same core:
+
+```
+tools/<name>.js   — MCP tool registration: zod schemas, jsonResult() wrapping, try/catch → {success:false}
+cli/commands/<name>.js — CLI subcommand registration via router.js (parseArgs-based, zero deps)
+        ↓ both call into ↓
+core/<name>.js    — business logic: pure-ish async functions, the actual TradingView interaction
+        ↓
+connection.js     — CDP client (chrome-remote-interface), sanitization helpers, KNOWN_PATHS
+```
+
+Key points for working in this codebase:
+
+- **`core/` is the single source of truth.** Both `tools/` (MCP) and `cli/commands/` (CLI) are thin adapters that call the same `core/<name>.js` functions — when adding a capability, implement it once in core and register it in both adapters (see how `chart_get_state` / `tv state` both call `core.getState()`).
+- **Dependency injection for testing.** Core functions accept an optional `_deps` (e.g. `{ evaluate, evaluateAsync, waitForChartReady }`) so tests can mock the CDP evaluation layer without a live chart — see `mockDeps()` in `tests/sanitization.test.js`.
+- **Sanitization is load-bearing, not optional.** Every value interpolated into a JS string that gets `Runtime.evaluate`'d via CDP must go through `safeString()` (string → JSON-escaped literal) or `requireFinite()` (numeric validation) from `connection.js`. This is what prevents injection into TradingView's internal APIs — `tests/sanitization.test.js` audits source files for raw interpolation.
+- **`KNOWN_PATHS` in `connection.js`** holds internal TradingView/Electron object paths (`window.TradingViewApi._activeChartWidgetWV...`, the Pine facade REST endpoint, etc.) discovered via live probing. These are undocumented and can break on any TradingView update — changes here are the most likely source of breakage.
+- **Pine graphics (lines/labels/tables/boxes)** are read by walking `study._graphics._primitivesCollection...`, not through any public API — see `core/data.js` and the path noted at the bottom of the tool-usage section below.
+- **`src/core/index.js`** re-exports the core modules as the `tradingview-mcp/core` package export for programmatic use outside the MCP/CLI transports.
+- **`scripts/pine_pull.js` / `pine_push.js`** sync Pine Script source between the local filesystem and the TradingView editor (used alongside the `pine_*` tools).
+- **`agents/performance-analyst.md`** and **`skills/*/SKILL.md`** define a Claude Code subagent and skills that orchestrate these tools for higher-level workflows (strategy review, chart analysis, multi-symbol scans, replay practice, Pine development).
+
+## Using the TradingView Tools (when operating a live chart)
+
+The rest of this file is the tool-selection guide Claude Code reads when *using* this MCP server against a live TradingView chart (as opposed to developing on this repo). 78 tools — pick by task:
 
 ### "What's on my chart right now?"
 1. `chart_get_state` → symbol, timeframe, chart type, list of all indicators with entity IDs
@@ -119,11 +182,5 @@ These tools can return large payloads. Follow these rules to avoid context bloat
 - Screenshots save to `screenshots/` directory with timestamps
 - OHLCV capped at 500 bars, trades at 20 per request
 - Pine labels capped at 50 per study by default (pass `max_labels` to override)
-
-## Architecture
-
-```
-Claude Code ←→ MCP Server (stdio) ←→ CDP (localhost:9222) ←→ TradingView Desktop (Electron)
-```
 
 Pine graphics path: `study._graphics._primitivesCollection.dwglines.get('lines').get(false)._primitivesDataById`

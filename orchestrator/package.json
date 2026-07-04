@@ -1,0 +1,15 @@
+{
+  "name": "trading-bot-orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Control-plane agent that tunes the trading bot's active strategy/filter set toward a win%+expectancy objective.",
+  "scripts": {
+    "cycle": "node index.mjs",
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.69.0",
+    "zod": "^4.0.0"
+  }
+}

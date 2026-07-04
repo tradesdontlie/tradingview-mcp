@@ -4,3 +4,21 @@ scripts/current.pine
 temp_*
 *.log
 discovery-log.json
+trading_notes/
+.env
+auto_trade_state.json
+auto_trade_futures_state.json
+.trade_watch_state.json
+.trade_watch_state_futures.json
+backtest_cache/
+backtest_results.json
+backtest_futures_results.json
+strategy_winners_results.csv
+strategy_winners_summary.md
+trading_journal.xlsx
+stream_logs/
+*.err
+# orchestrator runtime data (append-only logs + per-cycle cursor; created at runtime)
+trade_ledger.jsonl
+bot_events.jsonl
+orchestrator/.cursor.json
