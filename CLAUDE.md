@@ -1,6 +1,93 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # TradingView MCP — Claude Instructions
 
-68 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
+An MCP server + CLI that bridges Claude Code to a locally running TradingView Desktop app via Chrome DevTools Protocol (CDP, port 9222). 78 tools for reading and controlling a live chart, every one also exposed as a `tv <command>` CLI command. See README.md for the full tool/command list and user-facing setup.
+
+## Development Commands
+
+```bash
+npm install
+
+# Offline tests — no TradingView needed (mock _deps)
+npm run test:unit   # pine_analyze + cli
+node --test tests/pine_analyze.test.js
+node --test tests/sanitization.test.js
+node --test tests/replay.test.js
+node --test tests/launch.test.js   # tv_launch / health.js — mocked child_process, no real launch
+
+# npm test / test:e2e / test:all / test:verbose all run tests/e2e.test.js,
+# which calls process.exit(1) in its `before` hook if it can't reach
+# TradingView Desktop on localhost:9222 — start TradingView with CDP first.
+npm run test:e2e
+
+# CLI
+node src/cli/index.js <command>   # run CLI directly
+npm link                          # install `tv` globally for `tv <command>`
+tv status                          # verify CDP connection (TradingView must be running)
+
+# Launch TradingView with CDP debugging enabled (macOS)
+./scripts/launch_tv_debug_mac.sh
+```
+
+## Architecture
+
+Three layers, strictly separated:
+
+```
+src/tools/*.js   → MCP tool registration (zod schemas, calls into core/, wraps result via jsonResult)
+src/cli/commands/*.js → CLI command registration (calls into core/ directly, mirrors tools/)
+src/core/*.js    → business logic — builds JS expressions and runs them via connection.js
+src/connection.js → CDP client (chrome-remote-interface), expression sanitization
+```
+
+- `src/server.js` registers every `tools/*.js` module against the `McpServer` and starts the stdio transport. The big `instructions` string passed to `McpServer` is the tool-selection guide also embedded below in this file — keep them in sync if either changes.
+- `src/cli/index.js` registers every `cli/commands/*.js` module against `src/cli/router.js` (a zero-dependency arg parser) — this is how every MCP tool is also a `tv` subcommand.
+- `src/core/index.js` re-exports all core modules as a namespaced public API (`tradingview-mcp/core` export in package.json) — both `tools/` and `cli/commands/` call into the same core functions, so logic is never duplicated between MCP and CLI.
+
+### Core module pattern (`src/core/*.js`)
+
+Every core function follows a dependency-injection pattern for testability:
+
+```js
+function _resolve(deps) {
+  return {
+    evaluate: deps?.evaluate || _evaluate,
+    evaluateAsync: deps?.evaluateAsync || _evaluateAsync,
+    ...
+  };
+}
+export async function setSymbol({ symbol, _deps }) {
+  const { evaluateAsync, waitForChartReady } = _resolve(_deps);
+  await evaluateAsync(`... CDP expression ...`);
+  ...
+}
+```
+
+Unit tests pass `_deps` with mocked `evaluate`/`evaluateAsync` functions and assert on the generated expression strings — no live CDP connection needed. Core functions build a JS expression string (often an IIFE referencing `window.TradingViewApi...`, see `KNOWN_PATHS` in `connection.js`) and pass it to `evaluate`/`evaluateAsync`.
+
+### Sanitization — required for any user-controlled value in a CDP expression
+
+Any value interpolated into a JS expression string passed to `evaluate`/`evaluateAsync` MUST go through one of:
+- `safeString(str)` — JSON.stringify-based escaping for string literals
+- `requireFinite(value, name)` — throws unless the value is a finite number
+
+`tests/sanitization.test.js` audits source files for unsanitized interpolation — run it after touching any `core/*.js` file that builds expression strings from tool input.
+
+### Adding a new tool
+
+1. Add the core logic function in `src/core/<module>.js` (or a new module), following the `_deps`/`_resolve` pattern above.
+2. Register it in `src/core/index.js` if it's a new module.
+3. Add the MCP tool in `src/tools/<module>.js` with a zod schema, calling the core function and wrapping the result with `jsonResult()` (`src/tools/_format.js`).
+4. Register the tool module in `src/server.js` (`registerXTools(server)`), and update the `instructions` string + this file's decision tree if it changes tool selection.
+5. Add the matching CLI command in `src/cli/commands/<module>.js`, registered in `src/cli/index.js`.
+6. Add offline unit tests (mocked `_deps`) and, if feasible, an e2e test in `tests/e2e.test.js`.
+
+## Contribution Scope (from CONTRIBUTING.md)
+
+This is a **local-only bridge** — all chart/data access must go through the locally running TradingView Desktop app via CDP. Out of scope: connecting directly to TradingView's servers, bypassing auth/subscription, scraping/caching/redistributing market data, automated trading/order execution, or reverse-engineering TradingView's proprietary code.
 
 ## Decision Tree — Which Tool When
 
@@ -61,6 +148,10 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 
 ### "Screen multiple symbols"
 - `batch_run` with `symbols: ["ES1!", "NQ1!", "YM1!"]` and `action: "screenshot"` or `"get_ohlcv"`
+
+### "Watch the chart continuously" (CLI-only — no MCP tool)
+- `tv stream quote` / `tv stream <...>` → long-running JSONL poll-and-diff loop to stdout (`src/core/stream.js`, `src/cli/commands/stream.js`)
+- Intentionally has **no MCP tool equivalent**: MCP tool calls must resolve and return a result, but streaming runs forever — it only makes sense as a CLI command piped elsewhere. Don't add a `stream_*` MCP tool without changing this constraint.
 
 ### "Draw on the chart"
 - `draw_shape` → horizontal_line, trend_line, rectangle, text (pass point + optional point2)
