@@ -1,0 +1,377 @@
+//@version=5
+strategy("Harvix MC Hybrid Strategy [Backtest]", 
+         overlay=true, 
+         initial_capital=10000000, 
+         default_qty_type=strategy.percent_of_equity, 
+         default_qty_value=10,
+         commission_type=strategy.commission.percent,
+         commission_value=0.1,
+         slippage=2,
+         pyramiding=1,
+         calc_on_every_tick=false)
+
+// =============================================================================
+// HARVIX MONTE CARLO HYBRID STRATEGY
+// Ingeniería Inversa de TradingView Montecarlo + Confirmadores
+// =============================================================================
+
+// -----------------------------------------------------------------------------
+// 1. INPUTS Y PARÁMETROS
+// -----------------------------------------------------------------------------
+
+// Grupo: Monte Carlo
+mc_sims        = input.int(1000, "MC Simulaciones", minval=100, maxval=5000, group="Monte Carlo")
+mc_lookback    = input.int(20, "MC Lookback (barras)", minval=5, maxval=100, group="Monte Carlo")
+mc_days        = input.int(5, "MC Días Proyección", minval=1, maxval=30, group="Monte Carlo")
+mc_pct_lower   = input.int(25, "MC Percentil Inferior", minval=1, maxval=50, group="Monte Carlo")
+mc_pct_upper   = input.int(75, "MC Percentil Superior", minval=50, maxval=99, group="Monte Carlo")
+
+// Grupo: VWAP Bands
+vwap_enabled   = input.bool(true, "Habilitar VWAP Bands", group="VWAP Bands")
+vwap_std_mult  = input.float(2.0, "VWAP Bandas (Std Dev)", minval=0.5, maxval=4.0, step=0.1, group="VWAP Bands")
+
+// Grupo: RSI
+rsi_enabled    = input.bool(true, "Habilitar Filtro RSI", group="RSI")
+rsi_length     = input.int(14, "RSI Longitud", minval=5, maxval=30, group="RSI")
+rsi_oversold   = input.float(30, "RSI Oversold", minval=10, maxval=40, group="RSI")
+rsi_overbought = input.float(70, "RSI Overbought", minval=60, maxval=90, group="RSI")
+
+// Grupo: SuperTrend
+st_enabled     = input.bool(true, "Habilitar SuperTrend", group="SuperTrend")
+st_multiplier  = input.float(3.0, "ST Multiplicador", minval=1.0, maxval=5.0, step=0.1, group="SuperTrend")
+st_period      = input.int(10, "ST Período ATR", minval=5, maxval=20, group="SuperTrend")
+
+// Grupo: ADX
+adx_enabled    = input.bool(true, "Habilitar Filtro ADX", group="ADX")
+adx_length     = input.int(14, "ADX Longitud", minval=10, maxval=20, group="ADX")
+adx_trend      = input.float(25, "ADX Threshold Tendencia", minval=15, maxval=40, group="ADX")
+adx_range      = input.float(20, "ADX Threshold Rango", minval=10, maxval=25, group="ADX")
+
+// Grupo: Volumen
+vol_enabled    = input.bool(true, "Habilitar Filtro Volumen", group="Volumen")
+vol_multiplier = input.float(1.5, "Volumen Multiplicador", minval=1.0, maxval=5.0, step=0.1, group="Volumen")
+vol_length     = input.int(20, "Volumen Promedio (barras)", minval=10, maxval=50, group="Volumen")
+
+// Grupo: Take Profit / Stop Loss
+tp1_pct        = input.float(33, "TP1 % Posición", minval=10, maxval=50, group="TP/SL")
+tp2_pct        = input.float(33, "TP2 % Posición", minval=10, maxval=50, group="TP/SL")
+tp3_pct        = input.float(34, "TP3 % Posición", minval=10, maxval=50, group="TP/SL")
+sl_extra_pct   = input.float(2.0, "SL Extra % más allá banda", minval=0.5, maxval=5.0, step=0.1, group="TP/SL")
+
+// Grupo: Condiciones Mínimas
+min_conditions = input.int(4, "Condiciones Mínimas para Entrada", minval=2, maxval=6, group="Condiciones")
+
+// -----------------------------------------------------------------------------
+// 2. CÁLCULO DE VOLATILIDAD Y MONTE CARLO SIMPLIFICADO
+// -----------------------------------------------------------------------------
+
+// Retornos logarítmicos
+log_ret = math.log(close / close[1])
+
+// Volatilidad rolling (desviación estándar de retornos)
+volatility = ta.stdev(log_ret, mc_lookback) * math.sqrt(252)
+
+// Drift (tendencia histórica)
+drift = ta.sma(log_ret, mc_lookback) * 252
+
+// Simulación Montecarlo simplificada (usando distribución normal)
+// Generamos N simulaciones usando la volatilidad histórica
+mc_std = volatility * math.sqrt(mc_days / 252)
+
+// Percentiles de la distribución normal
+mc_lower_band = close * math.exp(-mc_std * ta.zscore(mc_pct_lower / 100))
+mc_upper_band = close * math.exp(mc_std * ta.zscore(mc_pct_upper / 100))
+mc_median = close * math.exp(drift * (mc_days / 252))
+
+// -----------------------------------------------------------------------------
+// 3. VWAP Y BANDAS
+// -----------------------------------------------------------------------------
+
+// VWAP = Volume Weighted Average Price
+// Aproximación: (H + L + C) / 3 promediado
+typical_price = (high + low + close) / 3
+vwap_value = ta.sma(typical_price, mc_lookback)
+vwap_std = ta.stdev(typical_price, mc_lookback)
+
+vwap_upper_1 = vwap_value + vwap_std
+vwap_upper_2 = vwap_value + (vwap_std_mult * vwap_std)
+vwap_lower_1 = vwap_value - vwap_std
+vwap_lower_2 = vwap_value - (vwap_std_mult * vwap_std)
+
+// -----------------------------------------------------------------------------
+// 4. RSI
+// -----------------------------------------------------------------------------
+
+rsi_value = ta.rsi(close, rsi_length)
+rsi_oversold_cond = rsi_value < rsi_oversold
+rsi_overbought_cond = rsi_value > rsi_overbought
+
+// -----------------------------------------------------------------------------
+// 5. SUPERTREND
+// -----------------------------------------------------------------------------
+
+// Cálculo del SuperTrend
+atr = ta.atr(st_period)
+hl2 = (high + low) / 2
+
+upper_band = hl2 + (st_multiplier * atr)
+lower_band = hl2 - (st_multiplier * atr)
+
+// Dirección del SuperTrend
+var float st_direction = 1.0
+var float st_value = lower_band
+
+if close > nz(st_value, close)
+    st_direction := 1.0
+    st_value := lower_band
+else if close < nz(st_value, close)
+    st_direction := -1.0
+    st_value := upper_band
+else
+    st_value := nz(st_value, close)
+
+st_trend_up = st_direction == 1.0
+st_trend_down = st_direction == -1.0
+
+// -----------------------------------------------------------------------------
+// 6. ADX
+// -----------------------------------------------------------------------------
+
+// Calcular ADX
+plus_dm = high - high[1]
+minus_dm = low[1] - low
+
+plus_di = 100 * ta.rma(plus_dm > math.abs(minus_dm) ? plus_dm : 0, adx_length) / ta.rma(atr, adx_length)
+minus_di = 100 * ta.rma(minus_dm > math.abs(plus_dm) ? minus_dm : 0, adx_length) / ta.rma(atr, adx_length)
+
+dx = 100 * math.abs(plus_di - minus_di) / (plus_di + minus_di)
+adx_value = ta.sma(dx, adx_length)
+
+adx_trend_cond = adx_value > adx_trend
+adx_range_cond = adx_value < adx_range
+
+// -----------------------------------------------------------------------------
+// 7. VOLUMEN
+// -----------------------------------------------------------------------------
+
+vol_avg = ta.sma(volume, vol_length)
+vol_confirmed = volume >= (vol_avg * vol_multiplier)
+
+// -----------------------------------------------------------------------------
+// 8. CONDICIONES DE ENTRADA
+// -----------------------------------------------------------------------------
+
+// Condiciones para LONG
+long_price_cond = (close <= vwap_lower_2) or (close <= mc_lower_band)
+long_rsi_cond = rsi_enabled ? rsi_oversold_cond : true
+long_st_cond = st_enabled ? st_trend_up : true
+long_adx_cond = adx_enabled ? (adx_trend_cond or adx_range_cond) : true
+long_vol_cond = vol_enabled ? vol_confirmed : true
+
+// Contar condiciones LONG
+long_conditions_count = 0
+if long_price_cond
+    long_conditions_count += 1
+if long_rsi_cond
+    long_conditions_count += 1
+if long_st_cond
+    long_conditions_count += 1
+if long_adx_cond
+    long_conditions_count += 1
+if long_vol_cond
+    long_conditions_count += 1
+
+long_signal = long_conditions_count >= min_conditions
+
+// Condiciones para SHORT
+short_price_cond = (close >= vwap_upper_2) or (close >= mc_upper_band)
+short_rsi_cond = rsi_enabled ? rsi_overbought_cond : true
+short_st_cond = st_enabled ? st_trend_down : true
+short_adx_cond = adx_enabled ? (adx_trend_cond or adx_range_cond) : true
+short_vol_cond = vol_enabled ? vol_confirmed : true
+
+// Contar condiciones SHORT
+short_conditions_count = 0
+if short_price_cond
+    short_conditions_count += 1
+if short_rsi_cond
+    short_conditions_count += 1
+if short_st_cond
+    short_conditions_count += 1
+if short_adx_cond
+    short_conditions_count += 1
+if short_vol_cond
+    short_conditions_count += 1
+
+short_signal = short_conditions_count >= min_conditions
+
+// -----------------------------------------------------------------------------
+// 9. CÁLCULO DE TP/SL DINÁMICO
+// -----------------------------------------------------------------------------
+
+// Para LONG
+long_sl = vwap_lower_2 * (1 - sl_extra_pct / 100)
+long_tp1 = vwap_value
+long_tp2 = vwap_upper_1
+long_tp3 = vwap_upper_2
+
+// Para SHORT
+short_sl = vwap_upper_2 * (1 + sl_extra_pct / 100)
+short_tp1 = vwap_value
+short_tp2 = vwap_lower_1
+short_tp3 = vwap_lower_2
+
+// -----------------------------------------------------------------------------
+// 10. GESTIÓN DE POSICIONES
+// -----------------------------------------------------------------------------
+
+// Variable para controlar la posición actual
+var int position_type = 0  // 0 = none, 1 = long, -1 = short
+var float entry_price = 0.0
+var int bars_in_trade = 0
+
+// Cerrar posición si hay señal contraria
+if position_type == 1 and short_signal
+    strategy.close("Long", comment="Reverse Short")
+    position_type := -1
+    entry_price := close
+    bars_in_trade := 0
+else if position_type == -1 and long_signal
+    strategy.close("Short", comment="Reverse Long")
+    position_type := 1
+    entry_price := close
+    bars_in_trade := 0
+
+// Abrir LONG
+if long_signal and position_type != 1
+    strategy.entry("Long", strategy.long, comment="Long Entry")
+    position_type := 1
+    entry_price := close
+    bars_in_trade := 0
+    
+    // Setear exits para LONG
+    strategy.exit("Long Exit", "Long", 
+                  stop=long_sl, 
+                  limit=long_tp3,
+                  comment="Long TP3")
+    
+    // TP1 y TP2 parciales (usando múltiples exits)
+    strategy.exit("Long TP1", "Long", 
+                  limit=long_tp1,
+                  qty_percent=tp1_pct,
+                  comment="Long TP1")
+    
+    strategy.exit("Long TP2", "Long", 
+                  limit=long_tp2,
+                  qty_percent=tp2_pct,
+                  comment="Long TP2")
+
+// Abrir SHORT
+if short_signal and position_type != -1
+    strategy.entry("Short", strategy.short, comment="Short Entry")
+    position_type := -1
+    entry_price := close
+    bars_in_trade := 0
+    
+    // Setear exits para SHORT
+    strategy.exit("Short Exit", "Short", 
+                  stop=short_sl, 
+                  limit=short_tp3,
+                  comment="Short TP3")
+    
+    // TP1 y TP2 parciales
+    strategy.exit("Short TP1", "Short", 
+                  limit=short_tp1,
+                  qty_percent=tp1_pct,
+                  comment="Short TP1")
+    
+    strategy.exit("Short TP2", "Short", 
+                  limit=short_tp2,
+                  qty_percent=tp2_pct,
+                  comment="Short TP2")
+
+// Actualizar contador de barras
+if position_type != 0
+    bars_in_trade += 1
+
+// -----------------------------------------------------------------------------
+// 11. VISUALIZACIÓN EN GRÁFICO
+// -----------------------------------------------------------------------------
+
+// Plot VWAP bands
+plot(vwap_enabled ? vwap_value : na, "VWAP Centro", color=color.yellow, linewidth=2)
+plot(vwap_enabled ? vwap_upper_1 : na, "VWAP +1σ", color=color.orange, linewidth=1)
+plot(vwap_enabled ? vwap_upper_2 : na, "VWAP +2σ", color=color.red, linewidth=2)
+plot(vwap_enabled ? vwap_lower_1 : na, "VWAP -1σ", color=color.orange, linewidth=1)
+plot(vwap_enabled ? vwap_lower_2 : na, "VWAP -2σ", color=color.green, linewidth=2)
+
+// Plot MC bands (más sutiles)
+plot(mc_lower_band, "MC Lower", color=color.new(color.blue, 70), linewidth=1)
+plot(mc_upper_band, "MC Upper", color=color.new(color.blue, 70), linewidth=1)
+
+// Plot SuperTrend
+plot(st_enabled ? st_value : na, "SuperTrend", 
+     color=st_trend_up ? color.green : color.red, linewidth=2)
+
+// Plot señales
+plotshape(long_signal and position_type != 1, "Long Signal", 
+          shape.triangleup, location.belowbar, color.green, size=size.small)
+plotshape(short_signal and position_type != -1, "Short Signal", 
+          shape.triangledown, location.abovebar, color.red, size=size.small)
+
+// Background color según condiciones
+bgcolor(long_signal ? color.new(color.green, 90) : na)
+bgcolor(short_signal ? color.new(color.red, 90) : na)
+
+// -----------------------------------------------------------------------------
+// 12. TABLA DE INFORMACIÓN
+// -----------------------------------------------------------------------------
+
+var table info_table = table.new(position.top_right, 2, 10, 
+                                  bgcolor=color.black, border_width=1)
+
+if barstate.islast
+    table.cell(info_table, 0, 0, "PARÁMETRO", bgcolor=color.gray, text_color=color.white)
+    table.cell(info_table, 1, 0, "VALOR", bgcolor=color.gray, text_color=color.white)
+    
+    table.cell(info_table, 0, 1, "VWAP Centro", text_color=color.white)
+    table.cell(info_table, 1, 1, str.tostring(vwap_value, "#.##"), text_color=color.yellow)
+    
+    table.cell(info_table, 0, 2, "VWAP +2σ", text_color=color.white)
+    table.cell(info_table, 1, 2, str.tostring(vwap_upper_2, "#.##"), text_color=color.red)
+    
+    table.cell(info_table, 0, 3, "VWAP -2σ", text_color=color.white)
+    table.cell(info_table, 1, 3, str.tostring(vwap_lower_2, "#.##"), text_color=color.green)
+    
+    table.cell(info_table, 0, 4, "RSI", text_color=color.white)
+    table.cell(info_table, 1, 4, str.tostring(rsi_value, "#.#"), 
+               text_color=rsi_value > rsi_overbought ? color.red : 
+                          rsi_value < rsi_oversold ? color.green : color.white)
+    
+    table.cell(info_table, 0, 5, "ADX", text_color=color.white)
+    table.cell(info_table, 1, 5, str.tostring(adx_value, "#.#"), text_color=color.white)
+    
+    table.cell(info_table, 0, 6, "SuperTrend", text_color=color.white)
+    table.cell(info_table, 1, 6, st_trend_up ? "▲ UP" : "▼ DOWN", 
+               text_color=st_trend_up ? color.green : color.red)
+    
+    table.cell(info_table, 0, 7, "Volumen", text_color=color.white)
+    table.cell(info_table, 1, 7, vol_confirmed ? "✓ CONFIRM" : "✗ LOW", 
+               text_color=vol_confirmed ? color.green : color.red)
+    
+    table.cell(info_table, 0, 8, "Cond. LONG", text_color=color.white)
+    table.cell(info_table, 1, 8, str.tostring(long_conditions_count) + "/" + str.tostring(min_conditions),
+               text_color=long_conditions_count >= min_conditions ? color.green : color.white)
+    
+    table.cell(info_table, 0, 9, "Cond. SHORT", text_color=color.white)
+    table.cell(info_table, 1, 9, str.tostring(short_conditions_count) + "/" + str.tostring(min_conditions),
+               text_color=short_conditions_count >= min_conditions ? color.green : color.white)
+
+// -----------------------------------------------------------------------------
+// 13. ALERTAS
+// -----------------------------------------------------------------------------
+
+alertcondition(long_signal, "Long Signal", "Harvix: Señal LONG detectada")
+alertcondition(short_signal, "Short Signal", "Harvix: Señal SHORT detectada")
+alertcondition(long_conditions_count >= 3, "Long Warning", "Harvix: Condiciones LONG acercándose")
+alertcondition(short_conditions_count >= 3, "Short Warning", "Harvix: Condiciones SHORT acercándose")

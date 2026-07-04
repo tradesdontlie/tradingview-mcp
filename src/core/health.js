@@ -160,7 +160,7 @@ export async function uiState() {
 }
 
 export async function launch({ port, kill_existing } = {}) {
-  const cdpPort = port || 9222;
+  const cdpPort = port || (process.env.CDP_PORT ? Number(process.env.CDP_PORT) : 9223);
   const killFirst = kill_existing !== false;
   const platform = process.platform;
 
@@ -183,6 +183,21 @@ export async function launch({ port, kill_existing } = {}) {
     ],
   };
 
+  // On Windows, try to find the actual executable path via running process or AppxPackage
+  if (platform === 'win32') {
+    try {
+      // 1. Try to get path from running process (most reliable if it's already open)
+      const runningPath = execSync('PowerShell -Command "Get-Process TradingView -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Path -Unique"', { timeout: 2000 }).toString().trim();
+      if (runningPath && existsSync(runningPath)) pathMap.win32.unshift(runningPath);
+      
+      // 2. Try AppxPackage (Windows Store version)
+      const storeRoot = execSync('PowerShell -Command "(Get-AppxPackage *TradingView*).InstallLocation"', { timeout: 2000 }).toString().trim();
+      if (storeRoot) {
+        const storePath = `${storeRoot}\\TradingView.exe`;
+        if (existsSync(storePath)) pathMap.win32.push(storePath);
+      }
+    } catch { /* ignore */ }
+  }
   let tvPath = null;
   const candidates = pathMap[platform] || pathMap.linux;
   for (const p of candidates) {
