@@ -220,8 +220,9 @@ export async function launch({ port, kill_existing } = {}) {
     } catch { /* ignore */ }
   }
 
+  // Fall back to launching Chrome with TradingView web if Desktop app not found
   if (!tvPath) {
-    throw new Error(`TradingView not found on ${platform}. Searched: ${candidates.join(', ')}. Launch manually with: /path/to/TradingView --remote-debugging-port=${cdpPort}`);
+    return launchChrome({ cdpPort, killFirst });
   }
 
   if (killFirst) {
@@ -232,8 +233,17 @@ export async function launch({ port, kill_existing } = {}) {
     } catch { /* may not be running */ }
   }
 
-  const child = spawn(tvPath, [`--remote-debugging-port=${cdpPort}`], { detached: true, stdio: 'ignore' });
-  child.unref();
+  let child;
+  try {
+    child = spawn(tvPath, [`--remote-debugging-port=${cdpPort}`], { detached: true, stdio: 'ignore' });
+    child.unref();
+  } catch (err) {
+    // Store/sandboxed app — fall back to Chrome
+    if (err.code === 'EPERM' || err.code === 'EACCES') {
+      return launchChrome({ cdpPort, killFirst });
+    }
+    throw err;
+  }
 
   for (let i = 0; i < 15; i++) {
     await new Promise(r => setTimeout(r, 1000));
@@ -260,5 +270,90 @@ export async function launch({ port, kill_existing } = {}) {
   return {
     success: true, platform, binary: tvPath, pid: child.pid, cdp_port: cdpPort, cdp_ready: false,
     warning: 'TradingView launched but CDP not responding yet. It may still be loading. Try tv_health_check in a few seconds.',
+  };
+}
+
+async function launchChrome({ cdpPort, killFirst }) {
+  const platform = process.platform;
+  const chromePaths = platform === 'win32' ? [
+    `${process.env.PROGRAMFILES}\\Google\\Chrome\\Application\\chrome.exe`,
+    `${process.env['PROGRAMFILES(X86)']}\\Google\\Chrome\\Application\\chrome.exe`,
+    `${process.env.LOCALAPPDATA}\\Google\\Chrome\\Application\\chrome.exe`,
+  ] : platform === 'darwin' ? [
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  ] : [
+    '/usr/bin/google-chrome',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/chromium',
+  ];
+
+  let chromePath = null;
+  for (const p of chromePaths) {
+    if (p && existsSync(p)) { chromePath = p; break; }
+  }
+
+  if (!chromePath) {
+    throw new Error('TradingView Desktop not found and Chrome not found. Install Chrome or the standalone TradingView app.');
+  }
+
+  if (killFirst) {
+    // First kill
+    try {
+      if (platform === 'win32') execSync('taskkill /F /IM chrome.exe /T', { timeout: 5000 });
+      else execSync('pkill -f chrome', { timeout: 5000 });
+    } catch { /* may not be running */ }
+    await new Promise(r => setTimeout(r, 2000));
+    // Second kill to catch Chrome's auto-recovery restart
+    try {
+      if (platform === 'win32') execSync('taskkill /F /IM chrome.exe /T', { timeout: 5000 });
+      else execSync('pkill -f chrome', { timeout: 5000 });
+    } catch { /* already dead */ }
+    await new Promise(r => setTimeout(r, 2000));
+  }
+
+  const os = await import('os');
+  const path = await import('path');
+  const fs = await import('fs');
+  // Use temp profile — delete SingletonLock so stale locks don't block CDP
+  const userDataDir = path.join(os.tmpdir(), 'tradingview-mcp-chrome');
+  const lockFile = path.join(userDataDir, 'SingletonLock');
+  try { fs.unlinkSync(lockFile); } catch { /* no lock file, fine */ }
+
+  const child = spawn(chromePath, [
+    `--remote-debugging-port=${cdpPort}`,
+    `--user-data-dir=${userDataDir}`,
+    '--no-first-run',
+    '--no-default-browser-check',
+    'https://www.tradingview.com/chart/',
+  ], { detached: true, stdio: 'ignore' });
+  child.unref();
+
+  for (let i = 0; i < 20; i++) {
+    await new Promise(r => setTimeout(r, 1000));
+    try {
+      const http = await import('http');
+      const ready = await new Promise((resolve) => {
+        http.get(`http://localhost:${cdpPort}/json/version`, (res) => {
+          let data = '';
+          res.on('data', (chunk) => data += chunk);
+          res.on('end', () => resolve(data));
+        }).on('error', () => resolve(null));
+      });
+      if (ready) {
+        const info = JSON.parse(ready);
+        return {
+          success: true, platform, binary: chromePath, pid: child.pid,
+          cdp_port: cdpPort, cdp_url: `http://localhost:${cdpPort}`,
+          browser: info.Browser, user_agent: info['User-Agent'],
+          mode: 'chrome', note: 'Launched TradingView web in Chrome (Desktop app unavailable)',
+        };
+      }
+    } catch { /* retry */ }
+  }
+
+  return {
+    success: true, platform, binary: chromePath, pid: child.pid, cdp_port: cdpPort, cdp_ready: false,
+    mode: 'chrome',
+    warning: 'Chrome launched but CDP not responding yet. Try tv_health_check in a few seconds.',
   };
 }
