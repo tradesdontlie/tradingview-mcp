@@ -2,10 +2,7 @@
  * Core tab management logic.
  * Controls TradingView Desktop tabs via CDP and Electron keyboard shortcuts.
  */
-import { getClient, evaluate } from '../connection.js';
-
-const CDP_HOST = 'localhost';
-const CDP_PORT = 9222;
+import { CDP_HOST, CDP_PORT, getClient } from '../connection.js';
 
 /**
  * List all open chart tabs (CDP page targets).

@@ -2,8 +2,12 @@ import CDP from 'chrome-remote-interface';
 
 let client = null;
 let targetInfo = null;
-const CDP_HOST = 'localhost';
-const CDP_PORT = 9222;
+export const CDP_HOST = process.env.CDP_HOST || 'localhost';
+const rawPort = Number.parseInt(process.env.CDP_PORT || '9222', 10);
+if (!Number.isInteger(rawPort) || rawPort < 1 || rawPort > 65535) {
+  throw new Error(`CDP_PORT must be an integer in 1..65535, got: ${process.env.CDP_PORT}`);
+}
+export const CDP_PORT = rawPort;
 const MAX_RETRIES = 5;
 const BASE_DELAY = 500;
 
