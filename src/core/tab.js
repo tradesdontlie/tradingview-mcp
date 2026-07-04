@@ -11,7 +11,7 @@ const CDP_PORT = 9222;
  * List all open chart tabs (CDP page targets).
  */
 export async function list() {
-  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
+  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`, { signal: AbortSignal.timeout(5000) });
   const targets = await resp.json();
 
   const tabs = targets
@@ -89,15 +89,19 @@ export async function switchTab({ index }) {
   const tabs = await list();
   const idx = Number(index);
 
-  if (idx >= tabs.tab_count) {
+  if (!Number.isInteger(idx) || idx < 0 || idx >= tabs.tab_count) {
     throw new Error(`Tab index ${idx} out of range (have ${tabs.tab_count} tabs)`);
   }
 
   const target = tabs.tabs[idx];
 
+  if (!target.id || !/^[A-F0-9-]+$/i.test(target.id)) {
+    throw new Error(`Unexpected CDP target ID format: ${target.id}`);
+  }
+
   // Use CDP Target.activateTarget to bring the tab to front
   try {
-    const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/activate/${target.id}`);
+    const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/activate/${target.id}`, { signal: AbortSignal.timeout(5000) });
     const text = await resp.text();
     return { success: true, action: 'switched', index: idx, tab_id: target.id, chart_id: target.chart_id };
   } catch (e) {

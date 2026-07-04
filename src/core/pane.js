@@ -114,6 +114,9 @@ export async function setLayout({ layout }) {
  */
 export async function focus({ index }) {
   const idx = Number(index);
+  if (!Number.isInteger(idx) || idx < 0) {
+    throw new Error(`Pane index must be a non-negative integer, got: ${index}`);
+  }
   const result = await evaluate(`
     (function() {
       var cwc = ${CWC};
