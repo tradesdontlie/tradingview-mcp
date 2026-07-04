@@ -91,26 +91,31 @@ npm install
 TradingView Desktop must be running with Chrome DevTools Protocol enabled on port 9222.
 
 **Mac:**
+
 ```bash
 ./scripts/launch_tv_debug_mac.sh
 ```
 
 **Windows:**
+
 ```bash
 scripts\launch_tv_debug.bat
 ```
 
 **Linux:**
+
 ```bash
 ./scripts/launch_tv_debug_linux.sh
 ```
 
 **Or launch manually on any platform:**
+
 ```bash
 /path/to/TradingView --remote-debugging-port=9222
 ```
 
 **Or use the MCP tool** (auto-detects your install):
+
 > "Use tv_launch to start TradingView in debug mode"
 
 ### 3. Add to Claude Code
@@ -132,7 +137,7 @@ Replace `/path/to/tradingview-mcp` with your actual path.
 
 ### 4. Verify
 
-Ask Claude: *"Use tv_health_check to verify TradingView is connected"*
+Ask Claude: _"Use tv_health_check to verify TradingView is connected"_
 
 ## CLI
 
@@ -180,6 +185,11 @@ tv ui click/keyboard/hover/scroll/find/eval/type/panel/fullscreen/mouse
 tv screenshot / discover / ui-state / range / scroll
 ```
 
+tv pine_list_scripts
+tv layout_list
+
+tv symbol MSFT --all
+
 ## Streaming
 
 The `tv stream` commands poll your locally running TradingView Desktop instance at regular intervals via Chrome DevTools Protocol on localhost.
@@ -202,137 +212,137 @@ tv stream all                            # all panes at once (multi-symbol)
 
 Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project. It contains a complete decision tree:
 
-| You say... | Claude uses... |
-|------------|---------------|
-| "What's on my chart?" | `chart_get_state` → `data_get_study_values` → `quote_get` |
-| "What levels are showing?" | `data_get_pine_lines` → `data_get_pine_labels` |
-| "Read the session table" | `data_get_pine_tables` with `study_filter` |
-| "Give me a full analysis" | `quote_get` → `data_get_study_values` → `data_get_pine_lines` → `data_get_pine_labels` → `data_get_pine_tables` → `data_get_ohlcv` (summary) → `capture_screenshot` |
-| "Switch to AAPL daily" | `chart_set_symbol` → `chart_set_timeframe` |
-| "Write a Pine Script for..." | `pine_set_source` → `pine_smart_compile` → `pine_get_errors` |
-| "Start replay at March 1st" | `replay_start` → `replay_step` → `replay_trade` |
-| "Set up a 4-chart grid" | `pane_set_layout` → `pane_set_symbol` for each pane |
-| "Draw a level at 24500" | `draw_shape` (horizontal_line) |
-| "Take a screenshot" | `capture_screenshot` |
+| You say...                   | Claude uses...                                                                                                                                                      |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| "What's on my chart?"        | `chart_get_state` → `data_get_study_values` → `quote_get`                                                                                                           |
+| "What levels are showing?"   | `data_get_pine_lines` → `data_get_pine_labels`                                                                                                                      |
+| "Read the session table"     | `data_get_pine_tables` with `study_filter`                                                                                                                          |
+| "Give me a full analysis"    | `quote_get` → `data_get_study_values` → `data_get_pine_lines` → `data_get_pine_labels` → `data_get_pine_tables` → `data_get_ohlcv` (summary) → `capture_screenshot` |
+| "Switch to AAPL daily"       | `chart_set_symbol` → `chart_set_timeframe`                                                                                                                          |
+| "Write a Pine Script for..." | `pine_set_source` → `pine_smart_compile` → `pine_get_errors`                                                                                                        |
+| "Start replay at March 1st"  | `replay_start` → `replay_step` → `replay_trade`                                                                                                                     |
+| "Set up a 4-chart grid"      | `pane_set_layout` → `pane_set_symbol` for each pane                                                                                                                 |
+| "Draw a level at 24500"      | `draw_shape` (horizontal_line)                                                                                                                                      |
+| "Take a screenshot"          | `capture_screenshot`                                                                                                                                                |
 
 ## Tool Reference (78 MCP tools)
 
 ### Chart Reading
 
-| Tool | When to use | Output size |
-|------|------------|-------------|
-| `chart_get_state` | First call — get symbol, timeframe, all indicator names + IDs | ~500B |
-| `data_get_study_values` | Read current RSI, MACD, BB, EMA values from all indicators | ~500B |
-| `quote_get` | Get latest price, OHLC, volume | ~200B |
-| `data_get_ohlcv` | Get price bars. **Use `summary: true`** for compact stats | 500B (summary) / 8KB (100 bars) |
+| Tool                    | When to use                                                   | Output size                     |
+| ----------------------- | ------------------------------------------------------------- | ------------------------------- |
+| `chart_get_state`       | First call — get symbol, timeframe, all indicator names + IDs | ~500B                           |
+| `data_get_study_values` | Read current RSI, MACD, BB, EMA values from all indicators    | ~500B                           |
+| `quote_get`             | Get latest price, OHLC, volume                                | ~200B                           |
+| `data_get_ohlcv`        | Get price bars. **Use `summary: true`** for compact stats     | 500B (summary) / 8KB (100 bars) |
 
 ### Custom Indicator Data (Pine Drawings)
 
 Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any visible Pine indicator.
 
-| Tool | When to use | Output size |
-|------|------------|-------------|
-| `data_get_pine_lines` | Read horizontal price levels (support/resistance, session levels) | ~1-3KB |
-| `data_get_pine_labels` | Read text annotations + prices ("PDH 24550", "Bias Long") | ~2-5KB |
-| `data_get_pine_tables` | Read data tables (session stats, analytics dashboards) | ~1-4KB |
-| `data_get_pine_boxes` | Read price zones / ranges as {high, low} pairs | ~1-2KB |
+| Tool                   | When to use                                                       | Output size |
+| ---------------------- | ----------------------------------------------------------------- | ----------- |
+| `data_get_pine_lines`  | Read horizontal price levels (support/resistance, session levels) | ~1-3KB      |
+| `data_get_pine_labels` | Read text annotations + prices ("PDH 24550", "Bias Long")         | ~2-5KB      |
+| `data_get_pine_tables` | Read data tables (session stats, analytics dashboards)            | ~1-4KB      |
+| `data_get_pine_boxes`  | Read price zones / ranges as {high, low} pairs                    | ~1-2KB      |
 
 **Always use `study_filter`** to target a specific indicator: `study_filter: "Profiler"`.
 
 ### Chart Control
 
-| Tool | What it does |
-|------|-------------|
-| `chart_set_symbol` | Change ticker (BTCUSD, AAPL, ES1!, NYMEX:CL1!) |
-| `chart_set_timeframe` | Change resolution (1, 5, 15, 60, D, W, M) |
-| `chart_set_type` | Change style (Candles, HeikinAshi, Line, Area, Renko) |
-| `chart_manage_indicator` | Add/remove indicators. **Use full names**: "Relative Strength Index" not "RSI" |
-| `chart_scroll_to_date` | Jump to a date (ISO: "2025-01-15") |
-| `chart_set_visible_range` | Zoom to exact range (unix timestamps) |
-| `symbol_info` / `symbol_search` | Symbol metadata and search |
-| `indicator_set_inputs` / `indicator_toggle_visibility` | Change indicator settings, show/hide |
+| Tool                                                   | What it does                                                                   |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------ |
+| `chart_set_symbol`                                     | Change ticker (BTCUSD, AAPL, ES1!, NYMEX:CL1!)                                 |
+| `chart_set_timeframe`                                  | Change resolution (1, 5, 15, 60, D, W, M)                                      |
+| `chart_set_type`                                       | Change style (Candles, HeikinAshi, Line, Area, Renko)                          |
+| `chart_manage_indicator`                               | Add/remove indicators. **Use full names**: "Relative Strength Index" not "RSI" |
+| `chart_scroll_to_date`                                 | Jump to a date (ISO: "2025-01-15")                                             |
+| `chart_set_visible_range`                              | Zoom to exact range (unix timestamps)                                          |
+| `symbol_info` / `symbol_search`                        | Symbol metadata and search                                                     |
+| `indicator_set_inputs` / `indicator_toggle_visibility` | Change indicator settings, show/hide                                           |
 
 ### Multi-Pane Layouts
 
-| Tool | What it does |
-|------|-------------|
-| `pane_list` | List all panes with symbols and active state |
+| Tool              | What it does                                       |
+| ----------------- | -------------------------------------------------- |
+| `pane_list`       | List all panes with symbols and active state       |
 | `pane_set_layout` | Change grid: `s`, `2h`, `2v`, `2x2`, `4`, `6`, `8` |
-| `pane_focus` | Focus a specific pane by index |
-| `pane_set_symbol` | Set symbol on any pane |
+| `pane_focus`      | Focus a specific pane by index                     |
+| `pane_set_symbol` | Set symbol on any pane                             |
 
 ### Tab Management
 
-| Tool | What it does |
-|------|-------------|
-| `tab_list` | List open chart tabs |
-| `tab_new` / `tab_close` | Open/close tabs |
-| `tab_switch` | Switch to a tab by index |
+| Tool                    | What it does             |
+| ----------------------- | ------------------------ |
+| `tab_list`              | List open chart tabs     |
+| `tab_new` / `tab_close` | Open/close tabs          |
+| `tab_switch`            | Switch to a tab by index |
 
 ### Pine Script Development
 
-| Tool | Step |
-|------|------|
-| `pine_set_source` | 1. Inject code into editor |
-| `pine_smart_compile` | 2. Compile with auto-detection + error check |
-| `pine_get_errors` | 3. Read compilation errors if any |
-| `pine_get_console` | 4. Read log.info() output |
-| `pine_save` | 5. Save to TradingView cloud |
-| `pine_get_source` | Read current script (**warning: can be 200KB+ for complex scripts**) |
-| `pine_new` | Create blank indicator/strategy/library |
-| `pine_open` / `pine_list_scripts` | Open or list saved scripts |
-| `pine_analyze` | Offline static analysis (no chart needed) |
-| `pine_check` | Server-side compile check (no chart needed) |
+| Tool                              | Step                                                                 |
+| --------------------------------- | -------------------------------------------------------------------- |
+| `pine_set_source`                 | 1. Inject code into editor                                           |
+| `pine_smart_compile`              | 2. Compile with auto-detection + error check                         |
+| `pine_get_errors`                 | 3. Read compilation errors if any                                    |
+| `pine_get_console`                | 4. Read log.info() output                                            |
+| `pine_save`                       | 5. Save to TradingView cloud                                         |
+| `pine_get_source`                 | Read current script (**warning: can be 200KB+ for complex scripts**) |
+| `pine_new`                        | Create blank indicator/strategy/library                              |
+| `pine_open` / `pine_list_scripts` | Open or list saved scripts                                           |
+| `pine_analyze`                    | Offline static analysis (no chart needed)                            |
+| `pine_check`                      | Server-side compile check (no chart needed)                          |
 
 ### Replay Mode
 
-| Tool | Step |
-|------|------|
-| `replay_start` | Enter replay at a date |
-| `replay_step` | Advance one bar |
+| Tool              | Step                           |
+| ----------------- | ------------------------------ |
+| `replay_start`    | Enter replay at a date         |
+| `replay_step`     | Advance one bar                |
 | `replay_autoplay` | Auto-advance (set speed in ms) |
-| `replay_trade` | Buy/sell/close positions |
-| `replay_status` | Check position, P&L, date |
-| `replay_stop` | Return to realtime |
+| `replay_trade`    | Buy/sell/close positions       |
+| `replay_status`   | Check position, P&L, date      |
+| `replay_stop`     | Return to realtime             |
 
 ### Drawing, Alerts, UI Automation
 
-| Tool | What it does |
-|------|-------------|
-| `draw_shape` | Draw horizontal_line, trend_line, rectangle, text |
-| `draw_list` / `draw_remove_one` / `draw_clear` | Manage drawings |
-| `alert_create` / `alert_list` / `alert_delete` | Manage price alerts |
-| `capture_screenshot` | Screenshot (regions: full, chart, strategy_tester) |
-| `batch_run` | Run action across multiple symbols/timeframes |
-| `watchlist_get` / `watchlist_add` | Read/modify watchlist |
-| `layout_list` / `layout_switch` | Manage saved layouts |
-| `ui_open_panel` / `ui_click` / `ui_evaluate` | UI automation |
-| `tv_launch` / `tv_health_check` / `tv_discover` | Connection management |
+| Tool                                            | What it does                                       |
+| ----------------------------------------------- | -------------------------------------------------- |
+| `draw_shape`                                    | Draw horizontal_line, trend_line, rectangle, text  |
+| `draw_list` / `draw_remove_one` / `draw_clear`  | Manage drawings                                    |
+| `alert_create` / `alert_list` / `alert_delete`  | Manage price alerts                                |
+| `capture_screenshot`                            | Screenshot (regions: full, chart, strategy_tester) |
+| `batch_run`                                     | Run action across multiple symbols/timeframes      |
+| `watchlist_get` / `watchlist_add`               | Read/modify watchlist                              |
+| `layout_list` / `layout_switch`                 | Manage saved layouts                               |
+| `ui_open_panel` / `ui_click` / `ui_evaluate`    | UI automation                                      |
+| `tv_launch` / `tv_health_check` / `tv_discover` | Connection management                              |
 
 ## Context Management
 
 Tools return compact output by default to minimize context usage. For a typical "analyze my chart" workflow, total context is ~5-10KB instead of ~80KB.
 
-| Feature | How it saves context |
-|---------|---------------------|
-| Pine lines | Returns deduplicated price levels only, not every line object |
-| Pine labels | Capped at 50 per study, text+price only |
-| Pine tables | Pre-formatted row strings, no cell metadata |
-| Pine boxes | Deduplicated {high, low} zones only |
-| OHLCV summary mode | Stats + last 5 bars instead of all bars |
-| Indicator inputs | Encrypted/encoded blobs auto-filtered |
-| `verbose: true` | Pass on any pine tool to get raw data with IDs/colors when needed |
-| `study_filter` | Target one indicator instead of scanning all |
+| Feature            | How it saves context                                              |
+| ------------------ | ----------------------------------------------------------------- |
+| Pine lines         | Returns deduplicated price levels only, not every line object     |
+| Pine labels        | Capped at 50 per study, text+price only                           |
+| Pine tables        | Pre-formatted row strings, no cell metadata                       |
+| Pine boxes         | Deduplicated {high, low} zones only                               |
+| OHLCV summary mode | Stats + last 5 bars instead of all bars                           |
+| Indicator inputs   | Encrypted/encoded blobs auto-filtered                             |
+| `verbose: true`    | Pass on any pine tool to get raw data with IDs/colors when needed |
+| `study_filter`     | Target one indicator instead of scanning all                      |
 
 ## Finding TradingView on Your System
 
 Launch scripts and `tv_launch` auto-detect TradingView. If auto-detection fails:
 
-| Platform | Common Locations |
-|----------|-----------------|
-| **Mac** | `/Applications/TradingView.app/Contents/MacOS/TradingView` |
-| **Windows** | `%LOCALAPPDATA%\TradingView\TradingView.exe`, `%PROGRAMFILES%\WindowsApps\TradingView*\TradingView.exe` |
-| **Linux** | `/opt/TradingView/tradingview`, `~/.local/share/TradingView/TradingView`, `/snap/tradingview/current/tradingview` |
+| Platform    | Common Locations                                                                                                  |
+| ----------- | ----------------------------------------------------------------------------------------------------------------- |
+| **Mac**     | `/Applications/TradingView.app/Contents/MacOS/TradingView`                                                        |
+| **Windows** | `%LOCALAPPDATA%\TradingView\TradingView.exe`, `%PROGRAMFILES%\WindowsApps\TradingView*\TradingView.exe`           |
+| **Linux**   | `/opt/TradingView/tradingview`, `~/.local/share/TradingView/TradingView`, `/snap/tradingview/current/tradingview` |
 
 The key flag: `--remote-debugging-port=9222`
 
@@ -359,6 +369,7 @@ Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  Tradin
 ## Attributions
 
 This project is not affiliated with, endorsed by, or associated with:
+
 - **TradingView Inc.** — TradingView is a trademark of TradingView Inc.
 - **Anthropic** — Claude and Claude Code are trademarks of Anthropic, PBC.
 
