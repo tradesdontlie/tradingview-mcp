@@ -198,6 +198,33 @@ tv stream tables --filter Profiler       # table data monitoring
 tv stream all                            # all panes at once (multi-symbol)
 ```
 
+## tvremix Integration (Headless Data & Analytics)
+
+You have access to **tvremix** — a complementary headless TradingView API for data queries, technical analysis, and multi-symbol workflows. tvremix runs as its own MCP server and is available in Claude Code alongside tradingview-mcp.
+
+**No setup required** — tvremix tools work out of the box:
+
+- `tvremix_quote` — real-time price snapshots
+- `tvremix_technicals` — technical indicators (RSI, MACD, Bollinger Bands, etc.)
+- `tvremix_ohlcv` — historical price bars
+- `tvremix_analyze_smc` — market structure analysis (SMC/ICT)
+- `tvremix_analyze_swing` — swing pattern detection
+- `tvremix_compare_symbols` — side-by-side comparison
+- `tvremix_rank_setups` — rank symbols by technical strength
+- `tvremix_screener` — run custom screening queries
+
+### Example in Claude Code
+
+> "Rank NASDAQ:AAPL, NASDAQ:MSFT, and NASDAQ:NVDA by setup quality on the daily timeframe"
+
+tvremix analyzes all three symbols and returns ranked results with technical scores.
+
+> "Switch the chart to the top-ranked symbol and add the Relative Strength Index"
+
+tradingview-mcp changes your local chart to that symbol and adds the indicator.
+
+See [TVREMIX_SETUP.md](TVREMIX_SETUP.md) for complete guide on combining tvremix + tradingview-mcp workflows.
+
 ## How Claude Knows Which Tool to Use
 
 Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project. It contains a complete decision tree:

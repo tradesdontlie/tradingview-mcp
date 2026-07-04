@@ -4,3 +4,14 @@ scripts/current.pine
 temp_*
 *.log
 discovery-log.json
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+
+# macOS
+.DS_Store
+
+# Local Claude Code config
+.claude/
