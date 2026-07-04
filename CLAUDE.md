@@ -127,3 +127,28 @@ Claude Code ←→ MCP Server (stdio) ←→ CDP (localhost:9222) ←→ Trading
 ```
 
 Pine graphics path: `study._graphics._primitivesCollection.dwglines.get('lines').get(false)._primitivesDataById`
+
+## 12 Hr Update — Custom Watchlist Scanner
+
+When the user asks for a "12 hr update" or "twelve hour update", follow this workflow:
+
+### Step-by-Step
+1. Read `rules.json` in the project root to get the watchlist symbols, timeframes, and bias criteria
+2. For each symbol in `watchlist`:
+   a. `chart_set_symbol` to switch to that symbol
+   b. For each timeframe in `timeframes` (e.g., "W", "D", "240"):
+      - `chart_set_timeframe` to switch
+      - `quote_get` for current price
+      - `data_get_study_values` for all indicator readings
+      - `data_get_ohlcv` with `summary: true` for price stats
+      - `data_get_pine_lines` for support/resistance levels
+   c. Apply `biasCriteria` from rules.json to determine: Bullish / Bearish / Neutral
+3. Compile all results into a structured report
+4. Save to `~/.tradingview-mcp/sessions/` as `YYYY-MM-DD_HH-mm.json`
+5. Display the formatted report to the user
+
+### Report Format
+Each asset should show: Symbol | Bias | Price | Key Level | Per-Timeframe Breakdown | Indicator Values | Watch Points
+
+### Summary Section
+End with a summary grouping assets by Bullish/Bearish/Neutral, plus any risk checklist items from `rules.json.riskRules`
