@@ -311,6 +311,18 @@ describe('source audit — no unsafe interpolation patterns', () => {
       }
     });
   }
+
+  // Banned: ad-hoc `s.replace(/[\\`$]/g, '\\$&')` inlines. Single source of
+  // truth is safeBacktickBody() in connection.js — a file using the inline
+  // form is bypassing the audit above and should call the helper instead.
+  for (const file of coreFiles) {
+    it(`${file} uses safeBacktickBody() instead of inline backtick escaping`, () => {
+      const source = readFileSync(join(CORE_DIR, file), 'utf8');
+      const inlineBacktickEscape = '.replace(/[\\\\`$]/g,';
+      assert.ok(!source.includes(inlineBacktickEscape),
+        `${file} has inline \`.replace(/[\\\\\`$]/g, …)\` — use safeBacktickBody() from connection.js`);
+    });
+  }
 });
 
 // ── Path traversal prevention ────────────────────────────────────────────

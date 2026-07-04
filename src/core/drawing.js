@@ -40,11 +40,19 @@ export async function drawShape({ shape, point, point2, overrides: overridesRaw,
   await new Promise(r => setTimeout(r, 200));
   const after = await evaluate(`${apiPath}.getAllShapes().map(function(s) { return s.id; })`);
   const newId = (after || []).find(id => !(before || []).includes(id)) || null;
-  const result = { entity_id: newId };
-  return { success: true, shape, entity_id: result?.entity_id };
+  if (newId === null) {
+    return {
+      success: false,
+      shape,
+      entity_id: null,
+      error: `createShape returned no new entity. Common causes: invalid shape name "${shape}" rejected silently by TradingView; or point coordinates outside the chart's loaded range.`,
+    };
+  }
+  return { success: true, shape, entity_id: newId };
 }
 
-export async function listDrawings() {
+export async function listDrawings({ _deps } = {}) {
+  const { evaluate, getChartApi } = _resolve(_deps);
   const apiPath = await getChartApi();
   const shapes = await evaluate(`
     (function() {
@@ -56,7 +64,8 @@ export async function listDrawings() {
   return { success: true, count: shapes?.length || 0, shapes: shapes || [] };
 }
 
-export async function getProperties({ entity_id }) {
+export async function getProperties({ entity_id, _deps } = {}) {
+  const { evaluate, getChartApi } = _resolve(_deps);
   const apiPath = await getChartApi();
   const result = await evaluate(`
     (function() {
@@ -85,7 +94,8 @@ export async function getProperties({ entity_id }) {
   return { success: true, ...result };
 }
 
-export async function removeOne({ entity_id }) {
+export async function removeOne({ entity_id, _deps } = {}) {
+  const { evaluate, getChartApi } = _resolve(_deps);
   const apiPath = await getChartApi();
   const result = await evaluate(`
     (function() {
@@ -106,7 +116,8 @@ export async function removeOne({ entity_id }) {
   return { success: true, entity_id: result?.entity_id, removed: result?.removed, remaining_shapes: result?.remaining_shapes };
 }
 
-export async function clearAll() {
+export async function clearAll({ _deps } = {}) {
+  const { evaluate, getChartApi } = _resolve(_deps);
   const apiPath = await getChartApi();
   await evaluate(`${apiPath}.removeAllShapes()`);
   return { success: true, action: 'all_shapes_removed' };
