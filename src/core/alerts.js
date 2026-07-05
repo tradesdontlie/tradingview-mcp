@@ -169,6 +169,9 @@ export async function createWebhook({ symbol, price, message, message_from_clipb
 
   let msg = message;
   if (message_from_clipboard) {
+    // clipboard.readText() throws "Document is not focused" unless the
+    // TradingView window is frontmost — bring it forward first
+    try { const c = await getClient(); await c.Page.bringToFront(); } catch {}
     msg = await evaluateAsync(`navigator.clipboard.readText().catch(function(e) { return '__CLIP_ERR__' + e.message; })`);
     if (typeof msg !== 'string' || msg.startsWith('__CLIP_ERR__') || !msg.trim()) {
       throw new Error(`Clipboard read failed or empty: ${String(msg).replace('__CLIP_ERR__', '')}`);
