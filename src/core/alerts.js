@@ -147,6 +147,7 @@ function summarize(raw) {
     alert_id: raw.alert_id,
     symbol: raw.symbol,
     trigger_value: valueSeries ? valueSeries.value : null,
+    condition_type: cond.type,
     frequency: cond.frequency,
     web_hook: raw.web_hook || null,
     once_only: !!raw.auto_deactivate,
@@ -162,10 +163,15 @@ function summarize(raw) {
  * context (message_from_clipboard) so secret-bearing payloads never transit
  * tool parameters.
  */
-export async function createWebhook({ symbol, price, message, message_from_clipboard, webhook_url, once_only = true, popup = true }) {
+export async function createWebhook({ symbol, price, message, message_from_clipboard, webhook_url, once_only = true, popup = true, direction = 'any' }) {
   const value = Number(price);
   if (!Number.isFinite(value)) throw new Error(`price must be a finite number, got: ${price}`);
   if (!message && !message_from_clipboard) throw new Error('Provide message or set message_from_clipboard: true');
+  // 'any' matches TV's direction-agnostic "Crossing" (backward compatible);
+  // 'up'/'down' map to TV's "Crossing Up"/"Crossing Down" condition types
+  const CROSS_TYPES = { any: 'cross', up: 'cross_up', down: 'cross_down' };
+  const condType = CROSS_TYPES[direction];
+  if (!condType) throw new Error(`direction must be 'up', 'down', or 'any', got: ${direction}`);
 
   let msg = message;
   if (message_from_clipboard) {
@@ -180,7 +186,7 @@ export async function createWebhook({ symbol, price, message, message_from_clipb
 
   const payload = {
     conditions: [{
-      type: 'cross',
+      type: condType,
       frequency: 'on_first_fire',
       series: [{ type: 'barset' }, { type: 'value', value }],
       resolution: '1',

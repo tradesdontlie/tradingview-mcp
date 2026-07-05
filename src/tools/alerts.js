@@ -20,6 +20,7 @@ export function registerAlertTools(server) {
     webhook_url: z.string().optional().describe('Webhook URL to POST the message to when the alert fires'),
     once_only: z.coerce.boolean().optional().describe('Trigger only once then deactivate (default true)'),
     popup: z.coerce.boolean().optional().describe('Show TradingView popup on fire (default true)'),
+    direction: z.enum(['up', 'down', 'any']).optional().describe('Cross direction: "up" (Crossing Up), "down" (Crossing Down), or "any" (Crossing, default). Use "up" for breakout/reclaim longs, "down" for breakdown alerts.'),
   }, async (args) => {
     try { return jsonResult(await core.createWebhook(args)); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
