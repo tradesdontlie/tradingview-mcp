@@ -181,20 +181,36 @@ describe('chart.js — sanitized evaluate calls', () => {
     }
   });
 
-  it('manageIndicator add uses safeString for indicator name', async () => {
-    const { _deps, evaluate } = mockDeps();
-    evaluate.calls.length = 0;
-    // First evaluate call is getAllStudies (before), then createStudy, then getAllStudies (after)
-    const evalFn = async (expr) => {
-      evaluate.calls.push(expr);
-      if (expr.includes('getAllStudies')) return ['id1'];
-      return undefined;
-    };
-    _deps.evaluate = evalFn;
-    await manageIndicator({ action: 'add', indicator: "Relative Strength Index", _deps });
-    const createCall = evaluate.calls.find(c => c.includes('createStudy'));
-    assert.ok(createCall, 'createStudy called');
-    assert.ok(createCall.includes('"Relative Strength Index"'), 'indicator name via safeString');
+  it('manageIndicator add resolves study via inserter and uses safeString for name', async () => {
+    const calls = [];
+    const evaluateAsync = async (expr) => { calls.push(expr); return { entity_id: 'new1', study_id: 'RSI@tv-basicstudies' }; };
+    const _deps = { evaluate: mockEval(), evaluateAsync, waitForChartReady: async () => true };
+    const r = await manageIndicator({ action: 'add', indicator: "Relative Strength Index", _deps });
+    const addCall = calls.find(c => c.includes('createStudyInserter'));
+    assert.ok(addCall, 'study inserter used');
+    assert.ok(addCall.includes('"Relative Strength Index"'), 'indicator name via safeString');
+    assert.ok(addCall.includes('studyMetaIntoRepository'), 'metainfo repository used for id lookup');
+    assert.equal(r.success, true);
+    assert.equal(r.entity_id, 'new1');
+  });
+
+  it('manageIndicator add passes inputs as a plain object, not {id,value} array', async () => {
+    const calls = [];
+    const evaluateAsync = async (expr) => { calls.push(expr); return { entity_id: 'new1' }; };
+    const _deps = { evaluate: mockEval(), evaluateAsync };
+    await manageIndicator({ action: 'add', indicator: 'Moving Average', inputs: { length: 200 }, _deps });
+    const addCall = calls.find(c => c.includes('createStudyInserter'));
+    assert.ok(addCall.includes('{"length":200}'), 'inputs serialized as keyed object');
+    assert.ok(!addCall.includes('"id"'), 'no {id,value} array form');
+  });
+
+  it('manageIndicator add surfaces a real error instead of silent success:false', async () => {
+    const evaluateAsync = async () => ({ error: 'Indicator not found: Bogus' });
+    const _deps = { evaluate: mockEval(), evaluateAsync };
+    await assert.rejects(
+      () => manageIndicator({ action: 'add', indicator: 'Bogus', _deps }),
+      /Indicator not found: Bogus/,
+    );
   });
 
   it('manageIndicator remove uses safeString for entity_id', async () => {

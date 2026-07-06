@@ -85,22 +85,42 @@ export async function setType({ chart_type, _deps }) {
 }
 
 export async function manageIndicator({ action, indicator, entity_id, inputs: inputsRaw, _deps }) {
-  const { evaluate } = _resolve(_deps);
+  const { evaluate, evaluateAsync } = _resolve(_deps);
   const inputs = inputsRaw ? (typeof inputsRaw === 'string' ? JSON.parse(inputsRaw) : inputsRaw) : undefined;
 
   if (action === 'add') {
-    const inputArr = inputs ? Object.entries(inputs).map(([k, v]) => ({ id: k, value: v })) : [];
-    const before = await evaluate(`${CHART_API}.getAllStudies().map(function(s) { return s.id; })`);
-    await evaluate(`
+    // TradingView Desktop's chart.createStudy(name, ...) is broken on TV 3.2.0 (Electron 38):
+    // its name→metainfo lookup rejects with "unknown" even for exact descriptions. Instead we
+    // resolve the study's internal id from the metainfo repository ourselves and drive the
+    // model's study inserter directly, which is verified working live. The whole flow runs
+    // in-page as a single awaited promise so real errors surface instead of being swallowed.
+    const result = await evaluateAsync(`
       (function() {
         var chart = ${CHART_API};
-        chart.createStudy(${safeString(indicator)}, false, false, ${JSON.stringify(inputArr)});
+        var repo = chart.studyMetaIntoRepository();
+        var all = repo.getInternalMetaInfoArray();
+        var wanted = ${safeString(indicator)}.toLowerCase();
+        var meta = all.find(function(m) { return (m.description || '').toLowerCase() === wanted; });
+        if (!meta) {
+          return Promise.resolve({ error: 'Indicator not found: ' + ${safeString(indicator)} +
+            '. Use the full description (e.g. "Moving Average", "Relative Strength Index").' });
+        }
+        var inserter = chart._chartWidget.model().createStudyInserter({ type: 'java', studyId: meta.id }, []);
+        if (inserter.setForceOverlay) inserter.setForceOverlay(!!meta.is_price_study);
+        var inputs = ${JSON.stringify(inputs || {})};
+        return inserter.insert(function() {
+          return Promise.resolve({ inputs: inputs, parentSources: [] });
+        }).then(function(study) {
+          return { entity_id: study && study.id ? study.id() : null, study_id: meta.id };
+        }, function(e) {
+          return { error: 'Study insert failed: ' + (e && e.message ? e.message : String(e)) };
+        });
       })()
     `);
-    await new Promise(r => setTimeout(r, 1500));
-    const after = await evaluate(`${CHART_API}.getAllStudies().map(function(s) { return s.id; })`);
-    const newIds = (after || []).filter(id => !(before || []).includes(id));
-    return { success: newIds.length > 0, action: 'add', indicator, entity_id: newIds[0] || null, new_study_count: newIds.length };
+    if (!result || result.error) {
+      throw new Error(result?.error || 'Unknown error adding indicator');
+    }
+    return { success: true, action: 'add', indicator, entity_id: result.entity_id, study_id: result.study_id };
   } else if (action === 'remove') {
     if (!entity_id) throw new Error('entity_id required for remove action. Use chart_get_state to find study IDs.');
     await evaluate(`
