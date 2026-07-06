@@ -323,12 +323,21 @@ export async function launch({ port, kill_existing, _deps } = {}) {
   if (killFirst) await killExisting();
 
   const cdpArgs = [`--remote-debugging-port=${cdpPort}`];
-  let child = _spawnDetached(deps.spawn, tvPath, cdpArgs);
+  let child = null;
   let info = null;
   let usedLocalCopy = false;
 
-  if (platform === 'win32' && WINDOWS_APPS_RE.test(tvPath)) {
-    const earlyFailure = await _spawnFailedEarly(child);
+  const isMsix = platform === 'win32' && WINDOWS_APPS_RE.test(tvPath);
+  let spawnError = null;
+  try {
+    child = _spawnDetached(deps.spawn, tvPath, cdpArgs);
+  } catch (e) {
+    spawnError = e.code || e.message || 'spawn error';
+  }
+
+  if (isMsix) {
+    // Check for early failure from either a synchronous spawn error or a quick exit/error event.
+    const earlyFailure = spawnError || (child ? await _spawnFailedEarly(child) : 'no child');
     if (!earlyFailure) {
       info = await _waitForCdp({ cdpPort, attempts: 15, delay: deps.delay, probeCdp: deps.probeCdp });
     }
@@ -341,6 +350,8 @@ export async function launch({ port, kill_existing, _deps } = {}) {
       tvPath = localExe;
       usedLocalCopy = true;
     }
+  } else if (spawnError) {
+    throw new Error(`Failed to launch TradingView: ${spawnError}`);
   }
 
   if (!info) {
