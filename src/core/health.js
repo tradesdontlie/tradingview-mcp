@@ -228,7 +228,13 @@ async function _probeCdp(cdpPort) {
 }
 
 function _spawnDetached(spawnFn, exe, args) {
-  const child = spawnFn(exe, args, { detached: true, stdio: 'ignore' });
+  // Strip ELECTRON_RUN_AS_NODE from the child env: when it is set, the Electron
+  // binary (TradingView) runs as plain Node — no Chromium, no window, no CDP —
+  // and rejects Chromium switches like --remote-debugging-port as a "bad option",
+  // so the debug port never binds. Inherited from some shells/host environments.
+  const env = { ...process.env };
+  delete env.ELECTRON_RUN_AS_NODE;
+  const child = spawnFn(exe, args, { detached: true, stdio: 'ignore', env });
   child.unref();
   return child;
 }
@@ -390,6 +396,22 @@ export async function launch({ port, kill_existing, _deps } = {}) {
       cdp_port: cdpPort, cdp_url: `http://${CDP_HOST}:${cdpPort}`,
       browser: info.Browser, user_agent: info['User-Agent'],
       ...(usedLocalCopy && { msix_local_copy: true }),
+    };
+  }
+
+  // CDP never came up. If the process already exited, this is a hard launch
+  // failure (bad flag, crash, wrong binary) — not a slow load — so report it
+  // honestly instead of a misleading success:true.
+  if (typeof child.exitCode === 'number' || child.signalCode) {
+    const reason = child.signalCode
+      ? `was killed by ${child.signalCode}`
+      : `exited immediately (code ${child.exitCode})`;
+    return {
+      success: false, platform, binary: tvPath, pid: child.pid, cdp_port: cdpPort,
+      ...(usedLocalCopy && { msix_local_copy: true }),
+      error: `TradingView ${reason} without binding CDP on port ${cdpPort}. `
+        + 'If ELECTRON_RUN_AS_NODE is set in your environment, unset it and retry '
+        + '(it forces the app to run as headless Node and rejects the debug flag).',
     };
   }
 
