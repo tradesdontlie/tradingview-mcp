@@ -1,6 +1,6 @@
 // Self-check buildScenarios. Run: node test_scenarios.mjs  (expect ALL PASS)
 import assert from 'node:assert';
-import { buildScenarios, contRetestScenario, findDemandBar, rangeBreakoutScenario } from './check_one.mjs';
+import { annotateTplus, buildScenarios, contRetestScenario, findDemandBar, rangeBreakoutScenario, resampleWeekly, weeklyTrend } from './check_one.mjs';
 
 const long = (lo, hi, sl, t1) => sl < lo && lo <= hi && hi < t1;
 
@@ -105,5 +105,41 @@ assert.equal(rangeBreakoutScenario({ resistance: 14300, headroomPct: 0.7, price:
 assert.equal(rangeBreakoutScenario({ resistance: 14300, headroomPct: 9, price: 13000, atr14: 350, dir: 'LONG' }), null, 'overhead xa -> null');
 // SHORT -> null
 assert.equal(rangeBreakoutScenario({ resistance: 14300, headroomPct: 0.7, price: 14300, atr14: 350, dir: 'SHORT' }), null, 'SHORT -> null');
+
+// --- resampleWeekly + weeklyTrend ---
+const DAY = 86400;
+// 30 nen ngay tang deu (close 100..129) -> gop ~tuan, trend UP
+const upBars = Array.from({ length: 30 }, (_, i) => ({
+  time: i * DAY, open: 100 + i, high: 101 + i, low: 99 + i, close: 100 + i, volume: 1e6 }));
+let wk = resampleWeekly(upBars);
+assert.ok(wk.length >= 4 && wk.length <= 7, `30 ngay -> ~tuan (got ${wk.length})`);
+assert.ok(wk[0].time < wk[wk.length - 1].time, 'weekly sap xep tang theo time');
+assert.ok(wk[0].high >= wk[0].open && wk[0].low <= wk[0].close, 'OHLC tuan hop le');
+assert.equal(weeklyTrend(upBars).trend, 'UP', 'gia tang deu -> Weekly UP');
+// 30 nen ngay giam deu -> DOWN
+const dnBars = Array.from({ length: 30 }, (_, i) => ({
+  time: i * DAY, open: 130 - i, high: 131 - i, low: 129 - i, close: 130 - i, volume: 1e6 }));
+assert.equal(weeklyTrend(dnBars).trend, 'DOWN', 'gia giam deu -> Weekly DOWN');
+// du lieu qua it (1 tuan) -> sma null -> SIDEWAYS + note
+let few = weeklyTrend(upBars.slice(0, 3));
+assert.equal(few.trend, 'SIDEWAYS', 'thieu tuan -> SIDEWAYS');
+assert.ok(few.note, 'thieu tuan -> co note');
+
+// --- annotateTplus (T+2.5 chi VN stock): sl_atr/rr_locked/tplus_warn + floor 1.6 ATR ---
+let sc = [{ label: 'retest', entry_low: 14900, entry_high: 15100, sl: 14800, tp1: 16090 }];
+let tp = annotateTplus(sc, { atr14: 389, price: 14900, ticker: 'HOSE:POW' });
+assert.ok(tp && tp.lock_sessions === 2.5 && tp.floor_pct > tp.atr_pct, 'tplus co lock_sessions + floor > atr');
+assert.ok(Math.abs(sc[0].sl_atr - 0.77) < 0.02, `sl_atr ~0.77 (got ${sc[0].sl_atr})`);
+assert.ok(sc[0].tplus_warn, 'SL < 1.6 ATR -> phai co tplus_warn');
+assert.ok(Math.abs(sc[0].rr_locked - 1.59) < 0.02, `rr_locked ~1.59 (got ${sc[0].rr_locked})`);
+// SL du rong (>= 1.6 ATR) -> khong warn
+let sc2 = [{ label: 'retest', entry_low: 14900, entry_high: 15100, sl: 14400, tp1: 16090 }];
+annotateTplus(sc2, { atr14: 389, price: 14900, ticker: 'HOSE:POW' });
+assert.ok(sc2[0].sl_atr >= 1.6 && !sc2[0].tplus_warn, 'SL rong -> khong warn');
+// Forex / futures -> null, khong cham scenario
+let sc3 = [{ entry_high: 3000, sl: 2990, tp1: 3050 }];
+assert.equal(annotateTplus(sc3, { atr14: 5, price: 3000, ticker: 'ICMARKETS:XAUUSD' }), null, 'forex -> null');
+assert.equal(sc3[0].sl_atr, undefined, 'forex scenario khong bi annotate');
+assert.equal(annotateTplus(sc3, { atr14: 5, price: 1500, ticker: 'HNX:VN301!' }), null, 'VN30F -> null');
 
 console.log('ALL PASS');

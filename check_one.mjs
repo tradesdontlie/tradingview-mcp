@@ -84,6 +84,37 @@ function marketStructure(ph, pl) {
   return 'CONTRACTING';
 }
 
+// Gop bar H6 (~Daily, da loc vol thoa thuan) thanh nen tuan theo bucket 7 ngay (epoch-aligned).
+function resampleWeekly(bars) {
+  const wk = new Map();
+  for (const b of bars) {
+    const key = Math.floor(b.time / 604800); // 604800 = 7*86400s
+    const w = wk.get(key);
+    if (!w) wk.set(key, { time: b.time, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume || 0 });
+    else { w.high = Math.max(w.high, b.high); w.low = Math.min(w.low, b.low); w.close = b.close; w.volume += b.volume || 0; }
+  }
+  return [...wk.values()].sort((a, b) => a.time - b.time);
+}
+
+// Trend khung tuan: UP/DOWN/SIDEWAYS tu structure tuan + gia vs SMA tuan.
+function weeklyTrend(weekly) {
+  const closes = weekly.map(b => b.close);
+  const wN = weekly.length;
+  const period = wN >= 20 ? 20 : 10;
+  const smaW = sma(closes, period);
+  const piv = findPivots(weekly, 2);
+  const struct = marketStructure(piv.ph, piv.pl);
+  let trend = 'SIDEWAYS';
+  if (smaW != null) {
+    const above = closes[wN - 1] > smaW;
+    if (above && struct !== 'DOWNTREND') trend = 'UP';
+    else if (!above && struct !== 'UPTREND') trend = 'DOWN';
+  }
+  return { trend, weeks: wN, sma_period: period,
+    sma_w: smaW != null ? round2(smaW) : null, structure: struct,
+    note: smaW == null ? 'thieu du lieu tuan' : (wN < 20 ? `chi ${wN} tuan (SMA${period}W)` : null) };
+}
+
 function tpProjections(pl1, ph1, pl2) {
   const amp = ph1 - pl2;
   return {
@@ -203,6 +234,30 @@ function rangeBreakoutScenario({ resistance, headroomPct, price, atr14, dir }) {
     size_note: '1/2 size, chase' };
 }
 
+// T+2.5 (chi VN stock): mua xong ~2.5 phien hang chua ve, KHONG ban duoc -> SL gan chi la muc bao dong.
+// Annotate MAY MOC vao tung scenario (skill/bot khoi tinh tay): sl_atr = khoang SL theo boi ATR,
+// rr_locked = RR neu phai thoat theo nhieu cua so khoa (1.6 ATR ~ sqrt(2.5) phien), tplus_warn khi SL trong nhieu.
+// XAUUSD / VN30F (co '!') khong co T+ -> tra null, khong cham scenario.
+export const TPLUS_ATR_FLOOR = 1.6;
+export function annotateTplus(scenarios, { atr14, price, ticker }) {
+  const isVnStock = /^(HOSE|HNX|UPCOM):/i.test(ticker || '') && !(ticker || '').includes('!');
+  if (!isVnStock || !atr14 || !price) return null;
+  for (const s of (scenarios || [])) {
+    if (!s.entry_high || !s.sl) continue;
+    s.sl_atr = round2((s.entry_high - s.sl) / atr14);
+    if (s.tp1) s.rr_locked = round2((s.tp1 - s.entry_high) / (TPLUS_ATR_FLOOR * atr14));
+    if (s.sl_atr < TPLUS_ATR_FLOOR) {
+      s.tplus_warn = `SL ${s.sl_atr}xATR < ${TPLUS_ATR_FLOOR}x nhieu T+ -> size theo floor, vao 1/2 truoc + 1/2 sau khi hang ve`;
+    }
+  }
+  return {
+    lock_sessions: 2.5,
+    atr_pct: round2(100 * atr14 / price),
+    floor_pct: round2(100 * TPLUS_ATR_FLOOR * atr14 / price),
+    exit_rule: 'dong cua duoi invalidation khi hang chua ve -> dat ban phien chieu T+2 (ATC neu can), khong cho hoi ve SL',
+  };
+}
+
 function trailStatus(bars, sma20arr) {
   // Check last 3 bars vs SMA20
   const n = bars.length;
@@ -283,7 +338,7 @@ async function main() {
   }
   const [fpTbl, ohlcv, quote] = await Promise.all([
     data.getPineTables({}).catch(() => ({ studies: [] })),
-    data.getOhlcv({ count: 65 }).catch(() => ({})),
+    data.getOhlcv({ count: 130 }).catch(() => ({})),  // 130 H6~Daily ~= 26 tuan (du SMA20W)
     data.getQuote({}).catch(() => ({})),
   ]);
 
@@ -343,7 +398,8 @@ async function main() {
     }
   }
 
-  const bars = (ohlcv.bars || []).slice(-65);
+  const allBars = ohlcv.bars || [];
+  const bars = allBars.slice(-65);   // logic H6 giu nguyen 65 bar; weekly resample tu allBars
   const closes = bars.map(b => b.close);
   const n = bars.length;
   // nen D-0 da dong chua: chua dong -> phase/scenario chot theo nen D-1 (khong nhay trong phien)
@@ -631,13 +687,17 @@ async function main() {
     ? computeRS(bars, idxCache.closes)
     : { rs_20: null, leader: null, note: idxCache ? 'cache VNINDEX cu, chay /scan' : 'chua co cache, chay /scan' };
 
-  // --- MTF score ---
+  // --- HTF (khung tuan that, resample tu H6~Daily) ---
+  const htf = weeklyTrend(resampleWeekly(allBars));
+
+  // --- MTF score: H6 (structure + SMA) + Weekly that ---
   let mtfScore = 0;
   const mtfNotes = [];
-  // W/D bull: price > sma20 > sma100
-  if (sma20_current && sma100_current && sma20_current > sma100_current) { mtfScore += 1; mtfNotes.push('SMA_BULL+1'); }
-  if (structure === 'UPTREND')   { mtfScore += 1; mtfNotes.push('D_UPTREND+1'); }
-  if (structure === 'DOWNTREND') { mtfScore -= 2; mtfNotes.push('D_DOWNTREND-2'); }
+  if (sma20_current && sma100_current && sma20_current > sma100_current) { mtfScore += 1; mtfNotes.push('H6_SMA_BULL+1'); }
+  if (structure === 'UPTREND')   { mtfScore += 1; mtfNotes.push('H6_UPTREND+1'); }
+  if (structure === 'DOWNTREND') { mtfScore -= 2; mtfNotes.push('H6_DOWNTREND-2'); }
+  if (htf.trend === 'UP')   { mtfScore += 1; mtfNotes.push('W_UP+1'); }
+  if (htf.trend === 'DOWN') { mtfScore -= 2; mtfNotes.push('W_DOWN-2'); }
 
   // --- Huong (BiDir): tu fp.bias. null = ban cu long-only ---
   const dir = fp.bias === 1 ? 'LONG' : fp.bias === -1 ? 'SHORT' : fp.bias === 0 ? 'NEUTRAL' : 'LONG_ONLY';
@@ -661,6 +721,9 @@ async function main() {
     });
     if (bo) scenarios.push(bo);
   }
+
+  // T+2.5: annotate sl_atr/rr_locked/tplus_warn vao scenario + tplus top-level (null neu khong phai VN stock)
+  const tplus = annotateTplus(scenarios, { atr14, price, ticker });
 
   // --- Compact output (gate heavy diagnostics behind --full) ---
   const fpOut = { ...fp, score: fpScore, checks: fpChecks };
@@ -692,7 +755,9 @@ async function main() {
     days_to_vn30f_expiry,
     overhead,
     scenarios,
+    tplus,
     rs,
+    htf,
     avg_vol20: Math.round(avgVol20 || 0),
     mtf: { score: mtfScore, notes: mtfNotes },
     pivots: {
@@ -719,7 +784,7 @@ async function main() {
   try { await chart.setSymbol({ symbol: initState.symbol }); } catch(e) {}
   process.exit(0);
 }
-export { buildScenarios, contRetestScenario, findDemandBar, rangeBreakoutScenario };
+export { buildScenarios, contRetestScenario, findDemandBar, rangeBreakoutScenario, resampleWeekly, weeklyTrend };
 
 // Chi chay engine khi goi truc tiep (node check_one.mjs ...), khong khi bi import vao test.
 if ((process.argv[1] || '').replace(/\\/g, '/').endsWith('check_one.mjs')) {
