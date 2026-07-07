@@ -73,6 +73,24 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 - `alert_list` → view active alerts
 - `alert_delete` → remove alerts
 
+### "Receive TradingView alert webhooks"
+TradingView Pro alerts can POST to a webhook URL. Run a local receiver and read what came in.
+
+1. `webhook_start` → listen on a local port (default 9223). Pass `secret` (or set `TV_WEBHOOK_SECRET`); minimum 8 chars; required. Binds to 127.0.0.1 by default.
+2. In TradingView: alert dialog → Notifications → Webhook URL = `http://<host>:9223/`. TradingView Cloud must reach the port — typically via a tunnel like ngrok. Set custom headers including `X-Webhook-Secret: <your secret>`.
+3. `webhook_status` → check running state, counters, port
+4. `webhook_list_alerts` → read buffered alerts in receive order. Pass `limit` for the most-recent N, or `since` (ISO timestamp) to filter.
+5. `webhook_clear_alerts` → empty the buffer (counters preserved)
+6. `webhook_stop` → close port and drop buffered state
+
+Notes:
+- Default ring buffer holds 500 alerts; override with `max_alerts`.
+- Bodies > 64 KB are rejected (413).
+- Server accepts JSON or plain text. Each alert has `raw` (the original string), `body` (parsed JSON or null), and `parsed: boolean`.
+- Auth: `X-Webhook-Secret: <secret>` or `Authorization: Bearer <secret>`. Compared in constant time over SHA-256 digests.
+- Per-IP rate limit: 60 req/min default (override `rate_limit_per_min`; 0 disables). Over-limit returns 429 with `Retry-After`.
+- `/health` is unauthenticated and returns only `{ok: true}` — no counters that could leak activity if the port is exposed.
+
 ### "Navigate the UI"
 - `ui_open_panel` → open/close pine-editor, strategy-tester, watchlist, alerts, trading
 - `ui_click` → click buttons by aria-label, text, or data-name
