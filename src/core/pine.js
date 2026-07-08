@@ -6,30 +6,45 @@
 import { evaluate, evaluateAsync, getClient } from '../connection.js';
 
 // ── Monaco finder (injected into TV page) ──
+// TV can leave a stale hidden .pine-editor-monaco container in the DOM after
+// the editor is re-docked; the stale one has no React fiber on any ancestor,
+// so visible containers (offsetParent !== null) must be tried first.
 const FIND_MONACO = `
   (function findMonacoEditor() {
-    var container = document.querySelector('.monaco-editor.pine-editor-monaco');
-    if (!container) return null;
-    var el = container;
-    var fiberKey;
-    for (var i = 0; i < 20; i++) {
-      if (!el) break;
-      fiberKey = Object.keys(el).find(function(k) { return k.startsWith('__reactFiber$'); });
-      if (fiberKey) break;
-      el = el.parentElement;
-    }
-    if (!fiberKey) return null;
-    var current = el[fiberKey];
-    for (var d = 0; d < 15; d++) {
-      if (!current) break;
-      if (current.memoizedProps && current.memoizedProps.value && current.memoizedProps.value.monacoEnv) {
-        var env = current.memoizedProps.value.monacoEnv;
-        if (env.editor && typeof env.editor.getEditors === 'function') {
-          var editors = env.editor.getEditors();
-          if (editors.length > 0) return { editor: editors[0], env: env };
-        }
+    var all = document.querySelectorAll('.monaco-editor.pine-editor-monaco');
+    if (all.length === 0) return null;
+    var containers = [];
+    var i;
+    for (i = 0; i < all.length; i++) { if (all[i].offsetParent !== null) containers.push(all[i]); }
+    for (i = 0; i < all.length; i++) { if (all[i].offsetParent === null) containers.push(all[i]); }
+    for (var c = 0; c < containers.length; c++) {
+      var el = containers[c];
+      var fiberKey;
+      for (var j = 0; j < 20; j++) {
+        if (!el) break;
+        fiberKey = Object.keys(el).find(function(k) { return k.startsWith('__reactFiber$'); });
+        if (fiberKey) break;
+        el = el.parentElement;
       }
-      current = current.return;
+      if (!fiberKey) continue;
+      var current = el[fiberKey];
+      for (var d = 0; d < 15; d++) {
+        if (!current) break;
+        if (current.memoizedProps && current.memoizedProps.value && current.memoizedProps.value.monacoEnv) {
+          var env = current.memoizedProps.value.monacoEnv;
+          if (env.editor && typeof env.editor.getEditors === 'function') {
+            var editors = env.editor.getEditors();
+            var editor = null;
+            for (var e = 0; e < editors.length; e++) {
+              var dom = editors[e].getDomNode && editors[e].getDomNode();
+              if (dom && dom.offsetParent !== null) { editor = editors[e]; break; }
+            }
+            if (!editor && editors.length > 0) editor = editors[0];
+            if (editor) return { editor: editor, env: env };
+          }
+        }
+        current = current.return;
+      }
     }
     return null;
   })()
