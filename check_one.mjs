@@ -9,7 +9,7 @@ import * as chart from './src/core/chart.js';
 import * as data from './src/core/data.js';
 import { getClient } from './src/connection.js';
 import { computeRS, readVnindexCache } from './rs_util.mjs';
-import { barStatus } from './bar_status.mjs';
+import { barStatus, sessionInfo } from './bar_status.mjs';
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function parseNum(val) {
@@ -626,6 +626,13 @@ async function main() {
   // `bar`/`barClosed` da tinh dau ham (truoc wave) de chot phase theo nen D-1 khi D-0 chua dong
   vol_state.ultra = lastVolRatio != null && lastVolRatio >= VOL_ULTRA;
 
+  // --- Session phase (VN HOSE) ---
+  const isVnStock = /^(HOSE|HNX|UPCOM):/i.test(ticker || '') && !(ticker || '').includes('!');
+  const sess = sessionInfo(new Date(), isVnStock ? 'VN' : 'N/A');
+  const vol_ratio_age_adj = barClosed
+    ? lastVolRatio                                      // nen dong roi -> ratio chinh xac
+    : (bar.age_pct > 0 ? (lastVolRatio / (bar.age_pct / 100)) : null); // du phong ratio phia cuoi phien
+
   // === VN structural fields: bien do tran/san + ADTV + dao han VN30F ===
   // Tach board tu prefix
   const board = ticker.split(':')[0].toUpperCase();
@@ -748,6 +755,13 @@ async function main() {
     bar_read,
     bar,
     prev_closed,
+    session: {
+      phase: sess.phase,
+      trust_level: sess.trust_level,
+      age_pct: bar.age_pct,
+      vol_ratio_age_adj,
+      warnings: sess.warnings,
+    },
     vsa_churn,
     topbot,
     price_limit,

@@ -10,6 +10,7 @@ import { getClient } from './src/connection.js';
 import { readFileSync, writeFileSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { computeRS, writeVnindexCache, VNINDEX_SYM } from './rs_util.mjs';
+import { barStatus, sessionInfo } from './bar_status.mjs';
 
 // Evening Scout feed: scan_live ghi ket qua footprint cho morning brief (scout_promote.py doc file nay)
 const requiredEnv = name => {
@@ -190,20 +191,25 @@ function marketStructure(ph, pl) {
   if (ph[0].price > ph[1].price && pl[0].price < pl[1].price) return 'EXPANDING';
   return 'CONTRACTING';
 }
-// Tra { phase, vol_ratio } — phase khop logic check_one.mjs (PULLBACK/IMPULSE/DOWNTREND/SIDEWAYS)
+// Tra { phase, vol_ratio, churn } — phase khop logic check_one.mjs (PULLBACK/IMPULSE/DOWNTREND/SIDEWAYS)
+// Dung decisionPrice (chot theo nen D-1 khi D-0 chua dong) de phase khong nhap nhay trong phien.
 function computeWave(bars, price) {
   if (!bars || bars.length < 25) return { phase: 'UNKNOWN', vol_ratio: null };
+  // barStatus cho nen cuoi: chua dong -> decisionPrice = close D-1 (chot phase)
+  const lastBar = bars[bars.length - 1];
+  const barInfo = barStatus(lastBar.time, 360);
+  const decisionPrice = barInfo.closed ? price : (bars[bars.length - 2]?.close ?? price);
   const { ph, pl } = findPivots(bars, 3);
   const structure = marketStructure(ph, pl);
   let phase = 'SIDEWAYS';
   if (structure === 'UPTREND' && ph.length >= 1 && pl.length >= 2) {
-    phase = price < ph[0].price ? 'PULLBACK' : 'IMPULSE';
+    phase = decisionPrice < ph[0].price ? 'PULLBACK' : 'IMPULSE';
   } else if (structure === 'DOWNTREND') {
     phase = 'DOWNTREND';
   }
   const vols = bars.map(b => b.volume);
   const avgVol20 = sma(vols, 20);
-  const vol_ratio = avgVol20 ? Math.round(bars[bars.length - 1].volume / avgVol20 * 100) / 100 : null;
+  const vol_ratio = avgVol20 ? Math.round(lastBar.volume / avgVol20 * 100) / 100 : null;
   // VSA churn: no luc cao + dong yeu/mid + than nho (chom cung tai nen no-progress)
   let churn = false;
   const lb = bars[bars.length - 1];
@@ -367,6 +373,7 @@ function buildScoutResult(r, marketRegime) {
     market_adj: r.scored?.market_adj ?? 0,
     regime_note: r.scored?.regime_note ?? marketRegime.note,
     sector: r.sector,
+    session: r.session ?? null,
   };
 }
 
@@ -436,7 +443,11 @@ async function scanOne(ticker, name, idxCloses) {
   const scored = scoreSignal(fp, ma, price, phase, vol_ratio, churn);
   const rs = idxCloses ? computeRS(bars, idxCloses) : { rs_20: null, leader: null };
 
-  return { price, chg_pct, fp, ma, scored, tableRows, phase, vol_ratio, churn, rs };
+  // Session phase (VN HOSE gate)
+  const isVnStock = /^(HOSE|HNX|UPCOM):/i.test(ticker || '') && !(ticker || '').includes('!');
+  const sess = sessionInfo(new Date(), isVnStock ? 'VN' : 'N/A');
+
+  return { price, chg_pct, fp, ma, scored, tableRows, phase, vol_ratio, churn, rs, session: sess };
 }
 
 async function main() {
@@ -515,6 +526,11 @@ async function main() {
       continue;
     }
     applyRegimeGate(r, marketRegime.regime);
+    // Session trust gate: LOW (ATO/EARLY/ATC/LUNCH) → cap BUY→WATCH
+    if (r.session?.trust_level === 'LOW' && r.scored?.sig === 'BUY') {
+      r.scored.sig = 'WATCH';
+      r.scored.regime_note = (r.scored.regime_note || '') + '; session LOW: BUY→WATCH';
+    }
     const sig = r.scored.sig;
     const pct = r.scored.pct;
     console.log(sig + (pct !== null ? ' (' + pct + '%)' : '') +

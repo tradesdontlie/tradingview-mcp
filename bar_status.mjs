@@ -24,6 +24,27 @@ export function barStatus(barOpenSec, tfMin, now = new Date()) {
   return { closed: ageMin >= tfMin, age_pct: clamp(Math.round(ageMin / tfMin * 100), 0, 100) };
 }
 
+/**
+ * sessionInfo — xac dinh phien giao dich VN HOSE (ATO/Continuous/ATC/LUNCH/CLOSED).
+ * Chia KHU VUC giao dich de gate trust level cho entry/scan/alert.
+ * market != 'VN' → { phase:'N/A', trust_level:'HIGH', warnings:[] } (nhuong thị trường khác).
+ * Dong bo logic Python voi tg_alert_watcher.py vn_session_phase().
+ */
+export function sessionInfo(now = new Date(), market = 'VN') {
+  if (market !== 'VN') return { phase: 'N/A', trust_level: 'HIGH', warnings: [] };
+  const wd = now.getDay(); // 0=Sun..6=Sat
+  if (wd === 0 || wd === 6) return { phase: 'CLOSED', trust_level: 'LOW', warnings: ['weekend'] };
+  const t = now.getHours() * 60 + now.getMinutes();
+  if (t < 540)  return { phase: 'CLOSED',    trust_level: 'LOW',  warnings: ['pre_market'] };
+  if (t < 555)  return { phase: 'ATO',       trust_level: 'LOW',  warnings: ['ato_noisy_delta'] };
+  if (t < 570)  return { phase: 'EARLY',     trust_level: 'LOW',  warnings: ['early_vol_unstable'] };
+  if (t < 690)  return { phase: 'CONT_AM',   trust_level: 'HIGH', warnings: [] };
+  if (t < 780)  return { phase: 'LUNCH',     trust_level: 'LOW',  warnings: ['lunch_stale_price'] };
+  if (t < 870)  return { phase: 'CONT_PM',   trust_level: 'HIGH', warnings: [] };
+  if (t < 885)  return { phase: 'ATC',       trust_level: 'LOW',  warnings: ['atc_frozen_orderbook'] };
+  return { phase: 'CLOSED', trust_level: 'HIGH', warnings: [] }; // >14:45 gia dong chinh thuc
+}
+
 // ponytail: self-check chay khi goi truc tiep `node bar_status.mjs`
 if (process.argv[1] && process.argv[1].endsWith('bar_status.mjs')) {
   const mk = (h, m) => new Date(2026, 5, 23, h, m); // 23/06/2026
@@ -40,5 +61,17 @@ if (process.argv[1] && process.argv[1].endsWith('bar_status.mjs')) {
   console.assert(barStatus(sec(nowI) - 180, 5, nowI).closed === false, 'M5 -3p phai chua dong');
   // M5: nen mo cach day 6 phut -> da dong
   console.assert(barStatus(sec(nowI) - 360, 5, nowI).closed === true, 'M5 -6p phai dong');
+  // sessionInfo self-check
+  const sun = new Date(2026, 6, 5, 11, 0); // Chu nhat 05/07/2026
+  console.assert(sessionInfo(sun).phase === 'CLOSED', 'Sunday phai CLOSED');
+  console.assert(sessionInfo(new Date(2026, 6, 9, 9, 10)).phase === 'ATO', '09:10 phai ATO');
+  console.assert(sessionInfo(new Date(2026, 6, 9, 10, 0)).phase === 'CONT_AM', '10:00 phai CONT_AM');
+  console.assert(sessionInfo(new Date(2026, 6, 9, 14, 40)).phase === 'ATC', '14:40 phai ATC');
+  console.assert(sessionInfo(new Date(2026, 6, 9, 12, 0)).phase === 'LUNCH', '12:00 phai LUNCH');
+  console.assert(sessionInfo(new Date(2026, 6, 9, 9, 20)).phase === 'EARLY', '09:20 phai EARLY');
+  console.assert(sessionInfo(new Date(2026, 6, 9, 13, 30)).phase === 'CONT_PM', '13:30 phai CONT_PM');
+  console.assert(sessionInfo(new Date(2026, 6, 9, 15, 0)).trust_level === 'HIGH', '15:00 trust=HIGH (post-close)');
+  console.assert(sessionInfo(new Date(2026, 6, 9, 10, 0), 'FX').phase === 'N/A', 'FX market=N/A');
+  console.log('sessionInfo self-check OK');
   console.log('bar_status self-check OK');
 }
