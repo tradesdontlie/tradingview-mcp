@@ -16,6 +16,11 @@ Custom Pine indicators draw with `line.new()`, `label.new()`, `table.new()`, `bo
 2. `data_get_pine_labels` → text annotations with prices (e.g., "PDH 24550", "Bias Long ✓")
 3. `data_get_pine_tables` → table data formatted as rows (e.g., session stats, analytics dashboards)
 4. `data_get_pine_boxes` → price zones / ranges as {high, low} pairs
+5. `data_get_bias_signal` → infer bullish/bearish/neutral directional bias for black-box custom
+   indicators (no plot() output, so data_get_study_values returns nothing for them). Checks
+   label/table text for explicit bias keywords first; falls back to a sweep→confirmation
+   (CSD/BOS/CHoCH) label-price sequence heuristic. Use for SMC-style indicators like
+   "CRT overlay Pro+" / "PO3 Entry".
 
 Use `study_filter` parameter to target a specific indicator by name substring (e.g., `study_filter: "Profiler"`).
 
@@ -32,6 +37,7 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 5. `data_get_pine_tables` → session stats, analytics tables
 6. `data_get_ohlcv` with `summary: true` → price action summary
 7. `capture_screenshot` → visual confirmation
+8. `data_get_bias_signal` → current bullish/bearish/neutral call from custom SMC-style indicators
 
 ### "Change the chart"
 - `chart_set_symbol` → switch ticker (e.g., "AAPL", "ES1!", "NYMEX:CL1!")
