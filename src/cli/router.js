@@ -3,6 +3,7 @@
  * Zero dependencies — uses only Node.js built-ins.
  */
 import { parseArgs } from 'node:util';
+import { disconnect } from '../connection.js';
 
 /** @type {Map<string, { description: string, options?: object, handler: Function, subcommands?: Map<string, object> }>} */
 const commands = new Map();
@@ -105,7 +106,7 @@ export async function run(argv) {
       }
       await execute(handler, values, positionals);
     } catch (err) {
-      handleError(err);
+      await handleError(err);
     }
   } else {
     handler = cmd.handler;
@@ -123,7 +124,7 @@ export async function run(argv) {
       }
       await execute(handler, values, positionals);
     } catch (err) {
-      handleError(err);
+      await handleError(err);
     }
   }
 }
@@ -132,19 +133,24 @@ async function execute(handler, values, positionals) {
   try {
     const result = await handler(values, positionals);
     console.log(JSON.stringify(result, null, 2));
+    // Close the CDP connection (no-op if none was opened) before exiting.
     // process.exitCode (not process.exit()): handlers that call fetch() (e.g.
     // pine check) can still have an in-flight network handle mid-teardown here.
     // Forcibly killing the process with process.exit() races that libuv cleanup
     // and crashes with a uv__async_send/UV_HANDLE_CLOSING assertion on Windows
-    // with Node 24.x. Setting exitCode lets the event loop drain naturally.
+    // with Node 24.x. Setting exitCode lets the event loop drain naturally —
+    // but that only works if we've actually closed the CDP WebSocket ourselves,
+    // otherwise the open socket keeps the event loop alive forever.
+    await disconnect();
     process.exitCode = 0;
   } catch (err) {
-    handleError(err);
+    await handleError(err);
   }
 }
 
-function handleError(err) {
+async function handleError(err) {
   const message = err.message || String(err);
+  await disconnect();
   // Connection failures get exit code 2
   if (/CDP|connection|ECONNREFUSED|not running/i.test(message)) {
     console.error(JSON.stringify({ success: false, error: message }, null, 2));
