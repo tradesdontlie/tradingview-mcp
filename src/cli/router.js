@@ -132,7 +132,12 @@ async function execute(handler, values, positionals) {
   try {
     const result = await handler(values, positionals);
     console.log(JSON.stringify(result, null, 2));
-    process.exit(0);
+    // process.exitCode (not process.exit()): handlers that call fetch() (e.g.
+    // pine check) can still have an in-flight network handle mid-teardown here.
+    // Forcibly killing the process with process.exit() races that libuv cleanup
+    // and crashes with a uv__async_send/UV_HANDLE_CLOSING assertion on Windows
+    // with Node 24.x. Setting exitCode lets the event loop drain naturally.
+    process.exitCode = 0;
   } catch (err) {
     handleError(err);
   }
@@ -143,8 +148,9 @@ function handleError(err) {
   // Connection failures get exit code 2
   if (/CDP|connection|ECONNREFUSED|not running/i.test(message)) {
     console.error(JSON.stringify({ success: false, error: message }, null, 2));
-    process.exit(2);
+    process.exitCode = 2;
+    return;
   }
   console.error(JSON.stringify({ success: false, error: message }, null, 2));
-  process.exit(1);
+  process.exitCode = 1;
 }
