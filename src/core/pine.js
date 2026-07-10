@@ -9,6 +9,24 @@ import { evaluate, evaluateAsync, getClient } from '../connection.js';
 // TradingView Desktop uses Cmd-based shortcuts on macOS.
 const PRIMARY_MODIFIER = process.platform === 'darwin' ? 4 : 2;
 
+// Focuses the visible Pine Monaco textarea so keyboard shortcuts dispatched
+// via CDP actually reach the editor. Synthetic CDP mouse clicks do not move
+// DOM focus, so without this the Cmd/Ctrl+Enter and Cmd/Ctrl+S fallbacks are
+// no-ops whenever focus sits on <body>.
+const FOCUS_EDITOR = `
+  (function() {
+    var eds = document.querySelectorAll('.monaco-editor.pine-editor-monaco');
+    for (var i = 0; i < eds.length; i++) {
+      var r = eds[i].getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) {
+        var ta = eds[i].querySelector('textarea');
+        if (ta) { ta.focus(); return true; }
+      }
+    }
+    return false;
+  })()
+`;
+
 // Clicks the visible "Save"/"保存" button inside a modal dialog, e.g. the
 // "Save script before adding?" prompt that blocks Add-to-chart for unsaved
 // scripts. Returns true if a dialog button was clicked.
@@ -351,6 +369,7 @@ export async function compile() {
   `);
 
   if (!clicked) {
+    await evaluate(FOCUS_EDITOR);
     const c = await getClient();
     await c.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: PRIMARY_MODIFIER, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
     await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 'Enter', code: 'Enter' });
@@ -393,6 +412,7 @@ export async function save() {
   const editorReady = await ensurePineEditorOpen();
   if (!editorReady) throw new Error('Could not open Pine Editor.');
 
+  await evaluate(FOCUS_EDITOR);
   const c = await getClient();
   await c.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: PRIMARY_MODIFIER, key: 's', code: 'KeyS', windowsVirtualKeyCode: 83 });
   await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 's', code: 'KeyS' });
@@ -495,6 +515,7 @@ export async function smartCompile() {
   `);
 
   if (!buttonClicked) {
+    await evaluate(FOCUS_EDITOR);
     const c = await getClient();
     await c.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: PRIMARY_MODIFIER, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
     await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 'Enter', code: 'Enter' });
