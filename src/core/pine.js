@@ -5,31 +5,71 @@
  */
 import { evaluate, evaluateAsync, getClient } from '../connection.js';
 
+// CDP modifier bitmask: Alt=1, Ctrl=2, Meta=4, Shift=8.
+// TradingView Desktop uses Cmd-based shortcuts on macOS.
+const PRIMARY_MODIFIER = process.platform === 'darwin' ? 4 : 2;
+
+// Clicks the visible "Save"/"保存" button inside a modal dialog, e.g. the
+// "Save script before adding?" prompt that blocks Add-to-chart for unsaved
+// scripts. Returns true if a dialog button was clicked.
+const CLICK_DIALOG_SAVE = `
+  (function() {
+    var btns = document.querySelectorAll('[role="dialog"] button, [class*="dialog"] button, [class*="modal"] button, [class*="popup"] button');
+    for (var i = 0; i < btns.length; i++) {
+      var t = btns[i].textContent.trim();
+      if ((t === 'Save' || t === '保存') && btns[i].offsetParent !== null) {
+        btns[i].click();
+        return true;
+      }
+    }
+    return false;
+  })()
+`;
+
 // ── Monaco finder (injected into TV page) ──
+// The page can hold more than one Pine Monaco instance (e.g. a stale editor
+// left behind after the panel is re-docked between the right sidebar and the
+// bottom panel). Always prefer the *visible* container/editor so reads and
+// writes target what the user actually sees.
 const FIND_MONACO = `
   (function findMonacoEditor() {
-    var container = document.querySelector('.monaco-editor.pine-editor-monaco');
-    if (!container) return null;
-    var el = container;
-    var fiberKey;
-    for (var i = 0; i < 20; i++) {
-      if (!el) break;
-      fiberKey = Object.keys(el).find(function(k) { return k.startsWith('__reactFiber$'); });
-      if (fiberKey) break;
-      el = el.parentElement;
+    function isVisible(node) {
+      if (!node || node.offsetParent === null) return false;
+      var r = node.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
     }
-    if (!fiberKey) return null;
-    var current = el[fiberKey];
-    for (var d = 0; d < 15; d++) {
-      if (!current) break;
-      if (current.memoizedProps && current.memoizedProps.value && current.memoizedProps.value.monacoEnv) {
-        var env = current.memoizedProps.value.monacoEnv;
-        if (env.editor && typeof env.editor.getEditors === 'function') {
-          var editors = env.editor.getEditors();
-          if (editors.length > 0) return { editor: editors[0], env: env };
-        }
+    var containers = Array.prototype.slice.call(document.querySelectorAll('.monaco-editor.pine-editor-monaco'));
+    if (containers.length === 0) return null;
+    containers.sort(function(a, b) { return (isVisible(b) ? 1 : 0) - (isVisible(a) ? 1 : 0); });
+    for (var c = 0; c < containers.length; c++) {
+      var el = containers[c];
+      var fiberKey;
+      for (var i = 0; i < 20; i++) {
+        if (!el) break;
+        fiberKey = Object.keys(el).find(function(k) { return k.startsWith('__reactFiber$'); });
+        if (fiberKey) break;
+        el = el.parentElement;
       }
-      current = current.return;
+      if (!fiberKey) continue;
+      var current = el[fiberKey];
+      for (var d = 0; d < 15; d++) {
+        if (!current) break;
+        if (current.memoizedProps && current.memoizedProps.value && current.memoizedProps.value.monacoEnv) {
+          var env = current.memoizedProps.value.monacoEnv;
+          if (env.editor && typeof env.editor.getEditors === 'function') {
+            var editors = env.editor.getEditors();
+            if (editors.length > 0) {
+              var chosen = null;
+              for (var e = 0; e < editors.length; e++) {
+                var node = editors[e].getDomNode && editors[e].getDomNode();
+                if (node && isVisible(node)) { chosen = editors[e]; break; }
+              }
+              return { editor: chosen || editors[0], env: env };
+            }
+          }
+        }
+        current = current.return;
+      }
     }
     return null;
   })()
@@ -291,15 +331,16 @@ export async function compile() {
       var fallback = null;
       var saveBtn = null;
       for (var i = 0; i < btns.length; i++) {
+        if (btns[i].offsetParent === null) continue;
         var text = btns[i].textContent.trim();
-        if (/save and add to chart/i.test(text)) {
+        if (/save and add to chart/i.test(text) || text.indexOf('保存并添加到图表') !== -1) {
           btns[i].click();
           return 'Save and add to chart';
         }
-        if (!fallback && /^(Add to chart|Update on chart)/i.test(text)) {
+        if (!fallback && (/^(Add to chart|Update on chart)/i.test(text) || text.indexOf('添加到图表') !== -1 || text.indexOf('更新于图表') !== -1)) {
           fallback = btns[i];
         }
-        if (!saveBtn && btns[i].className.indexOf('saveButton') !== -1 && btns[i].offsetParent !== null) {
+        if (!saveBtn && btns[i].className.indexOf('saveButton') !== -1) {
           saveBtn = btns[i];
         }
       }
@@ -311,12 +352,16 @@ export async function compile() {
 
   if (!clicked) {
     const c = await getClient();
-    await c.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: 2, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+    await c.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: PRIMARY_MODIFIER, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
     await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 'Enter', code: 'Enter' });
   }
 
+  // Add-to-chart on an unsaved script pops a "save first" dialog — confirm it.
+  await new Promise(r => setTimeout(r, 800));
+  const dialogSaved = await evaluate(CLICK_DIALOG_SAVE);
+
   await new Promise(r => setTimeout(r, 2000));
-  return { success: true, button_clicked: clicked || 'keyboard_shortcut', source: 'dom_fallback' };
+  return { success: true, button_clicked: clicked || 'keyboard_shortcut', save_dialog_confirmed: dialogSaved === true, source: 'dom_fallback' };
 }
 
 export async function getErrors() {
@@ -349,27 +394,12 @@ export async function save() {
   if (!editorReady) throw new Error('Could not open Pine Editor.');
 
   const c = await getClient();
-  await c.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: 2, key: 's', code: 'KeyS', windowsVirtualKeyCode: 83 });
+  await c.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: PRIMARY_MODIFIER, key: 's', code: 'KeyS', windowsVirtualKeyCode: 83 });
   await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 's', code: 'KeyS' });
   await new Promise(r => setTimeout(r, 800));
 
   // Handle "Save Script" name dialog that appears for new/unsaved scripts
-  const dialogHandled = await evaluate(`
-    (function() {
-      var saveBtn = null;
-      var btns = document.querySelectorAll('button');
-      for (var i = 0; i < btns.length; i++) {
-        var text = btns[i].textContent.trim();
-        if (text === 'Save' && btns[i].offsetParent !== null) {
-          // Check if it's in a dialog (not the Pine Editor save button)
-          var parent = btns[i].closest('[class*="dialog"], [class*="modal"], [class*="popup"], [role="dialog"]');
-          if (parent) { saveBtn = btns[i]; break; }
-        }
-      }
-      if (saveBtn) { saveBtn.click(); return true; }
-      return false;
-    })()
-  `);
+  const dialogHandled = await evaluate(CLICK_DIALOG_SAVE);
 
   if (dialogHandled) await new Promise(r => setTimeout(r, 500));
 
@@ -447,14 +477,15 @@ export async function smartCompile() {
       var updateBtn = null;
       var saveBtn = null;
       for (var i = 0; i < btns.length; i++) {
+        if (btns[i].offsetParent === null) continue;
         var text = btns[i].textContent.trim();
-        if (/save and add to chart/i.test(text)) {
+        if (/save and add to chart/i.test(text) || text.indexOf('保存并添加到图表') !== -1) {
           btns[i].click();
           return 'Save and add to chart';
         }
-        if (!addBtn && /^add to chart$/i.test(text)) addBtn = btns[i];
-        if (!updateBtn && /^update on chart$/i.test(text)) updateBtn = btns[i];
-        if (!saveBtn && btns[i].className.indexOf('saveButton') !== -1 && btns[i].offsetParent !== null) saveBtn = btns[i];
+        if (!addBtn && (/^add to chart$/i.test(text) || text.indexOf('添加到图表') !== -1)) addBtn = btns[i];
+        if (!updateBtn && (/^update on chart$/i.test(text) || text.indexOf('更新于图表') !== -1)) updateBtn = btns[i];
+        if (!saveBtn && btns[i].className.indexOf('saveButton') !== -1) saveBtn = btns[i];
       }
       if (addBtn) { addBtn.click(); return 'Add to chart'; }
       if (updateBtn) { updateBtn.click(); return 'Update on chart'; }
@@ -465,9 +496,13 @@ export async function smartCompile() {
 
   if (!buttonClicked) {
     const c = await getClient();
-    await c.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: 2, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+    await c.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: PRIMARY_MODIFIER, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
     await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 'Enter', code: 'Enter' });
   }
+
+  // Add-to-chart on an unsaved script pops a "save first" dialog — confirm it.
+  await new Promise(r => setTimeout(r, 800));
+  const dialogSaved = await evaluate(CLICK_DIALOG_SAVE);
 
   await new Promise(r => setTimeout(r, 2500));
 
@@ -499,6 +534,7 @@ export async function smartCompile() {
   return {
     success: true,
     button_clicked: buttonClicked || 'keyboard_shortcut',
+    save_dialog_confirmed: dialogSaved === true,
     has_errors: errors?.length > 0,
     errors: errors || [],
     study_added: studyAdded,
