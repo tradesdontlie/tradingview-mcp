@@ -12,6 +12,7 @@ ping -n 3 127.0.0.1 >nul
 
 REM Auto-detect TradingView install location
 set "TV_EXE="
+set "TV_AUMID="
 
 REM Check common install locations
 if exist "%LOCALAPPDATA%\TradingView\TradingView.exe" set "TV_EXE=%LOCALAPPDATA%\TradingView\TradingView.exe"
@@ -22,12 +23,15 @@ REM Check MSIX / Windows Store installs.
 REM Get-AppxPackage resolves the install without elevation; enumerating
 REM %PROGRAMFILES%\WindowsApps with dir requires admin rights, so keep it as a fallback.
 if "%TV_EXE%"=="" (
-    for /f "usebackq tokens=*" %%i in (`powershell -NoProfile -Command "(Get-AppxPackage -Name 'TradingView.Desktop' -ErrorAction SilentlyContinue).InstallLocation" 2^>nul`) do (
+    for /f "usebackq tokens=*" %%i in (`powershell -NoProfile -Command "Get-AppxPackage | Where-Object { $_.Name -like '*TradingView*' -or $_.PackageFullName -like '*TradingView*' } | Select-Object -First 1 -ExpandProperty InstallLocation" 2^>nul`) do (
         if exist "%%i\TradingView.exe" set "TV_EXE=%%i\TradingView.exe"
+    )
+    for /f "usebackq tokens=*" %%i in (`powershell -NoProfile -Command "$pkg = Get-AppxPackage | Where-Object { $_.Name -like '*TradingView*' -or $_.PackageFullName -like '*TradingView*' } | Select-Object -First 1; if ($pkg) { $manifest = [xml](Get-Content (Join-Path $pkg.InstallLocation 'AppxManifest.xml')); $pkg.PackageFamilyName + '!' + $manifest.Package.Applications.Application.Id }" 2^>nul`) do (
+        set "TV_AUMID=%%i"
     )
 )
 if "%TV_EXE%"=="" (
-    for /f "tokens=*" %%i in ('dir /s /b "%PROGRAMFILES%\WindowsApps\TradingView*\TradingView.exe" 2^>nul') do set "TV_EXE=%%i"
+    for /f "tokens=*" %%i in ('dir /s /b "%PROGRAMFILES%\WindowsApps\*TradingView*\TradingView.exe" 2^>nul') do set "TV_EXE=%%i"
 )
 if "%TV_EXE%"=="" (
     for /f "tokens=*" %%i in ('where TradingView.exe 2^>nul') do set "TV_EXE=%%i"
@@ -42,9 +46,15 @@ if "%TV_EXE%"=="" (
     exit /b 1
 )
 
-echo Found TradingView at: %TV_EXE%
-echo Starting with --remote-debugging-port=%PORT%...
-start "" "%TV_EXE%" --remote-debugging-port=%PORT%
+if not "%TV_AUMID%"=="" (
+    echo Found TradingView AppX: %TV_AUMID%
+    echo Starting with --remote-debugging-port=%PORT%...
+    powershell -NoProfile -Command "Start-Process -FilePath 'shell:AppsFolder\%TV_AUMID%' -ArgumentList '--remote-debugging-port=%PORT%'" >nul 2>&1
+) else (
+    echo Found TradingView at: %TV_EXE%
+    echo Starting with --remote-debugging-port=%PORT%...
+    start "" "%TV_EXE%" --remote-debugging-port=%PORT%
+)
 
 echo Waiting for CDP to become available...
 ping -n 6 127.0.0.1 >nul
