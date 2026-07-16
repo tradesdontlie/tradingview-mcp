@@ -5,6 +5,7 @@ import { getClient, getTargetInfo, evaluate, CDP_HOST, CDP_PORT } from '../conne
 import { existsSync, cpSync, rmSync, readdirSync } from 'fs';
 import { execSync, spawn } from 'child_process';
 import { dirname, basename, join } from 'path';
+import { fileURLToPath } from 'url';
 
 // Best-effort git-pull update check: compare local HEAD to origin's default
 // branch on GitHub. Never throws — returns null on any failure (offline,
@@ -228,22 +229,17 @@ async function _probeCdp(cdpPort) {
 }
 
 function _spawnDetached(spawnFn, exe, args) {
-  const child = spawnFn(exe, args, { detached: true, stdio: 'ignore' });
-  child.unref();
-  return child;
-}
-
-// Resolves once with an error string if the process fails/exits within graceMs,
-// or with null if it survives that long.
-function _spawnFailedEarly(child, graceMs = 1500) {
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => { cleanup(); resolve(null); }, graceMs);
-    const onError = (e) => { cleanup(); resolve(e.code || e.message || 'spawn error'); };
-    const onExit = (code) => { cleanup(); resolve(`exited immediately (code ${code})`); };
-    const cleanup = () => { clearTimeout(timer); child.off?.('error', onError); child.off?.('exit', onExit); };
-    child.on('error', onError);
-    child.on('exit', onExit);
-  });
+  // spawn() can throw synchronously (e.g. EPERM for WindowsApps paths) as well
+  // as emit an async 'error'. Swallow both: an unhandled 'error' event would
+  // crash the server, and callers report failure via _waitForCdp timing out.
+  try {
+    const child = spawnFn(exe, args, { detached: true, stdio: 'ignore' });
+    child.on?.('error', () => {});
+    child.unref();
+    return child;
+  } catch {
+    return { pid: undefined };
+  }
 }
 
 async function _waitForCdp({ cdpPort, attempts, delay, probeCdp }) {
@@ -258,11 +254,31 @@ async function _waitForCdp({ cdpPort, attempts, delay, probeCdp }) {
 }
 
 /**
- * Some Windows builds block CDP for MSIX-packaged apps: direct spawn from
- * WindowsApps gets EACCES, and even COM activation passes the flag but the
- * debug port never binds (issues #42, #75, #128). Running the same files from
- * a plain directory outside WindowsApps works and keeps the user's session,
- * so copy the package into LOCALAPPDATA once per version and launch that.
+ * MSIX installs need their full package context: spawning TradingView.exe
+ * straight out of WindowsApps throws EPERM, and builds 3.3.0+ crash with
+ * "bridge-not-loaded" (~12s after start) when run from a plain directory.
+ * COM activation via IApplicationActivationManager launches the app
+ * full-trust inside its package context with the CDP flag forwarded, so it
+ * is the primary launch path for WindowsApps installs. Runs
+ * scripts/activate_msix.ps1; returns the launched PID (or undefined),
+ * throws if PowerShell/activation fails.
+ */
+function _activateMsixViaCom(cdpPort, { execSync }) {
+  const script = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'scripts', 'activate_msix.ps1');
+  const out = execSync(
+    `powershell -NoProfile -ExecutionPolicy Bypass -File "${script}" -Arguments "--remote-debugging-port=${cdpPort}"`,
+    { timeout: 30000, stdio: ['ignore', 'pipe', 'ignore'] }
+  ).toString().trim();
+  const pid = Number(out.split(/\r?\n/).pop());
+  return Number.isFinite(pid) && pid > 0 ? pid : undefined;
+}
+
+/**
+ * Last-resort fallback for MSIX installs where COM activation leaves the
+ * debug port unbound (seen on some builds: issues #42, #75, #128): copy the
+ * package into LOCALAPPDATA once per version and launch from the copy. The
+ * copy keeps the user's session. Known to crash with "bridge-not-loaded" on
+ * 3.3.0+, which is why COM activation is tried first.
  */
 function _copyMsixPackageLocal(tvPath, { cpSync, rmSync, readdirSync, existsSync }) {
   const srcDir = dirname(tvPath);
@@ -360,24 +376,33 @@ export async function launch({ port, kill_existing, _deps } = {}) {
   if (killFirst) await killExisting();
 
   const cdpArgs = [`--remote-debugging-port=${cdpPort}`];
-  let child = _spawnDetached(deps.spawn, tvPath, cdpArgs);
+  let pid;
   let info = null;
   let usedLocalCopy = false;
+  let usedComActivation = false;
 
   if (platform === 'win32' && WINDOWS_APPS_RE.test(tvPath)) {
-    const earlyFailure = await _spawnFailedEarly(child);
-    if (!earlyFailure) {
+    // MSIX/Store install — COM activation is the primary path; direct spawn
+    // from WindowsApps always fails with EPERM (see _activateMsixViaCom).
+    try {
+      pid = _activateMsixViaCom(cdpPort, deps);
+      usedComActivation = true;
       info = await _waitForCdp({ cdpPort, attempts: 15, delay: deps.delay, probeCdp: deps.probeCdp });
-    }
+    } catch { /* activation unavailable — fall through to the local copy */ }
     if (!info) {
-      // Direct WindowsApps launch was blocked or CDP never bound — fall back to
-      // a local copy of the package (see _copyMsixPackageLocal).
+      // COM activation failed or CDP never bound — last resort is a local
+      // copy of the package (see _copyMsixPackageLocal).
+      usedComActivation = false;
       const localExe = _copyMsixPackageLocal(tvPath, deps);
       await killExisting();
-      child = _spawnDetached(deps.spawn, localExe, cdpArgs);
+      const child = _spawnDetached(deps.spawn, localExe, cdpArgs);
       tvPath = localExe;
+      pid = child.pid;
       usedLocalCopy = true;
     }
+  } else {
+    const child = _spawnDetached(deps.spawn, tvPath, cdpArgs);
+    pid = child.pid;
   }
 
   if (!info) {
@@ -386,15 +411,17 @@ export async function launch({ port, kill_existing, _deps } = {}) {
 
   if (info) {
     return {
-      success: true, platform, binary: tvPath, pid: child.pid,
+      success: true, platform, binary: tvPath, pid,
       cdp_port: cdpPort, cdp_url: `http://${CDP_HOST}:${cdpPort}`,
       browser: info.Browser, user_agent: info['User-Agent'],
+      ...(usedComActivation && { msix_com_activation: true }),
       ...(usedLocalCopy && { msix_local_copy: true }),
     };
   }
 
   return {
-    success: true, platform, binary: tvPath, pid: child.pid, cdp_port: cdpPort, cdp_ready: false,
+    success: true, platform, binary: tvPath, pid, cdp_port: cdpPort, cdp_ready: false,
+    ...(usedComActivation && { msix_com_activation: true }),
     ...(usedLocalCopy && { msix_local_copy: true }),
     warning: 'TradingView launched but CDP not responding yet. It may still be loading. Try tv_health_check in a few seconds.',
   };

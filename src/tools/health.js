@@ -19,7 +19,7 @@ export function registerHealthTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('tv_launch', 'Launch TradingView Desktop with Chrome DevTools Protocol (remote debugging) enabled. Auto-detects install location on Mac, Windows, and Linux, including Windows MSIX/Store installs. If a Store install blocks the debug port, automatically relaunches from a local package copy (result then includes msix_local_copy: true; the first fallback launch copies ~330MB one time, so it can take a minute).', {
+  server.tool('tv_launch', 'Launch TradingView Desktop with Chrome DevTools Protocol (remote debugging) enabled. Auto-detects install location on Mac, Windows, and Linux, including Windows MSIX/Store installs. MSIX installs launch via COM activation so the debug flag reaches the packaged app (result includes msix_com_activation: true); if the debug port still never binds, falls back to relaunching from a local package copy (msix_local_copy: true; the first fallback launch copies ~330MB one time, so it can take a minute).', {
     port: z.coerce.number().optional().describe('CDP port (default 9222)'),
     kill_existing: z.coerce.boolean().optional().describe('Kill existing TradingView instances first (default true)'),
   }, async ({ port, kill_existing }) => {

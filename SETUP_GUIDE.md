@@ -47,20 +47,18 @@ Mac:
 
 Windows:
 
-TradingView for Windows now ships **only as an MSIX package** (Microsoft Store and tvd-packages.tradingview.com both install under `C:\Program Files\WindowsApps\`). Use the launch script — it resolves the install via `Get-AppxPackage`, which works without admin rights:
+TradingView for Windows now ships **only as an MSIX package** (Microsoft Store and tvd-packages.tradingview.com both install under `C:\Program Files\WindowsApps\`). The exe under `WindowsApps` cannot be started directly (**"Access is denied"**), and running a copy of the package outside its MSIX context crashes 3.3.0+ shortly after start with `bridge-not-loaded` (see `%APPDATA%\TradingView\logs`). The reliable method is **COM activation** (`IApplicationActivationManager`), which launches the app in its full package context and forwards `--remote-debugging-port` — no admin rights needed. Use the launch script, which does this automatically:
 
 ```bat
 scripts\launch_tv_debug.bat
 ```
 
-Or, preferred: let the `tv_launch` MCP tool do it — it auto-detects MSIX installs and, on Windows builds where launching from `WindowsApps` is blocked with **"Access is denied"**, automatically copies the package to `%LOCALAPPDATA%\tradingview-mcp\` (one-time, ~330MB) and launches from the copy. The copy keeps your login, layout, and chart state. If the fallback was used, the result includes `msix_local_copy: true`.
+Or, preferred: let the `tv_launch` MCP tool do it — it auto-detects MSIX installs and launches them via COM activation (the result then includes `msix_com_activation: true`). On the few builds where COM activation leaves the debug port unbound, it falls back to copying the package to `%LOCALAPPDATA%\tradingview-mcp\` (one-time, ~330MB) and launching from the copy (`msix_local_copy: true`) — a last resort only, since that copy crashes on 3.3.0+.
 
-Manual equivalent of that fallback, if you need it:
+Manual equivalent of the COM activation, if you need it:
 
 ```powershell
-$pkg = (Get-AppxPackage TradingView.Desktop).InstallLocation
-Copy-Item "$pkg\*" "$env:LOCALAPPDATA\tradingview-mcp\TradingView" -Recurse -Force
-& "$env:LOCALAPPDATA\tradingview-mcp\TradingView\TradingView.exe" --remote-debugging-port=9222
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\activate_msix.ps1 -Arguments "--remote-debugging-port=9222"
 ```
 
 Reading files out of `WindowsApps` by exact path is allowed even where executing them isn't. Do **not** try to change ACLs on `WindowsApps` with `icacls` — it fails and can break app servicing.
@@ -115,7 +113,8 @@ Then `tv status`, `tv quote`, `tv pine compile`, etc. work from anywhere.
 | Problem | Solution |
 |---------|----------|
 | `cdp_connected: false` | Launch TradingView with `--remote-debugging-port=9222` |
-| Windows: "Access is denied" launching from `WindowsApps` | Use `tv_launch` (auto copy-fallback) or the manual copy snippet in Step 3 — never `icacls` on WindowsApps |
+| Windows: "Access is denied" launching from `WindowsApps` | Use `tv_launch` or `scripts\launch_tv_debug.bat` (COM activation) — never `icacls` on WindowsApps |
+| Windows: TradingView exits ~12s after launch, `bridge-not-loaded` in `%APPDATA%\TradingView\logs` | The app was launched from a copied package directory — relaunch via `tv_launch` / COM activation (Step 3) instead |
 | `ECONNREFUSED` | TradingView isn't running or port 9222 is blocked |
 | MCP server not showing in Claude Code | Check `~/.claude/.mcp.json` syntax, restart Claude Code |
 | `tv` command not found | Run `npm link` from the project directory |
