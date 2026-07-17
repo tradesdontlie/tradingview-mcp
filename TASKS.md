@@ -52,6 +52,7 @@ The scale unlock: array-speed full-history backtests, no browser. Gated on a via
 ## Backlog
 - T113b — replay session recovery + scroll_back (deep remainder) — DEFERRED, documented TV limitation (safe subset shipped) — see `tasks/backlog.md` + FORK_NOTES §21
 - T120 — Strategy-tester DOM-scrape fallback — WON'T-FIX / superseded by T119 — see `tasks/backlog.md` + FORK_NOTES §21
+- T121 — `backtest_from_signals`: native per-entry stop-loss. The predicate exit DSL is stateless (`evalPredicate` sees only cur/prev — no entry price/bar), so a *fixed* per-entry stop can't be expressed; consumers currently approximate it with a forward-filled `field2` stop level, which behaves as a trailing stop (re-anchors when the level field updates mid-trade). Add a `rules.stop_loss` option — e.g. `{ field: "<stop_price_field>", basis: "close"|"intrabar" }` (or an absolute-offset variant) — that captures the stop at entry from the signal row and exits when price violates it (closing-basis = `close` breaches; intrabar = `low`/`high` breaches), filling at `price_field` on the exit bar. Keeps ONE engine for the paper-ledger + backtest consumers. Signal-engine only (`src/sidecar/signal_pnl.js`); additive, back-compatible. Motivated 2026-07-17 by a downstream consumer needing closing-basis stop realism in fill-parity backtests.
 
 ## Recently done
 - T113b (safe subset) — guarded `goToRealtime()` teardown in replay `stop()` + documented ~4-5-cycle TV limitation — DONE 2026-07-02 — see FORK_NOTES §21
