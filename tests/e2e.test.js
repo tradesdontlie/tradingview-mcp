@@ -65,21 +65,32 @@ function wv(path) {
 /** Sleep for ms */
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-async function waitForBars(timeoutMs = 15000) {
+async function waitForBars(expectedSymbol, timeoutMs = 15000) {
+  const expected = JSON.stringify(expectedSymbol);
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const ready = await evaluate(`
       (function() {
         try {
-          var bars = ${BARS_PATH};
-          return !!bars && typeof bars.size === 'function' && bars.size() > 0;
+          var chart = ${CHART_API};
+          var series = chart._chartWidget.model().mainSeries();
+          var bars = series.bars();
+          var info = series.symbolInfo();
+          var wanted = ${expected}.toUpperCase().split(':').pop();
+          var matches = function(symbol) {
+            return typeof symbol === 'string' && symbol.toUpperCase().split(':').pop() === wanted;
+          };
+          return matches(chart.symbol()) &&
+            matches(info && (info.full_name || info.pro_name || info.name)) &&
+            series.isStarted() === true && series.isLoading() === false &&
+            !!bars && typeof bars.size === 'function' && bars.size() > 0;
         } catch(e) { return false; }
       })()
     `);
     if (ready) return;
     await sleep(250);
   }
-  throw new Error(`TradingView bars did not load within ${timeoutMs}ms`);
+  throw new Error(`TradingView bars for ${expectedSymbol} did not load within ${timeoutMs}ms`);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -189,7 +200,7 @@ describe('TradingView MCP — Full E2E (70 tools)', () => {
 
     after(async () => {
       await evaluate(`${CHART_API}.setSymbol('${originalSymbol}', {})`);
-      await waitForBars();
+      await waitForBars(originalSymbol);
       await evaluate(`${CHART_API}.setResolution('${originalTF}')`);
       await sleep(1000);
       await evaluate(`${CHART_API}.setChartType(${originalType})`);
@@ -219,7 +230,7 @@ describe('TradingView MCP — Full E2E (70 tools)', () => {
 
     it('chart_set_symbol — change ticker', async () => {
       await evaluate(`${CHART_API}.setSymbol('AAPL', {})`);
-      await waitForBars();
+      await waitForBars('AAPL');
       const sym = await evaluate(`${CHART_API}.symbol()`);
       assert.ok(sym.includes('AAPL'), `Symbol changed to AAPL, got: ${sym}`);
     });
