@@ -10,6 +10,8 @@ describe('futuresRoot()', () => {
     assert.equal(futuresRoot('CME_MINI:MNQ1!'), 'MNQ');
     assert.equal(futuresRoot('ES 09-26'), 'ES');
     assert.equal(futuresRoot('MNQU6'), 'MNQ');
+    assert.equal(futuresRoot('CME_MINI:ESU2026'), 'ES');
+    assert.equal(futuresRoot('CME:MNQZ2026'), 'MNQ');
     assert.equal(futuresRoot('NASDAQ:AAPL'), null);
     assert.equal(futuresRoot(''), null);
   });

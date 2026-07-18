@@ -14,7 +14,7 @@ export function futuresRoot(symbol) {
   const exact = value.match(/^([A-Z]+)\s+\d{2}-\d{2}$/);
   if (exact) return exact[1];
 
-  const compact = value.match(new RegExp(`^([A-Z]+)[${FUTURES_MONTH_CODES}]\\d{1,2}$`));
+  const compact = value.match(new RegExp(`^([A-Z]+)[${FUTURES_MONTH_CODES}](?:\\d{1,2}|\\d{4})$`));
   return compact?.[1] || null;
 }
 
