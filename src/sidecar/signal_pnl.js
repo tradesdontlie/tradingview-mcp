@@ -17,7 +17,19 @@
  *     qty: 1,                          // units per trade
  *     fee_per_trade: 0,                // round-turn cost subtracted from each trade
  *     initial_capital: <number>,       // optional — enables % drawdown vs equity
+ *     stop_loss: {                     // optional — native per-entry stop (T121)
+ *       field: '<stop_price_field>',   //   values field read AT ENTRY as the stop level
+ *       basis: 'close' | 'intrabar',   //   'close' (default): close breaches; 'intrabar': low/high breaches
+ *     },
  *   }
+ *
+ * stop_loss is a FIXED per-entry stop: the level is captured from the entry bar's
+ * `field` and does not move for the life of the trade (unlike approximating a stop
+ * with a `field2` exit predicate, which re-reads the level each bar → trailing).
+ * It is checked BEFORE the signal `exit` (a bar that both stops out and signals
+ * exit is recorded as 'stop_loss'), and fills at `price_field` on the breach bar
+ * (a modeling choice: no assumption of getting filled exactly at the stop price).
+ * A missing/non-numeric captured level makes the stop inert for that trade.
  *
  * Predicate grammar (evaluated against the current bar + the previous bar):
  *   leaf       := { field, op, value? | field2? }
@@ -69,6 +81,24 @@ export function evalPredicate(pred, cur, prev) {
   return evalLeaf(pred, cur, prev);
 }
 
+// Native per-entry stop (T121). `stopPrice` is the level captured at entry; a bar
+// breaches it when — for a long (dir 1) — price drops below it, or for a short
+// (dir -1) — price rises above it. 'intrabar' basis tests the bar's low/high (the
+// worst excursion), falling back to close when low/high is absent; 'close' basis
+// (default) tests the bar's close. Inert when the level is non-numeric.
+function stopHit(stopPrice, cur, dir, basis) {
+  if (!isNum(stopPrice)) return false;
+  let px;
+  if (basis === 'intrabar') {
+    const ref = fieldOf(cur, dir === 1 ? 'low' : 'high');
+    px = isNum(ref) ? ref : fieldOf(cur, 'close');
+  } else {
+    px = fieldOf(cur, 'close');
+  }
+  if (!isNum(px)) return false;
+  return dir === 1 ? px < stopPrice : px > stopPrice;
+}
+
 export function backtestFromSignals({ series, rules } = {}) {
   if (!rules || !rules.entry) throw new Error('`entry` rule is required.');
   if (!Array.isArray(series) || series.length === 0) {
@@ -81,6 +111,8 @@ export function backtestFromSignals({ series, rules } = {}) {
   const qty = rules.qty != null ? rules.qty : 1;
   const fee = rules.fee_per_trade || 0;
   const initialCapital = rules.initial_capital;
+  const stopCfg = rules.stop_loss || null;
+  const stopBasis = stopCfg && stopCfg.basis === 'intrabar' ? 'intrabar' : 'close';
 
   const priceAt = (row) => {
     const p = fieldOf(row, priceField);
@@ -111,12 +143,22 @@ export function backtestFromSignals({ series, rules } = {}) {
     const cur = series[i];
     const prev = i > 0 ? series[i - 1] : null;
     if (pos) {
-      if (rules.exit && evalPredicate(rules.exit, cur, prev)) {
+      // Stop is checked before the signal exit — a bar that both stops out and
+      // signals exit is a stop-out (the protective stop fires first).
+      if (stopCfg && stopHit(pos.stop, cur, dir, stopBasis)) {
+        trades.push(closeTrade(pos, cur, i, 'stop_loss'));
+        pos = null;
+      } else if (rules.exit && evalPredicate(rules.exit, cur, prev)) {
         trades.push(closeTrade(pos, cur, i, 'signal'));
         pos = null;
       }
     } else if (evalPredicate(rules.entry, cur, prev)) {
-      pos = { entry_t: cur.t, entry_price: priceAt(cur), entry_i: i };
+      pos = {
+        entry_t: cur.t,
+        entry_price: priceAt(cur),
+        entry_i: i,
+        stop: stopCfg ? fieldOf(cur, stopCfg.field) : undefined,
+      };
     }
   }
   if (pos) {

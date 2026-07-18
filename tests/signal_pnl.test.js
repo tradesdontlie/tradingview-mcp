@@ -182,3 +182,88 @@ describe('all/any/not predicate combinators', () => {
     near(r.net_profit, 2);
   });
 });
+
+describe('backtestFromSignals() — native per-entry stop_loss (T121)', () => {
+  it('closing-basis long stop: exits when close breaches the entry-captured level', () => {
+    const series = [
+      { t: 1, values: { close: 100, e: 1, stop: 95 } }, // enter @100, stop 95
+      { t: 2, values: { close: 98, e: 0, stop: 95 } },  // 98 > 95 → hold
+      { t: 3, values: { close: 94, e: 0, stop: 95 } },  // 94 < 95 → stop out @94
+    ];
+    const r = backtestFromSignals({
+      series,
+      rules: { entry: { field: 'e', op: 'truthy' }, stop_loss: { field: 'stop' }, price_field: 'close' },
+    });
+    assert.equal(r.total_trades, 1);
+    const tr = r.trades[0];
+    assert.deepEqual([tr.exit_t, tr.exit_price, tr.exit_reason], [3, 94, 'stop_loss']);
+    near(tr.pnl, -6);
+  });
+
+  it('stop is captured at entry (fixed, not trailing): a later change to the field is ignored', () => {
+    const series = [
+      { t: 1, values: { close: 100, e: 1, stop: 95 } },  // capture stop 95
+      { t: 2, values: { close: 96, e: 0, stop: 99 } },   // field moved to 99, but 96 > captured 95 → hold
+      { t: 3, values: { close: 97, e: 0, stop: 99 } },   // still 97 > 95 → hold → end_of_data
+    ];
+    const r = backtestFromSignals({
+      series,
+      rules: { entry: { field: 'e', op: 'truthy' }, stop_loss: { field: 'stop' }, price_field: 'close' },
+    });
+    assert.equal(r.trades[0].exit_reason, 'end_of_data');
+    assert.equal(r.trades[0].exit_t, 3);
+  });
+
+  it('intrabar long stop: low breaching triggers even when the close does not', () => {
+    const series = [
+      { t: 1, values: { close: 100, low: 100, e: 1, stop: 95 } },
+      { t: 2, values: { close: 96, low: 94, e: 0, stop: 95 } }, // low 94 < 95 → stop; fill at price_field (close 96)
+    ];
+    const r = backtestFromSignals({
+      series,
+      rules: { entry: { field: 'e', op: 'truthy' }, stop_loss: { field: 'stop', basis: 'intrabar' }, price_field: 'close' },
+    });
+    const tr = r.trades[0];
+    assert.deepEqual([tr.exit_t, tr.exit_price, tr.exit_reason], [2, 96, 'stop_loss']);
+    near(tr.pnl, -4);
+  });
+
+  it('short close-basis stop: exits when close rises above the level', () => {
+    const series = [
+      { t: 1, values: { close: 100, s: 1, stop: 105 } }, // enter short @100, stop 105
+      { t: 2, values: { close: 107, s: 1, stop: 105 } }, // 107 > 105 → stop out @107
+    ];
+    const r = backtestFromSignals({
+      series,
+      rules: { side: 'short', entry: { field: 's', op: 'truthy' }, stop_loss: { field: 'stop' }, price_field: 'close' },
+    });
+    const tr = r.trades[0];
+    assert.deepEqual([tr.exit_reason, tr.exit_price], ['stop_loss', 107]);
+    near(tr.pnl, -7);
+  });
+
+  it('stop takes priority over a signal exit firing on the same bar', () => {
+    const series = [
+      { t: 1, values: { close: 100, e: 1, x: 0, stop: 95 } },
+      { t: 2, values: { close: 94, e: 0, x: 1, stop: 95 } }, // both stop AND signal exit true
+    ];
+    const r = backtestFromSignals({
+      series,
+      rules: { entry: { field: 'e', op: 'truthy' }, exit: { field: 'x', op: 'truthy' }, stop_loss: { field: 'stop' }, price_field: 'close' },
+    });
+    assert.equal(r.trades[0].exit_reason, 'stop_loss');
+  });
+
+  it('a missing/non-numeric stop level is inert (no stop exit)', () => {
+    const series = [
+      { t: 1, values: { close: 100, e: 1 } },  // no stop field
+      { t: 2, values: { close: 80, e: 0 } },   // would breach any stop, but none set
+    ];
+    const r = backtestFromSignals({
+      series,
+      rules: { entry: { field: 'e', op: 'truthy' }, stop_loss: { field: 'stop' }, price_field: 'close' },
+    });
+    assert.equal(r.trades[0].exit_reason, 'end_of_data');
+    near(r.trades[0].pnl, -20);
+  });
+});

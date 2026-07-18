@@ -4,10 +4,14 @@
 > Shipped-work narrative (what diverges from upstream and why) continues to live in `FORK_NOTES.md`.
 > T-numbers are shared across FORK_NOTES + commit messages + this queue, so they never collide.
 
-**Next ID:** T121
+**Next ID:** T122
 **Active branch:** `fixes/draw-api-resolve`
 
 ---
+
+## ▶ Resume pointer (2026-07-18)
+
+**State:** T121 shipped — `backtest_from_signals` now has a native per-entry `stop_loss` (`{field, basis}`, fixed-at-entry, close/intrabar breach, checked before the exit predicate). Removes the downstream consumer's last hacky stop layer (the forward-filled `field2` trailing approximation). Signal-engine only; additive + back-compatible; +6 TDD tests → `signal_pnl.test.js` 18/18. **Committed, not pushed** (public fork — user pushes manually; the auto-mode classifier blocks fork pushes). No open fork tasks remain (only the TV-gated T113b remainder in `tasks/backlog.md`). Older resume context below.
 
 ## ▶ Resume pointer (2026-07-02)
 
@@ -52,9 +56,9 @@ The scale unlock: array-speed full-history backtests, no browser. Gated on a via
 ## Backlog
 - T113b — replay session recovery + scroll_back (deep remainder) — DEFERRED, documented TV limitation (safe subset shipped) — see `tasks/backlog.md` + FORK_NOTES §21
 - T120 — Strategy-tester DOM-scrape fallback — WON'T-FIX / superseded by T119 — see `tasks/backlog.md` + FORK_NOTES §21
-- T121 — `backtest_from_signals`: native per-entry stop-loss. The predicate exit DSL is stateless (`evalPredicate` sees only cur/prev — no entry price/bar), so a *fixed* per-entry stop can't be expressed; consumers currently approximate it with a forward-filled `field2` stop level, which behaves as a trailing stop (re-anchors when the level field updates mid-trade). Add a `rules.stop_loss` option — e.g. `{ field: "<stop_price_field>", basis: "close"|"intrabar" }` (or an absolute-offset variant) — that captures the stop at entry from the signal row and exits when price violates it (closing-basis = `close` breaches; intrabar = `low`/`high` breaches), filling at `price_field` on the exit bar. Keeps ONE engine for the paper-ledger + backtest consumers. Signal-engine only (`src/sidecar/signal_pnl.js`); additive, back-compatible. Motivated 2026-07-17 by a downstream consumer needing closing-basis stop realism in fill-parity backtests.
 
 ## Recently done
+- T121 — `backtest_from_signals` native per-entry `stop_loss` ⭐ — DONE 2026-07-18. Added a `rules.stop_loss = { field, basis: "close"|"intrabar" }` option to the signal engine (`src/sidecar/signal_pnl.js`): the stop level is captured from the entry bar's `field` (a FIXED per-entry stop, not trailing — unlike the old `field2`-exit approximation which re-reads the level each bar), checked BEFORE the signal exit, exits `close`-basis (default: bar close breaches) or `intrabar` (low/high breaches), fills at `price_field` on the breach bar (exit_reason `stop_loss`). Non-numeric captured level → inert. Additive + back-compatible (`rules` schema already `.passthrough()`; added an explicit discoverable `stop_loss` field to the tool schema in `src/tools/replay.js`). TDD: +6 tests in `tests/signal_pnl.test.js` (18/18 green). Motivated by a downstream consumer needing closing-basis stop realism in fill-parity backtests.
 - T113b (safe subset) — guarded `goToRealtime()` teardown in replay `stop()` + documented ~4-5-cycle TV limitation — DONE 2026-07-02 — see FORK_NOTES §21
 - T120 — closed as superseded by T119 (socket strategyReport beats DOM-scrape); no code — DONE 2026-07-02 — see FORK_NOTES §21
 - T119 — strategy harness: `backtest_from_signals` + `backtest_run_strategy` ⭐ — DONE 2026-07-02 (code-side P&L + strategyReport reader, one canonical schema; zlib-decompress + key-mapping fixes) — see `tasks/done.md`

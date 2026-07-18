@@ -46,6 +46,10 @@ export function registerReplayTools(server) {
       qty: z.number().optional().describe('Units per trade (default 1).'),
       fee_per_trade: z.number().optional().describe('Round-turn cost subtracted from each trade (default 0).'),
       initial_capital: z.number().optional().describe('Enables %-drawdown vs equity.'),
+      stop_loss: z.object({
+        field: z.string().describe('values field read AT ENTRY as the fixed stop price for the trade.'),
+        basis: z.enum(['close', 'intrabar']).optional().describe('"close" (default): exit when the bar close breaches the level; "intrabar": when low/high breaches it.'),
+      }).optional().describe('Native per-entry stop-loss. Level is captured at entry and does not trail; checked before the exit predicate; fills at price_field on the breach bar.'),
     }).passthrough().describe('Entry/exit rules.'),
     out: z.string().optional().describe('Write the full report JSON here and return only a summary (recommended for long series).'),
   }, async ({ series, series_path, rules, out }) => {

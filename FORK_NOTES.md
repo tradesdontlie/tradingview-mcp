@@ -746,6 +746,18 @@ Both closed 2026-07-02 as the final fork cleanup. Neither warranted the deep/ris
 
 ---
 
+### 22. T121 — `backtest_from_signals` native per-entry `stop_loss` ⭐
+
+Shipped 2026-07-18. Closes the one modeling gap in the code-side P&L engine: it could not express a **fixed per-entry stop**. The exit-predicate DSL is stateless (`evalPredicate` sees only the current + previous bar — no entry price or bar index), so downstream consumers approximated a stop with a `field2` exit like `{field:"close", op:"<", field2:"stop_level"}` — which **re-reads `stop_level` every bar**, making it a *trailing* stop that re-anchors mid-trade, not the fixed closing-basis stop real risk rules use.
+
+- **Added `rules.stop_loss = { field, basis }`** to `src/sidecar/signal_pnl.js`. The stop level is read **once, from the entry bar's `field`**, and stored on the open position — so it is fixed for the life of the trade. `basis: "close"` (default) exits when the bar **close** breaches the level; `basis: "intrabar"` exits when the bar **low** (long) / **high** (short) breaches it (falling back to close if low/high absent). Fills at `price_field` on the breach bar (a deliberate modeling choice — no assumption of a fill exactly at the stop price), `exit_reason: "stop_loss"`.
+- **Priority:** the stop is checked **before** the signal `exit` predicate — a bar that both stops out and signals exit is recorded as `stop_loss` (the protective stop fires first). A non-numeric captured level is **inert** for that trade (no stop exit), so a series without the field behaves exactly as before.
+- **Additive + back-compatible.** `rules` was already `.passthrough()`, so the option flowed through untouched; added an explicit, self-documenting `stop_loss` field to the tool schema in `src/tools/replay.js` for discoverability. No behavior change for any existing rule set.
+- **TDD:** +6 tests in `tests/signal_pnl.test.js` (closing-basis long, fixed-not-trailing capture, intrabar low-breach, short close-basis, stop-beats-signal priority, inert-when-absent). `signal_pnl.test.js` 18/18 green; `node --check` clean on both touched files.
+- **Why now:** a downstream fill-parity backtest needed honest closing-basis stop realism; the `field2` trailing approximation was its last non-native modeling hack. One engine still serves both the paper-ledger and backtest consumers.
+
+---
+
 ### Replay API surface (live probe, TV 3.1.0) — reference for T113/T114/T115/T119
 
 `Object.getOwnPropertyNames(Object.getPrototypeOf(window.TradingViewApi._replayApi))` on TV Desktop 3.1.0 exposes (beyond the already-used methods) several undocumented capabilities worth building on:
