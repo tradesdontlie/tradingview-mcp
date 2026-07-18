@@ -1,5 +1,6 @@
 import { register } from '../router.js';
 import * as core from '../../core/data.js';
+import { getBiasSignal } from '../../core/bias.js';
 import { chartSnapshot } from '../../core/snapshot.js';
 
 register('snapshot', {
@@ -96,6 +97,13 @@ register('data', {
         if (!positionals[0]) throw new Error('Entity ID required. Usage: tv data indicator eFu1Ot');
         return core.getIndicator({ entity_id: positionals[0] });
       },
+    }],
+    ['bias', {
+      description: 'Infer bull/bear/neutral bias for label/box-only Pine indicators (no plot() output)',
+      options: {
+        filter: { type: 'string', short: 'f', description: 'Substring to match study name' },
+      },
+      handler: (opts) => getBiasSignal({ study_filter: opts.filter }),
     }],
   ]),
 });

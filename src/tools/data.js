@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { jsonResult } from './_format.js';
 import * as core from '../core/data.js';
+import { getBiasSignal } from '../core/bias.js';
 import { chartSnapshot, SNAPSHOT_SECTIONS } from '../core/snapshot.js';
 
 export function registerDataTools(server) {
@@ -98,6 +99,13 @@ export function registerDataTools(server) {
 
   server.tool('data_get_study_values', 'Get current indicator values from the data window for all visible studies (RSI, MACD, Bollinger Bands, EMAs, custom indicators with plot()).', {}, async () => {
     try { return jsonResult(await core.getStudyValues()); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('data_get_bias_signal', 'Infer directional bias (bullish/bearish/neutral) for custom Pine indicators that draw only lines/labels/boxes with no plot() output (data_get_study_values returns nothing for these). Checks label/table text for explicit bias keywords first (high confidence), then falls back to a sweep→confirmation (CSD/BOS/CHoCH) label-price sequence heuristic (low confidence). Use study_filter to target a specific indicator.', {
+    study_filter: z.string().optional().describe('Substring to match study name (e.g., "3Cs", "Key Levels"). Omit for all label/table-drawing studies.'),
+  }, async ({ study_filter }) => {
+    try { return jsonResult(await getBiasSignal({ study_filter })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 }
