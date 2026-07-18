@@ -3,7 +3,7 @@
  */
 import { getClient, getTargetInfo, evaluate, CDP_HOST, CDP_PORT } from '../connection.js';
 import { existsSync, cpSync, rmSync, readdirSync } from 'fs';
-import { execSync, spawn } from 'child_process';
+import { execSync, execFileSync, spawn } from 'child_process';
 import { dirname, basename, join } from 'path';
 
 // Best-effort git-pull update check: compare local HEAD to origin's default
@@ -205,6 +205,7 @@ function _resolveLaunchDeps(deps) {
   return {
     spawn: deps?.spawn || spawn,
     execSync: deps?.execSync || execSync,
+    execFileSync: deps?.execFileSync || execFileSync,
     existsSync: deps?.existsSync || existsSync,
     cpSync: deps?.cpSync || cpSync,
     rmSync: deps?.rmSync || rmSync,
@@ -360,7 +361,20 @@ export async function launch({ port, kill_existing, _deps } = {}) {
   if (killFirst) await killExisting();
 
   const cdpArgs = [`--remote-debugging-port=${cdpPort}`];
-  let child = _spawnDetached(deps.spawn, tvPath, cdpArgs);
+  let child;
+  if (platform === 'darwin' && tvPath.includes('.app/')) {
+    // Launch through `open` so launchd starts the app at normal foreground
+    // QoS. A direct spawn() inherits this process's priority — when the MCP
+    // runs under a background scheduler (launchd agent, cron), TradingView
+    // comes up App-Napped (ps state SN) and macOS throttles and eventually
+    // evicts its renderers. The CDP port keeps answering HTTP in that state
+    // while every Runtime.evaluate hangs.
+    const appPath = tvPath.replace(/\/Contents\/MacOS\/.*$/, '');
+    deps.execFileSync('open', ['-a', appPath, '--args', ...cdpArgs], { timeout: 15000 });
+    child = { pid: null };
+  } else {
+    child = _spawnDetached(deps.spawn, tvPath, cdpArgs);
+  }
   let info = null;
   let usedLocalCopy = false;
 

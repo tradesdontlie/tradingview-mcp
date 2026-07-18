@@ -16,7 +16,7 @@ import { getClient, reconnectTo, CDP_HOST, CDP_PORT } from '../connection.js';
  * List all open chart tabs (CDP page targets).
  */
 export async function list() {
-  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
+  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`, { signal: AbortSignal.timeout(3000) });
   const targets = await resp.json();
 
   // Chart tabs plus new-tab landing pages (layout picker), so every tab in the
@@ -41,7 +41,7 @@ export async function list() {
  * is the one whose DOM actually contains `.tabs-container .tab`.
  */
 async function withShell(fn) {
-  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
+  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`, { signal: AbortSignal.timeout(3000) });
   const targets = await resp.json();
   const candidates = targets.filter(t => t.type === 'page' && /\/window\/index\.html/i.test(t.url || ''));
 
@@ -85,7 +85,7 @@ async function isTargetVisible(targetId) {
 
 /** Find an open new-tab landing page target (shows the layout picker). */
 async function findLandingTarget() {
-  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
+  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`, { signal: AbortSignal.timeout(3000) });
   const targets = await resp.json();
   return targets.find(t => t.type === 'page' && t.title === 'New tab') || null;
 }
@@ -147,7 +147,7 @@ export async function newTab({ layout, name } = {}) {
   if (!landing) throw new Error('New tab opened but its landing page target was not found.');
 
   // Snapshot existing chart targets so we can spot the one the pick creates.
-  const beforeResp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
+  const beforeResp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`, { signal: AbortSignal.timeout(3000) });
   const chartIdsBefore = new Set(
     (await beforeResp.json())
       .filter(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
@@ -226,7 +226,7 @@ export async function newTab({ layout, name } = {}) {
   let chartTarget = null;
   for (let i = 0; i < 30; i++) {
     await new Promise(r => setTimeout(r, 500));
-    const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
+    const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`, { signal: AbortSignal.timeout(3000) });
     const targets = await resp.json();
     chartTarget = targets.find(x =>
       x.type === 'page' && /tradingview\.com\/chart/i.test(x.url) && !chartIdsBefore.has(x.id)
