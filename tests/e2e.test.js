@@ -65,6 +65,23 @@ function wv(path) {
 /** Sleep for ms */
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
+async function waitForBars(timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const ready = await evaluate(`
+      (function() {
+        try {
+          var bars = ${BARS_PATH};
+          return !!bars && typeof bars.size === 'function' && bars.size() > 0;
+        } catch(e) { return false; }
+      })()
+    `);
+    if (ready) return;
+    await sleep(250);
+  }
+  throw new Error(`TradingView bars did not load within ${timeoutMs}ms`);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('TradingView MCP — Full E2E (70 tools)', () => {
@@ -171,8 +188,8 @@ describe('TradingView MCP — Full E2E (70 tools)', () => {
     });
 
     after(async () => {
-      await evaluate(`${CHART_API}.setSymbol('${originalSymbol}')`);
-      await sleep(2000);
+      await evaluate(`${CHART_API}.setSymbol('${originalSymbol}', {})`);
+      await waitForBars();
       await evaluate(`${CHART_API}.setResolution('${originalTF}')`);
       await sleep(1000);
       await evaluate(`${CHART_API}.setChartType(${originalType})`);
@@ -202,7 +219,7 @@ describe('TradingView MCP — Full E2E (70 tools)', () => {
 
     it('chart_set_symbol — change ticker', async () => {
       await evaluate(`${CHART_API}.setSymbol('AAPL', {})`);
-      await sleep(2500);
+      await waitForBars();
       const sym = await evaluate(`${CHART_API}.symbol()`);
       assert.ok(sym.includes('AAPL'), `Symbol changed to AAPL, got: ${sym}`);
     });

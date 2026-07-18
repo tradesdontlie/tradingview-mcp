@@ -203,6 +203,7 @@ const WINDOWS_APPS_RE = /\\WindowsApps\\/i;
 
 function _resolveLaunchDeps(deps) {
   return {
+    platform: deps?.platform || process.platform,
     spawn: deps?.spawn || spawn,
     execSync: deps?.execSync || execSync,
     existsSync: deps?.existsSync || existsSync,
@@ -287,7 +288,7 @@ export async function launch({ port, kill_existing, _deps } = {}) {
   const deps = _resolveLaunchDeps(_deps);
   const cdpPort = port || CDP_PORT;
   const killFirst = kill_existing !== false;
-  const platform = process.platform;
+  const platform = deps.platform;
 
   const pathMap = {
     darwin: [
@@ -350,6 +351,17 @@ export async function launch({ port, kill_existing, _deps } = {}) {
   }
 
   const killExisting = async () => {
+    if (platform === 'darwin') {
+      try {
+        deps.execSync("osascript -e 'tell application \"TradingView\" to quit'", { timeout: 5000 });
+      } catch { /* application may not be running */ }
+      await deps.delay(1500);
+      try {
+        deps.execSync('pkill -KILL -x TradingView', { timeout: 5000 });
+      } catch { /* graceful quit already completed */ }
+      await deps.delay(500);
+      return;
+    }
     try {
       if (platform === 'win32') deps.execSync('taskkill /F /IM TradingView.exe', { timeout: 5000 });
       else deps.execSync('pkill -f TradingView', { timeout: 5000 });

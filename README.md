@@ -1,4 +1,6 @@
-# TradingView MCP Bridge
+# NinjaView
+
+**NinjaView** is the current product codename for this local NinjaTrader–TradingView MCP bridge.
 
 Personal AI assistant for your TradingView Desktop charts. Connects Claude Code to your locally running TradingView app via Chrome DevTools Protocol for AI-assisted chart analysis, Pine Script development, and workflow automation.
 
@@ -28,6 +30,59 @@ The debug port is disabled by default and must be explicitly enabled by you usin
 - Bypass any TradingView paywall or access restriction
 - Execute real trades (chart interaction only)
 - Work if TradingView changes their internal Electron structure
+
+## NinjaView Local Bridge
+
+This branch adds a separate, read-only adapter for a NinjaTrader TradingBridge running on the local network. It combines two independent local surfaces in one MCP server:
+
+```text
+MCP client
+├── TradingView Desktop adapter — CDP on localhost:9222
+└── NinjaTrader adapter — TradingBridge HTTP on the configured LAN host
+```
+
+### Rename-safe branding
+
+User-facing branding is centralized in `src/branding.js`. Tool names, the `tv` CLI, npm package name, repository path, and Hermes registration are stable integration contracts and intentionally do not contain the product codename.
+
+To preview or adopt a later name without changing code:
+
+```bash
+export APP_DISPLAY_NAME="Project Horizon"
+export APP_CODENAME="horizon"
+npm start
+```
+
+`APP_CODENAME` must be a lowercase slug. It determines the MCP handshake name (`horizon-bridge` in this example); it does not rename or invalidate existing tools.
+
+Set the bridge URL before starting the server when it differs from the default:
+
+```bash
+export NINJATRADER_BRIDGE_URL="http://DS-WIN.local:5555"
+npm start
+```
+
+The NinjaTrader tools are deliberately read-only:
+
+| Tool | Purpose |
+|---|---|
+| `nt_status` | Check TradingBridge status and version |
+| `nt_connections` | Read connection and data-feed state |
+| `nt_accounts` | Read account snapshots |
+| `nt_positions` | Read open-position snapshots |
+| `nt_orders` | Read order snapshots |
+| `nt_bars` | Read historical bars for an exact NinjaTrader contract |
+| `bridge_get_context` | Compare the current chart root with privacy-reduced NinjaTrader position/order context |
+
+### Scope and limitations
+
+- This is a local coordination bridge, not an official TradingView broker integration.
+- NinjaTrader bars cannot replace TradingView's native chart feed through this CDP approach.
+- Position/order levels may later be represented as local TradingView drawings after symbol mapping is proven.
+- No order placement, cancellation, replacement, flatten, subscription, or account mutation route is exposed.
+- `nt_bars` requires an exact NinjaTrader contract such as `MNQ 09-26`; bare roots such as `MNQ` are not assumed to resolve.
+- TradingView Desktop internals are undocumented and may break after a TradingView update.
+- Keep CDP bound to localhost and keep the unauthenticated TradingBridge restricted to a trusted LAN.
 
 ## Research Context
 

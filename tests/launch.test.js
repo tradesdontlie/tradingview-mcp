@@ -11,6 +11,7 @@ import { launch } from '../src/core/health.js';
 const MSIX_EXE = 'C:\\Program Files\\WindowsApps\\TradingView.Desktop_3.1.0.7818_x64__n534cwy3pjxzj\\TradingView.exe';
 const LOCAL_COPY_EXE = `${process.env.LOCALAPPDATA || ''}\\tradingview-mcp\\TradingView.Desktop_3.1.0.7818_x64__n534cwy3pjxzj\\TradingView.exe`;
 const CDP_VERSION = JSON.stringify({ Browser: 'Chrome/140', 'User-Agent': 'TVDesktop/3.1.0' });
+const MAC_EXE = '/Applications/TradingView.app/Contents/MacOS/TradingView';
 
 // ── Mock helpers ─────────────────────────────────────────────────────────
 
@@ -61,6 +62,32 @@ function msixDeps({ spawnFailures = [], cdpBindsFor = [], copyExists = false } =
 
 // launch() only takes the MSIX code path on win32; skip elsewhere.
 const onWindows = process.platform === 'win32';
+
+describe('launch() — macOS existing-instance shutdown', () => {
+  it('quits through macOS before force-killing only the remaining main process', async () => {
+    const state = { commands: [], spawned: [], cdpUp: false };
+    const deps = {
+      platform: 'darwin',
+      existsSync: (p) => p === MAC_EXE,
+      execSync: (cmd) => { state.commands.push(cmd); return ''; },
+      spawn: (exe, args) => {
+        state.spawned.push({ exe, args });
+        state.cdpUp = true;
+        return mockChild();
+      },
+      cpSync: () => {}, rmSync: () => {}, readdirSync: () => [],
+      delay: async () => {},
+      probeCdp: async () => (state.cdpUp ? CDP_VERSION : null),
+    };
+
+    const result = await launch({ _deps: deps });
+
+    assert.equal(result.success, true);
+    assert.match(state.commands[0], /osascript.*TradingView.*quit/);
+    assert.equal(state.commands[1], 'pkill -KILL -x TradingView');
+    assert.deepEqual(state.spawned, [{ exe: MAC_EXE, args: ['--remote-debugging-port=9222'] }]);
+  });
+});
 
 describe('launch() — MSIX WindowsApps handling', { skip: !onWindows }, () => {
   it('direct WindowsApps spawn that binds CDP does not copy', async () => {

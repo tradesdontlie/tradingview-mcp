@@ -14,15 +14,20 @@ import { registerWatchlistTools } from './tools/watchlist.js';
 import { registerUiTools } from './tools/ui.js';
 import { registerPaneTools } from './tools/pane.js';
 import { registerTabTools } from './tools/tab.js';
+import { registerNinjaTraderTools } from './tools/ninjatrader.js';
+import { registerBridgeTools } from './tools/bridge.js';
+import { getBranding } from './branding.js';
+
+const branding = getBranding();
 
 const server = new McpServer(
   {
-    name: 'tradingview',
-    version: '2.0.0',
-    description: 'AI-assisted TradingView chart analysis and Pine Script development via Chrome DevTools Protocol',
+    name: branding.mcpServerName,
+    version: '0.1.0',
+    description: branding.description,
   },
   {
-    instructions: `TradingView MCP — 78 tools for reading and controlling a live TradingView Desktop chart.
+    instructions: `${branding.displayName} — local tools for TradingView Desktop plus read-only NinjaTrader snapshots.
 
 TOOL SELECTION GUIDE — use this to pick the right tool:
 
@@ -60,6 +65,16 @@ Launch: tv_launch → auto-detect and start TradingView with CDP on any platform
 Panes: pane_list, pane_set_layout (s, 2h, 2v, 4, 6, 8), pane_focus, pane_set_symbol
 Tabs: tab_list, tab_new, tab_close, tab_switch
 
+NinjaTrader TradingBridge (read-only):
+- nt_status → bridge status and version
+- nt_connections → connection and data-feed state
+- nt_accounts → account snapshots
+- nt_positions → open-position snapshots
+- nt_orders → order snapshots
+- nt_bars → historical bars for an exact NinjaTrader contract
+- bridge_get_context → privacy-reduced TradingView/NinjaTrader compatibility summary
+- These tools do not route, cancel, replace, or flatten orders
+
 CONTEXT MANAGEMENT:
 - ALWAYS use summary=true on data_get_ohlcv
 - ALWAYS use study_filter on pine tools when you know which indicator you want
@@ -84,9 +99,11 @@ registerWatchlistTools(server);
 registerUiTools(server);
 registerPaneTools(server);
 registerTabTools(server);
+registerNinjaTraderTools(server);
+registerBridgeTools(server);
 
 // Startup notice (stderr so it doesn't interfere with MCP stdio protocol)
-process.stderr.write('⚠  tradingview-mcp  |  Unofficial tool. Not affiliated with TradingView Inc. or Anthropic.\n');
+process.stderr.write(`⚠  ${branding.displayName} (${branding.codename})  |  Unofficial tool. Not affiliated with TradingView Inc., NinjaTrader, or Anthropic.\n`);
 process.stderr.write('   Ensure your usage complies with TradingView\'s Terms of Use.\n\n');
 
 // Start stdio transport
