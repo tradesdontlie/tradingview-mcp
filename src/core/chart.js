@@ -156,13 +156,49 @@ export async function manageIndicator({ action, indicator, entity_id, inputs: in
     `);
 
     if (result && result.newIds && result.newIds.length > 0) {
+      const entityId = result.newIds[0];
+
+      // createStudy's inputs argument is unreliable across TV builds (#249):
+      // the study is often created with DEFAULTS regardless of what we passed.
+      // Re-apply overrides via the study's own getInputValues/setInputValues
+      // (the authoritative path indicator_set_inputs uses), then read back to
+      // report exactly which inputs took. Unknown keys surface in
+      // unknown_inputs instead of being silently dropped. (Ported from upstream
+      // d54936a; layered on top of T108's create so it's belt-and-suspenders.)
+      let appliedInputs;
+      if (inputs && Object.keys(inputs).length) {
+        const applied = await evaluate(`
+          (function() {
+            var chart = ${CHART_API};
+            var study = chart.getStudyById(${safeString(entityId)});
+            if (!study || typeof study.getInputValues !== 'function') return { error: 'inputs unsupported for this study' };
+            var current = study.getInputValues();
+            var overrides = ${JSON.stringify(inputs)};
+            var appliedMap = {}, unknown = [], byId = {};
+            for (var i = 0; i < current.length; i++) byId[current[i].id] = true;
+            for (var k in overrides) {
+              if (byId[k]) { for (var j = 0; j < current.length; j++) { if (current[j].id === k) current[j].value = overrides[k]; } appliedMap[k] = overrides[k]; }
+              else unknown.push(k);
+            }
+            study.setInputValues(current);
+            var after = study.getInputValues();
+            var confirmed = {};
+            for (var m = 0; m < after.length; m++) { if (appliedMap.hasOwnProperty(after[m].id)) confirmed[after[m].id] = after[m].value; }
+            return { confirmed: confirmed, unknown: unknown };
+          })()
+        `);
+        if (applied?.error) appliedInputs = { error: applied.error };
+        else appliedInputs = { applied: applied?.confirmed || {}, ...(applied?.unknown?.length && { unknown_inputs: applied.unknown }) };
+      }
+
       return {
         success: true,
         action: 'add',
         indicator,
-        entity_id: result.newIds[0],
+        entity_id: entityId,
         new_study_count: result.newIds.length,
         resolution: result.resolution,
+        ...(appliedInputs && { inputs: appliedInputs }),
       };
     }
 
@@ -215,6 +251,25 @@ export async function setVisibleRange({ from, to, _deps }) {
   const { evaluate } = _resolve(_deps);
   const f = requireFinite(from, 'from');
   const t = requireFinite(to, 'to');
+
+  // Ensure enough history is loaded to cover `from`. The chart lazy-loads bars
+  // (~300 initially), so without this a multi-year range clamps to whatever is
+  // already loaded (~14 months of dailies). Page back via requestMoreData until
+  // the earliest loaded bar reaches `from`, the feed runs out, or a guard trips.
+  // (Ported from upstream be200a4 / PR #224; public setVisibleRange is
+  // 'Not implemented' on this build, so we page the internal series.)
+  for (let i = 0; i < 25; i++) {
+    const state = await evaluate(`(function() {
+      var ms = ${CHART_API}._chartWidget.model().mainSeries();
+      var b = ms.bars(); var fv = b.valueAt(b.firstIndex());
+      var more = true; try { more = ms.requestMoreDataAvailable(); } catch (e) {}
+      return { firstTime: fv && fv[0], more: more };
+    })()`);
+    if (!state || state.firstTime == null || state.firstTime <= f || !state.more) break;
+    await evaluate(`(function() { try { ${CHART_API}._chartWidget.model().mainSeries().requestMoreData(1000); } catch (e) {} })()`);
+    await new Promise(r => setTimeout(r, 1800));
+  }
+
   await evaluate(`
     (function() {
       var chart = ${CHART_API};
