@@ -30,7 +30,10 @@ export async function captureScreenshot({ region, filename, method, waitForRende
       : SCREENSHOT_DIR;
     mkdirSync(dir, { recursive: true });
     const ts = new Date().toISOString().replace(/[:.]/g, '-');
-    const fname = (filename || `tv_${region || 'full'}_${ts}`).replace(/[\\/]/g, '_');
+    // Strip path separators AND `..` sequences so a caller-supplied `filename`
+    // cannot escape `dir` (path traversal). The deliberate arbitrary-path
+    // escape hatches are `path`/`out_dir` above — this legacy branch stays put.
+    const fname = (filename || `tv_${region || 'full'}_${ts}`).replace(/[\\/]/g, '_').replace(/\.\./g, '_');
     filePath = join(dir, `${fname}.png`);
   }
 
