@@ -4,8 +4,16 @@
 > Shipped-work narrative (what diverges from upstream and why) continues to live in `FORK_NOTES.md`.
 > T-numbers are shared across FORK_NOTES + commit messages + this queue, so they never collide.
 
-**Next ID:** T131
+**Next ID:** T132
 **Active branch:** `fixes/draw-api-resolve`
+
+**T131 SHIPPED 2026-07-18** — `tv replay walk --sections` (CLI/MCP parity). The MCP tool
+always accepted `sections`; the CLI handler never passed it through, pinning the CLI to
+the default set — which excludes `pine_tables`, so table/panel-driven captures were
+impossible to script from the shell. Additive option, existing invocations unchanged.
+Parity-verified against the MCP tool on two symbols (138 rows, 15 table rows/bar each).
+See `FORK_NOTES.md` §24, which also records the TV-restores-a-non-chart-tab bootstrap
+deadlock and the CDP `Page.navigate` way out (relevant to §18 / T113b restart scripting).
 
 ---
 

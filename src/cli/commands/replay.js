@@ -99,6 +99,11 @@ register('replay', {
         resolution: { type: 'string', short: 'r', description: 'Replay resolution (e.g. 1H, 1D, auto)' },
         out: { type: 'string', short: 'o', description: 'Write JSONL rows to this file path' },
         'max-bars': { type: 'string', description: 'Safety cap on bars (default 1000)' },
+        sections: {
+          type: 'string',
+          description: 'Comma-separated snapshot sections (ohlcv, studies, pine_labels, '
+            + 'pine_lines, pine_tables, pine_boxes). Default: ohlcv,studies,pine_labels,pine_lines',
+        },
       },
       handler: (opts) => replayWalk({
         from: opts.from,
@@ -107,6 +112,12 @@ register('replay', {
         resolution: opts.resolution,
         out: opts.out,
         max_bars: opts['max-bars'] ? Number(opts['max-bars']) : undefined,
+        // Parity with the MCP tool, which has always accepted `sections`. Without
+        // this the CLI was locked to the default set — no pine_tables — so any
+        // panel/table-driven capture was impossible to script.
+        sections: opts.sections
+          ? opts.sections.split(',').map((s) => s.trim()).filter(Boolean)
+          : undefined,
       }),
     }],
     ['status', {

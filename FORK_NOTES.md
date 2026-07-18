@@ -795,6 +795,47 @@ After a thorough audit of our fork vs upstream (60 commits ahead of our 2026-04-
 
 ---
 
+## §24 — `tv replay walk --sections`: CLI/MCP parity (T131, 2026-07-18)
+
+**Symptom.** `replay_walk` as an *MCP tool* has always accepted a `sections` array
+(`ohlcv`, `studies`, `pine_labels`, `pine_lines`, `pine_tables`, `pine_boxes`). The
+`tv replay walk` **CLI** never exposed it — the handler in
+`src/cli/commands/replay.js` simply did not pass the option through — so the CLI was
+locked to the default set `['ohlcv','studies','pine_labels','pine_lines']`.
+
+**Why it mattered.** `pine_tables` is not in the default set. Any consumer whose
+per-bar state lives in a Pine **table** (status panels, dashboards — a very common
+shape) therefore could not capture it from the CLI at all, and captures came back
+looking structurally fine but with the panel fields empty. The MCP tool could do it;
+the CLI could not. That asymmetry is what made multi-symbol batch capture
+un-scriptable — driving N captures through the MCP tool costs ~2 tool calls each,
+whereas the CLI is a shell loop.
+
+**Fix.** Added a `--sections` option (comma-separated, parsed to an array, `undefined`
+when omitted so the existing default is untouched) and threaded it into the
+`replayWalk({...})` call. Purely additive; every existing invocation behaves exactly
+as before.
+
+```
+tv replay walk --from 2025-12-28 --to 2026-07-17 \
+   --sections "ohlcv,pine_tables,pine_lines,pine_labels,pine_boxes" --out cap.jsonl
+```
+
+**Verified.** Parity-checked CLI output against the MCP tool on two symbols over the
+same window — both produced 138 rows with 15 populated table rows per bar and
+identical adapted structure. `node --check` clean.
+
+**Related operational gotcha (not a code bug, worth knowing).** TradingView Desktop
+restores its *last tab*, which after a kill during an active replay is often a symbols
+page or "New tab". In that state **every** tool — including `tab_new` and
+`layout_switch`, which need a chart tab themselves — fails with "No TradingView chart
+tab found", a bootstrap deadlock. CDP `/json/new` is rejected by this Electron build
+("Could not create new page"). The way out is to take an existing page target and
+`Page.navigate` it to a saved chart URL over the CDP websocket. Relevant to anyone
+scripting the documented ~4–5-cycle replay restart (see §18 / T113b).
+
+---
+
 ## Open upstream-facing work (optional)
 
 Draft issue reports for the two unreported bugs we patched exist in local development notes. Paste at https://github.com/tradesdontlie/tradingview-mcp/issues/new when you want maintainer attention. Issues:
