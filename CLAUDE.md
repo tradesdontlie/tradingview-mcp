@@ -1,6 +1,6 @@
 # TradingView MCP — Claude Instructions
 
-88 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
+89 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
 
 ## Decision Tree — Which Tool When
 
@@ -16,6 +16,7 @@ Custom Pine indicators draw with `line.new()`, `label.new()`, `table.new()`, `bo
 2. `data_get_pine_labels` → text annotations with prices (e.g., "PDH 24550", "Bias Long ✓")
 3. `data_get_pine_tables` → table data formatted as rows (e.g., session stats, analytics dashboards)
 4. `data_get_pine_boxes` → price zones / ranges as {high, low} pairs
+5. `data_get_bias_signal` → infer bull/bear/neutral for **label/box-only** indicators (no `plot()`, so `data_get_study_values` returns nothing). Reads bias keywords from label/table text (high confidence), else a sweep→confirmation (CSD/BOS/CHoCH) label-price sequence (low confidence). Good for the ASTA 3Cs/Key-Levels/Patterns/Indicators-Panel studies.
 
 Use `study_filter` parameter to target a specific indicator by name substring (e.g., `study_filter: "Profiler"`).
 

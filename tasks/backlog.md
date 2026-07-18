@@ -23,6 +23,37 @@ Two hard problems T113a deliberately left alone because naive fixes regressed re
 1. **Repeated-cycle corruption / recovery.** After ~4–5 rapid start/stop cycles, replay degrades (5th `step()` can't advance); only a TV restart clears it today. Nulling `_chartWidgetCollection._replaySessionState` and/or `goToRealtime()` in `stop()` made it WORSE (broke the 2nd cycle) — so recovery needs real investigation of TV 3.1.0's replay-session teardown, not blind field-nulling. Candidates to probe: `leaveReplay()`, `_replayContainer` lifecycle, the `_replayUIController._restoreReplaySessionState` / `_updateReplaySessionState` methods (seen in the live prototype dump).
 2. **scroll_back for backward jumps past the loaded buffer.** A `selectDate()` to a target earlier than the loaded history buffer clamps (cursor stalls, `step()` then can't advance). Needs pre-loading older history via synthetic `Input.dispatchMouseEvent({type:'mouseWheel', deltaX:-120})` batches at the pane canvas until `bars().valueAt(firstIndex())[0] <= targetTs`, BEFORE `showReplayToolbar()`. iliaal's `_scrollBackToTarget` is the reference (but re-verify paths on 3.1.0).
 
+### Candidate implementation (evaluated 2026-07-18 — Collinshogo fork)
+
+The `Collinshogo:main` fork (no upstream PR filed; commit `f1e3ca6c7`, +216 lines
+in `src/core/replay.js`) is the strongest candidate reference found to date for
+item #1. It diagnoses a concrete root cause we hadn't isolated:
+
+- **Root cause:** TV's `ReplayManager._stopReplay()` sets `_isReplayStopping =
+  true` BEFORE asserting "Replay is not started", with no try/finally. One
+  stop-path call in the wrong state (e.g. `goToRealtime()` right after
+  `stopReplay()` — replay already stopped, assert throws) leaves the latch stuck
+  `true`; from then on every `stopReplay()`/`goToRealtime()`/toolbar-X silently
+  returns false while `isReplayStarted()` stays true — only a page reload
+  recovers. This matches our observed ~4–5-cycle degradation exactly.
+- **Their fix:** a shared `buildExitReplayJS()` that (1) graceful `stopReplay()`,
+  (2) if manager still started, `m._isReplayStopping = false` + `_forceStopReplay()`
+  to unwedge, (3) close replay MODE via `requestCloseReplay(true)`, (4)
+  `disconnectionSessionIfExists()`, (5) `updateReplaySessionState(null)`, (6)
+  dismiss the "Continue your last replay?" dialog. Plus `buildVerifyExitJS()`
+  that surveys `_chartWidgetCollection.getAll()` (replay is layout-global).
+
+**⚠️ Why this is NOT a rush-adopt (why it stays deferred, not shipped):**
+1. Step 5 (`updateReplaySessionState(null)`) is the SAME session-state clearing
+   FORK_NOTES §18 found REGRESSED re-use in our own attempt. Their sequencing
+   (force-stop BEFORE clearing state) may or may not avoid that regression — must
+   be proven with the ≥10-cycle soak test below, not assumed.
+2. It's a +216-line rewrite that must graft into our diverged replay.js (T112
+   stepping, T115 replay_walk) without regressing them.
+3. Needs stable CDP for a proper multi-cycle replay soak (start/stop cycles are
+   the most wedge-prone CDP interaction) — do it in a focused session, not a
+   ride-along. Ref diff: `gh api repos/tradesdontlie/tradingview-mcp/compare/tradesdontlie:main...Collinshogo:main`.
+
 ### Acceptance criteria
 - [ ] A safe replay-session reset that lets ≥10 consecutive start/stop cycles step cleanly with no TV restart — WITHOUT regressing normal stop→start→step (guard with a repeated-cycle live test).
 - [ ] `scroll_back` option on `start()`: backward jump past the buffer pre-loads history and lands correctly (drift-warning from T113a should then NOT fire).
