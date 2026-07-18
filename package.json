@@ -14,9 +14,11 @@
   "scripts": {
     "start": "node src/server.js",
     "tv": "node src/cli/index.js",
+    "lint": "eslint src/ eslint.config.mjs",
     "test": "node --test tests/e2e.test.js tests/pine_analyze.test.js",
     "test:e2e": "node --test tests/e2e.test.js",
     "test:unit": "node --test tests/pine_analyze.test.js tests/cli.test.js",
+    "test:unit:pure": "node --test tests/pine_analyze.test.js tests/signal_pnl.test.js tests/strategy_report.test.js tests/tv_decompress.test.js",
     "test:cli": "node --test tests/cli.test.js",
     "test:all": "node --test tests/e2e.test.js tests/pine_analyze.test.js tests/cli.test.js",
     "test:verbose": "node --test --test-reporter=spec tests/e2e.test.js tests/pine_analyze.test.js",
@@ -27,5 +29,8 @@
     "@modelcontextprotocol/sdk": "^1.12.1",
     "chrome-remote-interface": "^0.33.2",
     "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "eslint": "^9.39.4"
   }
 }
