@@ -3,9 +3,9 @@
  * lines/labels/boxes (no plot() output, so getStudyValues/data_get_study_values
  * returns nothing for them). Built on top of getPineLabels/getPineTables.
  *
- * Motivated by ASTA's label/table/box-heavy indicators (3Cs Dashboard, Key
- * Levels, Patterns) which have no plot() series to read. (Ported from PR #340
- * by olaseun28; the bundled Windows exit-crash fix from that PR is NOT included.)
+ * Motivated by a downstream consumer's label/table/box-heavy indicators which
+ * have no plot() series to read. (Ported from PR #340 by olaseun28; the bundled
+ * Windows exit-crash fix from that PR is NOT included.)
  */
 import { getPineLabels, getPineTables } from './data.js';
 

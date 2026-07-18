@@ -18,18 +18,18 @@ allowed:
 
 - **T122** — security: screenshot path-traversal `..` scrub (upstream #177) +
   `npm audit fix` (0 vulns, was 7). LIVE-verified traversal blocked.
-- **T123+T124** — data.js read correctness: 8dp price rounding (#77 — ASTA levels
+- **T123+T124** — data.js read correctness: 8dp price rounding (#77 — custom-indicator levels
   read exact now, e.g. 29.8755) + strategy-tester read rewrite (inverted
   `is_price_study` detector, #48/#173/#181). Rounding + no-crash LIVE-verified;
   full strategy metric read is a faithful upstream port (pending a strategy on
   the chart).
 - **T127+T129** — chart.js: `setVisibleRange` history paging (#224 — LIVE paged
-  CDNA 2300→3016 bars back to 2014 IPO) + reliable indicator inputs-on-add via
+  a daily equity chart 2300→3016 bars back to 2014 IPO) + reliable indicator inputs-on-add via
   setInputValues readback (#249, mechanism-verified).
 - **T128** — `ui_open_panel` close on TV 3.2+ (`hideWidget` removed; #248). LIVE:
   bottom panel 484px→38px via `bwb.close()` fallback.
 - **T125** — NEW `data_get_bias_signal`: reads bull/bear/neutral from label/box-only
-  Pine indicators (PR #340). LIVE: ASTA Indicators Panel → bullish (high conf).
+  Pine indicators (PR #340). LIVE: a custom indicator panel → bullish (high conf).
   +10 unit tests.
 - **T130** — ESLint `no-undef` guard + CI workflow (#205) — catches the "X is not
   defined" class the fork keeps hitting. src/ clean (0 errors).
@@ -99,10 +99,10 @@ The scale unlock: array-speed full-history backtests, no browser. Gated on a via
 - T130 — ESLint `no-undef` guard + CI workflow — DONE 2026-07-18 (upstream #205; src/ clean 0 errors, CI runs lint + `test:unit:pure` on Node 20/22) — see FORK_NOTES.
 - T129 — reliable indicator inputs-on-add (setInputValues readback) — DONE 2026-07-18 (upstream #249; mechanism-verified on 3.3.0, full add+readback e2e pending stable CDP) — see FORK_NOTES.
 - T128 — `ui_open_panel` close on TV 3.2+ (`hideWidget` removed) — DONE 2026-07-18 (upstream #248; LIVE 484px→38px via `bwb.close()` fallback) — see FORK_NOTES.
-- T127 — `setVisibleRange` history paging (multi-year ranges) — DONE 2026-07-18 (upstream #224; LIVE paged CDNA 2300→3016 bars back to 2014 IPO) — see FORK_NOTES.
-- T125 — `data_get_bias_signal` (read bias from label/box-only Pine indicators) ⭐ — DONE 2026-07-18 (PR #340; LIVE ASTA Indicators Panel → bullish/high-conf; +10 unit tests) — see FORK_NOTES.
+- T127 — `setVisibleRange` history paging (multi-year ranges) — DONE 2026-07-18 (upstream #224; LIVE paged a daily equity chart 2300→3016 bars back to 2014 IPO) — see FORK_NOTES.
+- T125 — `data_get_bias_signal` (read bias from label/box-only Pine indicators) ⭐ — DONE 2026-07-18 (PR #340; LIVE a custom indicator panel → bullish/high-conf; +10 unit tests) — see FORK_NOTES.
 - T124 — strategy-tester read rewrite (inverted `is_price_study` detector) — DONE 2026-07-18 (upstream #48/#173/#181; no-crash LIVE-verified, metric mapping faithful upstream port) — see FORK_NOTES.
-- T123 — 8dp price rounding (was 2dp, flattened fractional levels) — DONE 2026-07-18 (upstream #77; LIVE ASTA levels exact) — see FORK_NOTES.
+- T123 — 8dp price rounding (was 2dp, flattened fractional levels) — DONE 2026-07-18 (upstream #77; LIVE custom-indicator levels exact) — see FORK_NOTES.
 - T122 — security: screenshot path-traversal scrub + `npm audit fix` — DONE 2026-07-18 (upstream #177 + audit; 0 vulns, traversal LIVE-blocked) — see FORK_NOTES.
 - T121 — `backtest_from_signals` native per-entry `stop_loss` ⭐ — DONE 2026-07-18. Added a `rules.stop_loss = { field, basis: "close"|"intrabar" }` option to the signal engine (`src/sidecar/signal_pnl.js`): the stop level is captured from the entry bar's `field` (a FIXED per-entry stop, not trailing — unlike the old `field2`-exit approximation which re-reads the level each bar), checked BEFORE the signal exit, exits `close`-basis (default: bar close breaches) or `intrabar` (low/high breaches), fills at `price_field` on the breach bar (exit_reason `stop_loss`). Non-numeric captured level → inert. Additive + back-compatible (`rules` schema already `.passthrough()`; added an explicit discoverable `stop_loss` field to the tool schema in `src/tools/replay.js`). TDD: +6 tests in `tests/signal_pnl.test.js` (18/18 green). Motivated by a downstream consumer needing closing-basis stop realism in fill-parity backtests.
 - T113b (safe subset) — guarded `goToRealtime()` teardown in replay `stop()` + documented ~4-5-cycle TV limitation — DONE 2026-07-02 — see FORK_NOTES §21
