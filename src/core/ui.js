@@ -49,7 +49,13 @@ export async function openPanel({ panel, action }) {
           else { if (typeof bwb.showWidget === 'function') bwb.showWidget(widgetName); }
           performed = 'opened';
         } else if (action === 'close' || (action === 'toggle' && isOpen)) {
+          // hideWidget(name) was removed in newer TradingView builds (3.2.0+ /
+          // Electron 38); the old typeof guard let close silently no-op. Fall
+          // back to close() (minimizes the bottom panel) then hide() (hides the
+          // bar). (Ported from upstream d766b10 / PR #248.)
           if (typeof bwb.hideWidget === 'function') bwb.hideWidget(widgetName);
+          else if (typeof bwb.close === 'function') bwb.close();
+          else if (typeof bwb.hide === 'function') bwb.hide();
           performed = 'closed';
         }
         return { was_open: isOpen, performed: performed };
