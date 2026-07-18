@@ -25,6 +25,7 @@
   "dependencies": {
     "@mathieuc/tradingview": "^3.5.2",
     "@modelcontextprotocol/sdk": "^1.12.1",
-    "chrome-remote-interface": "^0.33.2"
+    "chrome-remote-interface": "^0.33.2",
+    "zod": "^3.25.76"
   }
 }
