@@ -288,6 +288,7 @@ export async function findElement({ query, strategy }) {
 }
 
 export async function uiEvaluate({ expression }) {
-  const result = await evaluate(expression);
+  // awaitPromise so async expressions return their resolved value, not {}
+  const result = await evaluateAsync(expression);
   return { success: true, result };
 }
