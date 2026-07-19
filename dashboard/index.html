@@ -1,0 +1,906 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>India Market Dashboard</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --page:        #0d0d0d;
+    --surface:     #1a1a19;
+    --surface-2:   #222221;
+    --ink:         #ffffff;
+    --ink-2:       #c3c2b7;
+    --muted:       #898781;
+    --grid:        #2c2c2a;
+    --border:      rgba(255,255,255,0.10);
+    --accent:      #3987e5;
+    --up:          #0ca30c;
+    --down:        #e66767;
+    --down-strong: #d03b3b;
+    --warn:        #eda100;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--page); color: var(--ink);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  header {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
+    padding: 12px 20px; border-bottom: 1px solid var(--grid);
+    position: sticky; top: 0; background: var(--page); z-index: 5;
+  }
+  header h1 { font-size: 16px; font-weight: 650; margin: 0; letter-spacing: .2px; }
+  .idx, .breadth {
+    display: inline-flex; align-items: baseline; gap: 7px; padding: 4px 12px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  }
+  .idx .nm, .breadth .nm { color: var(--ink-2); font-size: 12px; }
+  .idx .px { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .breadth .bar {
+    align-self: center; width: 70px; height: 6px; border-radius: 3px; overflow: hidden;
+    background: var(--down-strong); display: flex;
+  }
+  .breadth .bar i { display: block; height: 100%; background: var(--up); }
+  .status { margin-left: auto; color: var(--muted); font-size: 12px; }
+  .status .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--up); margin-right: 5px; }
+  .status.err .dot { background: var(--down-strong); }
+
+  main { padding: 18px 20px 60px; max-width: 1600px; margin: 0 auto; }
+  section.card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; margin-bottom: 20px; overflow: hidden;
+  }
+  .card-head {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 12px 16px; border-bottom: 1px solid var(--grid);
+  }
+  .card-head h2 { font-size: 14px; font-weight: 650; margin: 0; }
+  .card-head .sub { color: var(--muted); font-size: 12px; }
+
+  .chips { display: flex; gap: 6px; }
+  .chip {
+    background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--border);
+    border-radius: 20px; padding: 3px 12px; font: inherit; font-size: 12px; cursor: pointer;
+  }
+  .chip.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  .chip .n { opacity: .75; font-size: 11px; }
+
+  .addbox { margin-left: auto; display: flex; gap: 8px; }
+  .addbox input {
+    background: var(--surface-2); color: var(--ink); border: 1px solid var(--border);
+    border-radius: 8px; padding: 6px 10px; width: 190px; font: inherit; text-transform: uppercase;
+  }
+  .addbox input::placeholder { text-transform: none; color: var(--muted); }
+  .addbox button {
+    background: var(--accent); color: #fff; border: 0; border-radius: 8px;
+    padding: 6px 14px; font: inherit; font-weight: 600; cursor: pointer;
+  }
+  .addbox button:disabled { opacity: .5; cursor: default; }
+  .addmsg { font-size: 12px; color: var(--muted); align-self: center; }
+  .addmsg.err { color: var(--down); }
+
+  .tablewrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; white-space: nowrap; }
+  th, td { padding: 7px 12px; text-align: right; font-variant-numeric: tabular-nums; }
+  th:first-child, td:first-child { text-align: left; }
+  thead th {
+    font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase;
+    letter-spacing: .4px; border-bottom: 1px solid var(--grid);
+    cursor: pointer; user-select: none; position: sticky; top: 0; background: var(--surface);
+  }
+  thead th.nosort { cursor: default; }
+  thead th .arr { color: var(--accent); }
+  thead th.group { border-left: 1px solid var(--grid); }
+  td.group { border-left: 1px solid var(--grid); }
+  tbody tr { border-bottom: 1px solid var(--grid); }
+  tbody tr:last-child { border-bottom: 0; }
+  tbody tr.datarow:hover { background: var(--surface-2); cursor: pointer; }
+  .sym { font-weight: 650; }
+  .desc { color: var(--muted); font-size: 11px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+  .up { color: var(--up); }
+  .down { color: var(--down); }
+  .dim { color: var(--muted); }
+  .rvol-hi { color: var(--warn); font-weight: 650; }
+  .nearhigh { color: var(--up); font-weight: 600; }
+
+  .badge {
+    display: inline-block; font-size: 10px; font-weight: 650; letter-spacing: .3px;
+    border-radius: 9px; padding: 1px 7px; margin-left: 6px; vertical-align: 1px;
+  }
+  .b-trend { color: var(--up); background: rgba(12,163,12,.14); border: 1px solid rgba(12,163,12,.4); }
+  .b-pb { color: var(--accent); background: rgba(57,135,229,.14); border: 1px solid rgba(57,135,229,.45); }
+  .b-earn { color: var(--warn); background: rgba(237,161,0,.12); border: 1px solid rgba(237,161,0,.4); }
+  .b-s2 { color: #1baf7a; background: rgba(27,175,122,.12); border: 1px solid rgba(27,175,122,.45); }
+  .b-exit { color: #fff; background: var(--down-strong); border: 1px solid var(--down-strong); }
+
+  .cond {
+    background: var(--surface-2); color: var(--ink); border: 1px solid var(--border);
+    border-radius: 8px; padding: 5px 10px; width: 230px; font: inherit; font-size: 12px;
+  }
+  .cond.bad { border-color: var(--down-strong); }
+  .ghost {
+    background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 6px 12px; font: inherit; font-size: 12px; cursor: pointer;
+  }
+  .ghost:hover { color: var(--accent); border-color: var(--accent); }
+
+  .bu { font-size: 11px; font-weight: 650; border-radius: 9px; padding: 1px 8px; white-space: nowrap; }
+  .bu-long { color: var(--up); background: rgba(12,163,12,.14); }
+  .bu-short { color: var(--down); background: rgba(208,59,59,.14); }
+  .bu-cover { color: var(--accent); background: rgba(57,135,229,.14); }
+  .bu-unwind { color: var(--warn); background: rgba(237,161,0,.12); }
+
+  .funda { padding: 8px 0 4px; border-bottom: 1px solid var(--grid); margin-bottom: 6px; }
+  .funda .fscore { font-weight: 700; margin-right: 10px; }
+  .funda .fscore.strong { color: var(--up); }
+  .funda .fscore.moderate { color: var(--warn); }
+  .funda .fscore.weak { color: var(--down); }
+  .funda .kv { display: inline-block; margin-right: 12px; font-size: 12px; color: var(--ink-2); }
+  .funda .kv b { color: var(--ink); font-variant-numeric: tabular-nums; }
+  .funda .checks { margin-top: 4px; font-size: 11px; color: var(--muted); }
+  .funda .checks .pass { color: var(--up); }
+  .funda .checks .fail { color: var(--muted); }
+
+  .sectors { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 16px; }
+  .sec {
+    display: flex; flex-direction: column; gap: 1px; min-width: 88px;
+    border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px;
+  }
+  .sec .nm { font-size: 10px; color: var(--ink-2); text-transform: uppercase; letter-spacing: .3px; white-space: nowrap; }
+  .sec .v { font-weight: 650; font-size: 13px; font-variant-numeric: tabular-nums; }
+
+  #toast {
+    position: fixed; bottom: 18px; right: 18px; z-index: 20; display: none;
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px 14px; font-size: 13px; box-shadow: 0 4px 20px rgba(0,0,0,.5);
+  }
+  #toast.err { color: var(--down); }
+
+  .rm {
+    background: none; border: 0; color: var(--muted); cursor: pointer;
+    font-size: 14px; padding: 2px 6px; border-radius: 6px;
+  }
+  .rm:hover { color: var(--down); background: var(--surface-2); }
+  .tvbtn { color: var(--muted); font-size: 13px; }
+  .tvbtn:hover { color: var(--accent); background: var(--surface-2); }
+  .idx { cursor: pointer; }
+  td.acts { white-space: nowrap; }
+  .addwl { color: var(--accent); }
+  .addwl:hover { color: var(--accent); background: var(--surface-2); }
+
+  tr.newsrow td { background: var(--surface-2); text-align: left; white-space: normal; padding: 10px 16px; }
+  .newsitem { margin: 4px 0; }
+  .newsitem .src { color: var(--muted); font-size: 12px; margin-left: 8px; }
+
+  .ckchip {
+    display: inline-block; font-size: 10px; color: var(--ink-2);
+    border: 1px solid var(--border); border-radius: 9px; padding: 1px 7px;
+    margin: 1px 4px 1px 0; white-space: nowrap;
+  }
+  .hits { font-weight: 700; }
+  .hits.hi { color: var(--warn); }
+
+  .tabs { display: flex; gap: 6px; margin: 0 0 14px; }
+  .tab {
+    background: var(--surface); color: var(--ink-2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 7px 18px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .tab.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  .grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(430px, 1fr)); gap: 20px; }
+  .catalyst { max-width: 300px; overflow: hidden; text-overflow: ellipsis; text-align: left; white-space: nowrap; }
+  .catalyst .src { color: var(--muted); font-size: 11px; }
+
+  .empty { padding: 24px 16px; color: var(--muted); text-align: center; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>India Market Dashboard</h1>
+  <div id="indices" style="display:flex;gap:8px"></div>
+  <div id="breadthbox"></div>
+  <div class="status" id="status"><span class="dot"></span><span id="statustext">connecting…</span></div>
+</header>
+
+<main>
+  <div class="sectors" id="sectors"></div>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Watchlist</h2>
+      <div class="chips" id="setupchips">
+        <button class="chip on" data-f="all">All <span class="n" id="n-all"></span></button>
+        <button class="chip" data-f="trend">▲ Trend <span class="n" id="n-trend"></span></button>
+        <button class="chip" data-f="pullback">↩ Pullback <span class="n" id="n-pullback"></span></button>
+        <button class="chip" data-f="stage2">S2 <span class="n" id="n-stage2"></span></button>
+        <button class="chip" data-f="exit">Exit <span class="n" id="n-exit"></span></button>
+      </div>
+      <input id="condfilter" class="cond" placeholder="filter… e.g. chg>1 and w21>0" spellcheck="false" title="Fields: price, chg, volume, rvol, off52, d10, d21, w10, w21, w40 — combine with 'and'">
+      <div class="addbox">
+        <span class="addmsg" id="addmsg"></span>
+        <button id="tvimport" class="ghost" title="Import the active watchlist from TradingView Desktop">⇊ Import TV</button>
+        <input id="addsym" placeholder="Add NSE symbol… e.g. TATAMOTORS" spellcheck="false">
+        <button id="addbtn">Add</button>
+      </div>
+    </div>
+    <div class="tablewrap"><table id="wl">
+      <thead><tr>
+        <th data-k="name">Symbol</th>
+        <th data-k="price">Price</th>
+        <th data-k="chg">Chg%</th>
+        <th data-k="volume">Volume</th>
+        <th data-k="rvol">RVol</th>
+        <th data-k="off52">52wH %</th>
+        <th data-k="d10" class="group">D 10E %</th>
+        <th data-k="d21">D 21E %</th>
+        <th data-k="w10" class="group">W 10E %</th>
+        <th data-k="w21">W 21E %</th>
+        <th data-k="w40">W 40E %</th>
+        <th class="nosort"></th>
+      </tr></thead>
+      <tbody id="wlbody"></tbody>
+    </table></div>
+  </section>
+
+  <div class="tabs">
+    <button class="tab on" data-tab="today">Today</button>
+    <button class="tab" data-tab="week">Last 7 Days</button>
+    <button class="tab" data-tab="gain">Gainers 20%+</button>
+    <button class="tab" data-tab="ep">EP</button>
+    <button class="tab" data-tab="oi">F&amp;O OI</button>
+    <button class="tab" data-tab="chartink">Chartink</button>
+    <button class="tab" data-tab="ckresult">Chartink Result</button>
+  </div>
+
+  <div id="tab-today" class="grid3">
+    <section class="card">
+      <div class="card-head"><h2>Episodic Pivots</h2><span class="sub">+4%+ on 3×+ volume — moves that start trends</span></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Symbol</th><th>Chg%</th><th>Gap%</th><th>RVol</th><th>52wH %</th><th style="text-align:left">Catalyst</th><th class="nosort"></th></tr></thead>
+        <tbody id="epbody"></tbody>
+      </table></div>
+    </section>
+    <section class="card">
+      <div class="card-head"><h2>Top Gainers</h2><span class="sub">NSE · mcap &gt; ₹500 Cr · with catalyst</span></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Symbol</th><th>Chg%</th><th>Price</th><th>RVol</th><th style="text-align:left">Catalyst</th><th class="nosort"></th></tr></thead>
+        <tbody id="gbody"></tbody>
+      </table></div>
+    </section>
+    <section class="card">
+      <div class="card-head"><h2>Top Losers</h2><span class="sub">with catalyst</span></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Symbol</th><th>Chg%</th><th>Price</th><th>RVol</th><th style="text-align:left">Catalyst</th><th class="nosort"></th></tr></thead>
+        <tbody id="lbody"></tbody>
+      </table></div>
+    </section>
+    <section class="card">
+      <div class="card-head"><h2>Volume Shockers</h2><span class="sub">highest relative volume vs 10-day avg</span></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Symbol</th><th>RVol</th><th>Chg%</th><th>Price</th><th>Volume</th><th class="nosort"></th></tr></thead>
+        <tbody id="vbody"></tbody>
+      </table></div>
+    </section>
+  </div>
+
+  <div id="tab-week" class="grid3" style="display:none">
+    <section class="card">
+      <div class="card-head"><h2>7-Day Gainers</h2><span class="sub">best weekly performance</span></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Symbol</th><th>7d%</th><th>Today%</th><th>Price</th><th>RVol</th><th class="nosort"></th></tr></thead>
+        <tbody id="g7body"></tbody>
+      </table></div>
+    </section>
+    <section class="card">
+      <div class="card-head"><h2>7-Day Losers</h2><span class="sub">worst weekly performance</span></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Symbol</th><th>7d%</th><th>Today%</th><th>Price</th><th>RVol</th><th class="nosort"></th></tr></thead>
+        <tbody id="l7body"></tbody>
+      </table></div>
+    </section>
+    <section class="card">
+      <div class="card-head"><h2>Volume Buildup</h2><span class="sub">10-day avg volume vs 90-day avg — sustained interest</span></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Symbol</th><th>Buildup</th><th>7d%</th><th>Today%</th><th>Price</th><th class="nosort"></th></tr></thead>
+        <tbody id="vbbody"></tbody>
+      </table></div>
+    </section>
+  </div>
+
+  <div id="tab-gain" class="grid3" style="display:none">
+    <section class="card">
+      <div class="card-head"><h2>1-Day +20%</h2><span class="sub">circuit-level moves today</span></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Symbol</th><th>Chg%</th><th>RVol</th><th>Price</th><th>Volume</th><th class="nosort"></th></tr></thead>
+        <tbody id="g1body"></tbody>
+      </table></div>
+    </section>
+    <section class="card">
+      <div class="card-head"><h2>1-Week +20%</h2><span class="sub">top 50 · gained ≥20% in a week</span></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Symbol</th><th>7d%</th><th>Today%</th><th>Price</th><th>RVol</th><th class="nosort"></th></tr></thead>
+        <tbody id="gwbody"></tbody>
+      </table></div>
+    </section>
+    <section class="card">
+      <div class="card-head"><h2>15-Day +20%</h2><span class="sub">top 50 · gained ≥20% in 15 sessions</span></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Symbol</th><th>15d%</th><th>Today%</th><th>Price</th><th>RVol</th><th class="nosort"></th></tr></thead>
+        <tbody id="g15body"></tbody>
+      </table></div>
+    </section>
+  </div>
+
+  <div id="tab-ep" style="display:none">
+    <section class="card">
+      <div class="card-head"><h2>Episodic Pivots · Today</h2><span class="sub">+4%+ on 3×+ volume</span></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Symbol</th><th>Chg%</th><th>Gap%</th><th>RVol</th><th>52wH %</th><th style="text-align:left">Catalyst</th><th class="nosort"></th></tr></thead>
+        <tbody id="ep2body"></tbody>
+      </table></div>
+    </section>
+    <section class="card">
+      <div class="card-head"><h2>Episodic Pivots · Last 15 Days</h2><span class="sub">EP day detected in the last 15 sessions · with catalyst</span></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Symbol</th><th>EP Date</th><th>EP Day%</th><th>Vol×</th><th>Since EP</th><th>Price</th><th style="text-align:left">Catalyst</th><th class="nosort"></th></tr></thead>
+        <tbody id="ep15body"></tbody>
+      </table></div>
+    </section>
+  </div>
+
+  <div id="tab-oi" style="display:none">
+    <section class="card">
+      <div class="card-head"><h2>F&amp;O Open Interest Spurts</h2><span class="sub" id="oi-sub">NSE futures · OI change vs previous day</span></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Symbol</th><th style="text-align:left">Buildup</th><th>OI Chg%</th><th>OI (contracts)</th><th>Price</th><th>Chg%</th><th>Fut Vol</th><th class="nosort"></th></tr></thead>
+        <tbody id="oibody"></tbody>
+      </table></div>
+    </section>
+  </div>
+
+  <div id="tab-ckresult" style="display:none">
+    <section class="card">
+      <div class="card-head">
+        <h2>Chartink Result · high potential</h2>
+        <span class="sub">stocks hit by 2+ scanners simultaneously — the confluence filter</span>
+      </div>
+      <div class="tablewrap"><table>
+        <thead><tr>
+          <th>Symbol</th><th>Hits</th><th style="text-align:left">Scanners</th>
+          <th>Chg%</th><th>Price</th><th>Volume</th><th style="text-align:left">Catalyst</th><th class="nosort"></th>
+        </tr></thead>
+        <tbody id="ckrbody"></tbody>
+      </table></div>
+    </section>
+  </div>
+
+  <div id="tab-chartink" style="display:none">
+    <section class="card">
+      <div class="card-head">
+        <h2>Chartink · <span id="ck-title">…</span></h2>
+        <span class="sub" id="ck-sub">loading scanners…</span>
+      </div>
+      <div class="tablewrap"><table>
+        <thead><tr>
+          <th>Symbol</th><th>Hits</th><th style="text-align:left">Scanners</th>
+          <th>Chg%</th><th>Price</th><th>Volume</th><th style="text-align:left">Catalyst</th><th class="nosort"></th>
+        </tr></thead>
+        <tbody id="ckbody"></tbody>
+      </table></div>
+    </section>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+let watchRows = [], indexRows = [], breadth = null;
+let gainers = [], losers = [], shockers = [], eps = [];
+let gainers7 = [], losers7 = [], buildup = [];
+let sectors = [];
+let chartink = { title: null, scanners: [], stocks: [], at: null, error: null };
+let gainers1d = [], gainersW = [], gainers15 = [], ep15 = [];
+let oi = { rows: [], at: null, error: null };
+let condFilter = null;   // parsed conditions from the filter box, or null = show all
+const fundaData = new Map();   // symbol -> funda | 'loading' | null
+let sortKey = null, sortDir = -1;
+let setupFilter = 'all';
+const openNews = new Set();   // symbols with expanded news
+const newsData = new Map();   // symbol -> items | 'loading'
+
+// ---------- formatting ----------
+const fmtPx = v => v == null ? '—' : v.toLocaleString('en-IN', { maximumFractionDigits: 2, minimumFractionDigits: v < 100 ? 2 : 1 });
+const fmtVol = v => v == null ? '—' : v >= 1e7 ? (v / 1e7).toFixed(1) + ' Cr' : v >= 1e5 ? (v / 1e5).toFixed(1) + ' L' : v.toLocaleString('en-IN');
+function pctCell(v, { strong = false } = {}) {
+  if (v == null || !isFinite(v)) return '<span class="dim">—</span>';
+  const cls = v >= 0 ? 'up' : 'down';
+  const s = (v >= 0 ? '+' : '') + v.toFixed(strong ? 2 : 1) + '%';
+  return `<span class="${cls}">${s}</span>`;
+}
+function rvolCell(v) {
+  if (v == null) return '<span class="dim">—</span>';
+  return `<span class="${v >= 2 ? 'rvol-hi' : ''}">${v.toFixed(1)}×</span>`;
+}
+function off52Cell(v) {
+  if (v == null || !isFinite(v)) return '<span class="dim">—</span>';
+  return `<span class="${v >= -5 ? 'nearhigh' : 'dim'}">${v.toFixed(1)}%</span>`;
+}
+function timeAgo(pubDate) {
+  if (!pubDate) return '';
+  const m = (Date.now() - new Date(pubDate).getTime()) / 60000;
+  if (!isFinite(m) || m < 0) return '';
+  if (m < 60) return Math.round(m) + 'm ago';
+  if (m < 1440) return Math.round(m / 60) + 'h ago';
+  return Math.round(m / 1440) + 'd ago';
+}
+const esc = s => (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+// ---------- header ----------
+function renderIndices() {
+  $('indices').innerHTML = indexRows.map(r =>
+    `<span class="idx" data-chart="${esc(r.symbol)}" title="Open on TradingView chart">` +
+    `<span class="nm">${r.name}</span><span class="px">${fmtPx(r.price)}</span>${pctCell(r.chg)}</span>`).join('');
+  if (breadth && breadth.adv != null) {
+    const pct = breadth.adv + breadth.dec ? (breadth.adv / (breadth.adv + breadth.dec)) * 100 : 50;
+    $('breadthbox').innerHTML =
+      `<span class="breadth" title="NSE advancers vs decliners"><span class="nm">Breadth</span>` +
+      `<span class="up">${breadth.adv}</span><span class="bar"><i style="width:${pct.toFixed(0)}%"></i></span>` +
+      `<span class="down">${breadth.dec}</span></span>`;
+  }
+}
+
+// ---------- sector heatmap ----------
+function renderSectors() {
+  $('sectors').innerHTML = sectors.map(s => {
+    const a = (Math.min(Math.abs(s.chg), 2) / 2) * 0.38 + 0.06;
+    const bg = s.chg >= 0 ? `rgba(12,163,12,${a.toFixed(2)})` : `rgba(208,59,59,${a.toFixed(2)})`;
+    return `<span class="sec" style="background:${bg}" title="${esc(s.sector)} · ${s.adv}/${s.n} stocks advancing">` +
+      `<span class="nm">${esc(s.short)}</span><span class="v">${(s.chg >= 0 ? '+' : '') + s.chg.toFixed(2)}%</span></span>`;
+  }).join('');
+}
+
+// ---------- toast ----------
+let toastTimer = null;
+function toast(msg, err = false) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.className = err ? 'err' : '';
+  t.style.display = 'block';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.style.display = 'none'; }, 3500);
+}
+
+// ---------- news + fundamentals expansion ----------
+async function toggleNews(symbol, name) {
+  if (openNews.has(symbol)) { openNews.delete(symbol); renderAll(); return; }
+  openNews.add(symbol);
+  if (!fundaData.has(symbol)) {
+    fundaData.set(symbol, 'loading');
+    fetch('/funda?symbol=' + encodeURIComponent(symbol)).then(r => r.json())
+      .then(r => { fundaData.set(symbol, r.funda || null); renderAll(); })
+      .catch(() => { fundaData.set(symbol, null); renderAll(); });
+  }
+  if (!newsData.has(symbol)) {
+    newsData.set(symbol, 'loading');
+    renderAll();
+    try {
+      const r = await fetch('/news?name=' + encodeURIComponent(name)).then(r => r.json());
+      newsData.set(symbol, r.items || []);
+    } catch { newsData.set(symbol, []); }
+  }
+  renderAll();
+}
+const fnum = (v, d = 1) => v == null || !isFinite(v) ? '—' : v.toFixed(d);
+function fundaHtml(symbol) {
+  const f = fundaData.get(symbol);
+  if (f === 'loading') return '<div class="funda dim">loading fundamentals…</div>';
+  if (!f) return '';
+  const passes = f.checks.map(c =>
+    `<span class="${c.pass ? 'pass' : 'fail'}" title="${esc(c.label)}">${c.pass ? '✓' : '✗'} ${esc(c.label)}</span>`).join(' · ');
+  return `<div class="funda">` +
+    `<span class="fscore ${f.label.toLowerCase()}">${f.label} ${f.score}/${f.max}</span>` +
+    `<span class="kv">P/E <b>${fnum(f.pe)}</b></span><span class="kv">ROE <b>${fnum(f.roe)}%</b></span>` +
+    `<span class="kv">D/E <b>${fnum(f.de, 2)}</b></span><span class="kv">P/B <b>${fnum(f.pb)}</b></span>` +
+    `<span class="kv">Margin <b>${fnum(f.margin)}%</b></span>` +
+    `<span class="kv">Rev YoY <b>${fnum(f.revG)}%</b></span><span class="kv">PAT YoY <b>${fnum(f.niG)}%</b></span>` +
+    `<span class="kv">Div <b>${fnum(f.divYield, 2)}%</b></span>` +
+    `<div class="checks">${passes}</div></div>`;
+}
+function newsRowHtml(symbol, colspan) {
+  const d = newsData.get(symbol);
+  let inner;
+  if (d === 'loading') inner = '<span class="dim">loading news…</span>';
+  else if (!d || !d.length) inner = '<span class="dim">no recent news found</span>';
+  else inner = d.map(n =>
+    `<div class="newsitem"><a href="${esc(n.link)}" target="_blank" rel="noopener">${esc(n.title)}</a>` +
+    `<span class="src">${esc(n.source || '')} · ${timeAgo(n.pubDate)}</span></div>`).join('');
+  return `<tr class="newsrow"><td colspan="${colspan}">${fundaHtml(symbol)}${inner}</td></tr>`;
+}
+
+// ---------- watchlist condition filter ----------
+const COND_FIELDS = { price: 1, chg: 1, volume: 1, vol: 'volume', rvol: 1, off52: 1, d10: 1, d21: 1, w10: 1, w21: 1, w40: 1 };
+function parseCond(str) {
+  const parts = str.split(/\s*(?:,|;|\band\b|&&|&)\s*/i).map(p => p.trim()).filter(Boolean);
+  if (!parts.length) return null;
+  const conds = [];
+  for (const p of parts) {
+    const m = p.match(/^([a-z0-9]+)\s*(>=|<=|>|<|=)\s*(-?\d+(?:\.\d+)?)$/i);
+    if (!m) return { error: true };
+    let f = m[1].toLowerCase();
+    if (!(f in COND_FIELDS)) return { error: true };
+    if (typeof COND_FIELDS[f] === 'string') f = COND_FIELDS[f];
+    conds.push({ f, op: m[2], v: Number(m[3]) });
+  }
+  return { conds };
+}
+function condPass(r, conds) {
+  for (const c of conds) {
+    const val = r[c.f];
+    if (val == null) return false;
+    if (c.op === '>' && !(val > c.v)) return false;
+    if (c.op === '>=' && !(val >= c.v)) return false;
+    if (c.op === '<' && !(val < c.v)) return false;
+    if (c.op === '<=' && !(val <= c.v)) return false;
+    if (c.op === '=' && !(Math.abs(val - c.v) < 1e-9)) return false;
+  }
+  return true;
+}
+
+// ---------- watchlist table ----------
+function sortedWatch() {
+  let rows = setupFilter === 'all' ? watchRows
+    : setupFilter === 'stage2' ? watchRows.filter(r => r.stage2)
+    : setupFilter === 'exit' ? watchRows.filter(r => r.exit)
+    : watchRows.filter(r => r.setup === setupFilter);
+  if (condFilter) rows = rows.filter(r => !r.missing && condPass(r, condFilter));
+  if (!sortKey) return rows;
+  rows = [...rows];
+  rows.sort((a, b) => {
+    const av = a[sortKey], bv = b[sortKey];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    if (typeof av === 'string') return av.localeCompare(bv) * sortDir;
+    return (av - bv) * sortDir;
+  });
+  return rows;
+}
+function symCell(r) {
+  let badges = '';
+  if (r.exit) badges += '<span class="badge b-exit" title="price below weekly 21 EMA — exit rule">EXIT</span>';
+  if (r.stage2) badges += '<span class="badge b-s2" title="Stage 2: weekly 10>21>40 EMAs stacked, price on top">S2</span>';
+  if (r.setup === 'trend') badges += '<span class="badge b-trend">▲ TREND</span>';
+  if (r.setup === 'pullback') badges += '<span class="badge b-pb">↩ PB</span>';
+  if (r.earnDate) badges += `<span class="badge b-earn" title="results in ${r.earnDays} day(s)">E · ${esc(r.earnDate)}</span>`;
+  return `<td><span class="sym">${esc(r.name)}</span>${badges}<div class="desc">${esc(r.description || '')}</div></td>`;
+}
+function renderWatch() {
+  $('n-all').textContent = watchRows.length || '';
+  $('n-trend').textContent = watchRows.filter(r => r.setup === 'trend').length || '0';
+  $('n-pullback').textContent = watchRows.filter(r => r.setup === 'pullback').length || '0';
+  $('n-stage2').textContent = watchRows.filter(r => r.stage2).length || '0';
+  $('n-exit').textContent = watchRows.filter(r => r.exit).length || '0';
+  const rows = sortedWatch();
+  if (!rows.length) {
+    $('wlbody').innerHTML = `<tr><td colspan="12" class="empty">${watchRows.length ? 'No stocks match this setup right now.' : 'Watchlist is empty — add an NSE symbol above.'}</td></tr>`;
+    return;
+  }
+  let html = '';
+  for (const r of rows) {
+    if (r.missing) {
+      html += `<tr><td class="sym">${esc(r.name)}</td><td colspan="10" class="dim">no data</td>` +
+        `<td><button class="rm" data-rm="${esc(r.symbol)}" title="Remove">✕</button></td></tr>`;
+      continue;
+    }
+    html += `<tr class="datarow" data-news="${esc(r.symbol)}" data-name="${esc(r.description || r.name)}">` +
+      symCell(r) +
+      `<td>${fmtPx(r.price)}</td><td>${pctCell(r.chg, { strong: true })}</td>` +
+      `<td>${fmtVol(r.volume)}</td><td>${rvolCell(r.rvol)}</td><td>${off52Cell(r.off52)}</td>` +
+      `<td class="group">${pctCell(r.d10)}</td><td>${pctCell(r.d21)}</td>` +
+      `<td class="group">${pctCell(r.w10)}</td><td>${pctCell(r.w21)}</td><td>${pctCell(r.w40)}</td>` +
+      `<td class="acts">${tvBtn(r)}<button class="rm" data-rm="${esc(r.symbol)}" title="Remove from watchlist">✕</button></td></tr>`;
+    if (openNews.has(r.symbol)) html += newsRowHtml(r.symbol, 12);
+  }
+  $('wlbody').innerHTML = html;
+  document.querySelectorAll('#wl thead th[data-k]').forEach(th => {
+    const base = th.textContent.replace(/ [▲▼]$/, '');
+    th.innerHTML = th.dataset.k === sortKey ? `${base} <span class="arr">${sortDir > 0 ? '▲' : '▼'}</span>` : base;
+  });
+}
+
+// ---------- movers tables ----------
+const inWatch = sym => watchRows.some(r => r.symbol === sym);
+const moverSym = r => `<td><span class="sym">${esc(r.name)}</span><div class="desc">${esc(r.description || '')}</div></td>`;
+const addBtn = r => inWatch(r.symbol) ? '' :
+  `<button class="rm addwl" data-add="${esc(r.name)}" title="Add to watchlist">+</button>`;
+const tvBtn = r => `<button class="rm tvbtn" data-chart="${esc(r.symbol)}" title="Open on TradingView chart">↗</button>`;
+const catalystCell = c =>
+  c === undefined ? '<span class="dim">…</span>'
+  : c === null ? '<span class="dim">no headline found</span>'
+  : `<a href="${esc(c.link)}" target="_blank" rel="noopener">${esc(c.title)}</a> <span class="src">${esc(c.source || '')} · ${timeAgo(c.pubDate)}</span>`;
+
+function renderMovers(bodyId, rows, cells, colspan, emptyText = 'waiting for scan…') {
+  const el = $(bodyId);
+  if (!rows.length) { el.innerHTML = `<tr><td colspan="${colspan}" class="empty">${emptyText}</td></tr>`; return; }
+  let html = '';
+  for (const r of rows) {
+    html += `<tr class="datarow" data-news="${esc(r.symbol)}" data-name="${esc(r.description || r.name)}">` +
+      moverSym(r) + cells(r) + `<td class="acts">${tvBtn(r)}${addBtn(r)}</td></tr>`;
+    if (openNews.has(r.symbol)) html += newsRowHtml(r.symbol, colspan);
+  }
+  el.innerHTML = html;
+}
+function renderAllMovers() {
+  renderMovers('epbody', eps, r =>
+    `<td>${pctCell(r.chg, { strong: true })}</td><td>${pctCell(r.gap)}</td><td>${rvolCell(r.rvol)}</td>` +
+    `<td>${off52Cell(r.off52)}</td><td class="catalyst">${catalystCell(r.catalyst)}</td>`, 7,
+    'no episodic pivots today');
+  renderMovers('gbody', gainers, r =>
+    `<td>${pctCell(r.chg, { strong: true })}</td><td>${fmtPx(r.price)}</td><td>${rvolCell(r.rvol)}</td><td class="catalyst">${catalystCell(r.catalyst)}</td>`, 6);
+  renderMovers('lbody', losers, r =>
+    `<td>${pctCell(r.chg, { strong: true })}</td><td>${fmtPx(r.price)}</td><td>${rvolCell(r.rvol)}</td><td class="catalyst">${catalystCell(r.catalyst)}</td>`, 6);
+  renderMovers('vbody', shockers, r =>
+    `<td>${rvolCell(r.rvol)}</td><td>${pctCell(r.chg, { strong: true })}</td><td>${fmtPx(r.price)}</td><td>${fmtVol(r.volume)}</td>`, 6);
+  renderMovers('g7body', gainers7, r =>
+    `<td>${pctCell(r.perfW, { strong: true })}</td><td>${pctCell(r.chg)}</td><td>${fmtPx(r.price)}</td><td>${rvolCell(r.rvol)}</td>`, 6);
+  renderMovers('l7body', losers7, r =>
+    `<td>${pctCell(r.perfW, { strong: true })}</td><td>${pctCell(r.chg)}</td><td>${fmtPx(r.price)}</td><td>${rvolCell(r.rvol)}</td>`, 6);
+  renderMovers('vbbody', buildup, r =>
+    `<td><span class="rvol-hi">${r.ratio == null ? '—' : r.ratio.toFixed(1) + '×'}</span></td>` +
+    `<td>${pctCell(r.perfW)}</td><td>${pctCell(r.chg)}</td><td>${fmtPx(r.price)}</td>`, 6);
+  // gainers 20%+ tab
+  renderMovers('g1body', gainers1d, r =>
+    `<td>${pctCell(r.chg, { strong: true })}</td><td>${rvolCell(r.rvol)}</td><td>${fmtPx(r.price)}</td><td>${fmtVol(r.volume)}</td>`, 6,
+    'no stock is up 20%+ today');
+  renderMovers('gwbody', gainersW, r =>
+    `<td>${pctCell(r.perfW, { strong: true })}</td><td>${pctCell(r.chg)}</td><td>${fmtPx(r.price)}</td><td>${rvolCell(r.rvol)}</td>`, 6,
+    'no stock gained 20%+ this week');
+  renderMovers('g15body', gainers15, r =>
+    `<td>${pctCell(r.chg15, { strong: true })}</td><td>${pctCell(r.chg)}</td><td>${fmtPx(r.price)}</td><td>${rvolCell(r.rvol)}</td>`, 6,
+    'computing 15-day moves…');
+  // EP tab
+  renderMovers('ep2body', eps, r =>
+    `<td>${pctCell(r.chg, { strong: true })}</td><td>${pctCell(r.gap)}</td><td>${rvolCell(r.rvol)}</td>` +
+    `<td>${off52Cell(r.off52)}</td><td class="catalyst">${catalystCell(r.catalyst)}</td>`, 7,
+    'no episodic pivots today');
+  renderMovers('ep15body', ep15, r =>
+    `<td><span class="dim">${esc((r.epDate || '').slice(5))}</span></td><td>${pctCell(r.epChg, { strong: true })}</td>` +
+    `<td><span class="rvol-hi">${r.epVolx == null ? '—' : r.epVolx.toFixed(1) + '×'}</span></td>` +
+    `<td>${pctCell(r.sinceEp)}</td><td>${fmtPx(r.price)}</td><td class="catalyst">${catalystCell(r.catalyst)}</td>`, 8,
+    'scanning last 15 sessions…');
+  renderOI();
+  renderChartinkResult();
+}
+const BU_CLS = { 'long buildup': 'bu-long', 'short buildup': 'bu-short', 'short covering': 'bu-cover', 'long unwinding': 'bu-unwind' };
+function renderOI() {
+  const at = oi.at ? new Date(oi.at).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false }) : null;
+  $('oi-sub').innerHTML = oi.error
+    ? `<span class="down">${esc(oi.error)}</span>`
+    : 'NSE futures · OI change vs previous day' + (at ? ` · updated ${at} IST` : '');
+  renderMovers('oibody', oi.rows, r =>
+    `<td style="text-align:left">${r.buildup ? `<span class="bu ${BU_CLS[r.buildup] || ''}">${esc(r.buildup)}</span>` : '<span class="dim">—</span>'}</td>` +
+    `<td>${pctCell(r.oiChg, { strong: true })}</td><td>${fmtVol(r.oi)}</td>` +
+    `<td>${fmtPx(r.price)}</td><td>${pctCell(r.chg)}</td><td>${fmtVol(r.volume)}</td>`, 8,
+    'waiting for NSE OI data…');
+}
+function renderChartinkResult() {
+  const hi = chartink.stocks.filter(s => s.scanners.length >= 2);
+  const total = chartink.scanners.length || 1;
+  const el = $('ckrbody');
+  if (!hi.length) { el.innerHTML = '<tr><td colspan="8" class="empty">no stock is on 2+ scanners right now</td></tr>'; return; }
+  let html = '';
+  for (const s of hi) {
+    html += `<tr class="datarow" data-news="${esc(s.symbol)}" data-name="${esc(s.description || s.name)}">` +
+      moverSym(s) +
+      `<td><span class="hits hi">${s.scanners.length}/${total}</span></td>` +
+      `<td style="text-align:left;white-space:normal">${s.scanners.map(n => `<span class="ckchip" title="${esc(n)}">${esc(ckShort(n))}</span>`).join('')}</td>` +
+      `<td>${pctCell(s.chg, { strong: true })}</td><td>${fmtPx(s.price)}</td><td>${fmtVol(s.volume)}</td>` +
+      `<td class="catalyst">${catalystCell(s.catalyst)}</td>` +
+      `<td class="acts">${tvBtn(s)}${addBtn(s)}</td></tr>`;
+    if (openNews.has(s.symbol)) html += newsRowHtml(s.symbol, 8);
+  }
+  el.innerHTML = html;
+}
+// ---------- chartink tab ----------
+// scanner names on the dashboard are long — trim for chips, full name in tooltip
+function ckShort(name) {
+  const s = name.replace(/^Scanner \d+\s*:?-?\s*/i, '').trim();
+  return s.length > 22 ? s.slice(0, 21) + '…' : s;
+}
+function renderChartink() {
+  $('ck-title').textContent = chartink.title || '…';
+  const at = chartink.at ? new Date(chartink.at).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false }) : null;
+  $('ck-sub').innerHTML = chartink.error
+    ? `<span class="down">${esc(chartink.error)}</span>`
+    : chartink.scanners.map(s => `<span class="ckchip" title="${esc(s.name)}">${esc(ckShort(s.name))} <b>${s.count}</b></span>`).join('') +
+      (at ? ` <span class="dim">· scanned ${at} IST</span>` : '');
+  const el = $('ckbody');
+  if (!chartink.stocks.length) {
+    el.innerHTML = '<tr><td colspan="8" class="empty">' + (chartink.at ? 'no stocks matched any scanner in the last run' : 'running scanners…') + '</td></tr>';
+    return;
+  }
+  const total = chartink.scanners.length || 1;
+  let html = '';
+  for (const s of chartink.stocks) {
+    const hi = s.scanners.length >= 2;
+    html += `<tr class="datarow" data-news="${esc(s.symbol)}" data-name="${esc(s.description || s.name)}">` +
+      moverSym(s) +
+      `<td><span class="hits ${hi ? 'hi' : ''}">${s.scanners.length}/${total}</span></td>` +
+      `<td style="text-align:left;white-space:normal">${s.scanners.map(n => `<span class="ckchip" title="${esc(n)}">${esc(ckShort(n))}</span>`).join('')}</td>` +
+      `<td>${pctCell(s.chg, { strong: true })}</td><td>${fmtPx(s.price)}</td><td>${fmtVol(s.volume)}</td>` +
+      `<td class="catalyst">${catalystCell(s.catalyst)}</td>` +
+      `<td class="acts">${tvBtn(s)}${addBtn(s)}</td></tr>`;
+    if (openNews.has(s.symbol)) html += newsRowHtml(s.symbol, 8);
+  }
+  el.innerHTML = html;
+}
+
+function renderAll() { renderIndices(); renderSectors(); renderWatch(); renderAllMovers(); renderChartink(); }
+
+// ---------- clicks ----------
+document.addEventListener('click', async e => {
+  const tv = e.target.closest('[data-chart]');
+  if (tv) {
+    e.stopPropagation();
+    const sym = tv.dataset.chart;
+    toast(`opening ${sym.split(':').pop()} on chart…`);
+    try {
+      const r = await fetch('/chart/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbol: sym }) }).then(r => r.json());
+      if (r.ok) toast(`chart → ${r.symbol.split(':').pop()}`);
+      else toast(r.error || 'chart hand-off failed', true);
+    } catch { toast('chart hand-off failed', true); }
+    return;
+  }
+  const rm = e.target.closest('[data-rm]');
+  if (rm) {
+    e.stopPropagation();
+    await fetch('/watchlist/remove', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbol: rm.dataset.rm }) });
+    return;
+  }
+  const add = e.target.closest('[data-add]');
+  if (add) {
+    e.stopPropagation();
+    add.disabled = true;
+    await fetch('/watchlist/add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbol: add.dataset.add }) });
+    return;
+  }
+  const chip = e.target.closest('.chip[data-f]');
+  if (chip) {
+    setupFilter = chip.dataset.f;
+    document.querySelectorAll('.chip[data-f]').forEach(c => c.classList.toggle('on', c === chip));
+    renderWatch();
+    return;
+  }
+  const tab = e.target.closest('.tab[data-tab]');
+  if (tab) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t === tab));
+    for (const k of ['today', 'week', 'gain', 'ep', 'oi', 'chartink', 'ckresult']) {
+      $('tab-' + k).style.display = tab.dataset.tab === k ? '' : 'none';
+    }
+    return;
+  }
+  if (e.target.closest('a')) return;
+  const row = e.target.closest('tr[data-news]');
+  if (row) toggleNews(row.dataset.news, row.dataset.name);
+});
+
+// column sorting
+document.querySelectorAll('#wl thead th[data-k]').forEach(th => {
+  th.addEventListener('click', () => {
+    const k = th.dataset.k;
+    if (sortKey === k) { sortDir = -sortDir; if (sortDir === (k === 'name' ? -1 : 1)) { sortKey = null; } }
+    else { sortKey = k; sortDir = k === 'name' ? 1 : -1; }
+    renderWatch();
+  });
+});
+
+// add box
+async function addSymbol() {
+  const input = $('addsym'), btn = $('addbtn'), msg = $('addmsg');
+  const v = input.value.trim();
+  if (!v) return;
+  btn.disabled = true; msg.className = 'addmsg'; msg.textContent = 'checking…';
+  try {
+    const r = await fetch('/watchlist/add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbol: v }) }).then(r => r.json());
+    if (r.ok) { msg.textContent = r.note || `added ${r.symbol.split(':').pop()}`; input.value = ''; }
+    else { msg.className = 'addmsg err'; msg.textContent = r.error || 'failed'; }
+  } catch { msg.className = 'addmsg err'; msg.textContent = 'server error'; }
+  btn.disabled = false;
+  setTimeout(() => { msg.textContent = ''; }, 5000);
+}
+$('addbtn').addEventListener('click', addSymbol);
+$('addsym').addEventListener('keydown', e => { if (e.key === 'Enter') addSymbol(); });
+
+// condition filter box — empty = show all
+$('condfilter').addEventListener('input', e => {
+  const v = e.target.value.trim();
+  if (!v) { condFilter = null; e.target.classList.remove('bad'); renderWatch(); return; }
+  const p = parseCond(v);
+  if (!p || p.error) { e.target.classList.add('bad'); return; }
+  e.target.classList.remove('bad');
+  condFilter = p.conds;
+  renderWatch();
+});
+
+// import active TradingView Desktop watchlist
+$('tvimport').addEventListener('click', async () => {
+  const btn = $('tvimport');
+  btn.disabled = true;
+  toast('reading TradingView watchlist…');
+  try {
+    const r = await fetch('/tv/watchlist', { method: 'POST' }).then(r => r.json());
+    if (r.ok) toast(`TV watchlist: ${r.found} symbols, ${r.added} new added` + (r.found > r.nse ? ` (${r.found - r.nse} non-NSE skipped)` : ''));
+    else toast(r.error || 'import failed', true);
+  } catch { toast('import failed', true); }
+  btn.disabled = false;
+});
+
+// ---------- SSE ----------
+let emaState = { active: false, done: 0, total: 0 };
+function setStatus(text, err = false) {
+  $('status').className = 'status' + (err ? ' err' : '');
+  $('statustext').textContent = text;
+}
+function statusText(lastPoll) {
+  const t = lastPoll ? new Date(lastPoll).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false }) : '…';
+  return emaState.active ? `computing EMAs ${emaState.done}/${emaState.total} · updated ${t} IST` : `updated ${t} IST`;
+}
+const es = new EventSource('/events');
+es.onmessage = ev => {
+  const m = JSON.parse(ev.data);
+  if (m.type === 'init' || m.type === 'rows') {
+    watchRows = m.watchRows || watchRows;
+    indexRows = m.indexRows || indexRows;
+    if (m.type === 'init') {
+      gainers = m.gainers || []; losers = m.losers || []; shockers = m.volumeShockers || [];
+      gainers7 = m.gainers7 || []; losers7 = m.losers7 || []; buildup = m.volumeBuildup || [];
+      eps = m.eps || []; sectors = m.sectors || [];
+      if (m.chartink) chartink = m.chartink;
+      gainers1d = m.gainers1d || []; gainersW = m.gainersW || [];
+      gainers15 = m.gainers15 || []; ep15 = m.ep15 || [];
+      if (m.oi) oi = m.oi;
+      breadth = m.breadth || null;
+      if (m.ema) emaState = m.ema;
+    }
+    setStatus(statusText(m.lastPoll));
+    renderAll();
+  } else if (m.type === 'movers') {
+    gainers = m.gainers || []; losers = m.losers || []; shockers = m.volumeShockers || [];
+    eps = m.eps || eps;
+    breadth = m.breadth || breadth;
+    renderIndices(); renderAllMovers();
+  } else if (m.type === 'sectors') {
+    sectors = m.sectors || [];
+    renderSectors();
+  } else if (m.type === 'chartink') {
+    chartink = m.chartink || chartink;
+    renderChartink(); renderChartinkResult();
+  } else if (m.type === 'gain') {
+    gainers1d = m.gainers1d || []; gainersW = m.gainersW || [];
+    gainers15 = m.gainers15 || []; ep15 = m.ep15 || [];
+    renderAllMovers();
+  } else if (m.type === 'oi') {
+    oi = m.oi || oi;
+    renderOI();
+  } else if (m.type === 'weekly') {
+    gainers7 = m.gainers7 || []; losers7 = m.losers7 || []; buildup = m.volumeBuildup || [];
+    renderAllMovers();
+  } else if (m.type === 'ema') {
+    emaState = m;
+    setStatus(statusText(null));
+  } else if (m.type === 'error') {
+    setStatus('error: ' + m.error, true);
+  }
+};
+es.onerror = () => setStatus('reconnecting…', true);
+</script>
+</body>
+</html>

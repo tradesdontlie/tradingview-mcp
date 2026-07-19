@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "breakout-monitor",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["breakout-monitor/server.mjs"],
+      "port": 8787
+    },
+    {
+      "name": "scanner",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["scanner/server.mjs"],
+      "port": 8788
+    },
+    {
+      "name": "dashboard",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["dashboard/server.mjs"],
+      "port": 8790
+    }
+  ]
+}
