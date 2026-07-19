@@ -300,7 +300,7 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 | Tool | What it does |
 |------|-------------|
 | `draw_shape` | Draw horizontal_line, trend_line, rectangle, text |
-| `draw_list` / `draw_remove_one` / `draw_clear` | Manage drawings |
+| `draw_list` / `draw_get_properties` / `draw_remove_one` / `draw_clear` | List, inspect, and manage drawings |
 | `alert_create` / `alert_list` / `alert_delete` | Manage price alerts |
 | `capture_screenshot` | Screenshot (regions: full, chart, strategy_tester) |
 | `batch_run` | Run action across multiple symbols/timeframes |
