@@ -300,9 +300,13 @@ async function main() {
   if (givenBoard && VN_BOARDS.includes(givenBoard)) {
     try {
       const sr = await chart.symbolSearch({ query: shortName });
-      const hit = (sr.results || []).find(x =>
+      const matches = (sr.results || []).filter(x =>
         VN_BOARDS.includes((x.exchange || '').toUpperCase()) &&
         x.symbol.toUpperCase() === shortName.toUpperCase());
+      // Duplicate tickers exist across VN boards (e.g. HNX:VN30 and HOSE:VN30).
+      // Preserve the caller's explicit board before falling back to any match.
+      const hit = matches.find(x =>
+        (x.exchange || '').toUpperCase() === givenBoard) || matches[0];
       if (hit) ticker = hit.full_name;
     } catch (e) {}
   }
