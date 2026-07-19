@@ -3,6 +3,25 @@
  * Zero dependencies — uses only Node.js built-ins.
  */
 import { parseArgs } from 'node:util';
+import { disconnect } from '../connection.js';
+
+/**
+ * Exit the CLI cleanly. Calling process.exit() abruptly races libuv's async
+ * handle teardown on Windows — undici (Node's fetch, used by `pine check`) and
+ * the CDP WebSocket both trip the assertion
+ *   Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\win\async.c
+ * crashing with a nonzero code even after a successful command. Instead we set
+ * the exit code, close the CDP connection, and let the event loop drain
+ * naturally: undici unrefs its keep-alive sockets and CDP's socket closes, so
+ * the process exits on its own with no race. An unref'd timer force-exits only
+ * if some handle genuinely hangs — it never delays a clean exit.
+ */
+async function exit(code) {
+  process.exitCode = code;
+  try { await disconnect(); } catch { /* already closed */ }
+  const t = setTimeout(() => process.exit(code), 3000);
+  t.unref();
+}
 
 /** @type {Map<string, { description: string, options?: object, handler: Function, subcommands?: Map<string, object> }>} */
 const commands = new Map();
@@ -105,7 +124,7 @@ export async function run(argv) {
       }
       await execute(handler, values, positionals);
     } catch (err) {
-      handleError(err);
+      await handleError(err);
     }
   } else {
     handler = cmd.handler;
@@ -123,7 +142,7 @@ export async function run(argv) {
       }
       await execute(handler, values, positionals);
     } catch (err) {
-      handleError(err);
+      await handleError(err);
     }
   }
 }
@@ -132,19 +151,19 @@ async function execute(handler, values, positionals) {
   try {
     const result = await handler(values, positionals);
     console.log(JSON.stringify(result, null, 2));
-    process.exit(0);
+    await exit(0);
   } catch (err) {
-    handleError(err);
+    await handleError(err);
   }
 }
 
-function handleError(err) {
+async function handleError(err) {
   const message = err.message || String(err);
   // Connection failures get exit code 2
   if (/CDP|connection|ECONNREFUSED|not running/i.test(message)) {
     console.error(JSON.stringify({ success: false, error: message }, null, 2));
-    process.exit(2);
+    await exit(2);
   }
   console.error(JSON.stringify({ success: false, error: message }, null, 2));
-  process.exit(1);
+  await exit(1);
 }
