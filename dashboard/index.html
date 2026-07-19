@@ -253,6 +253,7 @@
     <button class="tab" data-tab="week">Last 7 Days</button>
     <button class="tab" data-tab="gain">Gainers 20%+</button>
     <button class="tab" data-tab="ep">EP</button>
+    <button class="tab" data-tab="intra">Intraday</button>
     <button class="tab" data-tab="oi">F&amp;O</button>
     <button class="tab" data-tab="screens">Screens</button>
     <button class="tab" data-tab="news">News</button>
@@ -356,6 +357,32 @@
     </section>
   </div>
 
+  <div id="tab-intra" style="display:none">
+    <section class="card">
+      <div class="card-head"><h2>Gappers</h2><span class="sub" id="gap-sub">pre-market ±2%+ movers · falls back to opening gaps after the bell</span></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Symbol</th><th>Pre-Mkt%</th><th>Gap%</th><th>Chg%</th><th>RVol</th><th>Price</th><th style="text-align:left">Catalyst</th><th class="nosort"></th></tr></thead>
+        <tbody id="gapbody"></tbody>
+      </table></div>
+    </section>
+    <div class="grid2" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(430px,1fr));gap:20px">
+      <section class="card">
+        <div class="card-head"><h2>In-Play Pace</h2><span class="sub">trading 3×+ their normal volume for this time of day</span></div>
+        <div class="tablewrap"><table>
+          <thead><tr><th>Symbol</th><th>Pace</th><th>Chg%</th><th>Price</th><th>Volume</th><th class="nosort"></th></tr></thead>
+          <tbody id="pacebody"></tbody>
+        </table></div>
+      </section>
+      <section class="card">
+        <div class="card-head"><h2>VWAP Reclaims / Rejects</h2><span class="sub">F&amp;O + watchlist stocks crossing VWAP, newest first</span></div>
+        <div class="tablewrap"><table>
+          <thead><tr><th>Symbol</th><th style="text-align:left">Flip</th><th>Time</th><th>Price</th><th>VWAP</th><th>Dist</th><th>RVol</th><th class="nosort"></th></tr></thead>
+          <tbody id="vwapbody"></tbody>
+        </table></div>
+      </section>
+    </div>
+  </div>
+
   <div id="tab-oi" style="display:none">
     <section class="card">
       <div class="card-head"><h2>F&amp;O Open Interest Spurts</h2><span class="sub" id="oi-sub">NSE futures · OI change vs previous day</span></div>
@@ -393,6 +420,13 @@
       <div class="tablewrap"><table>
         <thead><tr><th>Symbol</th><th>Reported</th><th>Chg%</th><th>RVol</th><th>Rev YoY</th><th>PAT YoY</th><th style="text-align:left">Catalyst</th><th class="nosort"></th></tr></thead>
         <tbody id="resbody"></tbody>
+      </table></div>
+    </section>
+    <section class="card">
+      <div class="card-head"><h2>VCP / Base Setups</h2><span class="sub">shrinking pullbacks on drying volume near 52w highs · sorted by distance to pivot</span></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Symbol</th><th style="text-align:left">Contractions</th><th>Pivot</th><th>To Pivot</th><th>52wH %</th><th>Price</th><th>Today%</th><th class="nosort"></th></tr></thead>
+        <tbody id="vcpbody"></tbody>
       </table></div>
     </section>
     <section class="card">
@@ -459,6 +493,7 @@ let oi = { rows: [], at: null, error: null };
 let uoa = { rows: [], at: null, error: null };
 let r1Crossers = [], ivPause = [], ipos = [], results = [];
 let wnews = { items: [], at: null };
+let gappers = [], pace = [], vwapFlips = [], vcp = [];
 let condFilter = null;   // parsed conditions from the filter box, or null = show all
 const fundaData = new Map();   // symbol -> funda | 'loading' | null
 let sortKey = null, sortDir = -1;
@@ -747,6 +782,26 @@ function renderAllMovers() {
     `<td><span class="dim">${esc((r.crossDate || '').slice(5))}</span></td><td>${fmtPx(r.r1)}</td>` +
     `<td>${fmtPx(r.price)}</td><td>${pctCell(r.aboveR1)}</td><td>${pctCell(r.chg)}</td><td>${fmtPx(r.r2)}</td>`, 8,
     'computing weekly pivots…');
+  // intraday tab
+  renderMovers('gapbody', gappers, r =>
+    `<td>${pctCell(r.pre, { strong: true })}</td><td>${pctCell(r.gap)}</td><td>${pctCell(r.chg)}</td>` +
+    `<td>${rvolCell(r.rvol)}</td><td>${fmtPx(r.price)}</td><td class="catalyst">${catalystCell(r.catalyst)}</td>`, 8,
+    'no ±2% gappers right now (populates from ~9:00 IST)');
+  renderMovers('pacebody', pace, r =>
+    `<td><span class="rvol-hi">${r.pace == null ? '—' : r.pace.toFixed(1) + '×'}</span></td>` +
+    `<td>${pctCell(r.chg, { strong: true })}</td><td>${fmtPx(r.price)}</td><td>${fmtVol(r.volume)}</td>`, 6,
+    'nothing trading 3×+ pace right now');
+  renderMovers('vwapbody', vwapFlips, r =>
+    `<td style="text-align:left"><span class="bu ${r.dir === 'reclaim' ? 'bu-long' : 'bu-short'}">${r.dir === 'reclaim' ? '↑ reclaim' : '↓ reject'}</span></td>` +
+    `<td><span class="dim">${esc(r.time || '')}</span></td><td>${fmtPx(r.price)}</td><td>${fmtPx(r.vwap)}</td>` +
+    `<td>${pctCell(r.dist)}</td><td>${rvolCell(r.rvol)}</td>`, 8,
+    'no VWAP flips yet — populates during market hours');
+  // VCP card
+  renderMovers('vcpbody', vcp, r =>
+    `<td style="text-align:left"><span class="dim">${r.c1 == null ? '—' : r.c1.toFixed(0) + '% → ' + r.c2.toFixed(0) + '% → ' + r.c3.toFixed(0) + '%'}</span></td>` +
+    `<td>${fmtPx(r.pivot)}</td><td>${pctCell(r.toPivot)}</td><td>${off52Cell(r.offHigh)}</td>` +
+    `<td>${fmtPx(r.price)}</td><td>${pctCell(r.chg)}</td>`, 8,
+    'no bases detected in the momentum pool yet…');
   renderUOA();
   renderWNews();
   renderOI();
@@ -884,7 +939,7 @@ document.addEventListener('click', async e => {
   const tab = e.target.closest('.tab[data-tab]');
   if (tab) {
     document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t === tab));
-    for (const k of ['today', 'week', 'gain', 'ep', 'oi', 'screens', 'news', 'chartink', 'ckresult']) {
+    for (const k of ['today', 'week', 'gain', 'ep', 'intra', 'oi', 'screens', 'news', 'chartink', 'ckresult']) {
       $('tab-' + k).style.display = tab.dataset.tab === k ? '' : 'none';
     }
     return;
@@ -973,6 +1028,8 @@ es.onmessage = ev => {
       if (m.wnews) wnews = m.wnews;
       r1Crossers = m.r1Crossers || []; ivPause = m.ivPause || [];
       ipos = m.ipos || []; results = m.results || [];
+      gappers = m.gappers || []; pace = m.pace || [];
+      vwapFlips = m.vwapFlips || []; vcp = m.vcp || [];
       breadth = m.breadth || null;
       if (m.ema) emaState = m.ema;
     }
@@ -1009,6 +1066,12 @@ es.onmessage = ev => {
   } else if (m.type === 'wnews') {
     wnews = m.wnews || wnews;
     renderWNews();
+  } else if (m.type === 'intraday') {
+    gappers = m.gappers || []; pace = m.pace || []; vwapFlips = m.vwapFlips || [];
+    renderAllMovers();
+  } else if (m.type === 'vcp') {
+    vcp = m.vcp || [];
+    renderAllMovers();
   } else if (m.type === 'weekly') {
     gainers7 = m.gainers7 || []; losers7 = m.losers7 || []; buildup = m.volumeBuildup || [];
     renderAllMovers();

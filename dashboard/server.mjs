@@ -1058,6 +1058,144 @@ async function pollWatchNews() {
   }
 }
 
+// ---------------- intraday: pre-market gappers / in-play pace / VWAP flips ----------------
+// Fast-polled during market hours (~08:50-15:40 IST), throttled to 10 min
+// otherwise. Pre-market gappers use premarket_change while the pre-open
+// session is live; once the market opens, rows fall back to the gap column.
+
+const INTRA_MS = 60 * 1000;
+let gappers = [], pace = [];
+let vwapFlips = [];               // recent reclaim/reject events, newest first
+const vwapState = new Map();      // sym -> was price above VWAP on last poll
+let lastIntradayRun = 0;
+
+function istNowMinutes() {
+  const [h, m] = new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour12: false }).split(':');
+  return Number(h) * 60 + Number(m);
+}
+const marketHoursIST = () => {
+  const t = istNowMinutes();
+  return t >= 8 * 60 + 50 && t <= 15 * 60 + 40;
+};
+
+async function pollIntraday() {
+  if (!marketHoursIST() && Date.now() - lastIntradayRun < 10 * 60 * 1000) return;
+  lastIntradayRun = Date.now();
+  try {
+    const cols = [...MOVER_COLUMNS, 'premarket_change', 'premarket_volume', 'gap'];
+    const mk = (field, op, right, order) => scan({
+      ...SCAN_BASE, filter: [...MOVER_FILTER, { left: field, operation: op, right }],
+      columns: cols, sort: { sortBy: field, sortOrder: order }, range: [0, 15],
+    });
+    const gapRows = (j, src) => (j.data || []).map(r => {
+      const [name, description, close, chg, volume, rvol, mcap, sector, pre, preVol, gap] = r.d;
+      return { symbol: r.s, name, description, price: close, chg, volume, rvol, sector, pre, preVol, gap, src };
+    });
+    // pre-market first; if the pre-open session isn't producing data, fall back to open gaps
+    let up = gapRows(await mk('premarket_change', 'egreater', 2, 'desc'), 'pre');
+    let dn = gapRows(await mk('premarket_change', 'eless', -2, 'asc'), 'pre');
+    if (!up.length && !dn.length) {
+      up = gapRows(await mk('gap', 'egreater', 2, 'desc'), 'open');
+      dn = gapRows(await mk('gap', 'eless', -2, 'asc'), 'open');
+    }
+    gappers = [...up, ...dn];
+
+    const p = await scan({
+      ...SCAN_BASE, filter: [...MOVER_FILTER, { left: 'relative_volume_intraday|5', operation: 'egreater', right: 3 }],
+      columns: [...MOVER_COLUMNS, 'relative_volume_intraday|5'],
+      sort: { sortBy: 'relative_volume_intraday|5', sortOrder: 'desc' }, range: [0, 25],
+    });
+    pace = (p.data || []).map(r => {
+      const [name, description, close, chg, volume, rvol, mcap, sector, ipace] = r.d;
+      return { symbol: r.s, name, description, price: close, chg, volume, rvol, sector, pace: ipace };
+    });
+
+    // VWAP flips over the F&O + watchlist universe
+    const uni = [...new Set([...fnoUniverse, ...watchlist])];
+    if (uni.length) {
+      const q = await scan({ symbols: { tickers: uni }, columns: ['close', 'VWAP', 'change', 'relative_volume_10d_calc', 'description'] });
+      const t = new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false }).slice(0, 5);
+      for (const r of q.data || []) {
+        const [close, vwap, chg, rvol, description] = r.d;
+        if (close == null || vwap == null) continue;
+        const above = close > vwap;
+        const prev = vwapState.get(r.s);
+        vwapState.set(r.s, above);
+        if (prev !== undefined && prev !== above && marketHoursIST()) {
+          vwapFlips.unshift({
+            symbol: r.s, name: r.s.split(':').pop(), description,
+            dir: above ? 'reclaim' : 'reject', time: t,
+            price: close, vwap, dist: ((close - vwap) / vwap) * 100, chg, rvol,
+          });
+        }
+      }
+      if (vwapFlips.length > 40) vwapFlips.length = 40;
+    }
+    broadcast({ type: 'intraday', gappers, pace, vwapFlips, at: new Date().toISOString() });
+    let changed = false;
+    for (const s of gappers.slice(0, CATALYST_COUNT)) {
+      if (s.catalyst !== undefined) continue;
+      try {
+        s.catalyst = pickCatalyst(await fetchNews(newsQueryName(s.description)));
+        changed = true;
+      } catch { s.catalyst = null; }
+      await sleep(150);
+    }
+    if (changed) broadcast({ type: 'intraday', gappers, pace, vwapFlips, at: new Date().toISOString() });
+  } catch (e) {
+    lastError = e.message;
+  }
+}
+
+// ---------------- VCP / base detection ----------------
+// Volatility contraction over the last ~60 sessions: three 20-bar segments
+// whose high-low ranges shrink in sequence, on drying volume, near 52w highs,
+// with a defined pivot (the recent contraction high).
+
+function detectVcp(bars) {
+  if (!bars || bars.length < 120) return null;
+  const closes = bars.map(b => b.close);
+  const n = closes.length;
+  const last = closes[n - 1];
+  const hi52 = Math.max(...closes);
+  if (last < hi52 * 0.75) return null;
+  const win = bars.slice(-60);
+  const seg = (a, b) => {
+    const s = win.slice(a, b);
+    const hi = Math.max(...s.map(x => x.high)), lo = Math.min(...s.map(x => x.low));
+    return { hi, dd: ((hi - lo) / hi) * 100, vol: s.reduce((t, x) => t + x.volume, 0) / s.length };
+  };
+  const s1 = seg(0, 20), s2 = seg(20, 40), s3 = seg(40, 60);
+  if (!(s1.dd > s2.dd && s2.dd > s3.dd)) return null;   // must contract
+  if (s3.dd > 10 || s1.dd > 35) return null;
+  if (s3.vol > s1.vol) return null;                     // volume must dry up
+  const pivot = Math.max(s2.hi, s3.hi);
+  const toPivot = ((pivot - last) / last) * 100;
+  if (toPivot < -3 || toPivot > 15) return null;
+  return { c1: s1.dd, c2: s2.dd, c3: s3.dd, pivot, toPivot, offHigh: ((last / hi52) - 1) * 100 };
+}
+
+let vcp = [];
+async function refreshVcp() {
+  const hits = [];
+  for (const [sym, cb] of candBars) {
+    const v = detectVcp(cb.bars);
+    if (v) hits.push({ symbol: sym, name: sym.split(':').pop(), ...v });
+  }
+  if (hits.length) {
+    try {
+      const q = await scan({ symbols: { tickers: hits.map(h => h.symbol) }, columns: ['description', 'change', 'close'] });
+      const map = new Map((q.data || []).map(x => [x.s, x.d]));
+      for (const h of hits) {
+        const d = map.get(h.symbol);
+        if (d) { h.description = d[0]; h.chg = d[1]; h.price = d[2]; }
+      }
+    } catch { /* optional decoration */ }
+  }
+  vcp = hits.sort((a, b) => Math.abs(a.toPivot) - Math.abs(b.toPivot)).slice(0, 30);
+  broadcast({ type: 'vcp', vcp });
+}
+
 // ---------------- fundamentals (concept from MrChartist/Funda-Scanner-Base-Project) ----------------
 // Piotroski-style pass/fail checklist with the same Strong >=7 / Moderate >=4
 // grading as that project's FundamentalScoring, fed by live scanner columns.
@@ -1116,7 +1254,8 @@ async function validateSymbol(sym) {
   pollResults();
   pollUOA();
   await pollOI();                       // fills fnoUniverse for the pivot scan
-  refreshCandidates().then(pollPivots); // candidates warm the shared bars cache first
+  pollIntraday();
+  refreshCandidates().then(() => pollPivots()).then(() => refreshVcp());
   refreshEmas().then(() => { pollQuotes(); pollWatchNews(); });
 })();
 setInterval(pollQuotes, QUOTE_MS);
@@ -1131,6 +1270,8 @@ setInterval(refreshCandidates, CAND_MS);
 setInterval(pollPivots, PIVOT_MS);
 setInterval(pollResults, RESULTS_MS);
 setInterval(pollWatchNews, WNEWS_MS);
+setInterval(pollIntraday, INTRA_MS);
+setInterval(refreshVcp, PIVOT_MS);
 setInterval(() => refreshEmas(), EMA_REFRESH_MS);
 
 // ---------------- http ----------------
@@ -1155,6 +1296,7 @@ const server = http.createServer(async (req, res) => {
       gainers7, losers7, volumeBuildup, breadth, eps, sectors, chartink,
       gainers1d, gainersW, gainers15, ep15, oi,
       ivPause, ipos, r1Crossers, results, uoa, wnews,
+      gappers, pace, vwapFlips, vcp,
       lastPoll, lastError, ema: emaState, watchlist,
     })}\n\n`);
     clients.add(res);
