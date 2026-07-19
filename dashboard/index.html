@@ -253,7 +253,9 @@
     <button class="tab" data-tab="week">Last 7 Days</button>
     <button class="tab" data-tab="gain">Gainers 20%+</button>
     <button class="tab" data-tab="ep">EP</button>
-    <button class="tab" data-tab="oi">F&amp;O OI</button>
+    <button class="tab" data-tab="oi">F&amp;O</button>
+    <button class="tab" data-tab="screens">Screens</button>
+    <button class="tab" data-tab="news">News</button>
     <button class="tab" data-tab="chartink">Chartink</button>
     <button class="tab" data-tab="ckresult">Chartink Result</button>
   </div>
@@ -362,6 +364,51 @@
         <tbody id="oibody"></tbody>
       </table></div>
     </section>
+    <section class="card">
+      <div class="card-head"><h2>Unusual Options Activity</h2><span class="sub" id="uoa-sub">most active stock option contracts · big premium moves flag positioning</span></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Contract</th><th>Prem%</th><th>LTP</th><th>Contracts Vol</th><th>OI</th><th>Spot</th><th>Spot%</th><th style="text-align:left">Catalyst</th><th class="nosort"></th></tr></thead>
+        <tbody id="uoabody"></tbody>
+      </table></div>
+    </section>
+    <section class="card">
+      <div class="card-head"><h2>Weekly Fib R1 Crossers</h2><span class="sub">F&amp;O stocks that closed above the weekly Fibonacci R1 pivot in the last 7 sessions and still hold it</span></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Symbol</th><th>Crossed On</th><th>R1</th><th>Price</th><th>Above R1</th><th>Today%</th><th>R2 Target</th><th class="nosort"></th></tr></thead>
+        <tbody id="pivbody"></tbody>
+      </table></div>
+    </section>
+  </div>
+
+  <div id="tab-screens" style="display:none">
+    <section class="card">
+      <div class="card-head"><h2>IV Pause</h2><span class="sub">ran 20%+ in 1w/15d/1m, now consolidating tight on the daily 10/20/50 EMA</span></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Symbol</th><th>Run-up</th><th>Window</th><th style="text-align:left">Near</th><th>EMA Dist</th><th>5d Range</th><th>Price</th><th>Today%</th><th class="nosort"></th></tr></thead>
+        <tbody id="pausebody"></tbody>
+      </table></div>
+    </section>
+    <section class="card">
+      <div class="card-head"><h2>Results Reaction</h2><span class="sub">reported in the last 4 days · sorted by price reaction</span></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Symbol</th><th>Reported</th><th>Chg%</th><th>RVol</th><th>Rev YoY</th><th>PAT YoY</th><th style="text-align:left">Catalyst</th><th class="nosort"></th></tr></thead>
+        <tbody id="resbody"></tbody>
+      </table></div>
+    </section>
+    <section class="card">
+      <div class="card-head"><h2>Recent Listings</h2><span class="sub">listed within ~6 months and showing momentum</span></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Symbol</th><th>Listed</th><th>15d%</th><th>Today%</th><th>Price</th><th>Off High</th><th class="nosort"></th></tr></thead>
+        <tbody id="ipobody"></tbody>
+      </table></div>
+    </section>
+  </div>
+
+  <div id="tab-news" style="display:none">
+    <section class="card">
+      <div class="card-head"><h2>Watchlist News</h2><span class="sub" id="wnews-sub">latest headlines across your watchlist</span></div>
+      <div id="wnewsbody" style="padding: 8px 16px 14px"></div>
+    </section>
   </div>
 
   <div id="tab-ckresult" style="display:none">
@@ -409,6 +456,9 @@ let sectors = [];
 let chartink = { title: null, scanners: [], stocks: [], at: null, error: null };
 let gainers1d = [], gainersW = [], gainers15 = [], ep15 = [];
 let oi = { rows: [], at: null, error: null };
+let uoa = { rows: [], at: null, error: null };
+let r1Crossers = [], ivPause = [], ipos = [], results = [];
+let wnews = { items: [], at: null };
 let condFilter = null;   // parsed conditions from the filter box, or null = show all
 const fundaData = new Map();   // symbol -> funda | 'loading' | null
 let sortKey = null, sortDir = -1;
@@ -676,8 +726,60 @@ function renderAllMovers() {
     `<td><span class="rvol-hi">${r.epVolx == null ? '—' : r.epVolx.toFixed(1) + '×'}</span></td>` +
     `<td>${pctCell(r.sinceEp)}</td><td>${fmtPx(r.price)}</td><td class="catalyst">${catalystCell(r.catalyst)}</td>`, 8,
     'scanning last 15 sessions…');
+  // screens tab
+  renderMovers('pausebody', ivPause, r =>
+    `<td>${pctCell(r.runup, { strong: true })}</td><td><span class="dim">${esc(r.runWindow)}</span></td>` +
+    `<td style="text-align:left"><span class="ckchip">${esc(r.nearEma)}</span></td><td>${pctCell(r.emaDist)}</td>` +
+    `<td><span class="dim">${r.range5 == null ? '—' : r.range5.toFixed(1) + '%'}</span></td>` +
+    `<td>${fmtPx(r.price)}</td><td>${pctCell(r.chg)}</td>`, 9,
+    'no post-run consolidations found yet…');
+  renderMovers('resbody', results, r =>
+    `<td><span class="dim">${esc((r.reported || '').slice(5))}</span></td><td>${pctCell(r.chg, { strong: true })}</td>` +
+    `<td>${rvolCell(r.rvol)}</td><td>${pctCell(r.revG)}</td><td>${pctCell(r.niG)}</td>` +
+    `<td class="catalyst">${catalystCell(r.catalyst)}</td>`, 8,
+    'no results in the last 4 days');
+  renderMovers('ipobody', ipos, r =>
+    `<td><span class="dim">${esc(r.listedOn || '')}</span></td><td>${pctCell(r.chg15)}</td><td>${pctCell(r.chg)}</td>` +
+    `<td>${fmtPx(r.price)}</td><td>${off52Cell(r.offHigh)}</td>`, 7,
+    'no recent listings in the momentum pool');
+  // F&O tab extras
+  renderMovers('pivbody', r1Crossers, r =>
+    `<td><span class="dim">${esc((r.crossDate || '').slice(5))}</span></td><td>${fmtPx(r.r1)}</td>` +
+    `<td>${fmtPx(r.price)}</td><td>${pctCell(r.aboveR1)}</td><td>${pctCell(r.chg)}</td><td>${fmtPx(r.r2)}</td>`, 8,
+    'computing weekly pivots…');
+  renderUOA();
+  renderWNews();
   renderOI();
   renderChartinkResult();
+}
+function renderUOA() {
+  const at = uoa.at ? new Date(uoa.at).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false }) : null;
+  $('uoa-sub').innerHTML = uoa.error
+    ? `<span class="down">${esc(uoa.error)}</span>`
+    : 'most active stock option contracts · big premium moves flag positioning' + (at ? ` · updated ${at} IST` : '');
+  const el = $('uoabody');
+  if (!uoa.rows.length) { el.innerHTML = '<tr><td colspan="9" class="empty">waiting for NSE options data…</td></tr>'; return; }
+  let html = '';
+  for (const r of uoa.rows) {
+    const side = r.side === 'Call' ? '<span class="up">CE</span>' : '<span class="down">PE</span>';
+    html += `<tr class="datarow" data-news="${esc(r.symbol)}" data-name="${esc(r.description || r.name)}">` +
+      `<td><span class="sym">${esc(r.name)}</span> ${fmtPx(r.strike)} ${side}<div class="desc">exp ${esc(r.expiry || '')}</div></td>` +
+      `<td>${pctCell(r.premChg, { strong: true })}</td><td>${fmtPx(r.ltp)}</td><td>${fmtVol(r.volume)}</td>` +
+      `<td>${fmtVol(r.oi)}</td><td>${fmtPx(r.spot)}</td><td>${pctCell(r.chg)}</td>` +
+      `<td class="catalyst">${catalystCell(r.catalyst)}</td><td class="acts">${tvBtn(r)}</td></tr>`;
+    if (openNews.has(r.symbol)) html += newsRowHtml(r.symbol, 9);
+  }
+  el.innerHTML = html;
+}
+function renderWNews() {
+  const at = wnews.at ? new Date(wnews.at).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false }) : null;
+  $('wnews-sub').textContent = 'latest headlines across your watchlist' + (at ? ` · refreshed ${at} IST` : '');
+  const el = $('wnewsbody');
+  if (!wnews.items.length) { el.innerHTML = '<div class="empty">collecting headlines…</div>'; return; }
+  el.innerHTML = wnews.items.map(n =>
+    `<div class="newsitem"><span class="ckchip" style="cursor:pointer" data-chart="${esc(n.symbol)}" title="Open on TradingView chart">${esc(n.name)}</span> ` +
+    `<a href="${esc(n.link)}" target="_blank" rel="noopener">${esc(n.title)}</a>` +
+    `<span class="src">${esc(n.source || '')} · ${timeAgo(n.pubDate)}</span></div>`).join('');
 }
 const BU_CLS = { 'long buildup': 'bu-long', 'short buildup': 'bu-short', 'short covering': 'bu-cover', 'long unwinding': 'bu-unwind' };
 function renderOI() {
@@ -782,7 +884,7 @@ document.addEventListener('click', async e => {
   const tab = e.target.closest('.tab[data-tab]');
   if (tab) {
     document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t === tab));
-    for (const k of ['today', 'week', 'gain', 'ep', 'oi', 'chartink', 'ckresult']) {
+    for (const k of ['today', 'week', 'gain', 'ep', 'oi', 'screens', 'news', 'chartink', 'ckresult']) {
       $('tab-' + k).style.display = tab.dataset.tab === k ? '' : 'none';
     }
     return;
@@ -867,6 +969,10 @@ es.onmessage = ev => {
       gainers1d = m.gainers1d || []; gainersW = m.gainersW || [];
       gainers15 = m.gainers15 || []; ep15 = m.ep15 || [];
       if (m.oi) oi = m.oi;
+      if (m.uoa) uoa = m.uoa;
+      if (m.wnews) wnews = m.wnews;
+      r1Crossers = m.r1Crossers || []; ivPause = m.ivPause || [];
+      ipos = m.ipos || []; results = m.results || [];
       breadth = m.breadth || null;
       if (m.ema) emaState = m.ema;
     }
@@ -886,10 +992,23 @@ es.onmessage = ev => {
   } else if (m.type === 'gain') {
     gainers1d = m.gainers1d || []; gainersW = m.gainersW || [];
     gainers15 = m.gainers15 || []; ep15 = m.ep15 || [];
+    ivPause = m.ivPause || ivPause; ipos = m.ipos || ipos;
     renderAllMovers();
   } else if (m.type === 'oi') {
     oi = m.oi || oi;
     renderOI();
+  } else if (m.type === 'uoa') {
+    uoa = m.uoa || uoa;
+    renderUOA();
+  } else if (m.type === 'pivots') {
+    r1Crossers = m.r1Crossers || [];
+    renderAllMovers();
+  } else if (m.type === 'results') {
+    results = m.results || [];
+    renderAllMovers();
+  } else if (m.type === 'wnews') {
+    wnews = m.wnews || wnews;
+    renderWNews();
   } else if (m.type === 'weekly') {
     gainers7 = m.gainers7 || []; losers7 = m.losers7 || []; buildup = m.volumeBuildup || [];
     renderAllMovers();

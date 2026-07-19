@@ -678,7 +678,7 @@ async function pollGainers() {
 // bars over a candidate pool (top 200 by 1-month performance). The same bars
 // feed the 15-day episodic-pivot history below.
 async function fetchCandBars(sym) {
-  const url = `${YF}/${yahooSymbol(sym)}?interval=1d&range=3mo`;
+  const url = `${YF}/${yahooSymbol(sym)}?interval=1d&range=1y`;
   const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
   if (!res.ok) throw new Error(`Yahoo HTTP ${res.status}`);
   const j = await res.json();
@@ -688,9 +688,22 @@ async function fetchCandBars(sym) {
   const bars = [];
   for (let i = 0; i < r.timestamp.length; i++) {
     if (q.close[i] == null) continue;
-    bars.push({ date: new Date(r.timestamp[i] * 1000).toISOString().slice(0, 10), close: q.close[i], volume: q.volume[i] || 0 });
+    bars.push({
+      date: new Date(r.timestamp[i] * 1000).toISOString().slice(0, 10),
+      close: q.close[i], high: q.high[i] ?? q.close[i], low: q.low[i] ?? q.close[i], volume: q.volume[i] || 0,
+    });
   }
   return bars;
+}
+
+async function getBarsCached(sym) {
+  let cb = candBars.get(sym);
+  if (!cb || Date.now() - cb.at > CAND_MS) {
+    cb = { at: Date.now(), bars: await fetchCandBars(sym) };
+    candBars.set(sym, cb);
+    await sleep(140);   // be polite to Yahoo
+  }
+  return cb.bars;
 }
 
 function analyze15(bars) {
@@ -710,6 +723,47 @@ function analyze15(bars) {
   return { chg15, ep, sinceEp: ep ? ((bars[n - 1].close / ep.close) - 1) * 100 : null };
 }
 
+// "IV pause": a stock that ran 20%+ in a week / 15d / month and is now
+// consolidating tight on the daily 10/20/50 EMA — the resting phase before a
+// possible continuation.
+function detectPause(bars) {
+  if (!bars || bars.length < 60) return null;
+  const closes = bars.map(b => b.close);
+  const n = closes.length;
+  const last = closes[n - 1];
+  const run = k => {
+    if (n <= k) return null;
+    const start = closes[n - 1 - k];
+    return ((Math.max(...closes.slice(n - 1 - k)) / start) - 1) * 100;
+  };
+  const runs = [['1w', run(5)], ['15d', run(15)], ['1m', run(21)]].filter(([, v]) => v != null && v >= 20);
+  if (!runs.length) return null;
+  const best = runs.sort((a, b) => b[1] - a[1])[0];
+  const e10 = emaLast(closes, 10), e20 = emaLast(closes, 20), e50 = emaLast(closes, 50);
+  const near = [['10 EMA', e10], ['20 EMA', e20], ['50 EMA', e50]]
+    .map(([lbl, e]) => [lbl, e == null ? null : ((last - e) / e) * 100])
+    .filter(([, d]) => d != null && Math.abs(d) <= 3)
+    .sort((a, b) => Math.abs(a[1]) - Math.abs(b[1]))[0];
+  if (!near) return null;
+  const w5 = closes.slice(-5);
+  const range5 = ((Math.max(...w5) - Math.min(...w5)) / Math.min(...w5)) * 100;
+  if (range5 > 8) return null;                       // not consolidating
+  if (e50 != null && last < e50 * 0.97) return null; // broken down, not pausing
+  return { runup: best[1], runWindow: best[0], nearEma: near[0], emaDist: near[1], range5 };
+}
+
+// recent listing = Yahoo history starts inside the last ~6 months
+function detectRecentListing(bars) {
+  if (!bars || !bars.length) return null;
+  const first = bars[0].date;
+  if (new Date(first) < new Date(Date.now() - 190 * 86400000)) return null;
+  const closes = bars.map(b => b.close);
+  const last = closes[closes.length - 1];
+  const hi = Math.max(...closes);
+  return { listedOn: first, offHigh: ((last / hi) - 1) * 100 };
+}
+
+let ivPause = [], ipos = [];
 let candRunning = false;
 async function refreshCandidates() {
   if (candRunning) return;
@@ -720,24 +774,28 @@ async function refreshCandidates() {
       columns: MOVER_COLUMNS, sort: { sortBy: 'Perf.1M', sortOrder: 'desc' }, range: [0, 200],
     });
     const cands = moverRows(j);
-    const g15 = [], e15 = [];
+    const g15 = [], e15 = [], pauses = [], listings = [];
     for (const c of cands) {
-      let cb = candBars.get(c.symbol);
-      if (!cb || Date.now() - cb.at > CAND_MS) {
-        try {
-          cb = { at: Date.now(), bars: await fetchCandBars(c.symbol) };
-          candBars.set(c.symbol, cb);
-        } catch { continue; }
-        await sleep(150);   // be polite to Yahoo
+      let bars;
+      try {
+        bars = await getBarsCached(c.symbol);
+      } catch { continue; }
+      const a = analyze15(bars);
+      if (a) {
+        if (a.chg15 != null && a.chg15 >= 20) g15.push({ ...c, chg15: a.chg15 });
+        if (a.ep) e15.push({ ...c, epDate: a.ep.date, epChg: a.ep.chg, epVolx: a.ep.volx, sinceEp: a.sinceEp });
       }
-      const a = analyze15(cb.bars);
-      if (!a) continue;
-      if (a.chg15 != null && a.chg15 >= 20) g15.push({ ...c, chg15: a.chg15 });
-      if (a.ep) e15.push({ ...c, epDate: a.ep.date, epChg: a.ep.chg, epVolx: a.ep.volx, sinceEp: a.sinceEp });
+      const p = detectPause(bars);
+      if (p) pauses.push({ ...c, ...p });
+      const l = detectRecentListing(bars);
+      if (l) listings.push({ ...c, ...l, chg15: a?.chg15 ?? null });
     }
     gainers15 = g15.sort((a, b) => b.chg15 - a.chg15).slice(0, 50);
     ep15 = e15.sort((a, b) => b.epDate.localeCompare(a.epDate) || b.epVolx - a.epVolx).slice(0, 50);
-    broadcast({ type: 'gain', gainers1d, gainersW, gainers15, ep15 });
+    ivPause = pauses.sort((a, b) => b.runup - a.runup).slice(0, 30);
+    ipos = listings.sort((a, b) => b.listedOn.localeCompare(a.listedOn)).slice(0, 30);
+    const payload = () => ({ type: 'gain', gainers1d, gainersW, gainers15, ep15, ivPause, ipos });
+    broadcast(payload());
     let changed = false;
     for (const s of ep15.slice(0, CATALYST_COUNT)) {
       if (s.catalyst !== undefined) continue;
@@ -747,7 +805,7 @@ async function refreshCandidates() {
       } catch { s.catalyst = null; }
       await sleep(150);
     }
-    if (changed) broadcast({ type: 'gain', gainers1d, gainersW, gainers15, ep15 });
+    if (changed) broadcast(payload());
   } catch (e) {
     lastError = e.message;
   } finally {
@@ -779,6 +837,7 @@ async function pollOI() {
       symbol: nseToTv(d.symbol), name: d.symbol,
       oi: d.latestOI, oiChg: d.avgInOI, volume: d.volume, futValue: d.futValue, price: d.underlyingValue,
     }));
+    fnoUniverse = rows.map(r => r.symbol);   // full F&O underlying list for the pivot scan
     rows.sort((a, b) => Math.abs(b.oiChg) - Math.abs(a.oiChg));
     rows = rows.slice(0, 40);
     try {
@@ -800,6 +859,202 @@ async function pollOI() {
   } catch (e) {
     oi = { ...oi, error: e.message };
     broadcast({ type: 'oi', oi });
+  }
+}
+
+// ---------------- unusual options activity (NSE most-active stock options) ----------------
+// The strike-by-strike option-chain API is bot-gated, so UOA uses NSE's
+// most-active stock options feed: the contracts the market is piling into,
+// with premium %change and OI, joined with the underlying's catalyst.
+
+let uoa = { rows: [], at: null, error: null };
+
+async function pollUOA() {
+  try {
+    const r = await fetch('https://www.nseindia.com/api/liveEquity-derivatives?index=stock_opt', {
+      headers: { 'User-Agent': NSE_UA, Accept: '*/*', Referer: 'https://www.nseindia.com/market-data/equity-derivatives-watch' },
+    });
+    if (!r.ok) throw new Error(`NSE HTTP ${r.status}`);
+    const j = await r.json();
+    const rows = (j.data || []).map(d => ({
+      symbol: nseToTv(d.underlying), name: d.underlying,
+      strike: d.strikePrice, side: d.optionType, expiry: d.expiryDate,
+      ltp: d.lastPrice, premChg: d.pChange, volume: d.volume, oi: d.openInterest,
+      value: d.value, spot: d.underlyingValue,
+    }));
+    try {
+      const q = await scan({ symbols: { tickers: [...new Set(rows.map(x => x.symbol))] }, columns: ['description', 'change'] });
+      const map = new Map((q.data || []).map(x => [x.s, x.d]));
+      for (const row of rows) {
+        const d = map.get(row.symbol);
+        if (d) { row.description = d[0]; row.chg = d[1]; }
+      }
+    } catch { /* names/chg optional */ }
+    uoa = { rows, at: new Date().toISOString(), error: null };
+    broadcast({ type: 'uoa', uoa });
+    const seen = new Set();
+    let changed = false;
+    for (const row of rows) {
+      if (seen.size >= CATALYST_COUNT) break;
+      if (seen.has(row.symbol) || row.catalyst !== undefined) continue;
+      seen.add(row.symbol);
+      try {
+        row.catalyst = pickCatalyst(await fetchNews(newsQueryName(row.description || row.name)));
+        changed = true;
+      } catch { row.catalyst = null; }
+      await sleep(150);
+    }
+    if (changed) broadcast({ type: 'uoa', uoa });
+  } catch (e) {
+    uoa = { ...uoa, error: e.message };
+    broadcast({ type: 'uoa', uoa });
+  }
+}
+
+// ---------------- weekly Fibonacci R1 crossers (F&O universe) ----------------
+// Weekly Fib pivots off the previous week's H/L/C: P = (H+L+C)/3,
+// R1 = P + 0.382*(H-L), R2 = P + 0.618*(H-L). Reports F&O stocks whose daily
+// close crossed above R1 within the last 7 sessions and still holds above it.
+
+const PIVOT_MS = 30 * 60 * 1000;
+let fnoUniverse = [];
+let r1Crossers = [];
+let pivotRunning = false;
+
+function weekKeyOf(date) {
+  const d = new Date(date + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+  return d.toISOString().slice(0, 10);
+}
+
+function detectR1Cross(bars) {
+  if (!bars || bars.length < 15) return null;
+  const weeks = [];
+  for (const b of bars) {
+    const k = weekKeyOf(b.date);
+    const w = weeks[weeks.length - 1];
+    if (!w || w.key !== k) weeks.push({ key: k, high: b.high, low: b.low, close: b.close });
+    else { w.high = Math.max(w.high, b.high); w.low = Math.min(w.low, b.low); w.close = b.close; }
+  }
+  const fib = key => {
+    const i = weeks.findIndex(w => w.key === key);
+    if (i <= 0) return null;
+    const p = weeks[i - 1];
+    const P = (p.high + p.low + p.close) / 3, range = p.high - p.low;
+    return { r1: P + 0.382 * range, r2: P + 0.618 * range };
+  };
+  const n = bars.length;
+  let cross = null;
+  for (let i = Math.max(1, n - 7); i < n; i++) {
+    const pv = fib(weekKeyOf(bars[i].date));
+    if (pv && bars[i - 1].close < pv.r1 && bars[i].close >= pv.r1) {
+      cross = { crossDate: bars[i].date, crossClose: bars[i].close };
+    }
+  }
+  if (!cross) return null;
+  const last = bars[n - 1].close;
+  const now = fib(weekKeyOf(bars[n - 1].date));
+  if (!now || last < now.r1) return null;   // gave the level back
+  return { crossDate: cross.crossDate, r1: now.r1, r2: now.r2, price: last, aboveR1: ((last - now.r1) / now.r1) * 100 };
+}
+
+async function pollPivots() {
+  if (!fnoUniverse.length || pivotRunning) return;
+  pivotRunning = true;
+  try {
+    const out = [];
+    for (const sym of fnoUniverse) {
+      let bars;
+      try {
+        bars = await getBarsCached(sym);
+      } catch { continue; }
+      const r = detectR1Cross(bars);
+      if (r) out.push({ symbol: sym, name: sym.slice(4), ...r });
+    }
+    try {
+      const q = await scan({ symbols: { tickers: out.map(o => o.symbol) }, columns: ['description', 'change'] });
+      const map = new Map((q.data || []).map(x => [x.s, x.d]));
+      for (const o of out) {
+        const d = map.get(o.symbol);
+        if (d) { o.description = d[0]; o.chg = d[1]; }
+      }
+    } catch { /* optional */ }
+    r1Crossers = out.sort((a, b) => b.crossDate.localeCompare(a.crossDate) || b.aboveR1 - a.aboveR1);
+    broadcast({ type: 'pivots', r1Crossers });
+  } catch (e) {
+    lastError = e.message;
+  } finally {
+    pivotRunning = false;
+  }
+}
+
+// ---------------- results reaction ----------------
+
+const RESULTS_MS = 60 * 60 * 1000;
+let results = [];
+
+async function pollResults() {
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    const j = await scan({
+      ...SCAN_BASE,
+      filter: [...BREADTH_FILTER,
+        { left: 'market_cap_basic', operation: 'egreater', right: 5e9 },
+        { left: 'earnings_release_date', operation: 'egreater', right: now - 4 * 86400 }],
+      columns: [...MOVER_COLUMNS, 'earnings_release_date', 'total_revenue_yoy_growth_fq', 'net_income_yoy_growth_fq'],
+      sort: { sortBy: 'change', sortOrder: 'desc' }, range: [0, 50],
+    });
+    results = (j.data || []).map(r => {
+      const [name, description, close, chg, volume, rvol, mcap, sector, edate, revG, niG] = r.d;
+      return {
+        symbol: r.s, name, description, price: close, chg, volume, rvol, sector, revG, niG,
+        reported: edate ? new Date(edate * 1000).toISOString().slice(0, 10) : null,
+      };
+    });
+    broadcast({ type: 'results', results });
+    let changed = false;
+    for (const s of results.slice(0, CATALYST_COUNT)) {
+      if (s.catalyst !== undefined) continue;
+      try {
+        s.catalyst = pickCatalyst(await fetchNews(newsQueryName(s.description)));
+        changed = true;
+      } catch { s.catalyst = null; }
+      await sleep(150);
+    }
+    if (changed) broadcast({ type: 'results', results });
+  } catch (e) {
+    lastError = e.message;
+  }
+}
+
+// ---------------- watchlist news feed ----------------
+
+const WNEWS_MS = 15 * 60 * 1000;
+let wnews = { items: [], at: null };
+
+async function pollWatchNews() {
+  try {
+    const items = [];
+    for (const sym of watchlist.slice(0, 40)) {
+      const row = watchRows.find(r => r.symbol === sym);
+      try {
+        for (const it of await fetchNews(newsQueryName(row?.description || sym.split(':').pop()))) {
+          items.push({ ...it, symbol: sym, name: sym.split(':').pop() });
+        }
+      } catch { /* one symbol failing shouldn't kill the feed */ }
+      await sleep(120);
+    }
+    const seen = new Set();
+    wnews = {
+      items: items
+        .filter(i => { if (seen.has(i.title)) return false; seen.add(i.title); return true; })
+        .sort((a, b) => new Date(b.pubDate || 0) - new Date(a.pubDate || 0))
+        .slice(0, 40),
+      at: new Date().toISOString(),
+    };
+    broadcast({ type: 'wnews', wnews });
+  } catch (e) {
+    lastError = e.message;
   }
 }
 
@@ -858,9 +1113,11 @@ async function validateSymbol(sym) {
   pollSectors();
   pollChartink();
   pollGainers();
-  pollOI();
-  refreshCandidates();
-  refreshEmas().then(pollQuotes);
+  pollResults();
+  pollUOA();
+  await pollOI();                       // fills fnoUniverse for the pivot scan
+  refreshCandidates().then(pollPivots); // candidates warm the shared bars cache first
+  refreshEmas().then(() => { pollQuotes(); pollWatchNews(); });
 })();
 setInterval(pollQuotes, QUOTE_MS);
 setInterval(pollMovers, MOVERS_MS);
@@ -869,7 +1126,11 @@ setInterval(pollSectors, WEEKLY_MS);
 setInterval(pollChartink, CHARTINK_MS);
 setInterval(pollGainers, GAIN_MS);
 setInterval(pollOI, OI_MS);
+setInterval(pollUOA, OI_MS);
 setInterval(refreshCandidates, CAND_MS);
+setInterval(pollPivots, PIVOT_MS);
+setInterval(pollResults, RESULTS_MS);
+setInterval(pollWatchNews, WNEWS_MS);
 setInterval(() => refreshEmas(), EMA_REFRESH_MS);
 
 // ---------------- http ----------------
@@ -893,6 +1154,7 @@ const server = http.createServer(async (req, res) => {
       type: 'init', watchRows, indexRows, gainers, losers, volumeShockers,
       gainers7, losers7, volumeBuildup, breadth, eps, sectors, chartink,
       gainers1d, gainersW, gainers15, ep15, oi,
+      ivPause, ipos, r1Crossers, results, uoa, wnews,
       lastPoll, lastError, ema: emaState, watchlist,
     })}\n\n`);
     clients.add(res);
