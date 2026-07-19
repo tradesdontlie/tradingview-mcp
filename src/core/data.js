@@ -524,8 +524,23 @@ export async function getStudyValues() {
           // (e.g. two EMAs with different lengths) are distinguishable (#143).
           var id = null;
           try { id = s.id ? s.id() : null; } catch(e) {}
+          // Pine studies stash their obfuscated source in inputs().text — multi-KB
+          // per study, and it says nothing about how the study is configured. Drop
+          // it and the internal flags, and unwrap the {v,f,t} envelope so the
+          // inputs stay readable while still distinguishing instances (#143).
           var inputs = null;
-          try { var ip = s.inputs ? s.inputs() : null; if (ip && Object.keys(ip).length) inputs = ip; } catch(e) {}
+          try {
+            var ip = s.inputs ? s.inputs() : null;
+            if (ip) {
+              var lean = {};
+              for (var k in ip) {
+                if (k === 'text' || k === 'pineFeatures' || k === '__fast_calc' || k === '__profile') continue;
+                var iv = ip[k];
+                lean[k] = (iv && typeof iv === 'object' && 'v' in iv) ? iv.v : iv;
+              }
+              if (Object.keys(lean).length) inputs = lean;
+            }
+          } catch(e) {}
           if (Object.keys(values).length > 0) results.push({ id: id, name: name, inputs: inputs, values: values });
         } catch(e) {}
       }
