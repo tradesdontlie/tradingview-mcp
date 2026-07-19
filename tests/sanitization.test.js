@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { safeString, requireFinite } from '../src/connection.js';
-import { setSymbol, setTimeframe, setType, manageIndicator, setVisibleRange } from '../src/core/chart.js';
+import { setSymbol, setTimeframe, setType, manageIndicator, setVisibleRange, scrollToDate, getVisibleRange, symbolInfo } from '../src/core/chart.js';
 import { drawShape } from '../src/core/drawing.js';
 
 // ── Mock helpers ─────────────────────────────────────────────────────────
@@ -285,6 +285,33 @@ describe('drawing.js — sanitized evaluate calls', () => {
 });
 
 // ── Source-level audit ───────────────────────────────────────────────────
+
+describe('chart.js — DI regression (all evaluate calls must resolve via _deps)', () => {
+  // Regression: the DI refactor renamed the module import to _evaluate, but
+  // scrollToDate/getVisibleRange/symbolInfo still referenced bare `evaluate`
+  // → ReferenceError "evaluate is not defined" at call time.
+  it('scrollToDate uses injected evaluate', async () => {
+    const { _deps, evaluate } = mockDeps();
+    const r = await scrollToDate({ date: '2026-05-15', _deps });
+    assert.equal(r.success, true);
+    assert.ok(evaluate.calls.some(c => c.includes('zoomToBarsRange')), 'injected evaluate was called');
+  });
+
+  it('getVisibleRange uses injected evaluate', async () => {
+    const calls = [];
+    const evaluate = async (expr) => { calls.push(expr); return { visible_range: { from: 1, to: 2 }, bars_range: { from: 0, to: 10 } }; };
+    const r = await getVisibleRange({ _deps: { evaluate } });
+    assert.equal(r.success, true);
+    assert.equal(calls.length, 1, 'injected evaluate was called');
+  });
+
+  it('symbolInfo uses injected evaluate', async () => {
+    const { _deps, evaluate } = mockDeps();
+    const r = await symbolInfo({ _deps });
+    assert.equal(r.success, true);
+    assert.ok(evaluate.calls.length > 0, 'injected evaluate was called');
+  });
+});
 
 describe('source audit — no unsafe interpolation patterns', () => {
   const CORE_DIR = new URL('../src/core/', import.meta.url).pathname;
