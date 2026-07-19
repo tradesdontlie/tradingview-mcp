@@ -2,17 +2,23 @@
  * Core tab management logic.
  * Controls TradingView Desktop tabs via CDP and Electron keyboard shortcuts.
  */
+import CDP from 'chrome-remote-interface';
 import { getClient, evaluate } from '../connection.js';
 
 const CDP_HOST = 'localhost';
 const CDP_PORT = 9222;
 
+async function listPageTargets() {
+  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
+  const targets = await resp.json();
+  return targets.filter(t => t.type === 'page');
+}
+
 /**
  * List all open chart tabs (CDP page targets).
  */
 export async function list() {
-  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
-  const targets = await resp.json();
+  const targets = await listPageTargets();
 
   const tabs = targets
     .filter(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
@@ -28,30 +34,49 @@ export async function list() {
 }
 
 /**
- * Open a new chart tab via keyboard shortcut (Ctrl+T / Cmd+T).
+ * Open a new tab by clicking the tab bar's "+" button in the window host page.
+ * Synthetic Cmd+T via CDP does NOT work — Electron menu accelerators live in the
+ * main process and never see renderer-level Input.dispatchKeyEvent.
  */
 export async function newTab() {
-  const c = await getClient();
+  const before = await listPageTargets();
+  const host = before.find(t => /app\/window\/index\.html/.test(t.url));
+  if (!host) throw new Error('TradingView window host target not found. Is TradingView Desktop running with --remote-debugging-port?');
 
-  // Electron/TradingView Desktop uses Ctrl+T for new tab on macOS too
-  // But some versions use Cmd+T
-  const isMac = process.platform === 'darwin';
-  const mod = isMac ? 4 : 2; // 4 = meta (Cmd), 2 = ctrl
+  const c = await CDP({ host: CDP_HOST, port: CDP_PORT, target: host.id });
+  try {
+    await c.Runtime.enable();
+    const r = await c.Runtime.evaluate({
+      expression: `(function(){var b=document.querySelector('.create-new-tab-button');if(!b)return false;b.click();return true;})()`,
+      returnByValue: true,
+    });
+    if (r.exceptionDetails || !r.result?.value) {
+      throw new Error('create-new-tab-button not found in TradingView window host');
+    }
+  } finally {
+    await c.close().catch(() => {});
+  }
 
-  await c.Input.dispatchKeyEvent({
-    type: 'keyDown',
-    modifiers: mod,
-    key: 't',
-    code: 'KeyT',
-    windowsVirtualKeyCode: 84,
-  });
-  await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 't', code: 'KeyT' });
-
-  await new Promise(r => setTimeout(r, 2000));
-
-  // Verify a new tab appeared
-  const state = await list();
-  return { success: true, action: 'new_tab_opened', ...state };
+  // Only report success once the new target is verifiably present
+  const beforeIds = new Set(before.map(t => t.id));
+  for (let i = 0; i < 10; i++) {
+    await new Promise(r => setTimeout(r, 500));
+    const now = await listPageTargets();
+    const added = now.find(t => !beforeIds.has(t.id) && /app\/new-tab\/|tradingview\.com\/chart/i.test(t.url));
+    if (added) {
+      const state = await list();
+      return {
+        success: true,
+        action: 'new_tab_opened',
+        new_target: { id: added.id, url: added.url },
+        note: /app\/new-tab\//.test(added.url)
+          ? 'New tab opened on the start screen — it becomes a chart tab once a chart is selected.'
+          : undefined,
+        ...state,
+      };
+    }
+  }
+  throw new Error('New tab did not appear within 5s of clicking the tab bar "+" button');
 }
 
 /**
