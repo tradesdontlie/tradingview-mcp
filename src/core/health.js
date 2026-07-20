@@ -360,18 +360,37 @@ export async function launch({ port, kill_existing, _deps } = {}) {
   if (killFirst) await killExisting();
 
   const cdpArgs = [`--remote-debugging-port=${cdpPort}`];
-  let child = _spawnDetached(deps.spawn, tvPath, cdpArgs);
+  const isWindowsApps = platform === 'win32' && WINDOWS_APPS_RE.test(tvPath);
+
+  // Attempt a direct launch first. On some Windows machines, spawning a
+  // WindowsApps-packaged exe fails *synchronously* with EPERM rather than
+  // emitting an async 'error' event (which _spawnFailedEarly listens for), so
+  // guard the spawn and treat a throw on an MSIX path as a failed direct launch
+  // that should fall back to a local copy. Without this, the sync throw escapes
+  // launch() entirely and the local-copy fallback below never runs.
+  let child = null;
+  let directLaunchFailed = false;
+  try {
+    child = _spawnDetached(deps.spawn, tvPath, cdpArgs);
+  } catch (err) {
+    if (!isWindowsApps) throw err; // no local-copy fallback for non-MSIX installs
+    directLaunchFailed = true;
+  }
+
   let info = null;
   let usedLocalCopy = false;
 
-  if (platform === 'win32' && WINDOWS_APPS_RE.test(tvPath)) {
-    const earlyFailure = await _spawnFailedEarly(child);
-    if (!earlyFailure) {
-      info = await _waitForCdp({ cdpPort, attempts: 15, delay: deps.delay, probeCdp: deps.probeCdp });
+  if (isWindowsApps) {
+    if (!directLaunchFailed) {
+      const earlyFailure = await _spawnFailedEarly(child);
+      if (!earlyFailure) {
+        info = await _waitForCdp({ cdpPort, attempts: 15, delay: deps.delay, probeCdp: deps.probeCdp });
+      }
     }
     if (!info) {
-      // Direct WindowsApps launch was blocked or CDP never bound — fall back to
-      // a local copy of the package (see _copyMsixPackageLocal).
+      // Direct WindowsApps launch was blocked (sync EPERM or async EACCES) or CDP
+      // never bound — fall back to a local copy of the package (see
+      // _copyMsixPackageLocal).
       const localExe = _copyMsixPackageLocal(tvPath, deps);
       await killExisting();
       child = _spawnDetached(deps.spawn, localExe, cdpArgs);

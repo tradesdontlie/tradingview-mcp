@@ -25,11 +25,12 @@ function mockChild({ failWith } = {}) {
 /**
  * Build a _deps bundle simulating a win32 MSIX environment.
  * @param {object} opts
- *   spawnFailures — spawn paths (substring) that emit EACCES
+ *   spawnFailures — spawn paths (substring) that emit an async EACCES 'error'
+ *   spawnThrows  — spawn paths (substring) that throw synchronously (EPERM)
  *   cdpBindsFor  — spawn paths (substring) after which probeCdp starts succeeding
  *   copyExists   — local copy already present
  */
-function msixDeps({ spawnFailures = [], cdpBindsFor = [], copyExists = false } = {}) {
+function msixDeps({ spawnFailures = [], spawnThrows = [], cdpBindsFor = [], copyExists = false } = {}) {
   const state = { spawned: [], copies: [], removed: [], killed: 0, cdpUp: false };
   const deps = {
     existsSync: (p) => {
@@ -46,6 +47,9 @@ function msixDeps({ spawnFailures = [], cdpBindsFor = [], copyExists = false } =
     },
     spawn: (exe) => {
       state.spawned.push(exe);
+      if (spawnThrows.some((s) => exe.includes(s))) {
+        throw Object.assign(new Error('spawn EPERM'), { code: 'EPERM' });
+      }
       const fail = spawnFailures.some((s) => exe.includes(s));
       if (!fail && cdpBindsFor.some((s) => exe.includes(s))) state.cdpUp = true;
       return mockChild(fail ? { failWith: 'EACCES' } : {});
@@ -86,6 +90,19 @@ describe('launch() — MSIX WindowsApps handling', { skip: !onWindows }, () => {
     assert.match(state.removed[0], /3\.0\.0\.7652/);
     // the CDP-less direct instance is killed before relaunching from the copy
     assert.ok(state.killed >= 2);
+  });
+
+  it('synchronous EPERM on direct spawn falls back to local copy', async () => {
+    // Some machines throw EPERM synchronously from spawn() instead of emitting
+    // an async 'error' event; the fallback must still trigger.
+    const { deps, state } = msixDeps({ spawnThrows: ['WindowsApps'], cdpBindsFor: ['tradingview-mcp'] });
+    const result = await launch({ _deps: deps });
+    assert.equal(result.success, true);
+    assert.equal(result.msix_local_copy, true);
+    assert.equal(result.binary, LOCAL_COPY_EXE);
+    assert.equal(state.copies.length, 1);
+    assert.match(state.spawned[0], /WindowsApps/);
+    assert.match(state.spawned[1], /tradingview-mcp/);
   });
 
   it('CDP never binding on direct spawn falls back to local copy', async () => {
