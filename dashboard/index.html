@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="author" content="Sunil Goyal">
 <title>India Market Dashboard</title>
 <style>
   :root {
@@ -45,9 +46,16 @@
 
   .shell { display: flex; flex: 1; min-height: 0; }
   nav.side {
-    width: 208px; flex: none; overflow-y: auto; padding: 14px 10px 30px;
+    width: 208px; flex: none; overflow-y: auto; padding: 14px 10px 16px;
     background: var(--surface); border-right: 1px solid var(--grid);
+    display: flex; flex-direction: column;
   }
+  .navfoot {
+    margin-top: auto; padding: 14px 10px 0; border-top: 1px solid var(--grid);
+    color: var(--muted); font-size: 11px; line-height: 1.5;
+  }
+  .navfoot b { color: var(--ink-2); font-weight: 600; }
+  @media (max-width: 900px) { .navfoot { display: none; } }
   .navgroup { margin-bottom: 16px; }
   .navgroup h3 {
     margin: 0 10px 5px; font-size: 10px; font-weight: 700; color: var(--muted);
@@ -273,6 +281,7 @@
     <button class="tab" data-tab="chartink">All Scans</button>
     <button class="tab" data-tab="ckresult">High Potential</button>
   </div>
+  <div class="navfoot">© 2026 <b>Sunil Goyal</b><br>India Markets Dashboard</div>
 </nav>
 
 <main>
@@ -415,6 +424,13 @@
 
   <div id="tab-intra" style="display:none">
     <section class="card">
+      <div class="card-head"><h2>Opening Range Breakouts</h2><span class="sub" id="orb-sub">9:15–9:45 IST range · live breaks above/below with volume · newest first</span></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Symbol</th><th style="text-align:left">Break</th><th>Time</th><th>Price</th><th>OR High</th><th>OR Low</th><th>Range%</th><th>Beyond</th><th>RVol</th><th class="nosort"></th></tr></thead>
+        <tbody id="orbbody"></tbody>
+      </table></div>
+    </section>
+    <section class="card">
       <div class="card-head"><h2>Gappers</h2><span class="sub" id="gap-sub">pre-market ±2%+ movers · falls back to opening gaps after the bell</span></div>
       <div class="tablewrap"><table>
         <thead><tr><th>Symbol</th><th>Pre-Mkt%</th><th>Gap%</th><th>Chg%</th><th>RVol</th><th>Price</th><th style="text-align:left">Catalyst</th><th class="nosort"></th></tr></thead>
@@ -483,6 +499,13 @@
       </table></div>
     </section>
     <section class="card">
+      <div class="card-head"><h2>Power Plays · High Tight Flags</h2><span class="sub">30%+ inside 3 weeks, now flagging &lt;15% off the run high · tightest first</span></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Symbol</th><th>Run-up</th><th>Pullback</th><th>Run High</th><th>High Ago</th><th>5d Range</th><th>Price</th><th>Today%</th><th class="nosort"></th></tr></thead>
+        <tbody id="ppbody"></tbody>
+      </table></div>
+    </section>
+    <section class="card">
       <div class="card-head"><h2>VCP / Base Setups</h2><span class="sub">shrinking pullbacks on drying volume near 52w highs · sorted by distance to pivot</span></div>
       <div class="tablewrap"><table>
         <thead><tr><th>Symbol</th><th style="text-align:left">Contractions</th><th>Pivot</th><th>To Pivot</th><th>52wH %</th><th>Price</th><th>Today%</th><th class="nosort"></th></tr></thead>
@@ -511,6 +534,13 @@
       <div class="tablewrap"><table>
         <thead><tr><th>Symbol</th><th>Reported</th><th>Since Rep</th><th>Rev YoY</th><th>PAT YoY</th><th>1w%</th><th>Chg%</th><th>Price</th><th style="text-align:left">Catalyst</th><th class="nosort"></th></tr></thead>
         <tbody id="peadbody"></tbody>
+      </table></div>
+    </section>
+    <section class="card">
+      <div class="card-head"><h2>Gap &amp; Hold</h2><span class="sub">gapped 2%+ on results and the gap never filled — institutions kept buying · biggest gap first</span></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Symbol</th><th>Reported</th><th>Gap%</th><th>Held</th><th>Above Gap</th><th>Rev YoY</th><th>PAT YoY</th><th>Price</th><th>Today%</th><th class="nosort"></th></tr></thead>
+        <tbody id="ghbody"></tbody>
       </table></div>
     </section>
   </div>
@@ -583,6 +613,7 @@ let r1Crossers = [], ivPause = [], ipos = [], results = [];
 let wnews = { items: [], at: null };
 let gappers = [], pace = [], vwapFlips = [], vcp = [];
 let radar = [], pead = [], patterns = [];
+let powerPlays = [], gapHold = [], orb = { date: null, events: [] };
 let condFilter = null;   // parsed conditions from the filter box, or null = show all
 const fundaData = new Map();   // symbol -> funda | 'loading' | null
 let sortKey = null, sortDir = -1;
@@ -885,6 +916,27 @@ function renderAllMovers() {
     `<td><span class="dim">${esc(r.time || '')}</span></td><td>${fmtPx(r.price)}</td><td>${fmtPx(r.vwap)}</td>` +
     `<td>${pctCell(r.dist)}</td><td>${rvolCell(r.rvol)}</td>`, 8,
     'no VWAP flips yet — populates during market hours');
+  // ORB card
+  renderMovers('orbbody', orb.events, r =>
+    `<td style="text-align:left"><span class="bu ${r.dir === 'up' ? 'bu-long' : 'bu-short'}">${r.dir === 'up' ? '↑ above OR' : '↓ below OR'}</span></td>` +
+    `<td><span class="dim">${esc(r.time || '')}</span></td><td>${fmtPx(r.price)}</td>` +
+    `<td>${fmtPx(r.orHigh)}</td><td>${fmtPx(r.orLow)}</td>` +
+    `<td><span class="dim">${r.rangePct == null ? '—' : r.rangePct.toFixed(1) + '%'}</span></td>` +
+    `<td>${pctCell(r.beyond)}</td><td>${rvolCell(r.rvol)}</td>`, 10,
+    'opening range forms 9:15–9:45 IST — breaks appear after');
+  // power play card
+  renderMovers('ppbody', powerPlays, r =>
+    `<td>${pctCell(r.runup, { strong: true })}</td><td>${pctCell(-r.pullback)}</td>` +
+    `<td>${fmtPx(r.runHigh)}</td><td><span class="dim">${r.sinceHigh == null ? '—' : r.sinceHigh + 'd'}</span></td>` +
+    `<td><span class="dim">${r.range5 == null ? '—' : r.range5.toFixed(1) + '%'}</span></td>` +
+    `<td>${fmtPx(r.price)}</td><td>${pctCell(r.chg)}</td>`, 9,
+    'no high tight flags in the pool right now');
+  // gap & hold card
+  renderMovers('ghbody', gapHold, r =>
+    `<td><span class="dim">${esc((r.reported || '').slice(5))}</span></td><td>${pctCell(r.gapPct, { strong: true })}</td>` +
+    `<td><span class="dim">${r.sinceGap == null ? '—' : r.sinceGap + 'd'}</span></td><td>${pctCell(r.aboveGap)}</td>` +
+    `<td>${pctCell(r.revG)}</td><td>${pctCell(r.niG)}</td><td>${fmtPx(r.price)}</td><td>${pctCell(r.chg)}</td>`, 10,
+    'no unfilled results gaps in the window');
   // VCP card
   renderMovers('vcpbody', vcp, r =>
     `<td style="text-align:left"><span class="dim">${r.c1 == null ? '—' : r.c1.toFixed(0) + '% → ' + r.c2.toFixed(0) + '% → ' + r.c3.toFixed(0) + '%'}</span></td>` +
@@ -1198,6 +1250,8 @@ es.onmessage = ev => {
       vwapFlips = m.vwapFlips || []; vcp = m.vcp || [];
       radar = m.radar || []; pead = m.pead || []; patterns = m.patterns || [];
       oiChain = m.oiChain || {};
+      powerPlays = m.powerPlays || []; gapHold = m.gapHold || [];
+      if (m.orb) orb = m.orb;
       breadth = m.breadth || null;
       if (m.ema) emaState = m.ema;
     }
@@ -1218,6 +1272,7 @@ es.onmessage = ev => {
     gainers1d = m.gainers1d || []; gainersW = m.gainersW || [];
     gainers15 = m.gainers15 || []; ep15 = m.ep15 || [];
     ivPause = m.ivPause || ivPause; ipos = m.ipos || ipos;
+    powerPlays = m.powerPlays || powerPlays;
     renderAllMovers();
   } else if (m.type === 'oi') {
     oi = m.oi || oi;
@@ -1236,12 +1291,14 @@ es.onmessage = ev => {
     renderWNews();
   } else if (m.type === 'intraday') {
     gappers = m.gappers || []; pace = m.pace || []; vwapFlips = m.vwapFlips || [];
+    if (m.orb) orb = m.orb;
     renderAllMovers();
   } else if (m.type === 'vcp') {
     vcp = m.vcp || [];
     renderAllMovers();
   } else if (m.type === 'earnings') {
     radar = m.radar || radar; pead = m.pead || pead;
+    gapHold = m.gapHold || gapHold;
     renderAllMovers();
   } else if (m.type === 'patterns') {
     patterns = m.patterns || [];

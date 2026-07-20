@@ -1,5 +1,6 @@
 /**
  * India market dashboard (hexadelta-style).
+ * Copyright (c) 2026 Sunil Goyal
  *
  * One page showing, for a user-editable NSE watchlist:
  *   - live price / change / volume / relative volume
@@ -692,7 +693,8 @@ async function fetchCandBars(sym) {
     if (q.close[i] == null) continue;
     bars.push({
       date: new Date(r.timestamp[i] * 1000).toISOString().slice(0, 10),
-      close: q.close[i], high: q.high[i] ?? q.close[i], low: q.low[i] ?? q.close[i], volume: q.volume[i] || 0,
+      close: q.close[i], open: q.open?.[i] ?? q.close[i],
+      high: q.high[i] ?? q.close[i], low: q.low[i] ?? q.close[i], volume: q.volume[i] || 0,
     });
   }
   return bars;
@@ -754,6 +756,32 @@ function detectPause(bars) {
   return { runup: best[1], runWindow: best[0], nearEma: near[0], emaDist: near[1], range5 };
 }
 
+// Power play / high tight flag: 30%+ inside 3 weeks, then a shallow flag —
+// pullback under 15% from the run high, with the high made recently.
+function detectPowerPlay(bars) {
+  if (!bars || bars.length < 40) return null;
+  const closes = bars.map(b => b.close);
+  const n = closes.length;
+  const last = closes[n - 1];
+  let best = null;
+  for (let end = n - 1; end >= Math.max(15, n - 20); end--) {
+    const gain = ((closes[end] / closes[end - 15]) - 1) * 100;
+    if (gain >= 30 && (!best || gain > best.gain)) best = { end, gain };
+  }
+  if (!best) return null;
+  let runHigh = -Infinity, hiIdx = -1;
+  for (let i = best.end - 15; i < n; i++) {
+    if (bars[i].high > runHigh) { runHigh = bars[i].high; hiIdx = i; }
+  }
+  const sinceHigh = n - 1 - hiIdx;
+  if (sinceHigh > 15) return null;                    // flag has gone stale
+  const pullback = (1 - last / runHigh) * 100;
+  if (pullback > 15) return null;                     // too deep to be a flag
+  const w5 = closes.slice(-5);
+  const range5 = ((Math.max(...w5) - Math.min(...w5)) / Math.min(...w5)) * 100;
+  return { runup: best.gain, pullback, runHigh, sinceHigh, range5 };
+}
+
 // recent listing = Yahoo history starts inside the last ~6 months
 function detectRecentListing(bars) {
   if (!bars || !bars.length) return null;
@@ -765,7 +793,7 @@ function detectRecentListing(bars) {
   return { listedOn: first, offHigh: ((last / hi) - 1) * 100 };
 }
 
-let ivPause = [], ipos = [];
+let ivPause = [], ipos = [], powerPlays = [];
 let candRunning = false;
 async function refreshCandidates() {
   if (candRunning) return;
@@ -776,7 +804,7 @@ async function refreshCandidates() {
       columns: MOVER_COLUMNS, sort: { sortBy: 'Perf.1M', sortOrder: 'desc' }, range: [0, 200],
     });
     const cands = moverRows(j);
-    const g15 = [], e15 = [], pauses = [], listings = [];
+    const g15 = [], e15 = [], pauses = [], listings = [], plays = [];
     for (const c of cands) {
       let bars;
       try {
@@ -791,12 +819,15 @@ async function refreshCandidates() {
       if (p) pauses.push({ ...c, ...p });
       const l = detectRecentListing(bars);
       if (l) listings.push({ ...c, ...l, chg15: a?.chg15 ?? null });
+      const pp = detectPowerPlay(bars);
+      if (pp) plays.push({ ...c, ...pp });
     }
     gainers15 = g15.sort((a, b) => b.chg15 - a.chg15).slice(0, 50);
     ep15 = e15.sort((a, b) => b.epDate.localeCompare(a.epDate) || b.epVolx - a.epVolx).slice(0, 50);
     ivPause = pauses.sort((a, b) => b.runup - a.runup).slice(0, 30);
     ipos = listings.sort((a, b) => b.listedOn.localeCompare(a.listedOn)).slice(0, 30);
-    const payload = () => ({ type: 'gain', gainers1d, gainersW, gainers15, ep15, ivPause, ipos });
+    powerPlays = plays.sort((a, b) => a.pullback - b.pullback || b.runup - a.runup).slice(0, 30);
+    const payload = () => ({ type: 'gain', gainers1d, gainersW, gainers15, ep15, ivPause, ipos, powerPlays });
     broadcast(payload());
     let changed = false;
     for (const s of ep15.slice(0, CATALYST_COUNT)) {
@@ -1071,6 +1102,13 @@ let vwapFlips = [];               // recent reclaim/reject events, newest first
 const vwapState = new Map();      // sym -> was price above VWAP on last poll
 let lastIntradayRun = 0;
 
+// Opening Range Breakout: the 9:15-9:45 IST high/low per symbol, then live
+// breaks above/below it. Ranges persist to disk so a restart mid-session
+// doesn't lose the morning's range.
+const ORB_FILE = path.join(__dirname, 'orb.json');
+let orb = loadJson(ORB_FILE, { date: null, ranges: {}, events: [] });
+const orbStatus = new Map();      // sym -> 'in' | 'above' | 'below'
+
 function istNowMinutes() {
   const [h, m] = new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour12: false }).split(':');
   return Number(h) * 60 + Number(m);
@@ -1112,28 +1150,58 @@ async function pollIntraday() {
       return { symbol: r.s, name, description, price: close, chg, volume, rvol, sector, pace: ipace };
     });
 
-    // VWAP flips over the F&O + watchlist universe
+    // VWAP flips + ORB over the F&O + watchlist universe
     const uni = [...new Set([...fnoUniverse, ...watchlist])];
     if (uni.length) {
-      const q = await scan({ symbols: { tickers: uni }, columns: ['close', 'VWAP', 'change', 'relative_volume_10d_calc', 'description'] });
+      const q = await scan({ symbols: { tickers: uni }, columns: ['close', 'VWAP', 'change', 'relative_volume_10d_calc', 'description', 'high', 'low'] });
       const t = new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false }).slice(0, 5);
+      const today = todayIST();
+      const mins = istNowMinutes();
+      if (orb.date !== today && marketHoursIST() && mins >= 555) {
+        orb = { date: today, ranges: {}, events: [] };
+        orbStatus.clear();
+      }
       for (const r of q.data || []) {
-        const [close, vwap, chg, rvol, description] = r.d;
-        if (close == null || vwap == null) continue;
-        const above = close > vwap;
-        const prev = vwapState.get(r.s);
-        vwapState.set(r.s, above);
-        if (prev !== undefined && prev !== above && marketHoursIST()) {
-          vwapFlips.unshift({
-            symbol: r.s, name: r.s.split(':').pop(), description,
-            dir: above ? 'reclaim' : 'reject', time: t,
-            price: close, vwap, dist: ((close - vwap) / vwap) * 100, chg, rvol,
-          });
+        const [close, vwap, chg, rvol, description, dayHigh, dayLow] = r.d;
+        if (close == null) continue;
+        if (vwap != null) {
+          const above = close > vwap;
+          const prev = vwapState.get(r.s);
+          vwapState.set(r.s, above);
+          if (prev !== undefined && prev !== above && marketHoursIST()) {
+            vwapFlips.unshift({
+              symbol: r.s, name: r.s.split(':').pop(), description,
+              dir: above ? 'reclaim' : 'reject', time: t,
+              price: close, vwap, dist: ((close - vwap) / vwap) * 100, chg, rvol,
+            });
+          }
+        }
+        // ORB: during 9:15-9:45 the running day high/low IS the opening range
+        if (orb.date === today && dayHigh != null && dayLow != null) {
+          if (mins >= 555 && mins <= 585) {
+            orb.ranges[r.s] = { h: dayHigh, l: dayLow };
+          } else if (mins > 585 && orb.ranges[r.s]) {
+            const R = orb.ranges[r.s];
+            const st = close > R.h ? 'above' : close < R.l ? 'below' : 'in';
+            const prev = orbStatus.get(r.s) ?? 'in';
+            orbStatus.set(r.s, st);
+            if (st !== 'in' && prev === 'in') {
+              orb.events.unshift({
+                symbol: r.s, name: r.s.split(':').pop(), description,
+                dir: st === 'above' ? 'up' : 'down', time: t, price: close,
+                orHigh: R.h, orLow: R.l, rangePct: R.l ? ((R.h - R.l) / R.l) * 100 : null,
+                beyond: st === 'above' ? ((close - R.h) / R.h) * 100 : ((close - R.l) / R.l) * 100,
+                rvol, chg,
+              });
+              if (orb.events.length > 60) orb.events.length = 60;
+            }
+          }
         }
       }
       if (vwapFlips.length > 40) vwapFlips.length = 40;
+      saveJson(ORB_FILE, orb);
     }
-    broadcast({ type: 'intraday', gappers, pace, vwapFlips, at: new Date().toISOString() });
+    broadcast({ type: 'intraday', gappers, pace, vwapFlips, orb: { date: orb.date, events: orb.events }, at: new Date().toISOString() });
     let changed = false;
     for (const s of gappers.slice(0, CATALYST_COUNT)) {
       if (s.catalyst !== undefined) continue;
@@ -1143,7 +1211,7 @@ async function pollIntraday() {
       } catch { s.catalyst = null; }
       await sleep(150);
     }
-    if (changed) broadcast({ type: 'intraday', gappers, pace, vwapFlips, at: new Date().toISOString() });
+    if (changed) broadcast({ type: 'intraday', gappers, pace, vwapFlips, orb: { date: orb.date, events: orb.events }, at: new Date().toISOString() });
   } catch (e) {
     lastError = e.message;
   }
@@ -1332,7 +1400,32 @@ async function pollOptionChain() {
 // PEAD = momentum AFTER earnings: reported inside the last 12 days with
 // strong quarterly numbers, still holding above the 20 SMA — the drift.
 
-let radar = [], pead = [];
+let radar = [], pead = [], gapHold = [];
+
+// gap-and-hold: gapped 2%+ on the results day and the gap has never filled —
+// the institutional "kept buying after the pop" profile
+function detectGapHold(bars, reported) {
+  if (!bars || !reported) return null;
+  const i0 = bars.findIndex(b => b.date >= reported);
+  if (i0 <= 0) return null;
+  // after-close reports react on the NEXT session — test both candidate days
+  for (const idx of [i0, i0 + 1]) {
+    if (idx <= 0 || idx >= bars.length) continue;
+    const prevClose = bars[idx - 1].close;
+    const gapPct = ((bars[idx].open / prevClose) - 1) * 100;
+    if (gapPct < 2) continue;
+    const sinceGap = bars.length - 1 - idx;
+    if (sinceGap < 1) continue;                  // needs at least one session of holding
+    let filled = false;
+    for (let i = idx; i < bars.length; i++) {
+      if (bars[i].low <= prevClose) { filled = true; break; }   // gap filled — thesis dead
+    }
+    if (filled) continue;
+    const last = bars[bars.length - 1].close;
+    return { gapPct, sinceGap, aboveGap: ((last / bars[idx].open) - 1) * 100, gapDate: bars[idx].date };
+  }
+  return null;
+}
 
 async function pollRadar() {
   try {
@@ -1360,7 +1453,7 @@ async function pollRadar() {
         score: (mom ? 1 : 0) + (volB ? 1 : 0) + (partic ? 1 : 0) + (weekUp ? 1 : 0),
       };
     }).sort((a, b) => b.score - a.score || (a.daysTo ?? 99) - (b.daysTo ?? 99)).slice(0, 40);
-    broadcast({ type: 'earnings', radar, pead });
+    broadcast({ type: 'earnings', radar, pead, gapHold });
   } catch (e) {
     lastError = e.message;
   }
@@ -1377,25 +1470,30 @@ async function pollPead() {
         'total_revenue_yoy_growth_fq', 'net_income_yoy_growth_fq', 'SMA20', 'Perf.W'],
       sort: { sortBy: 'Perf.W', sortOrder: 'desc' }, range: [0, 150],
     });
-    const rows = [];
+    const rows = [], holds = [];
     for (const r of j.data || []) {
       const [name, description, close, chg, volume, rvol, mcap, sector, edate, revG, niG, sma20, perfW] = r.d;
+      const reported = edate ? new Date(edate * 1000).toISOString().slice(0, 10) : null;
+      const base = { symbol: r.s, name, description, price: close, chg, volume, rvol, revG, niG, perfW, reported };
+      let bars = null;
+      try {
+        bars = await getBarsCached(r.s);
+      } catch { /* fine — screens just get less detail */ }
+      const gh = detectGapHold(bars, reported);
+      if (gh) holds.push({ ...base, ...gh });
       const strong = (niG != null && niG >= 15) || (revG != null && revG >= 10);
       if (!strong) continue;
       if (sma20 != null && close < sma20) continue;   // drift requires momentum to hold
-      const row = {
-        symbol: r.s, name, description, price: close, chg, volume, rvol, revG, niG, perfW,
-        reported: edate ? new Date(edate * 1000).toISOString().slice(0, 10) : null,
-      };
-      const cb = candBars.get(r.s);   // % move since the pre-report close, when bars are cached
-      if (cb && row.reported) {
-        const idx = cb.bars.findIndex(b => b.date >= row.reported);
-        if (idx > 0) row.sinceRep = ((close / cb.bars[idx - 1].close) - 1) * 100;
+      const row = { ...base };
+      if (bars && reported) {   // % move since the pre-report close
+        const idx = bars.findIndex(b => b.date >= reported);
+        if (idx > 0) row.sinceRep = ((close / bars[idx - 1].close) - 1) * 100;
       }
       rows.push(row);
     }
     pead = rows.slice(0, 40);
-    broadcast({ type: 'earnings', radar, pead });
+    gapHold = holds.sort((a, b) => b.gapPct - a.gapPct).slice(0, 30);
+    broadcast({ type: 'earnings', radar, pead, gapHold });
     let changed = false;
     for (const s of pead.slice(0, CATALYST_COUNT)) {
       if (s.catalyst !== undefined) continue;
@@ -1405,7 +1503,7 @@ async function pollPead() {
       } catch { s.catalyst = null; }
       await sleep(150);
     }
-    if (changed) broadcast({ type: 'earnings', radar, pead });
+    if (changed) broadcast({ type: 'earnings', radar, pead, gapHold });
   } catch (e) {
     lastError = e.message;
   }
@@ -1649,6 +1747,7 @@ const server = http.createServer(async (req, res) => {
       gainers1d, gainersW, gainers15, ep15, oi,
       ivPause, ipos, r1Crossers, results, uoa, wnews,
       gappers, pace, vwapFlips, vcp, radar, pead, patterns, oiChain,
+      powerPlays, gapHold, orb: { date: orb.date, events: orb.events },
       lastPoll, lastError, ema: emaState, watchlist,
     })}\n\n`);
     clients.add(res);
