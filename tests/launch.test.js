@@ -29,10 +29,12 @@ function mockChild({ failWith } = {}) {
  *   spawnThrows  — spawn paths (substring) that throw synchronously (EPERM)
  *   cdpBindsFor  — spawn paths (substring) after which probeCdp starts succeeding
  *   cdpBindsOnlyWithGpuOff — CDP binds only when spawned with --disable-gpu
+ *   cdpVanishesUnlessGpuOff — CDP answers one probe then disappears (the app
+ *     restarts itself after a GPU crash) until --disable-gpu is used
  *   copyExists   — local copy already present
  */
-function msixDeps({ spawnFailures = [], spawnThrows = [], cdpBindsFor = [], cdpBindsOnlyWithGpuOff = false, copyExists = false } = {}) {
-  const state = { spawned: [], spawnArgs: [], copies: [], removed: [], killed: 0, cdpUp: false };
+function msixDeps({ spawnFailures = [], spawnThrows = [], cdpBindsFor = [], cdpBindsOnlyWithGpuOff = false, cdpVanishesUnlessGpuOff = false, copyExists = false } = {}) {
+  const state = { spawned: [], spawnArgs: [], copies: [], removed: [], killed: 0, cdpUp: false, gpuOff: false, probes: 0 };
   const deps = {
     existsSync: (p) => {
       if (p === MSIX_EXE) return true;
@@ -54,6 +56,7 @@ function msixDeps({ spawnFailures = [], spawnThrows = [], cdpBindsFor = [], cdpB
       }
       const fail = spawnFailures.some((s) => exe.includes(s));
       const gpuOff = args.includes('--disable-gpu');
+      if (gpuOff) state.gpuOff = true;
       // When cdpBindsOnlyWithGpuOff is set, CDP binds only once the GPU is disabled.
       const canBind = cdpBindsOnlyWithGpuOff ? gpuOff : cdpBindsFor.some((s) => exe.includes(s));
       if (!fail && canBind) state.cdpUp = true;
@@ -63,7 +66,14 @@ function msixDeps({ spawnFailures = [], spawnThrows = [], cdpBindsFor = [], cdpB
     rmSync: (p) => { state.removed.push(p); },
     readdirSync: () => ['TradingView.Desktop_3.0.0.7652_x64__n534cwy3pjxzj'],
     delay: async () => {},
-    probeCdp: async () => (state.cdpUp ? CDP_VERSION : null),
+    probeCdp: async () => {
+      if (cdpVanishesUnlessGpuOff) {
+        if (state.gpuOff) return CDP_VERSION; // stable once the GPU is off
+        state.probes++;
+        return state.probes === 1 ? CDP_VERSION : null; // binds once, then gone
+      }
+      return state.cdpUp ? CDP_VERSION : null;
+    },
   };
   return { deps, state };
 }
@@ -128,24 +138,37 @@ describe('launch() — MSIX WindowsApps handling', { skip: !onWindows }, () => {
     assert.equal(state.copies.length, 0);
   });
 
-  it('retries with GPU disabled when CDP never binds otherwise', async () => {
+  it('retries with GPU and sandbox disabled when CDP never binds otherwise', async () => {
     // Electron's GPU process can crash-loop and take the app down before CDP is
     // usable; the retry with --disable-gpu is what finally brings it up.
     const { deps, state } = msixDeps({ cdpBindsOnlyWithGpuOff: true });
     const result = await launch({ _deps: deps });
     assert.equal(result.success, true);
-    assert.equal(result.gpu_disabled, true);
+    assert.equal(result.crash_fallback, true);
     assert.equal(result.cdp_ready, undefined); // CDP came up, so no warning branch
     const lastArgs = state.spawnArgs.at(-1);
     assert.ok(lastArgs.includes('--disable-gpu'), 'final spawn disables the GPU');
+    assert.ok(lastArgs.includes('--no-sandbox'), 'final spawn disables the sandbox');
     assert.ok(lastArgs.includes('--remote-debugging-port=9222'), 'CDP port is kept');
   });
 
-  it('does not disable the GPU when CDP binds normally', async () => {
+  it('treats CDP that binds then vanishes as a failure and retries with the crash fallback', async () => {
+    // The real failure mode: the app binds CDP, its GPU process crash-loops, the
+    // app restarts itself without the debug flag — processes stay alive but the
+    // port is gone. A single successful probe must not count as success.
+    const { deps, state } = msixDeps({ cdpVanishesUnlessGpuOff: true });
+    const result = await launch({ _deps: deps });
+    assert.equal(result.success, true);
+    assert.equal(result.crash_fallback, true);
+    assert.equal(result.cdp_ready, undefined);
+    assert.ok(state.spawnArgs.at(-1).includes('--disable-gpu'));
+  });
+
+  it('does not use the crash fallback when CDP binds normally', async () => {
     const { deps } = msixDeps({ cdpBindsFor: ['WindowsApps'] });
     const result = await launch({ _deps: deps });
     assert.equal(result.success, true);
-    assert.equal(result.gpu_disabled, undefined);
+    assert.equal(result.crash_fallback, undefined);
   });
 
   it('returns cdp_ready:false warning when nothing binds', async () => {

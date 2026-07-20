@@ -201,8 +201,17 @@ export async function uiState() {
 
 const WINDOWS_APPS_RE = /\\WindowsApps\\/i;
 
-// Chromium flags used when a GPU crash-loop prevents the app from staying up.
-const GPU_DISABLE_ARGS = ['--disable-gpu', '--disable-gpu-sandbox', '--disable-software-rasterizer'];
+// Last-resort flags for when the app crash-loops outside its original install
+// context (notably an MSIX package run from a local copy). Two distinct crashes
+// happen there: the GPU process dies with an access violation until the GPU is
+// disabled, and the renderer then still crashes until the sandbox is off.
+// Only applied after a normal launch has already failed to hold CDP.
+const CRASH_FALLBACK_ARGS = [
+  '--disable-gpu',
+  '--disable-gpu-sandbox',
+  '--disable-software-rasterizer',
+  '--no-sandbox',
+];
 
 function _resolveLaunchDeps(deps) {
   return {
@@ -258,6 +267,24 @@ async function _waitForCdp({ cdpPort, attempts, delay, probeCdp }) {
     } catch { /* retry */ }
   }
   return null;
+}
+
+/**
+ * CDP can bind for a moment and then vanish: after a GPU crash the app restarts
+ * itself without the debug flag, leaving processes alive but nothing listening
+ * on the port. A single successful probe is therefore not enough — re-probe
+ * after a grace period and only report success if the endpoint is still there.
+ */
+async function _waitForLiveCdp({ cdpPort, attempts, delay, probeCdp, graceMs = 5000 }) {
+  const info = await _waitForCdp({ cdpPort, attempts, delay, probeCdp });
+  if (!info) return null;
+  await delay(graceMs);
+  try {
+    const still = await probeCdp(cdpPort);
+    return still ? JSON.parse(still) : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -387,7 +414,7 @@ export async function launch({ port, kill_existing, _deps } = {}) {
     if (!directLaunchFailed) {
       const earlyFailure = await _spawnFailedEarly(child);
       if (!earlyFailure) {
-        info = await _waitForCdp({ cdpPort, attempts: 15, delay: deps.delay, probeCdp: deps.probeCdp });
+        info = await _waitForLiveCdp({ cdpPort, attempts: 15, delay: deps.delay, probeCdp: deps.probeCdp });
       }
     }
     if (!info) {
@@ -403,25 +430,26 @@ export async function launch({ port, kill_existing, _deps } = {}) {
   }
 
   if (!info) {
-    info = await _waitForCdp({ cdpPort, attempts: 15, delay: deps.delay, probeCdp: deps.probeCdp });
+    info = await _waitForLiveCdp({ cdpPort, attempts: 15, delay: deps.delay, probeCdp: deps.probeCdp });
   }
 
-  // Last resort: retry with GPU acceleration off. Electron's GPU process can
-  // crash-loop when the app runs outside its original install context (repeated
-  // "GPU process exited unexpectedly: exit_code=-2147483645", then
-  // "GPU process isn't usable. Goodbye." and the app exits with code 3) — CDP
-  // binds for a moment and then dies with the app. Disabling the GPU keeps it up.
-  let usedGpuFallback = false;
+  // Last resort: retry with GPU and sandbox disabled. Running outside the
+  // original install context, Electron's GPU process crash-loops
+  // ("GPU process exited unexpectedly: exit_code=-2147483645", then
+  // "GPU process isn't usable. Goodbye." and the app exits with code 3), and
+  // once that is worked around the renderer still crashes to an error page.
+  // CDP appears to bind and then dies with the app; these flags keep it up.
+  let usedCrashFallback = false;
   if (!info) {
     await killExisting();
-    child = _spawnDetached(deps.spawn, tvPath, [...cdpArgs, ...GPU_DISABLE_ARGS]);
-    usedGpuFallback = true;
-    info = await _waitForCdp({ cdpPort, attempts: 15, delay: deps.delay, probeCdp: deps.probeCdp });
+    child = _spawnDetached(deps.spawn, tvPath, [...cdpArgs, ...CRASH_FALLBACK_ARGS]);
+    usedCrashFallback = true;
+    info = await _waitForLiveCdp({ cdpPort, attempts: 15, delay: deps.delay, probeCdp: deps.probeCdp });
   }
 
   const extras = {
     ...(usedLocalCopy && { msix_local_copy: true }),
-    ...(usedGpuFallback && { gpu_disabled: true }),
+    ...(usedCrashFallback && { crash_fallback: true }),
   };
 
   if (info) {
