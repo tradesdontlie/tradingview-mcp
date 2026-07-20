@@ -256,6 +256,8 @@
     <button class="tab" data-tab="intra">Intraday</button>
     <button class="tab" data-tab="oi">F&amp;O</button>
     <button class="tab" data-tab="screens">Screens</button>
+    <button class="tab" data-tab="earn">Earnings</button>
+    <button class="tab" data-tab="pat">Patterns</button>
     <button class="tab" data-tab="news">News</button>
     <button class="tab" data-tab="chartink">Chartink</button>
     <button class="tab" data-tab="ckresult">Chartink Result</button>
@@ -438,6 +440,33 @@
     </section>
   </div>
 
+  <div id="tab-earn" style="display:none">
+    <section class="card">
+      <div class="card-head"><h2>Results Radar · momentum before earnings</h2><span class="sub">results due in 10 days, scored on momentum (P&gt;20&gt;50 SMA), volume buildup, participation, and a positive week</span></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Symbol</th><th>Results On</th><th>In</th><th>Score</th><th style="text-align:left">Signals</th><th>1w%</th><th>Chg%</th><th>RVol</th><th>Price</th><th class="nosort"></th></tr></thead>
+        <tbody id="radarbody"></tbody>
+      </table></div>
+    </section>
+    <section class="card">
+      <div class="card-head"><h2>PEAD · momentum after earnings</h2><span class="sub">reported in the last 12 days with strong numbers (PAT +15% or Rev +10% YoY), still above the 20 SMA — the drift</span></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Symbol</th><th>Reported</th><th>Since Rep</th><th>Rev YoY</th><th>PAT YoY</th><th>1w%</th><th>Chg%</th><th>Price</th><th style="text-align:left">Catalyst</th><th class="nosort"></th></tr></thead>
+        <tbody id="peadbody"></tbody>
+      </table></div>
+    </section>
+  </div>
+
+  <div id="tab-pat" style="display:none">
+    <section class="card">
+      <div class="card-head"><h2>Chart Patterns · breakouts &amp; retests</h2><span class="sub">ATH / horizontal / base / trendline breakouts and HH-HL continuations · retest-held first — right stock, right breakout, right retest, right entry</span></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Symbol</th><th style="text-align:left">Pattern</th><th style="text-align:left">Status</th><th>Level</th><th>Broke On</th><th>Vol×</th><th>Price</th><th>Today%</th><th class="nosort"></th></tr></thead>
+        <tbody id="patbody"></tbody>
+      </table></div>
+    </section>
+  </div>
+
   <div id="tab-news" style="display:none">
     <section class="card">
       <div class="card-head"><h2>Watchlist News</h2><span class="sub" id="wnews-sub">latest headlines across your watchlist</span></div>
@@ -494,6 +523,7 @@ let uoa = { rows: [], at: null, error: null };
 let r1Crossers = [], ivPause = [], ipos = [], results = [];
 let wnews = { items: [], at: null };
 let gappers = [], pace = [], vwapFlips = [], vcp = [];
+let radar = [], pead = [], patterns = [];
 let condFilter = null;   // parsed conditions from the filter box, or null = show all
 const fundaData = new Map();   // symbol -> funda | 'loading' | null
 let sortKey = null, sortDir = -1;
@@ -802,6 +832,30 @@ function renderAllMovers() {
     `<td>${fmtPx(r.pivot)}</td><td>${pctCell(r.toPivot)}</td><td>${off52Cell(r.offHigh)}</td>` +
     `<td>${fmtPx(r.price)}</td><td>${pctCell(r.chg)}</td>`, 8,
     'no bases detected in the momentum pool yet…');
+  // earnings tab
+  renderMovers('radarbody', radar, r => {
+    const sig = [r.mom && 'P>20>50', r.volB && 'vol build', r.partic && 'rvol', r.weekUp && 'week+']
+      .filter(Boolean).map(s => `<span class="ckchip">${s}</span>`).join('') || '<span class="dim">—</span>';
+    return `<td><span class="dim">${esc((r.resultsOn || '').slice(5))}</span></td>` +
+      `<td><span class="${r.daysTo != null && r.daysTo <= 2 ? 'rvol-hi' : 'dim'}">${r.daysTo == null ? '—' : r.daysTo + 'd'}</span></td>` +
+      `<td><span class="hits ${r.score >= 3 ? 'hi' : ''}">${r.score}/4</span></td>` +
+      `<td style="text-align:left;white-space:normal">${sig}</td>` +
+      `<td>${pctCell(r.perfW)}</td><td>${pctCell(r.chg)}</td><td>${rvolCell(r.rvol)}</td><td>${fmtPx(r.price)}</td>`;
+  }, 10, 'no upcoming results in the window');
+  renderMovers('peadbody', pead, r =>
+    `<td><span class="dim">${esc((r.reported || '').slice(5))}</span></td><td>${pctCell(r.sinceRep, { strong: true })}</td>` +
+    `<td>${pctCell(r.revG)}</td><td>${pctCell(r.niG)}</td><td>${pctCell(r.perfW)}</td><td>${pctCell(r.chg)}</td>` +
+    `<td>${fmtPx(r.price)}</td><td class="catalyst">${catalystCell(r.catalyst)}</td>`, 10,
+    'no strong reporters in drift yet');
+  // patterns tab
+  const PAT_STATUS = { 'retest held': 'bu-long', retesting: 'bu-unwind', breakout: 'bu-cover', approaching: 'bu-short' };
+  renderMovers('patbody', patterns, r =>
+    `<td style="text-align:left"><span class="ckchip">${esc(r.type)}</span></td>` +
+    `<td style="text-align:left"><span class="bu ${PAT_STATUS[r.status] || ''}">${esc(r.status)}</span></td>` +
+    `<td>${fmtPx(r.level)}</td><td><span class="dim">${esc((r.brokeOn || '').slice(5))}</span></td>` +
+    `<td><span class="${r.volx != null && r.volx >= 2 ? 'rvol-hi' : 'dim'}">${r.volx == null ? '—' : r.volx.toFixed(1) + '×'}</span></td>` +
+    `<td>${fmtPx(r.price)}</td><td>${pctCell(r.chg)}</td>`, 9,
+    'scanning for patterns…');
   renderUOA();
   renderWNews();
   renderOI();
@@ -939,7 +993,7 @@ document.addEventListener('click', async e => {
   const tab = e.target.closest('.tab[data-tab]');
   if (tab) {
     document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t === tab));
-    for (const k of ['today', 'week', 'gain', 'ep', 'intra', 'oi', 'screens', 'news', 'chartink', 'ckresult']) {
+    for (const k of ['today', 'week', 'gain', 'ep', 'intra', 'oi', 'screens', 'earn', 'pat', 'news', 'chartink', 'ckresult']) {
       $('tab-' + k).style.display = tab.dataset.tab === k ? '' : 'none';
     }
     return;
@@ -1030,6 +1084,7 @@ es.onmessage = ev => {
       ipos = m.ipos || []; results = m.results || [];
       gappers = m.gappers || []; pace = m.pace || [];
       vwapFlips = m.vwapFlips || []; vcp = m.vcp || [];
+      radar = m.radar || []; pead = m.pead || []; patterns = m.patterns || [];
       breadth = m.breadth || null;
       if (m.ema) emaState = m.ema;
     }
@@ -1071,6 +1126,12 @@ es.onmessage = ev => {
     renderAllMovers();
   } else if (m.type === 'vcp') {
     vcp = m.vcp || [];
+    renderAllMovers();
+  } else if (m.type === 'earnings') {
+    radar = m.radar || radar; pead = m.pead || pead;
+    renderAllMovers();
+  } else if (m.type === 'patterns') {
+    patterns = m.patterns || [];
     renderAllMovers();
   } else if (m.type === 'weekly') {
     gainers7 = m.gainers7 || []; losers7 = m.losers7 || []; buildup = m.volumeBuildup || [];

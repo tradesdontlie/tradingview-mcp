@@ -1196,6 +1196,223 @@ async function refreshVcp() {
   broadcast({ type: 'vcp', vcp });
 }
 
+// ---------------- earnings cycle: Results Radar + PEAD ----------------
+// Radar = momentum BEFORE earnings: results due inside 10 days, scored on
+// technical momentum (price > SMA20 > SMA50), volume base-building (10d avg
+// above 30d avg), live participation (rvol), and a positive week.
+// PEAD = momentum AFTER earnings: reported inside the last 12 days with
+// strong quarterly numbers, still holding above the 20 SMA — the drift.
+
+let radar = [], pead = [];
+
+async function pollRadar() {
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    const j = await scan({
+      ...SCAN_BASE,
+      filter: [...MOVER_FILTER,
+        { left: 'earnings_release_next_date', operation: 'egreater', right: now - 86400 },
+        { left: 'earnings_release_next_date', operation: 'eless', right: now + 10 * 86400 }],
+      columns: [...MOVER_COLUMNS, 'earnings_release_next_date', 'SMA20', 'SMA50', 'Perf.W',
+        'average_volume_10d_calc', 'average_volume_30d_calc'],
+      sort: { sortBy: 'earnings_release_next_date', sortOrder: 'asc' }, range: [0, 150],
+    });
+    radar = (j.data || []).map(r => {
+      const [name, description, close, chg, volume, rvol, mcap, sector, edate, sma20, sma50, perfW, a10, a30] = r.d;
+      const mom = sma20 != null && sma50 != null && close > sma20 && sma20 > sma50;
+      const volB = a10 != null && a30 != null && a10 > a30 * 1.2;
+      const partic = rvol != null && rvol >= 1.2;
+      const weekUp = (perfW || 0) > 3;
+      return {
+        symbol: r.s, name, description, price: close, chg, volume, rvol, perfW,
+        resultsOn: edate ? new Date(edate * 1000).toISOString().slice(0, 10) : null,
+        daysTo: edate ? Math.max(0, Math.ceil((edate * 1000 - Date.now()) / 86400000)) : null,
+        mom, volB, partic, weekUp,
+        score: (mom ? 1 : 0) + (volB ? 1 : 0) + (partic ? 1 : 0) + (weekUp ? 1 : 0),
+      };
+    }).sort((a, b) => b.score - a.score || (a.daysTo ?? 99) - (b.daysTo ?? 99)).slice(0, 40);
+    broadcast({ type: 'earnings', radar, pead });
+  } catch (e) {
+    lastError = e.message;
+  }
+}
+
+async function pollPead() {
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    const j = await scan({
+      ...SCAN_BASE,
+      filter: [...MOVER_FILTER,
+        { left: 'earnings_release_date', operation: 'egreater', right: now - 12 * 86400 }],
+      columns: [...MOVER_COLUMNS, 'earnings_release_date',
+        'total_revenue_yoy_growth_fq', 'net_income_yoy_growth_fq', 'SMA20', 'Perf.W'],
+      sort: { sortBy: 'Perf.W', sortOrder: 'desc' }, range: [0, 150],
+    });
+    const rows = [];
+    for (const r of j.data || []) {
+      const [name, description, close, chg, volume, rvol, mcap, sector, edate, revG, niG, sma20, perfW] = r.d;
+      const strong = (niG != null && niG >= 15) || (revG != null && revG >= 10);
+      if (!strong) continue;
+      if (sma20 != null && close < sma20) continue;   // drift requires momentum to hold
+      const row = {
+        symbol: r.s, name, description, price: close, chg, volume, rvol, revG, niG, perfW,
+        reported: edate ? new Date(edate * 1000).toISOString().slice(0, 10) : null,
+      };
+      const cb = candBars.get(r.s);   // % move since the pre-report close, when bars are cached
+      if (cb && row.reported) {
+        const idx = cb.bars.findIndex(b => b.date >= row.reported);
+        if (idx > 0) row.sinceRep = ((close / cb.bars[idx - 1].close) - 1) * 100;
+      }
+      rows.push(row);
+    }
+    pead = rows.slice(0, 40);
+    broadcast({ type: 'earnings', radar, pead });
+    let changed = false;
+    for (const s of pead.slice(0, CATALYST_COUNT)) {
+      if (s.catalyst !== undefined) continue;
+      try {
+        s.catalyst = pickCatalyst(await fetchNews(newsQueryName(s.description)));
+        changed = true;
+      } catch { s.catalyst = null; }
+      await sleep(150);
+    }
+    if (changed) broadcast({ type: 'earnings', radar, pead });
+  } catch (e) {
+    lastError = e.message;
+  }
+}
+
+// ---------------- chart patterns: breakouts & retests ----------------
+// Detected over the shared Yahoo bars cache. A breakout's status walks
+// breakout -> retesting (pulled back to the level) -> retest held (level
+// defended and price back above) — the entry the screen is built to find.
+
+function pivotPoints(bars, w = 3) {
+  const highs = [], lows = [];
+  for (let i = w; i < bars.length - w; i++) {
+    const seg = bars.slice(i - w, i + w + 1);
+    if (bars[i].high === Math.max(...seg.map(b => b.high))) highs.push({ i, v: bars[i].high });
+    if (bars[i].low === Math.min(...seg.map(b => b.low))) lows.push({ i, v: bars[i].low });
+  }
+  return { highs, lows };
+}
+
+function retestStatus(bars, from, level) {
+  const last = bars[bars.length - 1];
+  // a retest means price actually came back to the level (within 0.5%)
+  let touched = false;
+  for (let i = from + 1; i < bars.length; i++) {
+    if (bars[i].low <= level * 1.005) touched = true;
+  }
+  if (!touched) return 'breakout';
+  return last.close > level ? 'retest held' : 'retesting';
+}
+
+function detectPatterns(bars) {
+  if (!bars || bars.length < 80) return [];
+  const out = [];
+  const n = bars.length;
+  const last = bars[n - 1];
+  const avg20 = bars.slice(-25, -5).reduce((s, b) => s + b.volume, 0) / 20;
+
+  // horizontal / base / ATH breakout: resistance = high of the window before the last 6 sessions
+  const res = bars.slice(Math.max(0, n - 66), n - 6);
+  if (res.length > 20) {
+    const H = Math.max(...res.map(b => b.high));
+    const touches = res.filter(b => b.high >= H * 0.98).length;
+    const isATH = H >= Math.max(...bars.slice(0, n - 6).map(b => b.high));
+    for (let i = n - 6; i < n; i++) {
+      if (bars[i].close > H && bars[i - 1].close <= H) {
+        const volx = avg20 ? bars[i].volume / avg20 : null;
+        if ((isATH || volx == null || volx >= 1.3) && last.close > H * 0.97) {
+          out.push({
+            type: isATH ? 'ATH breakout' : touches >= 3 ? 'horizontal breakout' : 'base breakout',
+            level: H, brokeOn: bars[i].date, volx, status: retestStatus(bars, i, H),
+          });
+        }
+        break;
+      }
+    }
+  }
+
+  const rel = bars.slice(-70);
+  const { highs, lows } = pivotPoints(rel);
+
+  // trendline breakout: line through the latest run of descending pivot highs
+  const ph = highs.filter(h => h.i < rel.length - 6);
+  let seq = [];
+  for (const h of ph) {
+    if (!seq.length || h.v < seq[seq.length - 1].v) seq.push(h);
+    else seq = [h];
+  }
+  if (seq.length >= 2) {
+    const a = seq[0], b = seq[seq.length - 1];
+    const slope = (b.v - a.v) / (b.i - a.i);
+    const lineAt = i => a.v + slope * (i - a.i);
+    if (slope < 0) {
+      for (let i = Math.max(b.i + 1, rel.length - 6); i < rel.length; i++) {
+        if (rel[i].close > lineAt(i) && rel[i - 1].close <= lineAt(i - 1)) {
+          const volx = avg20 ? rel[i].volume / avg20 : null;
+          if (rel[rel.length - 1].close > lineAt(rel.length - 1) * 0.99) {
+            out.push({
+              type: 'trendline breakout', level: lineAt(i), brokeOn: rel[i].date, volx,
+              status: retestStatus(rel, i, lineAt(rel.length - 1)),
+            });
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  // higher-high / higher-low continuation
+  if (highs.length >= 2 && lows.length >= 2) {
+    const [h1, h2] = highs.slice(-2), [l1, l2] = lows.slice(-2);
+    if (h2.v > h1.v && l2.v > l1.v && last.close >= h2.v * 0.95) {
+      out.push({
+        type: 'HH-HL continuation', level: h2.v, brokeOn: rel[h2.i].date,
+        volx: avg20 ? last.volume / avg20 : null,
+        status: last.close > h2.v ? 'breakout' : 'approaching',
+      });
+    }
+  }
+  return out;
+}
+
+const STATUS_RANK = { 'retest held': 0, retesting: 1, breakout: 2, approaching: 3 };
+let patterns = [];
+
+async function refreshPatterns() {
+  const hits = [];
+  for (const [sym, cb] of candBars) {
+    const found = detectPatterns(cb.bars)
+      .sort((a, b) => (STATUS_RANK[a.status] ?? 9) - (STATUS_RANK[b.status] ?? 9));
+    if (found.length) hits.push({ symbol: sym, name: sym.split(':').pop(), ...found[0] });
+  }
+  if (hits.length) {
+    try {
+      const q = await scan({ symbols: { tickers: hits.map(h => h.symbol) }, columns: ['description', 'change', 'close'] });
+      const map = new Map((q.data || []).map(x => [x.s, x.d]));
+      for (const h of hits) {
+        const d = map.get(h.symbol);
+        if (d) { h.description = d[0]; h.chg = d[1]; h.price = d[2]; }
+      }
+    } catch { /* optional decoration */ }
+  }
+  // cap per status so fresh breakouts aren't crowded out by held retests
+  const perStatus = new Map();
+  patterns = hits
+    .sort((a, b) => (STATUS_RANK[a.status] ?? 9) - (STATUS_RANK[b.status] ?? 9) || b.brokeOn.localeCompare(a.brokeOn))
+    .filter(h => {
+      const c = perStatus.get(h.status) || 0;
+      if (c >= 15) return false;
+      perStatus.set(h.status, c + 1);
+      return true;
+    })
+    .slice(0, 45);
+  broadcast({ type: 'patterns', patterns });
+}
+
 // ---------------- fundamentals (concept from MrChartist/Funda-Scanner-Base-Project) ----------------
 // Piotroski-style pass/fail checklist with the same Strong >=7 / Moderate >=4
 // grading as that project's FundamentalScoring, fed by live scanner columns.
@@ -1255,7 +1472,8 @@ async function validateSymbol(sym) {
   pollUOA();
   await pollOI();                       // fills fnoUniverse for the pivot scan
   pollIntraday();
-  refreshCandidates().then(() => pollPivots()).then(() => refreshVcp());
+  pollRadar();
+  refreshCandidates().then(() => pollPivots()).then(() => refreshVcp()).then(() => { refreshPatterns(); pollPead(); });
   refreshEmas().then(() => { pollQuotes(); pollWatchNews(); });
 })();
 setInterval(pollQuotes, QUOTE_MS);
@@ -1272,6 +1490,9 @@ setInterval(pollResults, RESULTS_MS);
 setInterval(pollWatchNews, WNEWS_MS);
 setInterval(pollIntraday, INTRA_MS);
 setInterval(refreshVcp, PIVOT_MS);
+setInterval(refreshPatterns, PIVOT_MS);
+setInterval(pollRadar, RESULTS_MS);
+setInterval(pollPead, RESULTS_MS);
 setInterval(() => refreshEmas(), EMA_REFRESH_MS);
 
 // ---------------- http ----------------
@@ -1296,7 +1517,7 @@ const server = http.createServer(async (req, res) => {
       gainers7, losers7, volumeBuildup, breadth, eps, sectors, chartink,
       gainers1d, gainersW, gainers15, ep15, oi,
       ivPause, ipos, r1Crossers, results, uoa, wnews,
-      gappers, pace, vwapFlips, vcp,
+      gappers, pace, vwapFlips, vcp, radar, pead, patterns,
       lastPoll, lastError, ema: emaState, watchlist,
     })}\n\n`);
     clients.add(res);
