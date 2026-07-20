@@ -56,6 +56,8 @@ const EMA_DEFS = [
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const nowIST = () => new Date().toLocaleString('en-CA', { timeZone: 'Asia/Kolkata', hour12: false });
+const todayIST = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+const timeIST = () => new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false }).slice(0, 5);
 function loadJson(f, fb) { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return fb; } }
 const saveJson = (f, o) => fs.writeFileSync(f, JSON.stringify(o, null, 1));
 
@@ -1196,6 +1198,133 @@ async function refreshVcp() {
   broadcast({ type: 'vcp', vcp });
 }
 
+// ---------------- index option chain: CE/PE OI crossover ----------------
+// NIFTY & BANKNIFTY chains from NSE's option-chain-v3 (needs an explicit
+// expiry from option-chain-contract-info). SENSEX options trade on BSE,
+// whose API hard-403s scripts, so it isn't covered.
+// Two crossover signals are tracked through the day:
+//   total  -- all-strike CE OI vs PE OI (the big-picture writers' balance)
+//   near   -- ATM +/-2 strikes only (flips faster; the intraday battle)
+// PE > CE = put writers dominating (supportive); CE > PE = call writers.
+
+const OC_MS = 3 * 60 * 1000;
+const OC_SYMBOLS = ['NIFTY', 'BANKNIFTY'];
+const OC_SERIES_FILE = path.join(__dirname, 'oi-series.json');
+const ocExpiries = new Map();
+let oiChain = {};
+let oiSeries = loadJson(OC_SERIES_FILE, {});
+let lastOcRun = 0;
+let ocRunning = false;
+
+async function nseGet(url, timeout = 30000) {
+  const r = await fetch(url, {
+    headers: { 'User-Agent': NSE_UA, Accept: '*/*', 'Accept-Language': 'en-US,en;q=0.9', Referer: 'https://www.nseindia.com/option-chain' },
+    signal: AbortSignal.timeout(timeout),
+  });
+  if (!r.ok) throw new Error(`NSE HTTP ${r.status}`);
+  return r.json();
+}
+
+async function ocExpiry(sym) {
+  const c = ocExpiries.get(sym);
+  if (c && Date.now() - c.at < 6 * 3600 * 1000) return c.list[0];
+  const j = await nseGet(`https://www.nseindia.com/api/option-chain-contract-info?symbol=${sym}`);
+  const list = j.expiryDates || [];
+  if (!list.length) throw new Error('no expiries');
+  ocExpiries.set(sym, { at: Date.now(), list });
+  return list[0];
+}
+
+// expiry level minimizing total payout to option holders
+function maxPain(data) {
+  let best = null;
+  for (const s of data.map(d => d.strikePrice)) {
+    let pain = 0;
+    for (const d of data) {
+      if (d.CE) pain += (d.CE.openInterest || 0) * Math.max(0, s - d.strikePrice);
+      if (d.PE) pain += (d.PE.openInterest || 0) * Math.max(0, d.strikePrice - s);
+    }
+    if (!best || pain < best.pain) best = { strike: s, pain };
+  }
+  return best?.strike ?? null;
+}
+
+async function pollOptionChain() {
+  const inHours = marketHoursIST();
+  if (ocRunning || (!inHours && Date.now() - lastOcRun < 15 * 60 * 1000)) return;
+  ocRunning = true;
+  lastOcRun = Date.now();
+  try {
+    const today = todayIST();
+    for (const sym of OC_SYMBOLS) {
+      try {
+        const expiry = await ocExpiry(sym);
+        const j = await nseGet(`https://www.nseindia.com/api/option-chain-v3?type=Indices&symbol=${sym}&expiry=${encodeURIComponent(expiry)}`, 45000);
+        const recs = j.records || {};
+        const data = recs.data || [];
+        if (!data.length) throw new Error('empty chain');
+        const spot = recs.underlyingValue;
+        let ce = 0, pe = 0, ceChg = 0, peChg = 0;
+        for (const d of data) {
+          if (d.CE) { ce += d.CE.openInterest || 0; ceChg += d.CE.changeinOpenInterest || 0; }
+          if (d.PE) { pe += d.PE.openInterest || 0; peChg += d.PE.changeinOpenInterest || 0; }
+        }
+        const strikes = [...new Set(data.map(d => d.strikePrice))].sort((a, b) => a - b);
+        const atmIdx = strikes.reduce((bi, s, i) => Math.abs(s - spot) < Math.abs(strikes[bi] - spot) ? i : bi, 0);
+        const byStrike = new Map(data.map(d => [d.strikePrice, d]));
+        const ladder = strikes.slice(Math.max(0, atmIdx - 6), atmIdx + 7).map(s => {
+          const d = byStrike.get(s) || {};
+          return {
+            strike: s, atm: s === strikes[atmIdx],
+            ceOI: d.CE?.openInterest || 0, ceChg: d.CE?.changeinOpenInterest || 0,
+            peOI: d.PE?.openInterest || 0, peChg: d.PE?.changeinOpenInterest || 0,
+          };
+        });
+        let nearCe = 0, nearPe = 0;
+        for (const s of strikes.slice(Math.max(0, atmIdx - 2), atmIdx + 3)) {
+          const d = byStrike.get(s) || {};
+          nearCe += d.CE?.openInterest || 0;
+          nearPe += d.PE?.openInterest || 0;
+        }
+        let resWall = null, supWall = null;
+        for (const d of data) {
+          if (d.CE && (!resWall || (d.CE.openInterest || 0) > resWall.oi)) resWall = { strike: d.strikePrice, oi: d.CE.openInterest || 0 };
+          if (d.PE && (!supWall || (d.PE.openInterest || 0) > supWall.oi)) supWall = { strike: d.strikePrice, oi: d.PE.openInterest || 0 };
+        }
+        if (!oiSeries[sym] || oiSeries[sym].date !== today) oiSeries[sym] = { date: today, points: [], events: [] };
+        const series = oiSeries[sym];
+        const prev = series.points[series.points.length - 1];
+        const t = timeIST();
+        series.points.push({ t, ce, pe, nearCe, nearPe, pcr: ce ? pe / ce : null, spot });
+        if (series.points.length > 250) series.points.shift();
+        if (prev && inHours) {
+          if (Math.sign(prev.pe - prev.ce) !== Math.sign(pe - ce)) {
+            series.events.unshift({ t, scope: 'total', dir: pe > ce ? 'PE>CE' : 'CE>PE' });
+          }
+          if (prev.nearCe != null && Math.sign(prev.nearPe - prev.nearCe) !== Math.sign(nearPe - nearCe)) {
+            series.events.unshift({ t, scope: 'ATM', dir: nearPe > nearCe ? 'PE>CE' : 'CE>PE' });
+          }
+          if (series.events.length > 12) series.events.length = 12;
+        }
+        oiChain[sym] = {
+          symbol: sym, expiry, spot, ce, pe, ceChg, peChg, nearCe, nearPe,
+          pcr: ce ? pe / ce : null, maxPain: maxPain(data), resWall, supWall, ladder,
+          bias: pe > ce ? 'PE>CE' : 'CE>PE', nearBias: nearPe > nearCe ? 'PE>CE' : 'CE>PE',
+          events: series.events, points: series.points.slice(-100),
+          at: new Date().toISOString(), error: null,
+        };
+      } catch (e) {
+        oiChain[sym] = { ...(oiChain[sym] || { symbol: sym }), error: e.message };
+      }
+      await sleep(2000);   // NSE is slow and touchy — space the two chains out
+    }
+    saveJson(OC_SERIES_FILE, oiSeries);
+    broadcast({ type: 'oichain', oiChain });
+  } finally {
+    ocRunning = false;
+  }
+}
+
 // ---------------- earnings cycle: Results Radar + PEAD ----------------
 // Radar = momentum BEFORE earnings: results due inside 10 days, scored on
 // technical momentum (price > SMA20 > SMA50), volume base-building (10d avg
@@ -1473,6 +1602,7 @@ async function validateSymbol(sym) {
   await pollOI();                       // fills fnoUniverse for the pivot scan
   pollIntraday();
   pollRadar();
+  pollOptionChain();
   refreshCandidates().then(() => pollPivots()).then(() => refreshVcp()).then(() => { refreshPatterns(); pollPead(); });
   refreshEmas().then(() => { pollQuotes(); pollWatchNews(); });
 })();
@@ -1493,6 +1623,7 @@ setInterval(refreshVcp, PIVOT_MS);
 setInterval(refreshPatterns, PIVOT_MS);
 setInterval(pollRadar, RESULTS_MS);
 setInterval(pollPead, RESULTS_MS);
+setInterval(pollOptionChain, OC_MS);
 setInterval(() => refreshEmas(), EMA_REFRESH_MS);
 
 // ---------------- http ----------------
@@ -1517,7 +1648,7 @@ const server = http.createServer(async (req, res) => {
       gainers7, losers7, volumeBuildup, breadth, eps, sectors, chartink,
       gainers1d, gainersW, gainers15, ep15, oi,
       ivPause, ipos, r1Crossers, results, uoa, wnews,
-      gappers, pace, vwapFlips, vcp, radar, pead, patterns,
+      gappers, pace, vwapFlips, vcp, radar, pead, patterns, oiChain,
       lastPoll, lastError, ema: emaState, watchlist,
     })}\n\n`);
     clients.add(res);

@@ -140,8 +140,8 @@
   .funda .fscore.strong { color: var(--up); }
   .funda .fscore.moderate { color: var(--warn); }
   .funda .fscore.weak { color: var(--down); }
-  .funda .kv { display: inline-block; margin-right: 12px; font-size: 12px; color: var(--ink-2); }
-  .funda .kv b { color: var(--ink); font-variant-numeric: tabular-nums; }
+  .kv { display: inline-block; margin-right: 12px; font-size: 12px; color: var(--ink-2); }
+  .kv b { color: var(--ink); font-variant-numeric: tabular-nums; }
   .funda .checks { margin-top: 4px; font-size: 11px; color: var(--muted); }
   .funda .checks .pass { color: var(--up); }
   .funda .checks .fail { color: var(--muted); }
@@ -386,6 +386,10 @@
   </div>
 
   <div id="tab-oi" style="display:none">
+    <section class="card">
+      <div class="card-head"><h2>Index OI · CE/PE Crossover</h2><span class="sub">NIFTY &amp; BANKNIFTY nearest-expiry chains · PE&gt;CE = put writers in control · SENSEX unavailable (BSE blocks its API)</span></div>
+      <div id="ocwrap" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(430px,1fr));gap:0"></div>
+    </section>
     <section class="card">
       <div class="card-head"><h2>F&amp;O Open Interest Spurts</h2><span class="sub" id="oi-sub">NSE futures · OI change vs previous day</span></div>
       <div class="tablewrap"><table>
@@ -859,8 +863,61 @@ function renderAllMovers() {
   renderUOA();
   renderWNews();
   renderOI();
+  renderOC();
   renderChartinkResult();
 }
+// ---------- index OI crossover ----------
+let oiChain = {};
+function ocSpark(points) {
+  if (!points || points.length < 2) return '';
+  const vals = points.map(p => p.pcr).filter(v => v != null);
+  if (vals.length < 2) return '';
+  const w = 170, h = 34;
+  const lo = Math.min(...vals, 1), hi = Math.max(...vals, 1);
+  const y = v => h - 3 - ((v - lo) / ((hi - lo) || 1)) * (h - 6);
+  const pts = points.filter(p => p.pcr != null).map((p, i, a) => `${(i / (a.length - 1)) * w},${y(p.pcr).toFixed(1)}`).join(' ');
+  return `<svg width="${w}" height="${h}" style="vertical-align:middle">` +
+    `<line x1="0" y1="${y(1).toFixed(1)}" x2="${w}" y2="${y(1).toFixed(1)}" stroke="var(--grid)" stroke-dasharray="3,3"/>` +
+    `<polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="1.5"/></svg>`;
+}
+function ocBlock(o) {
+  if (!o || (!o.spot && !o.error)) return '';
+  if (o.error && !o.spot) return `<div style="padding:14px 16px"><b>${esc(o.symbol)}</b> <span class="down">${esc(o.error)}</span></div>`;
+  const biasBadge = b => `<span class="bu ${b === 'PE>CE' ? 'bu-long' : 'bu-short'}">${b === 'PE>CE' ? '↑ ' : '↓ '}${b}</span>`;
+  const total = (o.ce || 0) + (o.pe || 0) || 1;
+  const pePct = ((o.pe || 0) / total) * 100;
+  const maxOI = Math.max(...(o.ladder || []).flatMap(l => [l.ceOI, l.peOI]), 1);
+  const bar = (v, color) => `<div style="display:inline-block;height:7px;border-radius:3px;background:${color};width:${Math.max(2, (v / maxOI) * 70).toFixed(0)}px"></div>`;
+  const ladder = (o.ladder || []).map(l =>
+    `<tr${l.atm ? ' style="background:var(--surface-2)"' : ''}>` +
+    `<td style="text-align:right">${fmtVol(l.ceOI)} ${bar(l.ceOI, 'var(--down-strong)')}</td>` +
+    `<td style="text-align:center;font-weight:${l.atm ? 700 : 400}">${l.strike}${l.atm ? ' •' : ''}</td>` +
+    `<td>${bar(l.peOI, 'var(--up)')} ${fmtVol(l.peOI)}</td></tr>`).join('');
+  const evts = (o.events || []).slice(0, 4).map(e =>
+    `<span class="ckchip">${e.dir === 'PE>CE' ? '↑' : '↓'} ${esc(e.scope)} ${e.dir} · ${esc(e.t)}</span>`).join('') ||
+    '<span class="dim">no crossover today</span>';
+  return `<div style="padding:12px 16px;border-right:1px solid var(--grid)">` +
+    `<div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">` +
+    `<b>${esc(o.symbol)}</b><span class="px">${fmtPx(o.spot)}</span>` +
+    `<span class="dim">exp ${esc(o.expiry || '')}</span>${biasBadge(o.bias)}` +
+    `<span class="dim">ATM±2:</span>${biasBadge(o.nearBias)}</div>` +
+    `<div style="margin:8px 0 2px;display:flex;gap:14px;flex-wrap:wrap;font-size:12px">` +
+    `<span class="kv">PCR <b>${o.pcr == null ? '—' : o.pcr.toFixed(2)}</b></span>` +
+    `<span class="kv">Max Pain <b>${fmtPx(o.maxPain)}</b></span>` +
+    `<span class="kv">Support <b class="up">${o.supWall ? fmtPx(o.supWall.strike) : '—'}</b></span>` +
+    `<span class="kv">Resistance <b class="down">${o.resWall ? fmtPx(o.resWall.strike) : '—'}</b></span></div>` +
+    `<div style="margin:6px 0"><span class="dim" style="font-size:11px">CE ${fmtVol(o.ce)}</span>` +
+    `<span class="bar" style="display:inline-flex;width:150px;height:7px;border-radius:3px;overflow:hidden;background:var(--down-strong);margin:0 8px;vertical-align:middle">` +
+    `<i style="display:block;height:100%;background:var(--up);width:${pePct.toFixed(0)}%"></i></span>` +
+    `<span class="dim" style="font-size:11px">PE ${fmtVol(o.pe)}</span>  ${ocSpark(o.points)}</div>` +
+    `<table style="width:auto;font-size:11px;margin-top:4px"><thead><tr><th>CE OI</th><th>Strike</th><th style="text-align:left">PE OI</th></tr></thead><tbody>${ladder}</tbody></table>` +
+    `<div style="margin-top:6px">${evts}</div></div>`;
+}
+function renderOC() {
+  $('ocwrap').innerHTML = ['NIFTY', 'BANKNIFTY'].map(s => ocBlock(oiChain[s])).join('') ||
+    '<div class="empty">loading option chains…</div>';
+}
+
 function renderUOA() {
   const at = uoa.at ? new Date(uoa.at).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false }) : null;
   $('uoa-sub').innerHTML = uoa.error
@@ -1085,6 +1142,7 @@ es.onmessage = ev => {
       gappers = m.gappers || []; pace = m.pace || [];
       vwapFlips = m.vwapFlips || []; vcp = m.vcp || [];
       radar = m.radar || []; pead = m.pead || []; patterns = m.patterns || [];
+      oiChain = m.oiChain || {};
       breadth = m.breadth || null;
       if (m.ema) emaState = m.ema;
     }
@@ -1133,6 +1191,9 @@ es.onmessage = ev => {
   } else if (m.type === 'patterns') {
     patterns = m.patterns || [];
     renderAllMovers();
+  } else if (m.type === 'oichain') {
+    oiChain = m.oiChain || oiChain;
+    renderOC();
   } else if (m.type === 'weekly') {
     gainers7 = m.gainers7 || []; losers7 = m.losers7 || []; buildup = m.volumeBuildup || [];
     renderAllMovers();
