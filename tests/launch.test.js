@@ -28,10 +28,11 @@ function mockChild({ failWith } = {}) {
  *   spawnFailures — spawn paths (substring) that emit an async EACCES 'error'
  *   spawnThrows  — spawn paths (substring) that throw synchronously (EPERM)
  *   cdpBindsFor  — spawn paths (substring) after which probeCdp starts succeeding
+ *   cdpBindsOnlyWithGpuOff — CDP binds only when spawned with --disable-gpu
  *   copyExists   — local copy already present
  */
-function msixDeps({ spawnFailures = [], spawnThrows = [], cdpBindsFor = [], copyExists = false } = {}) {
-  const state = { spawned: [], copies: [], removed: [], killed: 0, cdpUp: false };
+function msixDeps({ spawnFailures = [], spawnThrows = [], cdpBindsFor = [], cdpBindsOnlyWithGpuOff = false, copyExists = false } = {}) {
+  const state = { spawned: [], spawnArgs: [], copies: [], removed: [], killed: 0, cdpUp: false };
   const deps = {
     existsSync: (p) => {
       if (p === MSIX_EXE) return true;
@@ -45,13 +46,17 @@ function msixDeps({ spawnFailures = [], spawnThrows = [], cdpBindsFor = [], copy
       if (cmd.includes('taskkill')) { state.killed++; return ''; }
       throw new Error(`unexpected execSync: ${cmd}`);
     },
-    spawn: (exe) => {
+    spawn: (exe, args = []) => {
       state.spawned.push(exe);
+      state.spawnArgs.push(args);
       if (spawnThrows.some((s) => exe.includes(s))) {
         throw Object.assign(new Error('spawn EPERM'), { code: 'EPERM' });
       }
       const fail = spawnFailures.some((s) => exe.includes(s));
-      if (!fail && cdpBindsFor.some((s) => exe.includes(s))) state.cdpUp = true;
+      const gpuOff = args.includes('--disable-gpu');
+      // When cdpBindsOnlyWithGpuOff is set, CDP binds only once the GPU is disabled.
+      const canBind = cdpBindsOnlyWithGpuOff ? gpuOff : cdpBindsFor.some((s) => exe.includes(s));
+      if (!fail && canBind) state.cdpUp = true;
       return mockChild(fail ? { failWith: 'EACCES' } : {});
     },
     cpSync: (src, dst) => { state.copies.push({ src, dst }); },
@@ -121,6 +126,26 @@ describe('launch() — MSIX WindowsApps handling', { skip: !onWindows }, () => {
     assert.equal(result.success, true);
     assert.equal(result.msix_local_copy, true);
     assert.equal(state.copies.length, 0);
+  });
+
+  it('retries with GPU disabled when CDP never binds otherwise', async () => {
+    // Electron's GPU process can crash-loop and take the app down before CDP is
+    // usable; the retry with --disable-gpu is what finally brings it up.
+    const { deps, state } = msixDeps({ cdpBindsOnlyWithGpuOff: true });
+    const result = await launch({ _deps: deps });
+    assert.equal(result.success, true);
+    assert.equal(result.gpu_disabled, true);
+    assert.equal(result.cdp_ready, undefined); // CDP came up, so no warning branch
+    const lastArgs = state.spawnArgs.at(-1);
+    assert.ok(lastArgs.includes('--disable-gpu'), 'final spawn disables the GPU');
+    assert.ok(lastArgs.includes('--remote-debugging-port=9222'), 'CDP port is kept');
+  });
+
+  it('does not disable the GPU when CDP binds normally', async () => {
+    const { deps } = msixDeps({ cdpBindsFor: ['WindowsApps'] });
+    const result = await launch({ _deps: deps });
+    assert.equal(result.success, true);
+    assert.equal(result.gpu_disabled, undefined);
   });
 
   it('returns cdp_ready:false warning when nothing binds', async () => {

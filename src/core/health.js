@@ -201,6 +201,9 @@ export async function uiState() {
 
 const WINDOWS_APPS_RE = /\\WindowsApps\\/i;
 
+// Chromium flags used when a GPU crash-loop prevents the app from staying up.
+const GPU_DISABLE_ARGS = ['--disable-gpu', '--disable-gpu-sandbox', '--disable-software-rasterizer'];
+
 function _resolveLaunchDeps(deps) {
   return {
     spawn: deps?.spawn || spawn,
@@ -403,18 +406,36 @@ export async function launch({ port, kill_existing, _deps } = {}) {
     info = await _waitForCdp({ cdpPort, attempts: 15, delay: deps.delay, probeCdp: deps.probeCdp });
   }
 
+  // Last resort: retry with GPU acceleration off. Electron's GPU process can
+  // crash-loop when the app runs outside its original install context (repeated
+  // "GPU process exited unexpectedly: exit_code=-2147483645", then
+  // "GPU process isn't usable. Goodbye." and the app exits with code 3) — CDP
+  // binds for a moment and then dies with the app. Disabling the GPU keeps it up.
+  let usedGpuFallback = false;
+  if (!info) {
+    await killExisting();
+    child = _spawnDetached(deps.spawn, tvPath, [...cdpArgs, ...GPU_DISABLE_ARGS]);
+    usedGpuFallback = true;
+    info = await _waitForCdp({ cdpPort, attempts: 15, delay: deps.delay, probeCdp: deps.probeCdp });
+  }
+
+  const extras = {
+    ...(usedLocalCopy && { msix_local_copy: true }),
+    ...(usedGpuFallback && { gpu_disabled: true }),
+  };
+
   if (info) {
     return {
       success: true, platform, binary: tvPath, pid: child.pid,
       cdp_port: cdpPort, cdp_url: `http://${CDP_HOST}:${cdpPort}`,
       browser: info.Browser, user_agent: info['User-Agent'],
-      ...(usedLocalCopy && { msix_local_copy: true }),
+      ...extras,
     };
   }
 
   return {
     success: true, platform, binary: tvPath, pid: child.pid, cdp_port: cdpPort, cdp_ready: false,
-    ...(usedLocalCopy && { msix_local_copy: true }),
+    ...extras,
     warning: 'TradingView launched but CDP not responding yet. It may still be loading. Try tv_health_check in a few seconds.',
   };
 }
