@@ -25,16 +25,54 @@
   body {
     margin: 0; background: var(--page); color: var(--ink);
     font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: flex; flex-direction: column; height: 100vh; overflow: hidden;
   }
   a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
 
   header {
     display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
-    padding: 12px 20px; border-bottom: 1px solid var(--grid);
-    position: sticky; top: 0; background: var(--page); z-index: 5;
+    padding: 10px 20px; border-bottom: 1px solid var(--grid);
+    background: var(--surface); z-index: 5; flex: none;
   }
-  header h1 { font-size: 16px; font-weight: 650; margin: 0; letter-spacing: .2px; }
+  .brand { display: flex; align-items: baseline; gap: 8px; margin-right: 8px; }
+  .brand .logo {
+    width: 10px; height: 10px; border-radius: 3px; align-self: center;
+    background: linear-gradient(135deg, var(--accent), var(--up));
+  }
+  header h1 { font-size: 15px; font-weight: 700; margin: 0; letter-spacing: .3px; }
+  .brand .tag { color: var(--muted); font-size: 11px; letter-spacing: .5px; text-transform: uppercase; }
+
+  .shell { display: flex; flex: 1; min-height: 0; }
+  nav.side {
+    width: 208px; flex: none; overflow-y: auto; padding: 14px 10px 30px;
+    background: var(--surface); border-right: 1px solid var(--grid);
+  }
+  .navgroup { margin-bottom: 16px; }
+  .navgroup h3 {
+    margin: 0 10px 5px; font-size: 10px; font-weight: 700; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .9px;
+  }
+  .tab {
+    display: block; width: 100%; text-align: left; background: none; border: 0;
+    border-radius: 8px; padding: 7px 12px; margin: 1px 0; color: var(--ink-2);
+    font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap;
+  }
+  .tab:hover { background: var(--surface-2); color: var(--ink); }
+  .tab.on {
+    background: rgba(57,135,229,.14); color: #fff; font-weight: 600;
+    box-shadow: inset 2.5px 0 0 var(--accent);
+  }
+  @media (max-width: 900px) {
+    .shell { flex-direction: column; }
+    nav.side {
+      display: flex; width: auto; overflow-x: auto; padding: 6px 10px;
+      border-right: 0; border-bottom: 1px solid var(--grid); gap: 2px;
+    }
+    .navgroup { display: flex; margin: 0; align-items: center; }
+    .navgroup h3 { display: none; }
+    .tab { width: auto; }
+  }
   .idx, .breadth {
     display: inline-flex; align-items: baseline; gap: 7px; padding: 4px 12px;
     background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
@@ -50,10 +88,11 @@
   .status .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--up); margin-right: 5px; }
   .status.err .dot { background: var(--down-strong); }
 
-  main { padding: 18px 20px 60px; max-width: 1600px; margin: 0 auto; }
+  main { flex: 1; min-width: 0; overflow-y: auto; padding: 18px 22px 60px; }
   section.card {
     background: var(--surface); border: 1px solid var(--border);
     border-radius: 12px; margin-bottom: 20px; overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,.35);
   }
   .card-head {
     display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
@@ -185,13 +224,6 @@
   .hits { font-weight: 700; }
   .hits.hi { color: var(--warn); }
 
-  .tabs { display: flex; gap: 6px; margin: 0 0 14px; }
-  .tab {
-    background: var(--surface); color: var(--ink-2); border: 1px solid var(--border);
-    border-radius: 8px; padding: 7px 18px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
-  }
-  .tab.on { background: var(--accent); border-color: var(--accent); color: #fff; }
-
   .grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(430px, 1fr)); gap: 20px; }
   .catalyst { max-width: 300px; overflow: hidden; text-overflow: ellipsis; text-align: left; white-space: nowrap; }
   .catalyst .src { color: var(--muted); font-size: 11px; }
@@ -202,15 +234,51 @@
 <body>
 
 <header>
-  <h1>India Market Dashboard</h1>
+  <div class="brand"><span class="logo"></span><h1>India Markets</h1><span class="tag">dashboard</span></div>
   <div id="indices" style="display:flex;gap:8px"></div>
   <div id="breadthbox"></div>
   <div class="status" id="status"><span class="dot"></span><span id="statustext">connecting…</span></div>
 </header>
 
+<div class="shell">
+<nav class="side">
+  <div class="navgroup">
+    <h3>Portfolio</h3>
+    <button class="tab on" data-tab="watch">Watchlist</button>
+  </div>
+  <div class="navgroup">
+    <h3>Markets</h3>
+    <button class="tab" data-tab="today">Today's Movers</button>
+    <button class="tab" data-tab="week">Last 7 Days</button>
+    <button class="tab" data-tab="intra">Intraday</button>
+  </div>
+  <div class="navgroup">
+    <h3>Scans</h3>
+    <button class="tab" data-tab="gain">Gainers 20%+</button>
+    <button class="tab" data-tab="ep">Episodic Pivots</button>
+    <button class="tab" data-tab="screens">Setups</button>
+    <button class="tab" data-tab="pat">Chart Patterns</button>
+  </div>
+  <div class="navgroup">
+    <h3>Events</h3>
+    <button class="tab" data-tab="earn">Earnings Cycle</button>
+    <button class="tab" data-tab="news">Watchlist News</button>
+  </div>
+  <div class="navgroup">
+    <h3>Derivatives</h3>
+    <button class="tab" data-tab="oi">F&amp;O &amp; Options</button>
+  </div>
+  <div class="navgroup">
+    <h3>Chartink</h3>
+    <button class="tab" data-tab="chartink">All Scans</button>
+    <button class="tab" data-tab="ckresult">High Potential</button>
+  </div>
+</nav>
+
 <main>
   <div class="sectors" id="sectors"></div>
 
+  <div id="tab-watch">
   <section class="card">
     <div class="card-head">
       <h2>Watchlist</h2>
@@ -247,23 +315,9 @@
       <tbody id="wlbody"></tbody>
     </table></div>
   </section>
-
-  <div class="tabs">
-    <button class="tab on" data-tab="today">Today</button>
-    <button class="tab" data-tab="week">Last 7 Days</button>
-    <button class="tab" data-tab="gain">Gainers 20%+</button>
-    <button class="tab" data-tab="ep">EP</button>
-    <button class="tab" data-tab="intra">Intraday</button>
-    <button class="tab" data-tab="oi">F&amp;O</button>
-    <button class="tab" data-tab="screens">Screens</button>
-    <button class="tab" data-tab="earn">Earnings</button>
-    <button class="tab" data-tab="pat">Patterns</button>
-    <button class="tab" data-tab="news">News</button>
-    <button class="tab" data-tab="chartink">Chartink</button>
-    <button class="tab" data-tab="ckresult">Chartink Result</button>
   </div>
 
-  <div id="tab-today" class="grid3">
+  <div id="tab-today" class="grid3" style="display:none">
     <section class="card">
       <div class="card-head"><h2>Episodic Pivots</h2><span class="sub">+4%+ on 3×+ volume — moves that start trends</span></div>
       <div class="tablewrap"><table>
@@ -510,6 +564,7 @@
     </section>
   </div>
 </main>
+</div>
 
 <div id="toast"></div>
 
@@ -1050,7 +1105,7 @@ document.addEventListener('click', async e => {
   const tab = e.target.closest('.tab[data-tab]');
   if (tab) {
     document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t === tab));
-    for (const k of ['today', 'week', 'gain', 'ep', 'intra', 'oi', 'screens', 'earn', 'pat', 'news', 'chartink', 'ckresult']) {
+    for (const k of ['watch', 'today', 'week', 'gain', 'ep', 'intra', 'oi', 'screens', 'earn', 'pat', 'news', 'chartink', 'ckresult']) {
       $('tab-' + k).style.display = tab.dataset.tab === k ? '' : 'none';
     }
     return;
