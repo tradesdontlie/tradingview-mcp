@@ -4,16 +4,20 @@
  * Run: node scan_live.mjs
  */
 
-import * as chart from './src/core/chart.js';
-import * as data from './src/core/data.js';
-import { getClient } from './src/connection.js';
 import { readFileSync, writeFileSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { computeRS, writeVnindexCache, VNINDEX_SYM } from './rs_util.mjs';
 import { barStatus, sessionInfo } from './bar_status.mjs';
+import { MARKET_ADJ, SCAN_ENGINE_VERSION, assertH6Resolution, confirmSymbol, scoreSignal as policyScoreSignal } from './src/scan_policy.mjs';
+
+let chart;
+let data;
+let getClient;
 
 // Evening Scout feed: scan_live ghi ket qua footprint cho morning brief (scout_promote.py doc file nay)
+const SELF_TEST = process.argv.some(arg => arg.startsWith('--self-test-'));
 const requiredEnv = name => {
+  if (SELF_TEST) return process.env[name] || '';
   if (!process.env[name]) throw new Error(`Missing ${name}; run via cos.py scan-live`);
   return process.env[name];
 };
@@ -88,8 +92,6 @@ function loadWatchlist() {
   }
 }
 
-const MARKET_ADJ = { RISK_ON: 5, NEUTRAL: -5, RISK_OFF: -15 };
-
 function loadMarketRegime() {
   try {
     const payload = JSON.parse(readFileSync(REGIME_LATEST_PATH, 'utf-8'));
@@ -107,7 +109,6 @@ function loadMarketRegime() {
 
 function applyRegimeGate(result, regime) {
   const adj = MARKET_ADJ[regime] || 0;
-  result.scored.pct = Math.round(Math.max(0, Math.min(100, result.scored.pct + adj)) * 10) / 10;
   result.scored.market_regime = regime;
   result.scored.market_adj = adj;
   result.scored.regime_note = null;
@@ -126,9 +127,9 @@ function loadHeat() {
   }
 }
 
-function sectorWarnings(results) {
-  let sectors = {};
-  try { sectors = JSON.parse(readFileSync(SECTOR_MAP_PATH, 'utf-8')); } catch {}
+function sectorWarnings(results, sectorMap = null) {
+  let sectors = sectorMap || {};
+  if (!sectorMap) try { sectors = JSON.parse(readFileSync(SECTOR_MAP_PATH, 'utf-8')); } catch {}
   const buys = {};
   for (const result of results) {
     result.sector = sectors[result.name] || 'Unknown';
@@ -143,7 +144,7 @@ function sectorWarnings(results) {
 
 // CLI args: node scan_live.mjs FPT SAB -> scan ad-hoc thay vi WATCHLIST
 const argSymbols = process.argv.slice(2).filter(a => /^[A-Za-z0-9:]+$/.test(a));
-const SCAN_LIST = argSymbols.length > 0
+const SCAN_LIST = SELF_TEST ? [] : argSymbols.length > 0
   ? argSymbols.map(s => {
       const sym = s.toUpperCase();
       return { t: sym.includes(':') ? sym : 'HOSE:' + sym, g: 0, name: sym.split(':').pop() };
@@ -194,7 +195,7 @@ function marketStructure(ph, pl) {
 // Tra { phase, vol_ratio, churn } — phase khop logic check_one.mjs (PULLBACK/IMPULSE/DOWNTREND/SIDEWAYS)
 // Dung decisionPrice (chot theo nen D-1 khi D-0 chua dong) de phase khong nhap nhay trong phien.
 function computeWave(bars, price) {
-  if (!bars || bars.length < 25) return { phase: 'UNKNOWN', vol_ratio: null };
+  if (!bars || bars.length < 25) return { phase: 'UNKNOWN', vol_ratio: null, churn: null, bar_closed: null, bar_age_pct: null };
   // barStatus cho nen cuoi: chua dong -> decisionPrice = close D-1 (chot phase)
   const lastBar = bars[bars.length - 1];
   const barInfo = barStatus(lastBar.time, 360);
@@ -219,7 +220,7 @@ function computeWave(bars, price) {
     const bodyPct = Math.abs(lb.close - lb.open) / spread * 100;
     churn = vol_ratio >= 1.2 && closePos <= 50 && bodyPct < 35;
   }
-  return { phase, vol_ratio, churn };
+  return { phase, vol_ratio, churn, bar_closed: barInfo.closed, bar_age_pct: barInfo.age_pct };
 }
 
 function extractFP(studies) {
@@ -282,7 +283,7 @@ function parseFPTable(fpTableResult) {
 
 // phase/vol_ratio tu computeWave — scoreSignal PHAI khop pha (xem feedback_trigger_phase_match.md):
 // pullback dung CAN-CUNG, breakout moi doi CAU-MUA-AP-DAO + vol >= BREAKOUT_VOL.
-function scoreSignal(fp, ma, price, phase = 'UNKNOWN', vol_ratio = null, churn = false) {
+function legacyScoreSignal(fp, ma, price, phase = 'UNKNOWN', vol_ratio = null, churn = false) {
   const c = {};
 
   // 1. Confluence >= 60
@@ -348,6 +349,8 @@ function scoreSignal(fp, ma, price, phase = 'UNKNOWN', vol_ratio = null, churn =
   return { sig, pct, passed, total, c, phase, vol_ratio, churn };
 }
 
+export { MARKET_ADJ, SCAN_ENGINE_VERSION, assertH6Resolution, confirmSymbol, policyScoreSignal as scoreSignal };
+
 function buildScoutResult(r, marketRegime) {
   return {
     ticker: r.name,
@@ -374,6 +377,18 @@ function buildScoutResult(r, marketRegime) {
     regime_note: r.scored?.regime_note ?? marketRegime.note,
     sector: r.sector,
     session: r.session ?? null,
+    engine_version: SCAN_ENGINE_VERSION,
+    score_pct: r.scored?.score_pct ?? null,
+    rank_score: r.scored?.rank_score ?? null,
+    signal_quality: r.scored?.signal_quality ?? null,
+    missing_fields: r.scored?.missing_fields ?? [],
+    decision_reasons: r.scored?.decision_reasons ?? [],
+    criteria_passed: r.scored?.passed ?? null,
+    criteria_total: r.scored?.total ?? null,
+    bar_closed: r.barClosed ?? null,
+    bar_age_pct: r.barAgePct ?? null,
+    session_phase: r.session?.phase ?? null,
+    session_trust: r.session?.trust_level ?? null,
   };
 }
 
@@ -393,7 +408,7 @@ function computeBreadth(results) {
   return { up, down, pct_up };
 }
 
-async function scanOne(ticker, name, idxCloses) {
+async function scanOne(ticker, name, idxCloses, marketRegime) {
   // Set symbol
   try {
     await chart.setSymbol({ symbol: ticker });
@@ -401,20 +416,11 @@ async function scanOne(ticker, name, idxCloses) {
     return { error: 'setSymbol: ' + e.message };
   }
 
-  // Poll until chart symbol actually changes (max 6s)
-  const shortTicker = ticker.split(':').pop();
-  let confirmed = false;
-  for (let i = 0; i < 12; i++) {
-    await sleep(500);
-    try {
-      const st = await chart.getState();
-      const curSym = (st.symbol || '').split(':').pop().toUpperCase();
-      if (curSym === shortTicker.toUpperCase()) { confirmed = true; break; }
-    } catch(e) {}
-  }
-  if (!confirmed) {
-    // extra wait
-    await sleep(1500);
+  // Confirm the requested symbol before acquiring any indicator or price data.
+  try {
+    await confirmSymbol(ticker, chart.getState, { wait: () => sleep(500) });
+  } catch (e) {
+    return { error: e.message };
   }
   // Extra wait for Footprint indicator to reload data
   await sleep(1500);
@@ -439,15 +445,18 @@ async function scanOne(ticker, name, idxCloses) {
   const { fp, ma } = extractFP(sv.studies || []);
   const tableRows = parseFPTable(fpTbl);
   const bars = (ohlcv.bars || []).slice(-65);
-  const { phase, vol_ratio, churn } = computeWave(bars, price);
-  const scored = scoreSignal(fp, ma, price, phase, vol_ratio, churn);
-  const rs = idxCloses ? computeRS(bars, idxCloses) : { rs_20: null, leader: null };
-
+  const { phase, vol_ratio, churn, bar_closed, bar_age_pct } = computeWave(bars, price);
   // Session phase (VN HOSE gate)
   const isVnStock = /^(HOSE|HNX|UPCOM):/i.test(ticker || '') && !(ticker || '').includes('!');
   const sess = sessionInfo(new Date(), isVnStock ? 'VN' : 'N/A');
+  const scored = policyScoreSignal(fp, ma, price, phase, vol_ratio, churn, {
+    regime: marketRegime,
+    sessionTrust: sess?.trust_level,
+    barClosed: bar_closed,
+  });
+  const rs = idxCloses ? computeRS(bars, idxCloses) : { rs_20: null, leader: null };
 
-  return { price, chg_pct, fp, ma, scored, tableRows, phase, vol_ratio, churn, rs, session: sess };
+  return { price, chg_pct, fp, ma, scored, tableRows, phase, vol_ratio, churn, barClosed: bar_closed, barAgePct: bar_age_pct, rs, session: sess };
 }
 
 async function main() {
@@ -458,28 +467,33 @@ async function main() {
   if (process.argv.includes('--self-test-regime')) {
     const sample = applyRegimeGate({ scored: { sig: 'BUY', pct: 85 } }, 'RISK_OFF');
     console.log(JSON.stringify(sample));
-    process.exit(sample.scored.sig === 'WATCH' && sample.scored.pct === 70 ? 0 : 1);
+    process.exit(sample.scored.sig === 'WATCH' && sample.scored.pct === 85 ? 0 : 1);
   }
   if (process.argv.includes('--self-test-sector')) {
     const sample = ['ACB', 'MBB', 'TCB', 'VCB'].map(name => ({ name, sig: 'BUY' }));
-    const warnings = sectorWarnings(sample);
+    const warnings = sectorWarnings(sample, { ACB: 'Banks', MBB: 'Banks', TCB: 'Banks', VCB: 'Banks' });
     console.log(JSON.stringify({ results: sample, warnings }));
     process.exit(warnings.length === 1 ? 0 : 1);
   }
   if (process.argv.includes('--self-test-missing-footprint')) {
     const fp = { conf: 80, cumDelta: null, buyPct: 60, divSignal: 0, maxBuyStack: 1 };
     const ma = { ma20: 100, ma100: 90 };
-    const scored = scoreSignal(fp, ma, 110);
-    const zeroDelta = scoreSignal({ ...fp, cumDelta: 0 }, ma, 110);
+    const context = { regime: 'NEUTRAL', sessionTrust: 'HIGH', barClosed: true };
+    const scored = policyScoreSignal(fp, ma, 110, 'SIDEWAYS', null, false, context);
+    const zeroDelta = policyScoreSignal({ ...fp, cumDelta: 0 }, ma, 110, 'SIDEWAYS', null, false, context);
     const result = buildScoutResult(
-      { name: 'TEST', sig: scored.sig, scored, fp: {}, ma: {}, rs: {} },
+      { name: 'TEST', sig: scored.sig, scored, fp: {}, ma: {}, rs: {}, barClosed: true, barAgePct: 100,
+        session: { phase: 'CLOSED', trust_level: 'HIGH' } },
       { regime: 'NEUTRAL', note: null },
     );
     console.log(JSON.stringify(result));
     const footprintNull = ['conf', 'cum_delta', 'buy_pct', 'max_buy_stack']
       .every(field => result[field] === null);
-    process.exit(footprintNull && scored.sig === 'BUY' && zeroDelta.sig === 'WATCH' ? 0 : 1);
+    process.exit(footprintNull && scored.sig === 'N/A' && zeroDelta.sig === 'WATCH' ? 0 : 1);
   }
+  ({ getClient } = await import('./src/connection.js'));
+  chart = await import('./src/core/chart.js');
+  data = await import('./src/core/data.js');
   // Verify CDP
   try {
     await getClient();
@@ -489,11 +503,9 @@ async function main() {
   }
 
   const initState = await chart.getState();
+  try { assertH6Resolution(initState.resolution); }
+  catch (e) { console.error(e.message); process.exit(1); }
   console.log('Connected! Chart: ' + initState.symbol + ' | TF: ' + initState.resolution);
-  if (initState.resolution !== '360') {
-    console.log('WARNING: TF is not H6 (360). Scan results may be wrong!');
-    console.log('Per user profile: MUST use H6 for VN stocks volume analysis');
-  }
   console.log('Scanning ' + SCAN_LIST.length + ' ma...\n');
 
   // --- VNINDEX 1 lan dau de tinh RS (Relative Strength) + ghi cache cho check_one ---
@@ -519,7 +531,7 @@ async function main() {
   for (let i = 0; i < SCAN_LIST.length; i++) {
     const { t, g, name } = SCAN_LIST[i];
     process.stdout.write('[' + (i+1) + '/' + SCAN_LIST.length + '] ' + name + '... ');
-    const r = await scanOne(t, name, idxCloses);
+    const r = await scanOne(t, name, idxCloses, marketRegime.regime);
     if (r.error) {
       console.log('ERROR: ' + r.error);
       results.push({ name, group: g, error: r.error, sig: 'ERR' });
@@ -546,8 +558,8 @@ async function main() {
 
   // ---- OUTPUT ----
   const W = 80;
-  const buy   = results.filter(r => r.sig === 'BUY').sort((a,b) => (b.scored?.pct||0)-(a.scored?.pct||0));
-  const watch = results.filter(r => r.sig === 'WATCH').sort((a,b) => (b.scored?.pct||0)-(a.scored?.pct||0));
+  const buy   = results.filter(r => r.sig === 'BUY').sort((a,b) => (b.scored?.scorePct||0)-(a.scored?.scorePct||0));
+  const watch = results.filter(r => r.sig === 'WATCH').sort((a,b) => (b.scored?.scorePct||0)-(a.scored?.scorePct||0));
   const avoid = results.filter(r => r.sig === 'AVOID');
   const loai  = results.filter(r => r.sig === 'LOAI');
   const noData= results.filter(r => r.sig === 'N/A' || r.sig === 'ERR');
@@ -564,6 +576,7 @@ async function main() {
       date: `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`,
       scan_time: `${pad(now.getHours())}:${pad(now.getMinutes())}`,
       source: 'scan_live.mjs H6 Footprint',
+      engine_version: SCAN_ENGINE_VERSION,
       results: results.map(r => buildScoutResult(r, marketRegime)),
       breadth,
       market_regime: marketRegime,
