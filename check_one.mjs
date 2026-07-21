@@ -10,6 +10,7 @@ import * as data from './src/core/data.js';
 import { getClient } from './src/connection.js';
 import { computeRS, readVnindexCache } from './rs_util.mjs';
 import { barStatus, sessionInfo } from './bar_status.mjs';
+import { atomicWriteCache, cachePaths, evidenceHash, runtimeDataRoot, withChartLock } from './src/core/check_runtime.mjs';
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function parseNum(val) {
@@ -234,6 +235,19 @@ function rangeBreakoutScenario({ resistance, headroomPct, price, atr14, dir }) {
     size_note: '1/2 size, chase' };
 }
 
+// Geometry only. Promotion to READY belongs to the deterministic readiness gate.
+export function computeDecision(scenarios, price) {
+  if (!scenarios || scenarios.length === 0) {
+    return { setup_state: 'NO_SETUP', reason: 'khong co kich ban long kha thi', setup: null };
+  }
+  const inZone = scenarios.find(s =>
+    price >= Math.min(s.entry_low, s.entry_high) && price <= Math.max(s.entry_low, s.entry_high));
+  if (inZone) {
+    return { setup_state: 'IN_ZONE', reason: `gia trong entry zone (${inZone.label})`, setup: inZone.label };
+  }
+  return { setup_state: 'NEAR_ZONE', reason: `co setup ${scenarios[0].label}, cho trigger`, setup: scenarios[0].label };
+}
+
 // T+2.5 (chi VN stock): mua xong ~2.5 phien hang chua ve, KHONG ban duoc -> SL gan chi la muc bao dong.
 // Annotate MAY MOC vao tung scenario (skill/bot khoi tinh tay): sl_atr = khoang SL theo boi ATR,
 // rr_locked = RR neu phai thoat theo nhieu cua so khoa (1.6 ATR ~ sqrt(2.5) phien), tplus_warn khi SL trong nhieu.
@@ -284,14 +298,53 @@ function defaultTf(ticker) {
   return '360';
 }
 
+const known = values => values.every(value => value !== null && value !== undefined);
+export function phaseEvidence({ volRatio, closePos, conf, buyPct, buyStack, churn,
+  resistance, price, wideDownCloseLow, cumDelta, previousCumDelta }) {
+  const supplyDry = known([volRatio, buyPct, wideDownCloseLow])
+    ? volRatio < 1 && buyPct >= 35 && !wideDownCloseLow : null;
+  const microConfirm = known([buyPct, resistance, price])
+    ? buyPct > 50 || price > resistance : null;
+  const absorption = known([volRatio, closePos, buyPct, churn, cumDelta])
+    ? volRatio >= 1 && closePos >= 50 && buyPct > 50 && !churn && cumDelta > 0 : null;
+  const deltaFlip = known([previousCumDelta, cumDelta])
+    ? previousCumDelta <= 0 && cumDelta > 0 : null;
+  return {
+    breakout: { closed_above: known([resistance, price]) ? price > resistance : null,
+      volume_ratio: volRatio, close_position_pct: closePos, footprint_confidence: conf,
+      buy_pct: buyPct, buy_stack: buyStack, churn },
+    retest: { supply_dry: supplyDry, micro_confirm: microConfirm, volume_ratio: volRatio, buy_pct: buyPct, wide_down_close_low: wideDownCloseLow },
+    range: { absorption, delta_flip: deltaFlip, churn },
+  };
+}
+
+export function buildCacheEnvelope(payload, generatedAt = new Date().toISOString()) {
+  const marketDate = payload.market_date || payload.date || generatedAt.slice(0, 10);
+  return { ...payload, schema_version: 1, market_date: marketDate,
+    generated_at: generatedAt, date: marketDate, as_of: generatedAt };
+}
+
+export async function restoreChartState(chartApi, initialState) {
+  if (!initialState) return;
+  if (initialState.symbol) await chartApi.setSymbol({ symbol: initialState.symbol });
+  if (initialState.resolution) await chartApi.setTimeframe({ timeframe: initialState.resolution });
+}
+
+export async function withChartLifecycle(dataRoot, operation) {
+  return withChartLock(dataRoot, 180000, operation);
+}
+
 async function main() {
   let ticker = process.argv[2] || 'HOSE:OCB';
   const timeframe = process.argv[3] || defaultTf(ticker);
   const shortName = ticker.split(':').pop();
+  const cacheDir = runtimeDataRoot();
 
   try { await getClient(); } catch(e) { console.error('CDP FAIL:', e.message); process.exit(1); }
-
-  const initState = await chart.getState();
+  return withChartLifecycle(cacheDir, async () => {
+  let initState;
+  try {
+  initState = await chart.getState();
 
   // VN stock: prefix HOSE co the sai (SHS o HNX) -> resolve dung san qua TradingView symbol search REST,
   // tranh ban symbol invalid len chart (gay ket UI). Non-VN / search khong thay -> giu ticker goc.
@@ -331,6 +384,8 @@ async function main() {
       if (normTf(st.resolution) === normTf(timeframe)) { tfOk = true; break; }
     } catch(e) {}
   }
+  if (!ok) throw new Error(`SYMBOL_UNCONFIRMED:${ticker}`);
+  if (!tfOk) throw new Error(`TIMEFRAME_UNCONFIRMED:${timeframe}`);
   await sleep(2000);
 
   // Doc study values — retry cho footprint kip tinh sau khi doi symbol/TF (cold layout switch)
@@ -386,8 +441,7 @@ async function main() {
 
   // GUARD: thieu indicator footprint = sai layout. Bao loi ro thay vi doc bua.
   if (!fpFound) {
-    console.error(`FOOTPRINT_MISSING: chart khong co 'Footprint Aggressor Analysis' cho ${ticker} @ TF ${timeframe}. Hay load dung layout (VN / XAUUSD / VN30F1M) roi chay lai.`);
-    process.exit(2);
+    throw new Error(`FOOTPRINT_MISSING: chart khong co 'Footprint Aggressor Analysis' cho ${ticker} @ TF ${timeframe}. Hay load dung layout (VN / XAUUSD / VN30F1M) roi chay lai.`);
   }
 
   // --- Footprint table (compact: only key rows) ---
@@ -701,6 +755,16 @@ async function main() {
   // --- HTF (khung tuan that, resample tu H6~Daily) ---
   const htf = weeklyTrend(resampleWeekly(allBars));
 
+  // --- VSA No Demand / No Supply (co tho, KHONG gate) — dung lai cToday da co ---
+  // No Demand: nen tang nhung vol thap + spread hep giua uptrend -> cau yeu.
+  // No Supply: nen giam nhung vol thap + spread hep giua pullback/downtrend -> cung can.
+  const trendUp = htf.trend === 'UP' || wave.phase === 'IMPULSE';
+  const trendPullback = wave.phase === 'PULLBACK' || htf.trend === 'DOWN';
+  const vsa_signals = {
+    no_demand: { flag: !!(cToday.isUp && cToday.spreadClass === 'narrow' && lastVolRatio !== null && lastVolRatio < PULLBACK_VOL && trendUp) },
+    no_supply: { flag: !!(cToday.isDown && cToday.spreadClass === 'narrow' && lastVolRatio !== null && lastVolRatio < PULLBACK_VOL && trendPullback) },
+  };
+
   // --- MTF score: H6 (structure + SMA) + Weekly that ---
   let mtfScore = 0;
   const mtfNotes = [];
@@ -741,10 +805,9 @@ async function main() {
   if (!FULL) { delete fpOut.buyVol; delete fpOut.sellVol; delete fpOut.totalVol; }
   if (!FULL) { delete wave.amp_prev; delete wave.amp_prev_pct; }
 
-  const out = {
+  const out = buildCacheEnvelope({
     ticker, price, timeframe, tf_confirmed: tfOk, dir,
     symbol_confirmed: ok,
-    as_of: new Date().toISOString(),
     date: bars[n-1]?.time ? new Date(bars[n-1].time * 1000).toISOString().slice(0,10) : new Date().toISOString().slice(0,10),
     ohlc_today: { o: todayBar?.open, h: todayBar?.high, l: todayBar?.low, c: todayBar?.close, vol: todayBar?.volume },
     ma: { sma20: sma20_current, sma100: sma100_current },
@@ -765,14 +828,25 @@ async function main() {
       age_pct: bar.age_pct,
       vol_ratio_age_adj,
       warnings: sess.warnings,
+      next_phase: sess.next_phase,
+      minutes_remaining: sess.minutes_remaining,
+      phase_warning: sess.phase_warning,
     },
     vsa_churn,
+    vsa_signals,
     topbot,
     price_limit,
     adtv_20_bn,
     days_to_vn30f_expiry,
     overhead,
     scenarios,
+    setup_state: computeDecision(scenarios, price).setup_state,
+    decision: computeDecision(scenarios, price),
+    phase_evidence: phaseEvidence({ volRatio: lastVolRatio, closePos: fp.closePos, conf: fp.conf,
+      buyPct: fp.buyPct, buyStack: fp.buyStack, churn: vsa_churn.flag,
+      resistance: overhead.resistance ?? bars[n-2]?.high, price,
+      wideDownCloseLow: cToday?.isDown && cToday?.spreadClass === 'wide' && (fp.closePos ?? 100) < 50,
+      cumDelta: fp.cumD, previousCumDelta: null }),
     tplus,
     rs,
     htf,
@@ -782,25 +856,24 @@ async function main() {
       ph: ph.map(p => ({ price: p.price, d: `D-${n-1-p.i}` })),
       pl: pl.map(p => ({ price: p.price, d: `D-${n-1-p.i}` })),
     },
-  };
+  });
 
-  const json = JSON.stringify(out);
   try {
-    const cacheDir = 'C:/Users/ADMIN/claude_os/data';
-    fs.mkdirSync(cacheDir, { recursive: true });
     const cacheDate = out.date || new Date().toISOString().slice(0,10);
-    const cachePath = path.join(cacheDir, `check_${shortName.toUpperCase()}_${cacheDate.replace(/-/g, '')}.json`);
-    const latestPath = path.join(cacheDir, `check_${shortName.toUpperCase()}_latest.json`);
-    fs.writeFileSync(cachePath, json, 'utf8');
-    fs.writeFileSync(latestPath, json, 'utf8');
+    out.evidence_hash = evidenceHash(out);
+    const paths = cachePaths(cacheDir, shortName.toUpperCase(), timeframe);
+    paths.dated = path.join(cacheDir, `check_${shortName.toUpperCase()}_${cacheDate.replace(/-/g, '')}_${timeframe}.json`);
+    atomicWriteCache(paths, out);
   } catch (e) {
-    console.error('CACHE_WRITE_WARN:', e.message);
+    throw new Error(`CACHE_WRITE_FAILED:${e.message}`);
   }
 
-  console.log('DATA_JSON:' + json);
-
-  try { await chart.setSymbol({ symbol: initState.symbol }); } catch(e) {}
-  process.exit(0);
+  console.log('DATA_JSON:' + JSON.stringify(out));
+  return out;
+  } finally {
+    try { await restoreChartState(chart, initState); } catch(e) {}
+  }
+  });
 }
 export { buildScenarios, contRetestScenario, findDemandBar, rangeBreakoutScenario, resampleWeekly, weeklyTrend };
 

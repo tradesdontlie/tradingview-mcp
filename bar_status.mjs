@@ -30,19 +30,33 @@ export function barStatus(barOpenSec, tfMin, now = new Date()) {
  * market != 'VN' → { phase:'N/A', trust_level:'HIGH', warnings:[] } (nhuong thị trường khác).
  * Dong bo logic Python voi tg_alert_watcher.py vn_session_phase().
  */
+// Moc chuyen phien (phut trong ngay) + ten phien SAU moc do. Dung chung cho next_phase/minutes_remaining.
+const PHASE_BOUNDARIES = [
+  [540, 'ATO'], [555, 'EARLY'], [570, 'CONT_AM'], [690, 'LUNCH'],
+  [780, 'CONT_PM'], [870, 'ATC'], [885, 'CLOSED'],
+];
+
 export function sessionInfo(now = new Date(), market = 'VN') {
-  if (market !== 'VN') return { phase: 'N/A', trust_level: 'HIGH', warnings: [] };
+  if (market !== 'VN') return { phase: 'N/A', trust_level: 'HIGH', warnings: [], next_phase: null, minutes_remaining: null, phase_warning: null };
   const wd = now.getDay(); // 0=Sun..6=Sat
-  if (wd === 0 || wd === 6) return { phase: 'CLOSED', trust_level: 'LOW', warnings: ['weekend'] };
+  const weekendOrClosed = { next_phase: null, minutes_remaining: null, phase_warning: null };
+  if (wd === 0 || wd === 6) return { phase: 'CLOSED', trust_level: 'LOW', warnings: ['weekend'], ...weekendOrClosed };
   const t = now.getHours() * 60 + now.getMinutes();
-  if (t < 540)  return { phase: 'CLOSED',    trust_level: 'LOW',  warnings: ['pre_market'] };
-  if (t < 555)  return { phase: 'ATO',       trust_level: 'LOW',  warnings: ['ato_noisy_delta'] };
-  if (t < 570)  return { phase: 'EARLY',     trust_level: 'LOW',  warnings: ['early_vol_unstable'] };
-  if (t < 690)  return { phase: 'CONT_AM',   trust_level: 'HIGH', warnings: [] };
-  if (t < 780)  return { phase: 'LUNCH',     trust_level: 'LOW',  warnings: ['lunch_stale_price'] };
-  if (t < 870)  return { phase: 'CONT_PM',   trust_level: 'HIGH', warnings: [] };
-  if (t < 885)  return { phase: 'ATC',       trust_level: 'LOW',  warnings: ['atc_frozen_orderbook'] };
-  return { phase: 'CLOSED', trust_level: 'HIGH', warnings: [] }; // >14:45 gia dong chinh thuc
+  const nextB = PHASE_BOUNDARIES.find(([m]) => m > t);
+  const next_phase = nextB ? nextB[1] : null;
+  const minutes_remaining = nextB ? nextB[0] - t : null;
+  let phase, trust_level, warnings;
+  if (t < 540)      { phase = 'CLOSED';   trust_level = 'LOW';  warnings = ['pre_market']; }
+  else if (t < 555) { phase = 'ATO';      trust_level = 'LOW';  warnings = ['ato_noisy_delta']; }
+  else if (t < 570) { phase = 'EARLY';    trust_level = 'LOW';  warnings = ['early_vol_unstable']; }
+  else if (t < 690) { phase = 'CONT_AM';  trust_level = 'HIGH'; warnings = []; }
+  else if (t < 780) { phase = 'LUNCH';    trust_level = 'LOW';  warnings = ['lunch_stale_price']; }
+  else if (t < 870) { phase = 'CONT_PM';  trust_level = 'HIGH'; warnings = []; }
+  else if (t < 885) { phase = 'ATC';      trust_level = 'LOW';  warnings = ['atc_frozen_orderbook']; }
+  else              { phase = 'CLOSED';   trust_level = 'HIGH'; warnings = []; } // >14:45 gia dong chinh thuc
+  const phase_warning = (phase === 'CONT_PM' && minutes_remaining !== null && minutes_remaining <= 15) ? 'atc_approaching' : null;
+  const outNext = phase === 'CLOSED' ? weekendOrClosed : { next_phase, minutes_remaining, phase_warning };
+  return { phase, trust_level, warnings, ...outNext };
 }
 
 // ponytail: self-check chay khi goi truc tiep `node bar_status.mjs`
@@ -72,6 +86,13 @@ if (process.argv[1] && process.argv[1].endsWith('bar_status.mjs')) {
   console.assert(sessionInfo(new Date(2026, 6, 9, 13, 30)).phase === 'CONT_PM', '13:30 phai CONT_PM');
   console.assert(sessionInfo(new Date(2026, 6, 9, 15, 0)).trust_level === 'HIGH', '15:00 trust=HIGH (post-close)');
   console.assert(sessionInfo(new Date(2026, 6, 9, 10, 0), 'FX').phase === 'N/A', 'FX market=N/A');
+  // clock countdown self-check (Khoi A1)
+  const s1420 = sessionInfo(new Date(2026, 6, 9, 14, 20));
+  console.assert(s1420.next_phase === 'ATC' && s1420.minutes_remaining === 10 && s1420.phase_warning === 'atc_approaching', '14:20 phai con 10ph toi ATC + canh bao');
+  const s1000 = sessionInfo(new Date(2026, 6, 9, 10, 0));
+  console.assert(s1000.next_phase === 'LUNCH' && s1000.minutes_remaining === 90 && s1000.phase_warning === null, '10:00 phai con 90ph toi LUNCH, khong canh bao');
+  const sClosed = sessionInfo(new Date(2026, 6, 9, 15, 0));
+  console.assert(sClosed.next_phase === null && sClosed.minutes_remaining === null, 'CLOSED phai next_phase=null');
   console.log('sessionInfo self-check OK');
   console.log('bar_status self-check OK');
 }
