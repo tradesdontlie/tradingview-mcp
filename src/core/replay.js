@@ -1,7 +1,7 @@
 /**
  * Core replay mode logic.
  */
-import { evaluate as _evaluate, getReplayApi as _getReplayApi, safeString } from '../connection.js';
+import { evaluate as _evaluate, evaluateAsync as _evaluateAsync, getReplayApi as _getReplayApi, safeString } from '../connection.js';
 
 export const VALID_AUTOPLAY_DELAYS = [100, 143, 200, 300, 1000, 2000, 3000, 5000, 10000];
 
@@ -21,6 +21,10 @@ const DRIFT_WARN_SECONDS = 4 * 86400;
 function _resolve(deps) {
   return {
     evaluate: deps?.evaluate || _evaluate,
+    // evaluateAsync sets CDP awaitPromise:true. Required for selectDate() —
+    // see start(). Falls back to the injected `evaluate` in unit tests that
+    // only stub the sync one, so existing test doubles keep working.
+    evaluateAsync: deps?.evaluateAsync || deps?.evaluate || _evaluateAsync,
     getReplayApi: deps?.getReplayApi || _getReplayApi,
     pollMs: deps?.pollMs ?? STEP_POLL_MS,
     stepTimeoutMs: deps?.stepTimeoutMs ?? STEP_TIMEOUT_MS,
@@ -28,7 +32,7 @@ function _resolve(deps) {
 }
 
 export async function start({ date, _deps } = {}) {
-  const { evaluate, getReplayApi } = _resolve(_deps);
+  const { evaluate, evaluateAsync, getReplayApi } = _resolve(_deps);
   const rp = await getReplayApi();
   const available = await evaluate(wv(`${rp}.isReplayAvailable()`));
   if (!available) throw new Error('Replay is not available for the current symbol/timeframe');
@@ -48,12 +52,19 @@ export async function start({ date, _deps } = {}) {
   // which initializes the server-side replay session. Must be awaited inside the
   // page context, otherwise the promise is fire-and-forget and replay state says
   // "started" but stepping doesn't work (issue #26).
+  //
+  // The previous `.then(function(){return 'ok';})` wrapper did NOT achieve that:
+  // it just built another Promise, and `evaluate()` runs with CDP
+  // awaitPromise:false, so the whole chain was still fire-and-forget.
+  // selectFirstAvailableDate() had no wrapper at all. Use evaluateAsync
+  // (awaitPromise:true) so the page-side session is genuinely initialized
+  // before we poll. Upstream tradesdontlie/tradingview-mcp#172.
   if (date) {
     const ts = new Date(date).getTime();
     if (isNaN(ts)) throw new Error(`Invalid date: "${date}". Use YYYY-MM-DD format.`);
-    await evaluate(`${rp}.selectDate(${ts}).then(function() { return 'ok'; })`);
+    await evaluateAsync(`${rp}.selectDate(${ts})`);
   } else {
-    await evaluate(`${rp}.selectFirstAvailableDate()`);
+    await evaluateAsync(`${rp}.selectFirstAvailableDate()`);
   }
 
   // Poll until replay is fully initialized: isReplayStarted AND currentDate is set.
@@ -201,6 +212,41 @@ export async function stop({ _deps } = {}) {
   // see FORK_NOTES §21). For long or repeated backtests, prefer backtest_pull
   // (headless, no replay session) over many replay_walk cycles.
   try { await evaluate(`${rp}.goToRealtime()`); } catch {}
+
+  // VERIFY the stop actually took, instead of assuming it did.
+  //
+  // Measured on TV Desktop 3.3.0: from the SECOND start/stop cycle onward in a
+  // single app session, stopReplay() has no effect but this function still
+  // reported success — isReplayStarted() stays true. That silent lie is the
+  // dangerous part, because a subsequent replay_walk then captures ONE bar and
+  // returns success:true / truncated:false. A backtest built on that produces
+  // confident numbers from a single bar with nothing anywhere saying so.
+  //
+  // The underlying session degradation is a TV-side limitation nobody has
+  // solved (upstream #172 is a real but separate bug — awaiting selectDate did
+  // NOT fix this, measured; upstream PR #306 loosened its e2e test to match
+  // "the tool's actual (unverified) stop semantics"; this fork's T113b probed
+  // the teardown API and closed it as a TV limitation). So we cannot make stop
+  // succeed — but we CAN refuse to claim it did. Callers get a real signal and
+  // can relaunch Desktop, which is the only known recovery.
+  let stillStarted = true;
+  for (let i = 0; i < 8; i++) {
+    await new Promise(r => setTimeout(r, 150));
+    stillStarted = await evaluate(wv(`${rp}.isReplayStarted()`));
+    if (!stillStarted) break;
+  }
+  if (stillStarted) {
+    return {
+      success: false,
+      action: 'stop_failed',
+      replay_still_started: true,
+      error: 'replay_stop did not take: isReplayStarted() is still true after stopReplay(). '
+           + 'TradingView\'s replay session is degraded (typically from the 2nd start/stop cycle '
+           + 'onward in one app session). Recovery requires relaunching TradingView Desktop '
+           + '(tv_launch with kill_existing:true). WARNING: replay_walk in this state silently '
+           + 'returns a single bar with success:true — do not trust capture output until this clears.',
+    };
+  }
   return { success: true, action: 'replay_stopped' };
 }
 

@@ -844,3 +844,53 @@ Draft issue reports for the two unreported bugs we patched exist in local develo
 - `watchlist_get` returns `count: 0` when a different sidebar tab is active — TV lazy-renders hidden widgets
 - `alert_create` DOM automation is stale — REST endpoint `pricealerts.tradingview.com/create_alert` works instead (this one may be especially valuable to the maintainer)
 - `alert_delete` only supports `delete_all`, and even that opens a context menu — REST endpoint `pricealerts.tradingview.com/delete_alerts` supports native bulk delete by ID
+
+---
+
+### 22. Replay: await selectDate (upstream #172) + stop() must not lie
+
+Two changes from a live audit on **TV Desktop 3.3.0 / Chromium 140**.
+
+**a) `start()` now awaits `selectDate()` for real.** The old code was
+`await evaluate(rp.selectDate(ts).then(function(){return 'ok';}))`. The `.then()`
+wrapper looks like awaiting but isn't: `evaluate()` runs with CDP
+`awaitPromise:false`, so the whole chain stayed fire-and-forget, and
+`selectFirstAvailableDate()` had no wrapper at all. Both now go through
+`evaluateAsync()` (`awaitPromise:true`). This is upstream
+tradesdontlie/tradingview-mcp#172, still open there.
+
+⚠️ **This did NOT fix the start/stop cycle degradation** — measured before and
+after, identical. Recorded so nobody re-tries it expecting a cure. It is a real
+latent bug worth fixing on its own; it is not *this* bug.
+
+**b) `stop()` verifies the stop actually took.** Measured: from the **2nd**
+start/stop cycle in one app session, `stopReplay()` becomes a no-op —
+`isReplayStarted()` stays true — while `stop()` still returned
+`{success:true, action:'replay_stopped'}`.
+
+That silent lie is the dangerous part. In the degraded state `replay_walk`
+returns **one bar** with `success:true, truncated:false`. Measured on the same
+range: healthy = 11 rows, degraded = 1 row, no error either time. A backtest
+built on that produces confident numbers from a single bar and nothing anywhere
+says so — the exact class of failure `step()` was hardened against in T112
+("fails loud rather than returning stale, which is correct").
+
+`stop()` now polls `isReplayStarted()` after `stopReplay()` and returns
+`{success:false, action:'stop_failed', replay_still_started:true}` with recovery
+instructions when the stop didn't take. We cannot make TV stop — the session
+degradation is a TV-side limitation nobody has solved (this fork's T113b probed
+the teardown API and closed it as such; upstream PR #306 loosened its e2e test
+to match "the tool's actual (unverified) stop semantics") — but we can refuse
+to claim success. Callers get a real signal and can relaunch Desktop, the only
+known recovery.
+
+Cadence note for capture scripts: relaunch Desktop **every 2 captures**, not
+every 4–5. The older ~4–5 figure was measured on 3.1.0; 3.3.0 degrades sooner.
+
+**Validated:** `tests/replay.test.js` 53/53 (added: selectDate/selectFirstAvailableDate
+routed through `evaluateAsync`; `stop()` reports failure when the stop doesn't
+take; healthy-stop mocks now model the true→false transition instead of a
+constant `true`, which was indistinguishable from the degraded case). Live on a
+FRESH Desktop: cycle 1 `success:true` + `isReplayStarted:false` (no false
+positive), cycles 2–3 `success:false` + still started — matching ground truth
+every time.

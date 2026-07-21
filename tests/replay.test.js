@@ -55,11 +55,48 @@ describe('start() — date selection and polling', () => {
     assert.equal(result.replay_started, true);
     assert.equal(result.current_date, 1773532799);
     assert.equal(result.date, '2026-03-15');
-    // Verify selectDate was called with timestamp and .then()
+    // Verify selectDate was called with a ms timestamp, and NOT wrapped in .then().
+    // The old code did `selectDate(ts).then(() => 'ok')` and this test asserted the
+    // presence of `.then(` — i.e. it locked in the bug. That wrapper only builds
+    // another Promise; `evaluate()` runs with CDP awaitPromise:false, so the chain
+    // was still fire-and-forget and the replay session was not initialized when
+    // start() returned. The fix routes it through evaluateAsync (awaitPromise:true),
+    // which needs no wrapper. Upstream tradesdontlie/tradingview-mcp#172.
     const selectCall = evaluate.calls.find(c => c.includes('selectDate'));
     assert.ok(selectCall, 'selectDate was called');
-    assert.ok(selectCall.includes('.then('), 'promise is awaited via .then()');
+    assert.ok(!selectCall.includes('.then('), 'no .then() wrapper — awaiting is evaluateAsync\'s job');
     assert.ok(selectCall.includes('1773532800000') || selectCall.includes('177'), 'passes ms timestamp');
+  });
+
+  it('routes selectDate through evaluateAsync (awaitPromise:true), not evaluate', async () => {
+    // Regression guard for upstream #172. If selectDate ever goes back through the
+    // non-awaiting evaluate(), replay_start returns before TV's session is really
+    // initialized — start "succeeds", stepping misbehaves, and a subsequent
+    // replay_walk can silently return a single bar instead of the requested range.
+    const evaluate = mockEvaluate({
+      'isReplayAvailable': true,
+      'showReplayToolbar': undefined,
+      'isReplayStarted': true,
+      'currentDate': 1773532799,
+    });
+    const asyncCalls = [];
+    const evaluateAsync = async (expr) => { asyncCalls.push(expr); return undefined; };
+    await start({ date: '2026-03-15', _deps: { evaluate, evaluateAsync, getReplayApi: mockGetReplayApi() } });
+    assert.ok(asyncCalls.some(c => c.includes('selectDate')), 'selectDate went through evaluateAsync');
+    assert.ok(!evaluate.calls.some(c => c.includes('selectDate')), 'selectDate did NOT go through the non-awaiting evaluate');
+  });
+
+  it('routes selectFirstAvailableDate through evaluateAsync too', async () => {
+    const evaluate = mockEvaluate({
+      'isReplayAvailable': true,
+      'showReplayToolbar': undefined,
+      'isReplayStarted': true,
+      'currentDate': 1773532799,
+    });
+    const asyncCalls = [];
+    const evaluateAsync = async (expr) => { asyncCalls.push(expr); return undefined; };
+    await start({ _deps: { evaluate, evaluateAsync, getReplayApi: mockGetReplayApi() } });
+    assert.ok(asyncCalls.some(c => c.includes('selectFirstAvailableDate')), 'selectFirstAvailableDate went through evaluateAsync');
   });
 
   it('calls selectFirstAvailableDate when no date given', async () => {
@@ -355,11 +392,27 @@ describe('setResolution() — validate against live set before mutating', () => 
 // ── stop() ───────────────────────────────────────────────────────────────
 
 describe('stop()', () => {
+  // Models a HEALTHY TradingView: isReplayStarted() is true until stopReplay()
+  // runs, false afterwards. The old mocks returned true unconditionally, which
+  // is indistinguishable from the degraded session stop() now detects.
+  function healthyStopDeps(extra = {}) {
+    let stopped = false;
+    const calls = [];
+    const evaluate = async (expr) => {
+      calls.push(expr);
+      if (expr.includes('stopReplay')) { stopped = true; return undefined; }
+      if (expr.includes('isReplayStarted')) return !stopped;
+      for (const [k, v] of Object.entries(extra)) {
+        if (expr.includes(k)) return typeof v === 'function' ? v() : v;
+      }
+      return undefined;
+    };
+    evaluate.calls = calls;
+    return { _deps: { evaluate, getReplayApi: mockGetReplayApi() }, evaluate };
+  }
+
   it('calls stopReplay when started', async () => {
-    const { _deps, evaluate } = mockDeps({
-      'isReplayStarted': true,
-      'stopReplay': undefined,
-    });
+    const { _deps, evaluate } = healthyStopDeps();
     const result = await stop({ _deps });
     assert.equal(result.success, true);
     assert.equal(result.action, 'replay_stopped');
@@ -375,6 +428,21 @@ describe('stop()', () => {
     assert.equal(stopCall, undefined, 'stopReplay not called');
   });
 
+  it('reports failure when the stop does not take (degraded TV session)', async () => {
+    // Measured on TV Desktop 3.3.0: from the 2nd start/stop cycle in one app
+    // session, stopReplay() is a no-op and isReplayStarted() stays true. This
+    // used to return success:true — and a following replay_walk would then
+    // silently capture ONE bar, so a backtest ran on 1 bar and said nothing.
+    const evaluate = async (expr) => (expr.includes('isReplayStarted') ? true : undefined);
+    evaluate.calls = [];
+    const result = await stop({ _deps: { evaluate, getReplayApi: mockGetReplayApi() } });
+    assert.equal(result.success, false, 'must not claim success when replay is still started');
+    assert.equal(result.action, 'stop_failed');
+    assert.equal(result.replay_still_started, true);
+    assert.match(result.error, /relaunch/i, 'error tells the caller how to recover');
+    assert.match(result.error, /single bar/i, 'error warns that replay_walk silently truncates');
+  });
+
   it('does not call hideReplayToolbar', () => {
     const source = readFileSync(new URL('../src/core/replay.js', import.meta.url), 'utf8');
     assert.ok(!source.includes('hideReplayToolbar'), 'hideReplayToolbar must not appear anywhere');
@@ -382,11 +450,7 @@ describe('stop()', () => {
 
   // T113b (safe subset): best-effort return-to-realtime teardown after stopReplay.
   it('calls goToRealtime as a best-effort teardown after stopReplay', async () => {
-    const { _deps, evaluate } = mockDeps({
-      'isReplayStarted': true,
-      'stopReplay': undefined,
-      'goToRealtime': undefined,
-    });
+    const { _deps, evaluate } = healthyStopDeps({ 'goToRealtime': undefined });
     const result = await stop({ _deps });
     assert.equal(result.action, 'replay_stopped');
     const stopIdx = evaluate.calls.findIndex(c => c.includes('stopReplay'));
@@ -396,11 +460,7 @@ describe('stop()', () => {
   });
 
   it('still returns replay_stopped when the goToRealtime teardown throws (cannot regress)', async () => {
-    const { _deps } = mockDeps({
-      'isReplayStarted': true,
-      'stopReplay': undefined,
-      'goToRealtime': () => { throw new Error('teardown boom'); },
-    });
+    const { _deps } = healthyStopDeps({ 'goToRealtime': () => { throw new Error('teardown boom'); } });
     const result = await stop({ _deps });
     assert.equal(result.success, true);
     assert.equal(result.action, 'replay_stopped');
