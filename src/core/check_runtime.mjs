@@ -46,28 +46,66 @@ export function atomicWriteCache(paths, payload) {
   }
 }
 
-export function acquireLock(dataRoot, ticker, timeframe, staleMs) {
+function isPidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (error.code === 'ESRCH') return false;
+    if (error.code === 'EPERM') return true;
+    throw error;
+  }
+}
+
+function readLockMetadata(lockPath) {
+  let metadata;
+  try {
+    metadata = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+  } catch {
+    throw new Error('LOCK_INVALID_METADATA:TRADINGVIEW_CHART');
+  }
+  if (
+    !metadata || !Number.isInteger(metadata.pid) || metadata.pid <= 0
+    || !Number.isFinite(metadata.created_at) || metadata.created_at < 0
+    || typeof metadata.ticker !== 'string' || !metadata.ticker
+    || typeof metadata.timeframe !== 'string' || !metadata.timeframe
+  ) {
+    throw new Error('LOCK_INVALID_METADATA:TRADINGVIEW_CHART');
+  }
+  return metadata;
+}
+
+export function acquireLock(dataRoot, ticker, timeframe, staleMs, {
+  now = () => Date.now(), pid = process.pid, isPidAlive: pidAlive = isPidAlive,
+} = {}) {
   const lockPath = path.join(dataRoot, 'locks', 'tradingview-chart.lock');
   fs.mkdirSync(path.dirname(lockPath), { recursive: true });
   try {
     const fd = fs.openSync(lockPath, 'wx');
-    fs.writeFileSync(fd, JSON.stringify({ created_at: Date.now(), ticker, timeframe }));
+    fs.writeFileSync(fd, JSON.stringify({ pid, created_at: now(), ticker, timeframe }));
     return { fd, lockPath };
   } catch (error) {
     if (error.code !== 'EEXIST') throw error;
-    let createdAt = fs.statSync(lockPath).mtimeMs;
-    try { createdAt = JSON.parse(fs.readFileSync(lockPath, 'utf8')).created_at ?? createdAt; } catch {}
-    const age = Date.now() - createdAt;
+    const metadata = readLockMetadata(lockPath);
+    const age = now() - metadata.created_at;
     if (age > staleMs) {
+      let alive;
+      try {
+        alive = pidAlive(metadata.pid);
+      } catch {
+        throw new Error('LOCK_PID_CHECK_FAILED:TRADINGVIEW_CHART');
+      }
+      if (alive === true) throw new Error('LOCK_CONTENDED:TRADINGVIEW_CHART');
+      if (alive !== false) throw new Error('LOCK_PID_CHECK_FAILED:TRADINGVIEW_CHART');
       fs.unlinkSync(lockPath);
-      return acquireLock(dataRoot, ticker, timeframe, staleMs);
+      return acquireLock(dataRoot, ticker, timeframe, staleMs, { now, pid, isPidAlive: pidAlive });
     }
     throw new Error('LOCK_CONTENDED:TRADINGVIEW_CHART');
   }
 }
 
-export async function withChartLock(dataRoot, staleMs, operation) {
-  const lock = acquireLock(dataRoot, 'CHART', 'GLOBAL', staleMs);
+export async function withChartLock(dataRoot, ticker, timeframe, staleMs, operation) {
+  const lock = acquireLock(dataRoot, ticker, timeframe, staleMs);
   try { return await operation(); } finally { releaseLock(lock); }
 }
 

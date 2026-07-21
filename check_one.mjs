@@ -330,8 +330,8 @@ export async function restoreChartState(chartApi, initialState) {
   if (initialState.resolution) await chartApi.setTimeframe({ timeframe: initialState.resolution });
 }
 
-export async function withChartLifecycle(dataRoot, operation) {
-  return withChartLock(dataRoot, 180000, operation);
+export async function withChartLifecycle(dataRoot, ticker, timeframe, operation) {
+  return withChartLock(dataRoot, ticker, timeframe, 180000, operation);
 }
 
 async function main() {
@@ -341,7 +341,7 @@ async function main() {
   const cacheDir = runtimeDataRoot();
 
   try { await getClient(); } catch(e) { console.error('CDP FAIL:', e.message); process.exit(1); }
-  return withChartLifecycle(cacheDir, async () => {
+  return withChartLifecycle(cacheDir, ticker, timeframe, async () => {
   let initState;
   try {
   initState = await chart.getState();
