@@ -64,20 +64,48 @@ export async function openPanel({ panel, action }) {
     if (result && result.error) throw new Error(result.error);
     return { success: true, panel, action, was_open: result?.was_open ?? false, performed: result?.performed ?? 'unknown' };
   } else {
+    // data-name values drift between TV Desktop builds, so each panel carries a
+    // LIST of candidates tried in order (newest first) before the aria-label
+    // fallback. Verified against TV Desktop 3.3.0 / Chromium 140: the watchlist
+    // button is now `watchlists-button` and exposes no aria-label, so the old
+    // single `base-watchlist-widget-button` + aria pair missed on both counts
+    // and ui_open_panel('watchlist') failed outright.
     const selectorMap = {
-      'watchlist': { dataName: 'base-watchlist-widget-button', ariaLabel: 'Watchlist' },
-      'alerts': { dataName: 'alerts-button', ariaLabel: 'Alerts' },
-      'trading': { dataName: 'trading-button', ariaLabel: 'Trading Panel' },
+      // The watchlist TOGGLE is the right-toolbar button `base`
+      // (aria "Watchlist, details, and news"). It is present whether the sidebar
+      // is collapsed or expanded, which is what makes open/close work from any
+      // state. Do NOT use `watchlists-button` — that is the list-PICKER rendered
+      // *inside* the already-expanded panel, so it only exists when the sidebar
+      // is open and is useless for opening it.
+      'watchlist': { dataNames: ['base', 'base-watchlist-widget-button'], ariaLabel: 'Watchlist, details, and news' },
+      'alerts': { dataNames: ['alerts', 'alerts-button'], ariaLabel: 'Alerts' },
+      'trading': { dataNames: ['trading-button'], ariaLabel: 'Trading Panel' },
     };
     const sel = selectorMap[panel];
     const result = await evaluate(`
       (function() {
-        var dataName = ${JSON.stringify(sel.dataName)};
+        var dataNames = ${JSON.stringify(sel.dataNames)};
         var ariaLabel = ${JSON.stringify(sel.ariaLabel)};
         var action = ${JSON.stringify(action)};
-        var btn = document.querySelector('[data-name="' + dataName + '"]') || document.querySelector('[aria-label="' + ariaLabel + '"]');
-        if (!btn) return { error: 'Button not found for panel: ' + ${JSON.stringify(panel)} };
-        var isActive = btn.getAttribute('aria-pressed') === 'true' || btn.classList.contains('isActive') || btn.classList.toString().indexOf('active') !== -1 || btn.classList.toString().indexOf('Active') !== -1;
+        var btn = null;
+        for (var i = 0; i < dataNames.length && !btn; i++) {
+          btn = document.querySelector('[data-name="' + dataNames[i] + '"]');
+        }
+        if (!btn) btn = document.querySelector('[aria-label="' + ariaLabel + '"]');
+        if (!btn) return { error: 'Button not found for panel: ' + ${JSON.stringify(panel)} + ' (tried data-name ' + dataNames.join('/') + ' and aria-label "' + ariaLabel + '")' };
+        // aria-pressed is AUTHORITATIVE when present: on TV 3.3.0 every sidebar
+        // tab's className matches /active/i, so the old OR-chain fallback
+        // reported isActive=true for ALL tabs. That made "is this panel open?"
+        // answer yes whenever the sidebar was open on ANY tab -- e.g. asking to
+        // open the alerts panel while the watchlist tab was showing returned
+        // "already_open" and did nothing. Only fall back to class sniffing when
+        // the attribute is absent entirely.
+        // (NB: no backticks in this comment -- it lives inside a JS template
+        // literal, so a backtick here terminates the string and breaks the file.)
+        var pressed = btn.getAttribute('aria-pressed');
+        var isActive = pressed !== null
+          ? pressed === 'true'
+          : (btn.classList.contains('isActive') || btn.classList.toString().indexOf('active') !== -1 || btn.classList.toString().indexOf('Active') !== -1);
         var rightArea = document.querySelector('[class*="layout__area--right"]');
         var sidebarOpen = !!(rightArea && rightArea.offsetWidth > 50);
         var isOpen = isActive && sidebarOpen;
