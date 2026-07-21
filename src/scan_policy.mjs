@@ -8,6 +8,41 @@ const BASE_FIELDS = ['conf', 'cumDelta', 'buyPct', 'divSignal', 'maxBuyStack', '
 
 const finite = value => Number.isFinite(value);
 
+function parseStudyNumber(value) {
+  if (value == null || value === '') return null;
+  const parsed = Number.parseFloat(String(value).replace(/[,\s]/g, '').replace(/[−–—]/g, '-'));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function firstStudyNumber(values, aliases) {
+  for (const alias of aliases) {
+    const parsed = parseStudyNumber(values?.[alias]);
+    if (parsed !== null) return parsed;
+  }
+  return null;
+}
+
+export function extractMovingAverages(studies = []) {
+  const movingAverages = { ma20: null, ma100: null, ppSignal: null };
+  for (const study of studies) {
+    const values = study?.values || {};
+    if (study?.name?.includes('Pocket Pivot PRO')) {
+      movingAverages.ma20 ??= firstStudyNumber(values, [
+        'MA Nhanh (Tím)', 'MA Nhanh (Tim)', 'MA Nhanh (TÃƒÂ­m)', 'MA Fast', 'MA Nhanh',
+      ]);
+      movingAverages.ma100 ??= firstStudyNumber(values, [
+        'MA Chậm', 'MA Cham', 'MA ChÃ¡ÂºÂ­m', 'MA Slow', 'MA Macro',
+      ]);
+      movingAverages.ppSignal ??= firstStudyNumber(values, ['Pocket Pivot PRO']);
+    }
+    if (study?.name?.includes('Price Action GEM')) {
+      movingAverages.ma20 ??= firstStudyNumber(values, ['MA Fast']);
+      movingAverages.ma100 ??= firstStudyNumber(values, ['MA Macro', 'MA Slow']);
+    }
+  }
+  return movingAverages;
+}
+
 export function assertH6Resolution(resolution) {
   if (resolution !== '360') throw new Error(`H6 resolution required: expected 360, got ${resolution ?? 'unknown'}`);
   return true;

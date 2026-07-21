@@ -8,7 +8,7 @@ import { readFileSync, writeFileSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { computeRS, writeVnindexCache, VNINDEX_SYM } from './rs_util.mjs';
 import { barStatus, sessionInfo } from './bar_status.mjs';
-import { MARKET_ADJ, SCAN_ENGINE_VERSION, assertH6Resolution, confirmSymbol, scoreSignal as policyScoreSignal } from './src/scan_policy.mjs';
+import { MARKET_ADJ, SCAN_ENGINE_VERSION, assertH6Resolution, confirmSymbol, extractMovingAverages, scoreSignal as policyScoreSignal } from './src/scan_policy.mjs';
 
 let chart;
 let data;
@@ -230,8 +230,7 @@ function extractFP(studies) {
     pocHigh: null, pocLow: null, vah: null, val: null, verRatio: null,
     fpDelta: null,
   };
-  const ma = { ma20: null, ma100: null, ppSignal: null };
-  let price = null;
+  const ma = extractMovingAverages(studies);
 
   for (const s of studies) {
     const v = s.values;
@@ -252,16 +251,6 @@ function extractFP(studies) {
       fp.fpDelta      = parseNum(v['FP Delta']);
       if (fp.totalVol > 0 && fp.buyVol !== null)
         fp.buyPct = Math.round(fp.buyVol / fp.totalVol * 100);
-    }
-    if (s.name.includes('Pocket Pivot PRO')) {
-      ma.ma20     = parseNum(v['MA Nhanh (Tim)'] || v['MA Nhanh (TÃƒÂ­m)'] || v['MA Fast'] || v['MA Nhanh']);
-      ma.ma100    = parseNum(v['MA Cham'] || v['MA ChÃ¡ÂºÂ­m'] || v['MA Slow'] || v['MA Macro']);
-      ma.ppSignal = parseNum(v['Pocket Pivot PRO']);
-    }
-    // Fallback: lay gia tu Price Action GEM
-    if (s.name.includes('Price Action GEM') && !ma.ma20) {
-      ma.ma20  = parseNum(v['MA Fast']);
-      ma.ma100 = parseNum(v['MA Slow']);
     }
   }
 

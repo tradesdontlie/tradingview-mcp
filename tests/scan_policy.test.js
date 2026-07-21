@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assertH6Resolution, confirmSymbol, scoreSignal } from '../src/scan_policy.mjs';
+import { assertH6Resolution, confirmSymbol, extractMovingAverages, scoreSignal } from '../src/scan_policy.mjs';
 
 const fp = { conf: 80, cumDelta: 10, buyPct: 60, divSignal: 0, maxBuyStack: 1 };
 const ma = { ma20: 100, ma100: 90 };
@@ -100,4 +100,43 @@ test('timeframe and symbol guards fail before acquisition', async () => {
   let acquisitions = 0;
   await assert.rejects(confirmSymbol('HOSE:ACB', async () => ({ symbol: 'HOSE:VND' }), { attempts: 2 }), /confirmation failed/);
   assert.equal(acquisitions, 0);
+});
+
+test('extracts live Unicode moving-average labels without null overwrite', () => {
+  const studies = [
+    {
+      name: 'Price Action GEM',
+      values: { 'MA Fast': '71,845', 'MA Macro': '68,190' },
+    },
+    {
+      name: 'Pocket Pivot PRO - Claude',
+      values: {
+        'MA Nhanh (Tím)': '71,845',
+        'MA Chậm': '68,190',
+        'Pocket Pivot PRO': '1',
+      },
+    },
+  ];
+
+  assert.deepEqual(extractMovingAverages(studies), {
+    ma20: 71845,
+    ma100: 68190,
+    ppSignal: 1,
+  });
+});
+
+test('keeps Price Action fallback when Pocket Pivot values are absent', () => {
+  const studies = [
+    {
+      name: 'Price Action GEM',
+      values: { 'MA Fast': '71,845', 'MA Macro': '68,190' },
+    },
+    { name: 'Pocket Pivot PRO - Claude', values: {} },
+  ];
+
+  assert.deepEqual(extractMovingAverages(studies), {
+    ma20: 71845,
+    ma100: 68190,
+    ppSignal: null,
+  });
 });
