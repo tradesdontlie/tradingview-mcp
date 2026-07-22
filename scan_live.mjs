@@ -13,6 +13,7 @@ import { MARKET_ADJ, SCAN_ENGINE_VERSION, assertH6Resolution, confirmSymbol, ext
 let chart;
 let data;
 let getClient;
+let candidateBatch = null;
 
 // Evening Scout feed: scan_live ghi ket qua footprint cho morning brief (scout_promote.py doc file nay)
 const SELF_TEST = process.argv.some(arg => arg.startsWith('--self-test-'));
@@ -29,19 +30,6 @@ const FOREIGN_LATEST_PATH = requiredEnv('FOREIGN_LATEST_PATH');
 const REGIME_LATEST_PATH = requiredEnv('REGIME_LATEST_PATH');
 const SECTOR_MAP_PATH = requiredEnv('SECTOR_MAP_PATH');
 const PYTHON_EXECUTABLE = requiredEnv('PYTHON_EXECUTABLE');
-
-// Fallback neu decision watchlist loi/rong.
-const FALLBACK_WATCHLIST = [
-  { t: 'HOSE:GMD',  g: 1, name: 'GMD'  },
-  { t: 'HOSE:ACB',  g: 1, name: 'ACB'  },
-  { t: 'HOSE:VND',  g: 2, name: 'VND'  },
-  { t: 'HOSE:OCB',  g: 2, name: 'OCB'  },
-  { t: 'HOSE:HCM',  g: 3, name: 'HCM'  },
-  { t: 'HOSE:NAB',  g: 0, name: 'NAB'  },
-  { t: 'HOSE:TPB',  g: 0, name: 'TPB'  },
-  { t: 'HOSE:SAB',  g: 0, name: 'SAB'  },
-  { t: 'HOSE:SHS',  g: 0, name: 'SHS'  },
-];
 
 function exchangePrefix(raw) {
   const ex = (raw || '').toUpperCase();
@@ -65,31 +53,17 @@ function loadExchangeMap() {
 }
 
 function loadWatchlist() {
-  try {
-    const payload = JSON.parse(readFileSync(SCAN_CANDIDATES_PATH, 'utf-8'));
-    if (Array.isArray(payload.candidates) && payload.candidates.length > 0) {
-      return payload.candidates.map(row => {
-        const name = String(row.ticker).toUpperCase();
-        return { t: exchangePrefix(row.exchange) + ':' + name, g: 0, name };
-      });
-    }
-  } catch {}
-  try {
-    const output = execFileSync(PYTHON_EXECUTABLE, [COS_PATH, 'decision', 'watchlist'], { encoding: 'utf-8' });
-    const rows = JSON.parse(output);
-    if (!Array.isArray(rows) || rows.length === 0) return FALLBACK_WATCHLIST;
-    const exchanges = loadExchangeMap();
-    return rows
-      .filter(row => row && row.ticker)
-      .map(row => {
-        const name = String(row.ticker).toUpperCase();
-        const ex = exchanges[name] || 'HOSE';
-        return { t: ex + ':' + name, g: row.group_num ?? 0, name };
-      });
-  } catch (e) {
-    console.error('decision watchlist failed, fallback hardcoded:', e.message);
-    return FALLBACK_WATCHLIST;
-  }
+  const payload = JSON.parse(readFileSync(SCAN_CANDIDATES_PATH, 'utf-8'));
+  if (payload.schema_version !== 3 || !Array.isArray(payload.candidates) || payload.candidates.length === 0)
+    throw new Error('invalid schema-v3 candidate batch');
+  candidateBatch = payload;
+  const seen = new Set();
+  return payload.candidates.map(row => {
+    const name = String(row.ticker || '').toUpperCase();
+    if (!name || seen.has(name)) throw new Error('empty/duplicate candidate ticker');
+    seen.add(name);
+    return { t: exchangePrefix(row.exchange) + ':' + name, g: 0, name, discovery: row };
+  });
 }
 
 function loadMarketRegime() {
@@ -338,9 +312,23 @@ function legacyScoreSignal(fp, ma, price, phase = 'UNKNOWN', vol_ratio = null, c
   return { sig, pct, passed, total, c, phase, vol_ratio, churn };
 }
 
-export { MARKET_ADJ, SCAN_ENGINE_VERSION, assertH6Resolution, confirmSymbol, policyScoreSignal as scoreSignal };
+export { MARKET_ADJ, SCAN_ENGINE_VERSION, assertH6Resolution, confirmSymbol,
+  policyScoreSignal as scoreSignal, classifyDiscovery };
+
+function classifyDiscovery(r) {
+  const branches = r.discovery?.discovery_branches ?? [];
+  const healthy = branches.includes('ACCUMULATION_CANDIDATE') &&
+    ['PULLBACK', 'SIDEWAYS'].includes(r.phase) &&
+    r.vol_ratio !== null && r.vol_ratio <= 1.0 &&
+    r.fp?.buyPct !== null && r.fp.buyPct >= 35 &&
+    r.fp?.cumDelta !== null && r.fp.cumDelta >= 0 &&
+    r.price !== null && r.ma?.ma100 !== null && r.price > r.ma.ma100 && !r.churn;
+  return { branches, healthy, signal: healthy ? 'HEALTHY_ACCUMULATION' :
+    (r.discovery?.primary_discovery_track ?? null) };
+}
 
 function buildScoutResult(r, marketRegime) {
+  const discovery = classifyDiscovery(r);
   return {
     ticker: r.name,
     signal: r.sig,
@@ -378,6 +366,15 @@ function buildScoutResult(r, marketRegime) {
     bar_age_pct: r.barAgePct ?? null,
     session_phase: r.session?.phase ?? null,
     session_trust: r.session?.trust_level ?? null,
+    session_next_phase: r.session?.next_phase ?? null,
+    session_minutes_remaining: r.session?.minutes_remaining ?? null,
+    session_phase_warning: r.session?.phase_warning ?? null,
+    discovery_branches: discovery.branches,
+    accumulation_proxy: r.discovery?.accumulation_proxy ?? false,
+    primary_discovery_track: r.discovery?.primary_discovery_track ?? null,
+    healthy_accumulation: discovery.healthy,
+    discovery_fundamentals: r.discovery?.fundamentals ?? null,
+    discovery_signal: discovery.signal,
   };
 }
 
@@ -480,6 +477,15 @@ async function main() {
       .every(field => result[field] === null);
     process.exit(footprintNull && scored.sig === 'N/A' && zeroDelta.sig === 'WATCH' ? 0 : 1);
   }
+  if (process.argv.includes('--self-test-discovery')) {
+    const base = { discovery: { discovery_branches: ['ACCUMULATION_CANDIDATE'],
+        primary_discovery_track: 'ACCUMULATION_CANDIDATE' }, phase: 'PULLBACK', vol_ratio: 0.8,
+      fp: { buyPct: 40, cumDelta: 1 }, price: 110, ma: { ma100: 100 }, churn: false };
+    const good = classifyDiscovery(base);
+    const bad = classifyDiscovery({ ...base, vol_ratio: 1.2 });
+    console.log(JSON.stringify({ good, bad }));
+    process.exit(good.healthy && !bad.healthy ? 0 : 1);
+  }
   ({ getClient } = await import('./src/connection.js'));
   chart = await import('./src/core/chart.js');
   data = await import('./src/core/data.js');
@@ -518,9 +524,10 @@ async function main() {
   const results = [];
 
   for (let i = 0; i < SCAN_LIST.length; i++) {
-    const { t, g, name } = SCAN_LIST[i];
+    const { t, g, name, discovery } = SCAN_LIST[i];
     process.stdout.write('[' + (i+1) + '/' + SCAN_LIST.length + '] ' + name + '... ');
     const r = await scanOne(t, name, idxCloses, marketRegime.regime);
+    r.discovery = discovery || null;
     if (r.error) {
       console.log('ERROR: ' + r.error);
       results.push({ name, group: g, error: r.error, sig: 'ERR' });
@@ -555,6 +562,7 @@ async function main() {
   const breadth = computeBreadth(results);
   const heat = loadHeat();
   const sectorClusterWarnings = sectorWarnings(results);
+  const marketClock = sessionInfo(new Date(), 'VN');
 
   // ---- PERSIST: scout_scan.json cho morning brief (0 token, headless) ----
   let persistOk = false;
@@ -566,6 +574,10 @@ async function main() {
       scan_time: `${pad(now.getHours())}:${pad(now.getMinutes())}`,
       source: 'scan_live.mjs H6 Footprint',
       engine_version: SCAN_ENGINE_VERSION,
+      candidate_batch_id: candidateBatch?.batch_id ?? null,
+      candidate_schema_version: candidateBatch?.schema_version ?? null,
+      candidate_computed_at: candidateBatch?.computed_at ?? null,
+      market_clock: marketClock,
       results: results.map(r => buildScoutResult(r, marketRegime)),
       breadth,
       market_regime: marketRegime,
@@ -584,6 +596,9 @@ async function main() {
   console.log('  SCAN REPORT H6 | ' + new Date().toLocaleDateString('vi-VN') + ' | BUY:' + buy.length + ' WATCH:' + watch.length + ' AVOID:' + avoid.length + ' LOAI:' + loai.length);
   console.log('  Breadth: up ' + breadth.up + ' | down ' + breadth.down + ' | pct_up ' + (breadth.pct_up ?? 'N/A') + '%');
   console.log('  Regime: ' + marketRegime.regime + ' | Heat: ' + (heat.status || 'N/A') + ' (warning only)');
+  console.log('  Clock: ' + marketClock.phase + ' | trust ' + marketClock.trust_level +
+    (marketClock.minutes_remaining !== null ? ' | ' + marketClock.minutes_remaining + 'm -> ' + marketClock.next_phase : '') +
+    (marketClock.phase_warning ? ' | WARNING ' + marketClock.phase_warning : ''));
   console.log('='.repeat(W));
 
   function printHeader() {
