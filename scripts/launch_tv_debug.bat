@@ -21,13 +21,15 @@ if exist "%PROGRAMFILES(x86)%\TradingView\TradingView.exe" set "TV_EXE=%PROGRAMF
 REM Check MSIX / Windows Store installs.
 REM Get-AppxPackage resolves the install without elevation; enumerating
 REM %PROGRAMFILES%\WindowsApps with dir requires admin rights, so keep it as a fallback.
+REM Match by Name substring, not exact: 'TradingView.Desktop' is the manifest AppId, not the
+REM package Name (e.g. the retail listing installs as '31178TradingViewInc.TradingView').
 if "%TV_EXE%"=="" (
-    for /f "usebackq tokens=*" %%i in (`powershell -NoProfile -Command "(Get-AppxPackage -Name 'TradingView.Desktop' -ErrorAction SilentlyContinue).InstallLocation" 2^>nul`) do (
+    for /f "usebackq tokens=*" %%i in (`powershell -NoProfile -Command "(Get-AppxPackage ^| Where-Object { $_.Name -like '*TradingView*' } ^| Select-Object -First 1).InstallLocation" 2^>nul`) do (
         if exist "%%i\TradingView.exe" set "TV_EXE=%%i\TradingView.exe"
     )
 )
 if "%TV_EXE%"=="" (
-    for /f "tokens=*" %%i in ('dir /s /b "%PROGRAMFILES%\WindowsApps\TradingView*\TradingView.exe" 2^>nul') do set "TV_EXE=%%i"
+    for /f "tokens=*" %%i in ('dir /s /b "%PROGRAMFILES%\WindowsApps\*TradingView*\TradingView.exe" 2^>nul') do set "TV_EXE=%%i"
 )
 if "%TV_EXE%"=="" (
     for /f "tokens=*" %%i in ('where TradingView.exe 2^>nul') do set "TV_EXE=%%i"
@@ -59,8 +61,9 @@ set /a TRIES+=1
 if %TRIES% geq 30 (
     echo.
     echo Error: TradingView is running but CDP never became available on port %PORT%.
-    echo Some Windows MSIX builds block the debug port. Use the tv_launch MCP tool,
-    echo which falls back to launching from a local copy of the package.
+    echo Some Windows MSIX builds block the debug port even from a local copy. Use the
+    echo tv_launch MCP tool ^(or `tv launch`^), which also falls back to activating the
+    echo package through a shell:AppsFolder shortcut.
     exit /b 1
 )
 echo Still waiting...
