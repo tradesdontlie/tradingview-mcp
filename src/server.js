@@ -1,3 +1,4 @@
+import './load-env.js'; // load .env.local (TV_SESSION etc.) before anything reads process.env
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { registerHealthTools } from './tools/health.js';

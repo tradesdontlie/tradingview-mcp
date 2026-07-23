@@ -4,6 +4,49 @@
 > This queue starts at T112. Historical shipped work (T1–T111) predates the queue and is
 > narrated in `../FORK_NOTES.md` (the fork's divergence log) — not migrated here.
 
+## T132 — persistent `.env.local` loader for sidecar secrets
+
+**Status:** DONE (2026-07-22)
+**Priority:** Tier-Q (quality-of-life)
+**Effort:** S
+**Phase:** 2 (Block B follow-on)
+**Dependencies:** T118 / T119 (the sidecars that read `TV_SESSION` / `TV_SIGNATURE`)
+
+### Motivation
+`backtest_pull` and `backtest_run_strategy` read the session token from `process.env`,
+but nothing loaded it — supplying it meant exporting the vars into the exact host that
+launched the server, and the T119 pattern extracted a token into a throwaway `.env` it
+then deleted. No persistent, low-friction path existed for a long-lived MCP server
+started by an editor/agent host rather than a shell.
+
+### Outcome
+- New `src/load-env.js`: zero-dependency loader. Pure `parseEnv(text)` +
+  `loadEnvFile(path, env)` (no-override semantics — real env wins), plus an import
+  side-effect that loads the repo-root `.env.local` into `process.env`. Skips blanks/`#`
+  comments; preserves `=` inside values (base64 signature padding).
+- `src/server.js`: imports `./load-env.js` as the **first** statement, before anything
+  reads `process.env`.
+- `.env.local` is gitignored (`.gitignore`: `.env.*`); the token stays local, never
+  committed (S3). The loader itself carries no secret.
+
+### Verification (actual)
+- `tests/load-env.test.js` — 6 token-free unit tests (temp fixture + own env object),
+  green; wired into `test:unit:pure`.
+- Live: after `import './src/load-env.js'`, `process.env` gains `TV_SESSION` +
+  `TV_SIGNATURE` (checked by key name only, values never echoed). `.env.local` written
+  with real newlines, mode 600, `git check-ignore` confirms ignored.
+
+### Files touched
+- New: `src/load-env.js`, `tests/load-env.test.js`.
+- Modified: `src/server.js` (one import line), `package.json` (`test:unit:pure`),
+  `FORK_NOTES.md` (§25), `TASKS.md`, `tasks/done.md`.
+
+### Note
+Uncommitted as of filing — commit/push to the public fork is deferred to Kp's trigger,
+with the `fork-publishing.md` secret sweep applied at that time.
+
+---
+
 ## T119 — strategy harness (strategyReport + code-side P&L)
 
 **Status:** DONE (2026-07-02)

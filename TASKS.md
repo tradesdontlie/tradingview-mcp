@@ -4,8 +4,17 @@
 > Shipped-work narrative (what diverges from upstream and why) continues to live in `FORK_NOTES.md`.
 > T-numbers are shared across FORK_NOTES + commit messages + this queue, so they never collide.
 
-**Next ID:** T132
+**Next ID:** T133
 **Active branch:** `fixes/draw-api-resolve`
+
+**T132 SHIPPED 2026-07-22** — persistent `.env.local` loader for sidecar secrets.
+New zero-dependency `src/load-env.js` (imported first in `src/server.js`) loads
+`TV_SESSION` / `TV_SIGNATURE` from a gitignored repo-root `.env.local` into
+`process.env` without overriding existing env — so the headless backtest sidecars have
+a persistent, low-friction token source when the server is launched by an editor/agent
+host rather than a shell. Token-free unit suite (`tests/load-env.test.js`, 6 tests, in
+`test:unit:pure`). Loader carries no secret; `.env.local` never committed. See
+FORK_NOTES §25 + `tasks/done.md`. **Uncommitted — commit deferred to next fork push.**
 
 **T131 SHIPPED 2026-07-18** — `tv replay walk --sections` (CLI/MCP parity). The MCP tool
 always accepted `sections`; the CLI handler never passed it through, pinning the CLI to
@@ -104,6 +113,7 @@ The scale unlock: array-speed full-history backtests, no browser. Gated on a via
 - T120 — Strategy-tester DOM-scrape fallback — WON'T-FIX / superseded by T119 — see `tasks/backlog.md` + FORK_NOTES §21
 
 ## Recently done
+- T132 — persistent `.env.local` loader for sidecar secrets (`TV_SESSION`/`TV_SIGNATURE`) — DONE 2026-07-22 (new `src/load-env.js` imported first in `server.js`; 6 token-free unit tests; `.env.local` gitignored) — see FORK_NOTES §25. **Uncommitted.**
 - T130 — ESLint `no-undef` guard + CI workflow — DONE 2026-07-18 (upstream #205; src/ clean 0 errors, CI runs lint + `test:unit:pure` on Node 20/22) — see FORK_NOTES.
 - T129 — reliable indicator inputs-on-add (setInputValues readback) — DONE 2026-07-18 (upstream #249; mechanism-verified on 3.3.0, full add+readback e2e pending stable CDP) — see FORK_NOTES.
 - T128 — `ui_open_panel` close on TV 3.2+ (`hideWidget` removed) — DONE 2026-07-18 (upstream #248; LIVE 484px→38px via `bwb.close()` fallback) — see FORK_NOTES.

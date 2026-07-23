@@ -836,6 +836,35 @@ scripting the documented ~4–5-cycle replay restart (see §18 / T113b).
 
 ---
 
+## §25 — persistent `.env.local` loader for sidecar secrets (T132, 2026-07-22)
+
+**Symptom.** The headless sidecars — `backtest_pull` (§19) and `backtest_run_strategy`
+(§20) — read `TV_SESSION` / `TV_SIGNATURE` from `process.env`, but nothing ever loaded
+them. Supplying the token meant exporting the vars into the exact shell/host that
+launched the MCP server. For a long-lived server started by an editor or agent host
+(not a shell), there was no low-friction, persistent way to provide the session token,
+and the §20 workflow resorted to extracting a token into a throwaway `.env` that was
+deleted immediately after use.
+
+**Fix.** New `src/load-env.js`, a zero-dependency loader imported as the **first**
+statement in `src/server.js` (so the token is present before any sidecar reads
+`process.env`). It parses `KEY=VALUE` lines from the repo-root `.env.local` and injects
+them into `process.env` **without overriding** vars already set — the real environment
+always wins, so an explicit shell export still takes precedence. Blanks and `#` comments
+are skipped; `=` inside a value (base64 signature padding) is preserved.
+
+`.env.local` is covered by `.gitignore` (`.env.*`) — the session token stays local and
+is never committed (Standard S3). The loader carries **no** secret itself; it is generic
+plumbing.
+
+**Verified.** `parseEnv` / `loadEnvFile` split into pure, injectable functions with a
+token-free unit suite (`tests/load-env.test.js`, 6 tests, uses a temp fixture + its own
+env object — added to `test:unit:pure`). Loader confirmed live: after import,
+`process.env` gains the expected keys (checked by key **name** only; values never
+echoed).
+
+---
+
 ## Open upstream-facing work (optional)
 
 Draft issue reports for the two unreported bugs we patched exist in local development notes. Paste at https://github.com/tradesdontlie/tradingview-mcp/issues/new when you want maintainer attention. Issues:
