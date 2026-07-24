@@ -548,7 +548,8 @@ export async function getPineLines({ study_filter, verbose } = {}) {
       const v = item.raw;
       const y1 = roundPrice(v.y1);
       const y2 = roundPrice(v.y2);
-      if (verbose) allLines.push({ id: item.id, y1, y2, x1: v.x1, x2: v.x2, horizontal: v.y1 === v.y2, style: v.st, width: v.w, color: v.ci });
+      const tooltip = v.tt || '';
+      if (verbose) allLines.push({ id: item.id, y1, y2, x1: v.x1, x2: v.x2, horizontal: v.y1 === v.y2, style: v.st, width: v.w, color: v.ci, tooltip });
       if (y1 != null && v.y1 === v.y2 && !seen[y1]) { hLevels.push(y1); seen[y1] = true; }
     }
     hLevels.sort((a, b) => b - a);
