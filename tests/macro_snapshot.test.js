@@ -1,37 +1,69 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { captureMacroSnapshot } from '../src/core/macro_snapshot.js';
 
 const assets = [
   'OANDA:XAUUSD', 'TVC:DXY', 'TVC:US02Y', 'TVC:US10Y', 'CME_MINI:ES1!', 'HOSE:VNINDEX',
-].map((provider_symbol) => ({ provider_symbol, expected_full_name: provider_symbol }));
+].map((provider_symbol) => ({ id: provider_symbol, provider_symbol, expected_full_name: provider_symbol }));
 
-function deps(failSymbol = null) {
-  const calls = [];
+function deps({ failQuote = null, mismatch = null, ready = true, restoreFails = false, finalMismatch = false } = {}) {
+  const calls = []; let symbol = 'NASDAQ:AAPL'; let resolution = '60';
   return {
     calls,
-    getState: async () => ({ symbol: 'NASDAQ:AAPL', resolution: '60' }),
-    setSymbol: async ({ symbol }) => { calls.push(`symbol:${symbol}`); if (symbol === failSymbol) throw new Error('quote unavailable'); },
-    setTimeframe: async ({ timeframe }) => calls.push(`timeframe:${timeframe}`),
-    symbolInfo: async () => ({ symbol: calls.at(-2).slice(7), full_name: calls.at(-2).slice(7), resolution: '1' }),
-    getQuote: async () => ({ last: 1, time: 1710000000 }),
+    getState: async () => finalMismatch && symbol === 'NASDAQ:AAPL' && resolution === '60' && calls.length > 2
+      ? { symbol: 'TVC:DXY', resolution: '1' } : { symbol, resolution },
+    setSymbol: async ({ symbol: next }) => { calls.push(`symbol:${next}`); if (restoreFails && next === 'NASDAQ:AAPL') throw new Error('restore offline'); symbol = next; return { success: true, chart_ready: ready }; },
+    setTimeframe: async ({ timeframe }) => { calls.push(`timeframe:${timeframe}`); resolution = timeframe; return { success: true, chart_ready: ready }; },
+    symbolInfo: async () => ({ symbol, full_name: symbol === mismatch ? 'WRONG:NAME' : symbol, resolution }),
+    getQuote: async () => { if (symbol === failQuote) throw new Error('quote unavailable'); return { last: 1, time: 1710000000 }; },
     getOhlcv: async () => ({ bars: Array.from({ length: 20 }, (_, i) => ({ time: 1710000000 + i * 60, close: i + 1 })) }),
   };
 }
 
+function capture(fake) {
+  return captureMacroSnapshot({ config: { assets }, eventId: 'event', phase: 'PRE_T15', asOfUtc: '2026-07-26T00:00:00Z', deps: fake });
+}
+
 describe('macro snapshot bridge', () => {
-  it('captures configured assets in order and restores the chart', async () => {
-    const { captureMacroSnapshot } = await import('../src/core/macro_snapshot.js');
-    const fake = deps();
-    const result = await captureMacroSnapshot({ config: { assets }, eventId: 'event', phase: 'PRE_T15', asOfUtc: '2026-07-26T00:00:00Z', deps: fake });
+  it('captures all configured assets in order and verifies final restoration state', async () => {
+    const fake = deps(); const result = await capture(fake);
     assert.equal(result.assets.length, 6);
+    assert.deepEqual(result.assets.map((asset) => asset.loaded_symbol), assets.map((asset) => asset.provider_symbol));
     assert.deepEqual(fake.calls.slice(-2), ['symbol:NASDAQ:AAPL', 'timeframe:60']);
-    assert.equal(result.assets[0].loaded_full_name, 'OANDA:XAUUSD');
   });
 
-  it('restores when capture fails', async () => {
-    const { captureMacroSnapshot } = await import('../src/core/macro_snapshot.js');
-    const fake = deps('TVC:DXY');
-    await assert.rejects(() => captureMacroSnapshot({ config: { assets }, eventId: 'event', phase: 'PRE_T15', asOfUtc: '2026-07-26T00:00:00Z', deps: fake }));
+  it('restores after a post-switch market-data failure', async () => {
+    const fake = deps({ failQuote: 'TVC:DXY' });
+    await assert.rejects(() => capture(fake), /quote unavailable/);
     assert.deepEqual(fake.calls.slice(-2), ['symbol:NASDAQ:AAPL', 'timeframe:60']);
+  });
+
+  it('fails closed on identity mismatch and still restores', async () => {
+    const fake = deps({ mismatch: 'TVC:DXY' });
+    await assert.rejects(() => capture(fake), /identity mismatch/);
+    assert.deepEqual(fake.calls.slice(-2), ['symbol:NASDAQ:AAPL', 'timeframe:60']);
+  });
+
+  it('rejects false readiness before requesting market data', async () => {
+    const fake = deps({ ready: false });
+    await assert.rejects(() => capture(fake), /did not become ready/);
+  });
+
+  it('reports a restoration failure distinctly', async () => {
+    await assert.rejects(() => capture(deps({ restoreFails: true })), /restoration failed: restore offline/);
+  });
+
+  it('reports an unproven final restoration state distinctly', async () => {
+    await assert.rejects(() => capture(deps({ finalMismatch: true })), /restoration failed: .*final restoration state mismatch/);
+  });
+
+  it('registers macro-snapshot in router help and command help', () => {
+    const root = new URL('..', import.meta.url).pathname;
+    for (const args of [['--help'], ['macro-snapshot', '--help']]) {
+      const result = spawnSync(process.execPath, ['src/cli/index.js', ...args], { cwd: root, encoding: 'utf8' });
+      assert.equal(result.status, 0);
+      assert.match(result.stdout, /macro-snapshot/);
+    }
   });
 });
