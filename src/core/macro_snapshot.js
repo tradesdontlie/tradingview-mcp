@@ -18,6 +18,12 @@ function hash(value) {
   return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
+function isoTime(value) {
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds)) throw new Error('macro snapshot requires quote/bar timestamp evidence');
+  return new Date(seconds * 1000).toISOString().replace('.000Z', 'Z');
+}
+
 function requireReady(result, action) {
   if (!result || result.success === false || result.chart_ready !== true) {
     throw new Error(`macro chart ${action} did not become ready`);
@@ -53,8 +59,16 @@ export async function captureMacroSnapshot({ config, eventId, phase, asOfUtc, de
       const [quote, ohlcv] = await Promise.all([api.getQuote({}), api.getOhlcv({ count: 20 })]);
       const bars = normaliseBars(ohlcv.bars);
       const raw = { quote, bars };
+      const observedAtUtc = isoTime(quote.time ?? bars.at(-1)?.time);
+      // TradingView exposes timestamps, not a trustworthy exchange-session calendar.
+      // VNINDEX fails closed to context-only until a v1 session status is supplied.
+      const vnindex = asset.id === 'VNINDEX';
       assets.push({ id: asset.id || asset.provider_symbol, provider_symbol: asset.provider_symbol,
-        loaded_symbol: info.symbol, loaded_full_name: info.full_name, resolution: '1', quote, bars, raw_payload_hash: hash(raw) });
+        loaded_symbol: info.symbol, loaded_full_name: info.full_name, resolution: '1', quote,
+        observed_at_utc: observedAtUtc, retrieved_at_utc: observedAtUtc,
+        session_contract_version: config.sessions_version, session_status: vnindex ? 'UNKNOWN' : 'OPEN',
+        context_only_reason: vnindex ? 'VNINDEX_SESSION_UNKNOWN' : null,
+        bars, raw_payload_hash: hash(raw) });
     }
   } catch (error) {
     captureError = error;
