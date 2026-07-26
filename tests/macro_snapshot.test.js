@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { captureMacroSnapshot } from '../src/core/macro_snapshot.js';
 
 const assets = [
@@ -59,7 +60,7 @@ describe('macro snapshot bridge', () => {
   });
 
   it('registers macro-snapshot in router help and command help', () => {
-    const root = new URL('..', import.meta.url).pathname;
+    const root = fileURLToPath(new URL('..', import.meta.url));
     for (const args of [['--help'], ['macro-snapshot', '--help']]) {
       const result = spawnSync(process.execPath, ['src/cli/index.js', ...args], { cwd: root, encoding: 'utf8' });
       assert.equal(result.status, 0);
