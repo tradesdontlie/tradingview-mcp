@@ -1,8 +1,10 @@
 /**
  * Comprehensive E2E tests for all 70 TradingView MCP tools.
- * Requires TradingView Desktop running with --remote-debugging-port=9222
+ * Requires TradingView Desktop running with --remote-debugging-port=<CDP_PORT>
+ * (default 9222, override via TV_CDP_PORT/CDP_PORT — same convention as src/connection.js)
  *
  * Run: node --test tests/e2e.test.js
+ *      CDP_PORT=9333 node --test tests/e2e.test.js
  *
  * Coverage: 70+ tests across 12 tool modules
  * - Health & Connection (4 tools)
@@ -22,6 +24,12 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import CDP from 'chrome-remote-interface';
+
+// Same resolution convention as src/connection.js: TV_CDP_* wins over CDP_*,
+// and the host defaults to 127.0.0.1 (on Windows, localhost may resolve to ::1
+// first while Electron's --remote-debugging-port only listens on IPv4).
+const CDP_HOST = process.env.TV_CDP_HOST || process.env.CDP_HOST || '127.0.0.1';
+const CDP_PORT = Number(process.env.TV_CDP_PORT || process.env.CDP_PORT) || 9222;
 
 let client;
 let Runtime;
@@ -71,11 +79,11 @@ describe('TradingView MCP — Full E2E (70 tools)', () => {
 
   before(async () => {
     try {
-      const targets = await CDP.List({ host: 'localhost', port: 9222 });
+      const targets = await CDP.List({ host: CDP_HOST, port: CDP_PORT });
       const chartTarget = targets.find(t => t.url && t.url.includes('tradingview.com/chart'));
       if (!chartTarget) throw new Error('No TradingView chart target found');
 
-      client = await CDP({ host: 'localhost', port: 9222, target: chartTarget.id });
+      client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: chartTarget.id });
       await client.Runtime.enable();
       await client.Page.enable();
       await client.DOM.enable();
@@ -83,7 +91,9 @@ describe('TradingView MCP — Full E2E (70 tools)', () => {
       Input = client.Input;
       Page = client.Page;
     } catch (err) {
-      console.error('Cannot connect to TradingView. Make sure it is running with --remote-debugging-port=9222');
+      console.error(`Cannot connect to TradingView at ${CDP_HOST}:${CDP_PORT}. ` +
+        `Make sure it is running with --remote-debugging-port=${CDP_PORT} ` +
+        `(or set TV_CDP_PORT/CDP_PORT to the port it actually uses). Cause: ${err.message}`);
       process.exit(1);
     }
   });
