@@ -3,6 +3,7 @@
  * Zero dependencies — uses only Node.js built-ins.
  */
 import { parseArgs } from 'node:util';
+import { disconnect } from '../connection.js';
 
 /** @type {Map<string, { description: string, options?: object, handler: Function, subcommands?: Map<string, object> }>} */
 const commands = new Map();
@@ -132,19 +133,37 @@ async function execute(handler, values, positionals) {
   try {
     const result = await handler(values, positionals);
     console.log(JSON.stringify(result, null, 2));
-    process.exit(0);
+    await shutdown(0);
   } catch (err) {
-    handleError(err);
+    await handleError(err);
   }
 }
 
-function handleError(err) {
+/**
+ * Close the CDP WebSocket, then exit.
+ *
+ * Uses process.exitCode + unref'd handles rather than a bare process.exit():
+ * process.exit() tears down the event loop while sockets (the CDP WebSocket,
+ * and undici's keep-alive pool used by `pine check`'s fetch) are still open,
+ * which trips a libuv assertion on Windows (src\win\async.c:94) and reports a
+ * bogus exit code 127 even when the command succeeded.
+ */
+async function shutdown(code) {
+  try { await disconnect(); } catch { /* nothing to close */ }
+  process.exitCode = code;
+  // Let stdout flush and any keep-alive sockets go idle, then force-exit in
+  // case something (undici's pool) would otherwise hold the loop open.
+  const timer = setTimeout(() => process.exit(code), 100);
+  timer.unref();
+}
+
+async function handleError(err) {
   const message = err.message || String(err);
   // Connection failures get exit code 2
   if (/CDP|connection|ECONNREFUSED|not running/i.test(message)) {
     console.error(JSON.stringify({ success: false, error: message }, null, 2));
-    process.exit(2);
+    await shutdown(2);
   }
   console.error(JSON.stringify({ success: false, error: message }, null, 2));
-  process.exit(1);
+  await shutdown(1);
 }
