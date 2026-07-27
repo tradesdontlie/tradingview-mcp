@@ -6,6 +6,10 @@ async function readStdin() {
   if (process.stdin.isTTY) return null;
   const chunks = [];
   for await (const chunk of process.stdin) chunks.push(chunk);
+  // Release the stdin handle. Without this, the still-open stream keeps a
+  // libuv async handle alive and process.exit() trips an assertion on Windows
+  // (src\win\async.c:94), producing a bogus exit code 127 on success.
+  process.stdin.destroy();
   return Buffer.concat(chunks).toString('utf-8');
 }
 
