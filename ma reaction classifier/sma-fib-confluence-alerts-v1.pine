@@ -1,0 +1,428 @@
+// MPL-2.0
+//@version=6
+indicator("SMA/Fib Confluence Alerts [200D/200W]", overlay=true, max_bars_back=1200, max_labels_count=500)
+
+// Alert-capable successor to the frozen research companion. Signals emit only on confirmed bar closes.
+// Display inputs do not alter event logic, and this indicator never places orders.
+showGoldenPocket = input.bool(true, "Show Golden Pocket")
+showControlBands = input.bool(false, "Show Neighboring Control Bands")
+showEventLabels = input.bool(true, "Show Research Event Labels")
+showStatusTable = input.bool(true, "Show Research Status Table")
+showAlertMarkers = input.bool(true, "Show Golden Pocket Alert Markers")
+
+int MA_LENGTH = 200
+int PIVOT_LEFT = 5
+int PIVOT_RIGHT = 5
+float SHALLOW_MIN = 0.586
+float GOLDEN_MIN = 0.618
+float GOLDEN_MAX = 0.650
+float DEEP_MAX = 0.682
+
+bool profileDaily = timeframe.period == "1D"
+bool profileWeekly = timeframe.period == "1W"
+bool profileSupported = profileDaily or profileWeekly
+int profileCode = profileDaily ? 1 : profileWeekly ? 2 : 0
+float outerZonePct = profileDaily ? 5.0 : profileWeekly ? 10.0 : na
+float neutralBandPct = profileDaily ? 0.5 : profileWeekly ? 1.0 : na
+int testObservationBars = profileDaily ? 10 : profileWeekly ? 8 : 0
+int reactionConfirmationBars = profileDaily ? 5 : profileWeekly ? 4 : 0
+int durabilityBars = profileDaily ? 20 : profileWeekly ? 12 : 0
+
+round8(float value) => math.round(value * 100000000.0) / 100000000.0
+round12(float value) => math.round(value * 1000000000000.0) / 1000000000000.0
+
+strictPivotLow() =>
+    bool result = bar_index >= PIVOT_LEFT + PIVOT_RIGHT
+    float candidate = low[PIVOT_RIGHT]
+    if result
+        for offset = 0 to PIVOT_LEFT + PIVOT_RIGHT
+            if offset != PIVOT_RIGHT and not (candidate < low[offset])
+                result := false
+    result
+
+strictPivotHigh() =>
+    bool result = bar_index >= PIVOT_LEFT + PIVOT_RIGHT
+    float candidate = high[PIVOT_RIGHT]
+    if result
+        for offset = 0 to PIVOT_LEFT + PIVOT_RIGHT
+            if offset != PIVOT_RIGHT and not (candidate > high[offset])
+                result := false
+    result
+
+reactionFor(int origin, int confirmedSide) => origin == 1 ? (confirmedSide == 1 ? 1 : 3) : (confirmedSide == 1 ? 2 : 4)
+initialDurabilityFor(int reaction) => reaction == 1 ? 1 : reaction == 2 ? 2 : reaction == 3 ? 3 : reaction == 4 ? 4 : 0
+completedDurabilityFor(int reaction) => reaction == 1 ? 5 : reaction == 2 ? 6 : reaction == 3 ? 7 : reaction == 4 ? 8 : 0
+reversedDurabilityFor(int reaction) => reaction == 1 ? 9 : reaction == 2 ? 10 : reaction == 3 ? 11 : reaction == 4 ? 12 : 0
+expectedSideFor(int reaction) => reaction == 1 or reaction == 2 ? 1 : reaction == 3 or reaction == 4 ? -1 : 0
+
+fibText(int code) => code == 2 ? "Active pair" : code == 1 ? "Waiting high" : code == 3 ? "High superseded" : code == 4 ? "Low broken" : "Waiting low"
+originText(int code) => code == 1 ? "Above" : code == -1 ? "Below" : "None"
+reactionText(int code) => code == 1 ? "Hold" : code == 2 ? "Reclaim" : code == 3 ? "Breakdown" : code == 4 ? "Rejection" : code == 5 ? "Indeterminate" : code == 6 ? "No test" : "Pending"
+durabilityText(int code) => code == 1 ? "Holding" : code == 2 ? "Reclaim holding" : code == 3 ? "Breakdown active" : code == 4 ? "Rejection active" : code == 5 ? "Held window" : code == 6 ? "Reclaim held" : code == 7 ? "Breakdown persisted" : code == 8 ? "Rejection persisted" : code == 9 ? "Failed hold" : code == 10 ? "Failed reclaim" : code == 11 ? "Breakdown recovered" : code == 12 ? "Rejection recovered" : "None"
+bandText(int code) => code == 1 ? "Shallow" : code == 2 ? "Golden" : code == 3 ? "Deep" : "None"
+
+// Prior SMA mirrors the offline rolling sum and excludes the current close.
+var float priorCloseSum = 0.0
+if profileSupported and barstate.isconfirmed and bar_index > 0
+    priorCloseSum += close[1]
+    if bar_index > MA_LENGTH
+        priorCloseSum -= close[MA_LENGTH + 1]
+float priorSma = profileSupported and bar_index >= MA_LENGTH ? priorCloseSum / MA_LENGTH : na
+float distancePct = not na(priorSma) ? (close - priorSma) / priorSma * 100.0 : na
+int positionCode = na(distancePct) ? 9 : distancePct > neutralBandPct ? 1 : distancePct < -neutralBandPct ? -1 : 0
+bool insideOuterZone = not na(distancePct) and math.abs(distancePct) <= outerZonePct
+bool maTouched = not na(priorSma) and low <= priorSma and high >= priorSma
+
+// Causal Fib state. Context codes: 0 waiting low, 1 waiting high, 2 active, 3 high superseded, 4 low broken.
+var int fibContextCode = 0
+var float eligibleLowPrice = na
+var int eligibleLowPivotBar = na
+var int eligibleLowPivotTime = na
+var int eligibleLowConfirmationBar = na
+var int eligibleLowConfirmationTime = na
+var float pendingLowPrice = na
+var int pendingLowPivotBar = na
+var int pendingLowPivotTime = na
+var int pendingLowConfirmationBar = na
+var int pendingLowConfirmationTime = na
+var bool pairActive = false
+var float pairLowPrice = na
+var int pairLowPivotBar = na
+var int pairLowPivotTime = na
+var int pairLowConfirmationBar = na
+var int pairLowConfirmationTime = na
+var float pairHighPrice = na
+var int pairHighPivotBar = na
+var int pairHighPivotTime = na
+var int pairHighConfirmationBar = na
+var int pairHighConfirmationTime = na
+
+if profileSupported and barstate.isconfirmed
+    if not na(pendingLowPrice) and low < pendingLowPrice
+        pendingLowPrice := na
+        pendingLowPivotBar := na
+        pendingLowPivotTime := na
+        pendingLowConfirmationBar := na
+        pendingLowConfirmationTime := na
+
+    if pairActive and low < pairLowPrice
+        pairActive := false
+        eligibleLowPrice := na
+        pendingLowPrice := na
+        fibContextCode := 4
+    else if pairActive and bar_index > pairHighPivotBar and high > pairHighPrice
+        if not na(pendingLowPrice)
+            eligibleLowPrice := pendingLowPrice
+            eligibleLowPivotBar := pendingLowPivotBar
+            eligibleLowPivotTime := pendingLowPivotTime
+            eligibleLowConfirmationBar := pendingLowConfirmationBar
+            eligibleLowConfirmationTime := pendingLowConfirmationTime
+        else
+            eligibleLowPrice := pairLowPrice
+            eligibleLowPivotBar := pairLowPivotBar
+            eligibleLowPivotTime := pairLowPivotTime
+            eligibleLowConfirmationBar := pairLowConfirmationBar
+            eligibleLowConfirmationTime := pairLowConfirmationTime
+        pairActive := false
+        pendingLowPrice := na
+        fibContextCode := 3
+    else if not pairActive and not na(eligibleLowPrice) and low < eligibleLowPrice
+        eligibleLowPrice := na
+        fibContextCode := 4
+
+    int candidatePivotBar = bar_index - PIVOT_RIGHT
+    if strictPivotLow()
+        float confirmedLowPrice = low[PIVOT_RIGHT]
+        int confirmedLowTime = time[PIVOT_RIGHT]
+        if pairActive and candidatePivotBar > pairHighPivotBar
+            pendingLowPrice := confirmedLowPrice
+            pendingLowPivotBar := candidatePivotBar
+            pendingLowPivotTime := confirmedLowTime
+            pendingLowConfirmationBar := bar_index
+            pendingLowConfirmationTime := time
+        else if not pairActive
+            eligibleLowPrice := confirmedLowPrice
+            eligibleLowPivotBar := candidatePivotBar
+            eligibleLowPivotTime := confirmedLowTime
+            eligibleLowConfirmationBar := bar_index
+            eligibleLowConfirmationTime := time
+            fibContextCode := 1
+
+    if strictPivotHigh() and not pairActive and not na(eligibleLowPrice) and candidatePivotBar > eligibleLowPivotBar and high[PIVOT_RIGHT] > eligibleLowPrice
+        pairLowPrice := eligibleLowPrice
+        pairLowPivotBar := eligibleLowPivotBar
+        pairLowPivotTime := eligibleLowPivotTime
+        pairLowConfirmationBar := eligibleLowConfirmationBar
+        pairLowConfirmationTime := eligibleLowConfirmationTime
+        pairHighPrice := high[PIVOT_RIGHT]
+        pairHighPivotBar := candidatePivotBar
+        pairHighPivotTime := time[PIVOT_RIGHT]
+        pairHighConfirmationBar := bar_index
+        pairHighConfirmationTime := time
+        pairActive := true
+        pendingLowPrice := na
+        fibContextCode := 2
+
+bool pairEligible = pairActive and pairHighConfirmationBar < bar_index
+float pairRange = pairEligible ? pairHighPrice - pairLowPrice : na
+float fib0586 = pairEligible ? round8(pairHighPrice - SHALLOW_MIN * pairRange) : na
+float fib0618 = pairEligible ? round8(pairHighPrice - GOLDEN_MIN * pairRange) : na
+float fib0650 = pairEligible ? round8(pairHighPrice - GOLDEN_MAX * pairRange) : na
+float fib0682 = pairEligible ? round8(pairHighPrice - DEEP_MAX * pairRange) : na
+float shallowestRatio = pairEligible ? round12((pairHighPrice - high) / pairRange) : na
+float deepestRatio = pairEligible ? round12((pairHighPrice - low) / pairRange) : na
+float maRatio = pairEligible and not na(priorSma) ? round12((pairHighPrice - priorSma) / pairRange) : na
+bool shallowTouched = pairEligible and deepestRatio >= SHALLOW_MIN and shallowestRatio < GOLDEN_MIN
+bool goldenTouched = pairEligible and deepestRatio >= GOLDEN_MIN and shallowestRatio <= GOLDEN_MAX
+bool deepTouched = pairEligible and deepestRatio > GOLDEN_MAX and shallowestRatio <= DEEP_MAX
+bool maInShallow = pairEligible and maRatio >= SHALLOW_MIN and maRatio < GOLDEN_MIN
+bool maInGolden = pairEligible and maRatio >= GOLDEN_MIN and maRatio <= GOLDEN_MAX
+bool maInDeep = pairEligible and maRatio > GOLDEN_MAX and maRatio <= DEEP_MAX
+int bandTouchMask = (shallowTouched ? 1 : 0) + (goldenTouched ? 2 : 0) + (deepTouched ? 4 : 0)
+int maInsideBandMask = (maInShallow ? 1 : 0) + (maInGolden ? 2 : 0) + (maInDeep ? 4 : 0)
+int directBandCode = maTouched and shallowTouched and maInShallow ? 1 : maTouched and goldenTouched and maInGolden ? 2 : maTouched and deepTouched and maInDeep ? 3 : 0
+
+// Streaming MA episode state. Episode codes: 0 idle, 1 approach, 2 reaction, 3 durability.
+var int episodeStateCode = 0
+var int episodeStartBar = na
+var int episodeStartTime = na
+var int episodeOriginCode = 0
+var int testBar = na
+var int testTime = na
+var int testTypeCode = 0
+var int aboveStreak = 0
+var int belowStreak = 0
+var int reactionCode = 0
+var int reactionConfirmationBar = na
+var int reactionConfirmationTime = na
+var int durabilityCode = 0
+var int reverseStreak = 0
+var bool episodeHasEligibleTouch = false
+var bool episodeHadDirectGoldenTouch = false
+
+float maTestPulse = na
+float eligibleTouchPulse = na
+float reactionPulse = na
+float durabilityPulse = na
+float goldenNearAlertPulse = na
+float goldenTouchAlertPulse = na
+float goldenConfirmedAlertPulse = na
+
+// Latched event fields let a post-close poll detect a new event without backfilling history.
+var int lastEventTime = na
+var int lastEventEpisodeStartTime = na
+var int lastEventOriginCode = 0
+var int lastEventDirectBandCode = 0
+var int lastEventBandTouchMask = 0
+var float lastEventPriorSma = na
+var float lastEventGoldenLow = na
+var float lastEventGoldenHigh = na
+var float lastEventFibLow = na
+var float lastEventFibHigh = na
+var int lastEventLowPivotTime = na
+var int lastEventHighPivotTime = na
+var int lastEventHighConfirmationTime = na
+var int lastEventReactionCode = 0
+var int lastEventReactionTime = na
+var int lastEventDurabilityCode = 0
+var int lastEventDurabilityTime = na
+
+if profileSupported and barstate.isconfirmed and not na(priorSma)
+    bool enteredZone = positionCode[1] != 9 and not insideOuterZone[1] and insideOuterZone
+    if episodeStateCode == 0 and enteredZone
+        episodeStateCode := 1
+        episodeStartBar := bar_index
+        episodeStartTime := time
+        episodeOriginCode := positionCode[1] == 0 ? (distancePct[1] >= 0 ? 1 : -1) : positionCode[1]
+        testTypeCode := 0
+        reactionCode := 0
+        durabilityCode := 0
+        episodeHasEligibleTouch := false
+        episodeHadDirectGoldenTouch := false
+
+    if episodeStateCode == 1
+        int candidateTestType = maTouched ? 1 : positionCode != 0 and positionCode != episodeOriginCode ? 2 : math.abs(distancePct) <= neutralBandPct ? 3 : 0
+        if candidateTestType != 0
+            testBar := bar_index
+            testTime := time
+            testTypeCode := candidateTestType
+            maTestPulse := 1
+            episodeStateCode := 2
+            aboveStreak := 0
+            belowStreak := 0
+            episodeHasEligibleTouch := candidateTestType == 1 and pairEligible
+            bool directGoldenTouch = episodeHasEligibleTouch and directBandCode == 2
+            if candidateTestType == 3 and pairEligible and maInGolden
+                goldenNearAlertPulse := 1
+            if directGoldenTouch
+                episodeHadDirectGoldenTouch := true
+                goldenTouchAlertPulse := 1
+            if episodeHasEligibleTouch
+                eligibleTouchPulse := 1
+                lastEventTime := time
+                lastEventEpisodeStartTime := episodeStartTime
+                lastEventOriginCode := episodeOriginCode
+                lastEventDirectBandCode := directBandCode
+                lastEventBandTouchMask := bandTouchMask
+                lastEventPriorSma := priorSma
+                lastEventGoldenLow := fib0650
+                lastEventGoldenHigh := fib0618
+                lastEventFibLow := pairLowPrice
+                lastEventFibHigh := pairHighPrice
+                lastEventLowPivotTime := pairLowPivotTime
+                lastEventHighPivotTime := pairHighPivotTime
+                lastEventHighConfirmationTime := pairHighConfirmationTime
+                lastEventReactionCode := 0
+                lastEventReactionTime := na
+                lastEventDurabilityCode := 0
+                lastEventDurabilityTime := na
+        else if (bar_index > episodeStartBar and not insideOuterZone) or bar_index >= episodeStartBar + testObservationBars
+            reactionCode := 6
+            episodeStateCode := 0
+
+    if episodeStateCode == 2
+        aboveStreak := positionCode == 1 ? aboveStreak + 1 : 0
+        belowStreak := positionCode == -1 ? belowStreak + 1 : 0
+        int confirmedSide = aboveStreak >= 2 ? 1 : belowStreak >= 2 ? -1 : 0
+        if confirmedSide != 0
+            reactionCode := reactionFor(episodeOriginCode, confirmedSide)
+            reactionConfirmationBar := bar_index
+            reactionConfirmationTime := time
+            reactionPulse := reactionCode
+            if episodeHadDirectGoldenTouch and reactionCode >= 1 and reactionCode <= 4
+                goldenConfirmedAlertPulse := reactionCode
+            durabilityCode := initialDurabilityFor(reactionCode)
+            reverseStreak := 0
+            episodeStateCode := 3
+            if episodeHasEligibleTouch
+                lastEventReactionCode := reactionCode
+                lastEventReactionTime := time
+                lastEventDurabilityCode := durabilityCode
+        else if bar_index >= testBar + reactionConfirmationBars
+            reactionCode := 5
+            reactionPulse := reactionCode
+            episodeStateCode := 0
+            if episodeHasEligibleTouch
+                lastEventReactionCode := reactionCode
+                lastEventReactionTime := time
+
+    if episodeStateCode == 3 and bar_index > reactionConfirmationBar
+        int expectedSide = expectedSideFor(reactionCode)
+        int reverseSide = -expectedSide
+        reverseStreak := positionCode == reverseSide ? reverseStreak + 1 : 0
+        bool reversed = reverseStreak >= 2
+        bool completed = bar_index >= reactionConfirmationBar + durabilityBars
+        if reversed or completed
+            durabilityCode := reversed ? reversedDurabilityFor(reactionCode) : completedDurabilityFor(reactionCode)
+            durabilityPulse := durabilityCode
+            episodeStateCode := 0
+            if episodeHasEligibleTouch
+                lastEventDurabilityCode := durabilityCode
+                lastEventDurabilityTime := time
+
+// Stable machine-readable plot order. Event pulses are na on non-event bars.
+plot(float(profileCode), "SFC Profile Code", display=display.data_window)
+plot(priorSma, "SFC Prior 200 SMA", display=display.data_window)
+plot(float(positionCode), "SFC Position Code", display=display.data_window)
+plot(float(fibContextCode), "SFC Fib Context Code", display=display.data_window)
+plot(pairEligible ? 1.0 : 0.0, "SFC Pair Eligible", display=display.data_window)
+plot(pairEligible ? pairLowPrice : na, "SFC Fib Low Price", display=display.data_window)
+plot(pairEligible ? pairHighPrice : na, "SFC Fib High Price", display=display.data_window)
+plot(pairEligible ? float(pairLowPivotTime) : na, "SFC Fib Low Pivot Time ms", display=display.data_window)
+plot(pairEligible ? float(pairHighPivotTime) : na, "SFC Fib High Pivot Time ms", display=display.data_window)
+plot(pairEligible ? float(pairHighConfirmationTime) : na, "SFC Fib High Confirmation Time ms", display=display.data_window)
+plot(fib0586, "SFC Fib 0.586", display=display.data_window)
+plot(fib0618, "SFC Fib 0.618", display=display.data_window)
+plot(fib0650, "SFC Fib 0.650", display=display.data_window)
+plot(fib0682, "SFC Fib 0.682", display=display.data_window)
+plot(float(bandTouchMask), "SFC Band Touch Mask", display=display.data_window)
+plot(float(maInsideBandMask), "SFC SMA Inside Band Mask", display=display.data_window)
+plot(float(directBandCode), "SFC Direct Band Code", display=display.data_window)
+plot(float(episodeStateCode), "SFC Episode State Code", display=display.data_window)
+plot(float(episodeStartTime), "SFC Episode Start Time ms", display=display.data_window)
+plot(float(episodeOriginCode), "SFC Episode Origin Code", display=display.data_window)
+plot(maTestPulse, "SFC MA Test Pulse", display=display.data_window)
+plot(float(testTypeCode), "SFC MA Test Type Code", display=display.data_window)
+plot(eligibleTouchPulse, "SFC Eligible SMA Touch Event", display=display.data_window)
+plot(reactionPulse, "SFC Reaction Pulse", display=display.data_window)
+plot(float(reactionCode), "SFC Reaction Code", display=display.data_window)
+plot(durabilityPulse, "SFC Durability Pulse", display=display.data_window)
+plot(float(durabilityCode), "SFC Durability Code", display=display.data_window)
+plot(float(lastEventTime), "SFC Last Event Time ms", display=display.data_window)
+plot(float(lastEventEpisodeStartTime), "SFC Last Event Episode Start Time ms", display=display.data_window)
+plot(float(lastEventOriginCode), "SFC Last Event Origin Code", display=display.data_window)
+plot(float(lastEventDirectBandCode), "SFC Last Event Direct Band Code", display=display.data_window)
+plot(float(lastEventBandTouchMask), "SFC Last Event Band Touch Mask", display=display.data_window)
+plot(lastEventPriorSma, "SFC Last Event Prior SMA", display=display.data_window)
+plot(lastEventGoldenLow, "SFC Last Event Golden Low", display=display.data_window)
+plot(lastEventGoldenHigh, "SFC Last Event Golden High", display=display.data_window)
+plot(lastEventFibLow, "SFC Last Event Fib Low", display=display.data_window)
+plot(lastEventFibHigh, "SFC Last Event Fib High", display=display.data_window)
+plot(float(lastEventLowPivotTime), "SFC Last Event Low Pivot Time ms", display=display.data_window)
+plot(float(lastEventHighPivotTime), "SFC Last Event High Pivot Time ms", display=display.data_window)
+plot(float(lastEventHighConfirmationTime), "SFC Last Event High Confirmation Time ms", display=display.data_window)
+plot(float(lastEventReactionCode), "SFC Last Event Reaction Code", display=display.data_window)
+plot(float(lastEventReactionTime), "SFC Last Event Reaction Time ms", display=display.data_window)
+plot(float(lastEventDurabilityCode), "SFC Last Event Durability Code", display=display.data_window)
+plot(float(lastEventDurabilityTime), "SFC Last Event Durability Time ms", display=display.data_window)
+plot(syminfo.mintick, "SFC Symbol Min Tick", display=display.data_window)
+plot(goldenNearAlertPulse, "SFC Golden Near Alert Pulse", display=display.data_window)
+plot(goldenTouchAlertPulse, "SFC Golden Touch Alert Pulse", display=display.data_window)
+plot(goldenConfirmedAlertPulse, "SFC Golden Confirmed Alert Pulse", display=display.data_window)
+
+// Neutral visual context. Pivots and bands begin only after causal pair availability.
+plot(showGoldenPocket ? priorSma : na, "Prior 200 SMA", color=color.new(color.yellow, 0), linewidth=2)
+plot(showControlBands ? fib0586 : na, "Shallow Control Top", color=color.new(color.gray, 75), linewidth=1)
+goldenTopPlot = plot(showGoldenPocket ? fib0618 : na, "Golden Pocket Top", color=color.new(color.orange, 15), linewidth=1)
+goldenBottomPlot = plot(showGoldenPocket ? fib0650 : na, "Golden Pocket Bottom", color=color.new(color.orange, 15), linewidth=1)
+plot(showControlBands ? fib0682 : na, "Deep Control Bottom", color=color.new(color.gray, 75), linewidth=1)
+fill(goldenTopPlot, goldenBottomPlot, color=color.new(color.orange, 88), title="Golden Pocket Research Fill")
+plot(showControlBands and pairEligible ? pairLowPrice : na, "Confirmed Fib Low", color=color.new(color.gray, 70), style=plot.style_stepline)
+plot(showControlBands and pairEligible ? pairHighPrice : na, "Confirmed Fib High", color=color.new(color.gray, 70), style=plot.style_stepline)
+if showEventLabels and not na(eligibleTouchPulse) and (na(goldenTouchAlertPulse) or not showAlertMarkers)
+    string eventText = "SMA/Fib R\n" + (profileDaily ? "200D" : "200W") + " | " + originText(episodeOriginCode) + "\n" + bandText(directBandCode)
+    label.new(bar_index, low, eventText, style=label.style_label_up, color=directBandCode == 2 ? color.new(color.orange, 10) : color.new(color.gray, 25), textcolor=color.white, size=size.tiny)
+
+if showAlertMarkers and not na(goldenNearAlertPulse)
+    label.new(bar_index, low, (profileDaily ? "200D" : "200W") + " GP NEAR", style=label.style_label_up, color=color.new(color.aqua, 5), textcolor=color.black, size=size.tiny)
+if showAlertMarkers and not na(goldenTouchAlertPulse)
+    label.new(bar_index, low, (profileDaily ? "200D" : "200W") + " GP TOUCH", style=label.style_label_up, color=color.new(color.orange, 5), textcolor=color.white, size=size.small)
+if showAlertMarkers and not na(goldenConfirmedAlertPulse)
+    bool bullishConfirmation = goldenConfirmedAlertPulse == 1 or goldenConfirmedAlertPulse == 2
+    label.new(bar_index, low, (profileDaily ? "200D" : "200W") + (bullishConfirmation ? " GP CONF ↑" : " GP CONF ↓"), style=label.style_label_up, color=bullishConfirmation ? color.new(color.lime, 5) : color.new(color.red, 5), textcolor=color.black, size=size.tiny)
+
+var table statusTable = table.new(position.bottom_right, 2, 7, border_width=1)
+if showStatusTable and barstate.islast
+    table.cell(statusTable, 0, 0, "SMA/Fib Research", bgcolor=color.new(color.gray, 20), text_color=color.white, text_size=size.tiny)
+    table.cell(statusTable, 1, 0, profileSupported ? (profileDaily ? "200D" : "200W") : "Use 1D / 1W", bgcolor=color.new(color.gray, 20), text_color=color.white, text_size=size.tiny)
+    table.cell(statusTable, 0, 1, "Fib pair", text_color=color.white, text_size=size.tiny)
+    table.cell(statusTable, 1, 1, fibText(fibContextCode), text_color=color.white, text_size=size.tiny)
+    table.cell(statusTable, 0, 2, "Current direct", text_color=color.white, text_size=size.tiny)
+    table.cell(statusTable, 1, 2, bandText(directBandCode), text_color=color.white, text_size=size.tiny)
+    table.cell(statusTable, 0, 3, "Last origin", text_color=color.white, text_size=size.tiny)
+    table.cell(statusTable, 1, 3, originText(lastEventOriginCode), text_color=color.white, text_size=size.tiny)
+    table.cell(statusTable, 0, 4, "Last band", text_color=color.white, text_size=size.tiny)
+    table.cell(statusTable, 1, 4, bandText(lastEventDirectBandCode), text_color=color.white, text_size=size.tiny)
+    table.cell(statusTable, 0, 5, "Reaction", text_color=color.white, text_size=size.tiny)
+    table.cell(statusTable, 1, 5, reactionText(lastEventReactionCode), text_color=color.white, text_size=size.tiny)
+    table.cell(statusTable, 0, 6, "Durability", text_color=color.white, text_size=size.tiny)
+    table.cell(statusTable, 1, 6, durabilityText(lastEventDurabilityCode), text_color=color.white, text_size=size.tiny)
+else if not showStatusTable and barstate.islast
+    table.clear(statusTable, 0, 0, 1, 6)
+
+
+bool dailyGoldenNearAlert = profileDaily and barstate.isconfirmed and not na(goldenNearAlertPulse)
+bool dailyGoldenTouchAlert = profileDaily and barstate.isconfirmed and not na(goldenTouchAlertPulse)
+bool dailyGoldenConfirmedAlert = profileDaily and barstate.isconfirmed and not na(goldenConfirmedAlertPulse)
+bool weeklyGoldenNearAlert = profileWeekly and barstate.isconfirmed and not na(goldenNearAlertPulse)
+bool weeklyGoldenTouchAlert = profileWeekly and barstate.isconfirmed and not na(goldenTouchAlertPulse)
+bool weeklyGoldenConfirmedAlert = profileWeekly and barstate.isconfirmed and not na(goldenConfirmedAlertPulse)
+bool anyGoldenAlert = dailyGoldenNearAlert or dailyGoldenTouchAlert or dailyGoldenConfirmedAlert or weeklyGoldenNearAlert or weeklyGoldenTouchAlert or weeklyGoldenConfirmedAlert
+
+alertcondition(dailyGoldenNearAlert, "200D SMA/Fib Golden Pocket Near", "200D golden-pocket confluence is near on {{ticker}} {{interval}}. Close {{close}} | Prior 200 SMA {{plot(\"SFC Prior 200 SMA\")}} | Pocket {{plot(\"SFC Fib 0.650\")}} to {{plot(\"SFC Fib 0.618\")}}.")
+alertcondition(dailyGoldenTouchAlert, "200D SMA/Fib Golden Pocket Touch", "200D SMA and golden pocket were touched together on {{ticker}} {{interval}}. Close {{close}} | Prior 200 SMA {{plot(\"SFC Prior 200 SMA\")}} | Pocket {{plot(\"SFC Fib 0.650\")}} to {{plot(\"SFC Fib 0.618\")}}.")
+alertcondition(dailyGoldenConfirmedAlert, "200D SMA/Fib Golden Pocket Confirmed", "200D SMA/golden-pocket reaction confirmed on {{ticker}} {{interval}}. Close {{close}} | Reaction {{plot(\"SFC Golden Confirmed Alert Pulse\")}}.")
+alertcondition(weeklyGoldenNearAlert, "200W SMA/Fib Golden Pocket Near", "200W golden-pocket confluence is near on {{ticker}} {{interval}}. Close {{close}} | Prior 200 SMA {{plot(\"SFC Prior 200 SMA\")}} | Pocket {{plot(\"SFC Fib 0.650\")}} to {{plot(\"SFC Fib 0.618\")}}.")
+alertcondition(weeklyGoldenTouchAlert, "200W SMA/Fib Golden Pocket Touch", "200W SMA and golden pocket were touched together on {{ticker}} {{interval}}. Close {{close}} | Prior 200 SMA {{plot(\"SFC Prior 200 SMA\")}} | Pocket {{plot(\"SFC Fib 0.650\")}} to {{plot(\"SFC Fib 0.618\")}}.")
+alertcondition(weeklyGoldenConfirmedAlert, "200W SMA/Fib Golden Pocket Confirmed", "200W SMA/golden-pocket reaction confirmed on {{ticker}} {{interval}}. Close {{close}} | Reaction {{plot(\"SFC Golden Confirmed Alert Pulse\")}}.")
+alertcondition(anyGoldenAlert, "Any SMA/Fib Golden Pocket Alert", "SMA/golden-pocket confluence alert on {{ticker}} {{interval}}. Close {{close}} | Near {{plot(\"SFC Golden Near Alert Pulse\")}} | Touch {{plot(\"SFC Golden Touch Alert Pulse\")}} | Confirmed {{plot(\"SFC Golden Confirmed Alert Pulse\")}}.")

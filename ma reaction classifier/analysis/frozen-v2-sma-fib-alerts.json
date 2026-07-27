@@ -1,0 +1,42 @@
+{
+  "schema_version": "2.0.0",
+  "contract_id": "sma-fib-confluence-alerts-v2-display-successor",
+  "status": "display_only_successor",
+  "frozen_at": "2026-07-27",
+  "source_path": "ma reaction classifier/sma-fib-confluence-alerts-v2.pine",
+  "source_sha256": "a6157850ff55cce7c4c539ab59d0b337a1db553327a8cc8f3ef0147aa9d12ec0",
+  "predecessor": {
+    "contract_path": "ma reaction classifier/analysis/frozen-v1-sma-fib-alerts.json",
+    "source_path": "ma reaction classifier/sma-fib-confluence-alerts-v1.pine",
+    "source_sha256": "59738a1c77a52cf998f90238f6e5bdaec84412da08887247dd620a6643d6a510"
+  },
+  "display_changes": {
+    "active_anchor_input": "Show Active Fib Anchor Leg",
+    "active_anchor_default": false,
+    "anchor_line_count": 1,
+    "anchor_endpoint_label_count": 2,
+    "anchor_x_location": "bar_time",
+    "anchor_coordinates": "eligible_pair_pivot_times_and_prices",
+    "status_row": "SMA + pocket",
+    "aligned_text": "Aligned",
+    "not_aligned_text": "No confluence"
+  },
+  "invariants": {
+    "signal_math_unchanged": true,
+    "event_state_machine_unchanged": true,
+    "machine_plot_names_values_and_order_unchanged": true,
+    "alert_conditions_titles_and_messages_unchanged": true,
+    "automated_orders": false
+  },
+  "runtime_limits": {
+    "tradingview_plot_resource_limit": 64,
+    "estimated_plot_resources": 62,
+    "remaining_plot_resource_headroom": 2,
+    "anchor_uses_drawing_objects_not_plots": true
+  },
+  "delivery": {
+    "overwrite_predecessor": false,
+    "replace_existing_alerts": false,
+    "live_install_is_additive": true
+  }
+}

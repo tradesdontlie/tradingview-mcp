@@ -1,0 +1,119 @@
+{
+  "schema_version": "1.0.0",
+  "contract_id": "sma-fib-confluence-alerts-v1",
+  "status": "usable_confluence_watch_alerts_validation_pending",
+  "frozen_at": "2026-07-13",
+  "source_path": "ma reaction classifier/sma-fib-confluence-alerts-v1.pine",
+  "source_sha256": "59738a1c77a52cf998f90238f6e5bdaec84412da08887247dd620a6643d6a510",
+  "base_source_path": "ma reaction classifier/sma-fib-confluence-shadow.pine",
+  "base_source_sha256": "eb18bf976d09983e92cfdb93c24590317082b2960c9deee8c1b0848885e1b24c",
+  "signal": {
+    "ma_type": "SMA",
+    "ma_length": 200,
+    "excludes_current_close": true,
+    "profiles": {
+      "200D": {
+        "timeframe": "1D",
+        "near_distance_pct": 0.5
+      },
+      "200W": {
+        "timeframe": "1W",
+        "near_distance_pct": 1.0
+      }
+    },
+    "golden_pocket": [
+      0.618,
+      0.65
+    ],
+    "fib_direction": "confirmed_swing_low_to_later_confirmed_swing_high",
+    "pivot_left_bars": 5,
+    "pivot_right_bars": 5,
+    "pair_available_after_high_confirmation": true,
+    "touch_requires_literal_sma_and_candle_overlap": true,
+    "confirmation_reaction_codes": [
+      1,
+      2,
+      3,
+      4
+    ]
+  },
+  "alerts": [
+    {
+      "title": "200D SMA/Fib Golden Pocket Near",
+      "profile": "200D",
+      "stage": "near",
+      "emission_timing": "bar_close"
+    },
+    {
+      "title": "200D SMA/Fib Golden Pocket Touch",
+      "profile": "200D",
+      "stage": "touch",
+      "emission_timing": "bar_close"
+    },
+    {
+      "title": "200D SMA/Fib Golden Pocket Confirmed",
+      "profile": "200D",
+      "stage": "confirmed",
+      "emission_timing": "bar_close"
+    },
+    {
+      "title": "200W SMA/Fib Golden Pocket Near",
+      "profile": "200W",
+      "stage": "near",
+      "emission_timing": "bar_close"
+    },
+    {
+      "title": "200W SMA/Fib Golden Pocket Touch",
+      "profile": "200W",
+      "stage": "touch",
+      "emission_timing": "bar_close"
+    },
+    {
+      "title": "200W SMA/Fib Golden Pocket Confirmed",
+      "profile": "200W",
+      "stage": "confirmed",
+      "emission_timing": "bar_close"
+    },
+    {
+      "title": "Any SMA/Fib Golden Pocket Alert",
+      "profile": "200D_or_200W",
+      "stage": "near_or_touch_or_confirmed",
+      "emission_timing": "bar_close"
+    }
+  ],
+  "authorization": {
+    "live_alert_activation": true,
+    "automated_orders": false,
+    "trading_recommendation": false
+  },
+  "runtime_limits": {
+    "tradingview_plot_resource_limit": 64,
+    "estimated_plot_resources": 62,
+    "remaining_plot_resource_headroom": 2,
+    "alert_markers_use_labels_not_plots": true
+  },
+  "promotion": {
+    "current_label": "Confluence Watch",
+    "strong_signal_label_authorized": false,
+    "minimum_matched_events_200D": 120,
+    "minimum_symbols_200D": 70,
+    "minimum_distinct_dates_200D": 80,
+    "minimum_matched_events_200W_origin_above": 125,
+    "minimum_symbols_200W_origin_above": 40,
+    "minimum_months_200W_origin_above": 48,
+    "minimum_matched_events_200W_origin_below": 60,
+    "minimum_symbols_200W_origin_below": 30,
+    "minimum_months_200W_origin_below": 30,
+    "minimum_match_rate_pct": 80,
+    "maximum_single_era_share_pct": 40,
+    "required_reaction_success_lift_percentage_points": 5,
+    "required_median_benchmark_relative_return_lift_percentage_points": 1,
+    "required_confidence": "positive",
+    "adverse_move_or_drawdown_may_worsen": false
+  },
+  "known_limitations": [
+    "Near, touch, and confirmed pulses describe event stages but do not guarantee all three alerts fire during one approach episode.",
+    "The strong-signal label remains prohibited until the frozen historical promotion gates pass.",
+    "Alerts are informational and never place orders."
+  ]
+}
