@@ -142,33 +142,45 @@ test('keeps Price Action fallback when Pocket Pivot values are absent', () => {
   });
 });
 
-// ── Task 1: Auto Key Levels extractPreviousMonthProfile ──
+// ── Auto Key Levels extractPreviousMonthProfile ──
 
 function loadFixture(name) {
   return JSON.parse(readFileSync(new URL(`fixtures/${name}`, import.meta.url), 'utf-8'));
+}
+
+// Deterministic clock: captured once at test load, avoids flaky tests
+const NOW_FOR_TEST = new Date().toISOString();
+const NOW_MS = +new Date(NOW_FOR_TEST);
+
+function obsBefore(sec) {
+  return new Date(NOW_MS - sec * 1000).toISOString();
 }
 
 test('extractPreviousMonthProfile: parses formatted Auto Key Levels values', () => {
   const fixture = loadFixture('auto_key_levels_previous_month.json');
   const result = extractPreviousMonthProfile({
     studies: fixture.studies,
-    symbol: fixture.symbol,
+    expectedSymbol: fixture.symbol,
     marketDate: fixture.marketDate,
-    observedAt: fixture.observedAt,
+    observedAt: obsBefore(10),
     maxAgeSeconds: fixture.maxAgeSeconds,
+    now: NOW_FOR_TEST,
   });
   assert.ok(result.valid, `should be valid: ${JSON.stringify(result.error)}`);
   assert.equal(result.poc, fixture.expected.poc);
   assert.equal(result.vah, fixture.expected.vah);
   assert.equal(result.val, fixture.expected.val);
-  assert.equal(result.prevMonth, fixture.expected.prevMonth);
+  assert.equal(result.profile_month, fixture.expected.prevMonth);
   assert.equal(result.source, fixture.expected.source);
+  assert.ok(result.complete);
+  assert.ok(result.evidence_hash_fields);
+  assert.equal(result.evidence_hash_fields.profile_month, fixture.expected.prevMonth);
 });
 
 test('extractPreviousMonthProfile: enforces VAL < POC < VAH invariant', () => {
   const result = extractPreviousMonthProfile({
     studies: [{ name: 'Auto Key Levels', values: { 'Prev Monthly POC': '25.0 K', 'Prev Monthly VAH': '24.0 K', 'Prev Monthly VAL': '26.0 K' } }],
-    symbol: 'HOSE:TEST', marketDate: '2026-07-28', observedAt: '2026-07-28T10:30:00Z', maxAgeSeconds: 7200,
+    expectedSymbol: 'HOSE:TEST', marketDate: '2026-07-28', observedAt: obsBefore(10), maxAgeSeconds: 7200, now: NOW_FOR_TEST,
   });
   assert.equal(result.valid, false);
   assert.ok(result.error?.includes('VAH') || result.error?.includes('VAL'));
@@ -177,7 +189,7 @@ test('extractPreviousMonthProfile: enforces VAL < POC < VAH invariant', () => {
 test('extractPreviousMonthProfile: rejects inverted POC > VAH', () => {
   const result = extractPreviousMonthProfile({
     studies: [{ name: 'Auto Key Levels', values: { 'Prev Monthly POC': '26.0 K', 'Prev Monthly VAH': '24.0 K', 'Prev Monthly VAL': '23.0 K' } }],
-    symbol: 'HOSE:TEST', marketDate: '2026-07-28', observedAt: '2026-07-28T10:30:00Z', maxAgeSeconds: 7200,
+    expectedSymbol: 'HOSE:TEST', marketDate: '2026-07-28', observedAt: obsBefore(10), maxAgeSeconds: 7200, now: NOW_FOR_TEST,
   });
   assert.equal(result.valid, false);
 });
@@ -185,16 +197,33 @@ test('extractPreviousMonthProfile: rejects inverted POC > VAH', () => {
 test('extractPreviousMonthProfile: rejects stale observation', () => {
   const result = extractPreviousMonthProfile({
     studies: [{ name: 'Auto Key Levels', values: { 'Prev Monthly POC': '23.25 K', 'Prev Monthly VAH': '23.9 K', 'Prev Monthly VAL': '23.1 K' } }],
-    symbol: 'HOSE:HCM', marketDate: '2026-07-28', observedAt: '2026-07-01T00:00:00Z', maxAgeSeconds: 3600,
+    expectedSymbol: 'HOSE:HCM', marketDate: '2026-07-28', observedAt: obsBefore(99999), maxAgeSeconds: 3600, now: NOW_FOR_TEST,
   });
   assert.equal(result.valid, false);
   assert.ok(result.error?.includes('stale'));
 });
 
+test('extractPreviousMonthProfile: rejects future observation beyond clock skew', () => {
+  const result = extractPreviousMonthProfile({
+    studies: [{ name: 'Auto Key Levels', values: { 'Prev Monthly POC': '23.25 K', 'Prev Monthly VAH': '23.9 K', 'Prev Monthly VAL': '23.1 K' } }],
+    expectedSymbol: 'HOSE:HCM', marketDate: '2026-07-28', observedAt: '2026-07-29T00:00:00Z', maxAgeSeconds: 7200, now: NOW_FOR_TEST,
+  });
+  assert.equal(result.valid, false);
+  assert.ok(result.error?.includes('future'));
+});
+
+test('extractPreviousMonthProfile: rejects invalid observedAt', () => {
+  const result = extractPreviousMonthProfile({
+    studies: [{ name: 'Auto Key Levels', values: { 'Prev Monthly POC': '23.25 K', 'Prev Monthly VAH': '23.9 K', 'Prev Monthly VAL': '23.1 K' } }],
+    expectedSymbol: 'HOSE:HCM', marketDate: '2026-07-28', observedAt: 'not-a-date', maxAgeSeconds: 7200, now: NOW_FOR_TEST,
+  });
+  assert.equal(result.valid, false);
+});
+
 test('extractPreviousMonthProfile: rejects missing study', () => {
   const result = extractPreviousMonthProfile({
     studies: [{ name: 'Some Other Study', values: {} }],
-    symbol: 'HOSE:TEST', marketDate: '2026-07-28', observedAt: '2026-07-28T10:30:00Z', maxAgeSeconds: 7200,
+    expectedSymbol: 'HOSE:TEST', marketDate: '2026-07-28', observedAt: obsBefore(10), maxAgeSeconds: 7200, now: NOW_FOR_TEST,
   });
   assert.equal(result.valid, false);
 });
@@ -205,77 +234,130 @@ test('extractPreviousMonthProfile: rejects duplicate Auto Key Levels', () => {
       { name: 'Auto Key Levels', values: { 'Prev Monthly POC': '23.0 K', 'Prev Monthly VAH': '24.0 K', 'Prev Monthly VAL': '22.0 K' } },
       { name: 'Auto Key Levels', values: { 'Prev Monthly POC': '25.0 K', 'Prev Monthly VAH': '26.0 K', 'Prev Monthly VAL': '24.0 K' } },
     ],
-    symbol: 'HOSE:TEST', marketDate: '2026-07-28', observedAt: '2026-07-28T10:30:00Z', maxAgeSeconds: 7200,
+    expectedSymbol: 'HOSE:TEST', marketDate: '2026-07-28', observedAt: obsBefore(10), maxAgeSeconds: 7200, now: NOW_FOR_TEST,
   });
   assert.equal(result.valid, false);
-  assert.ok(result.error?.includes('duplicate') || result.error?.includes('Duplicate'));
+  assert.ok(result.error?.includes('Duplicate') || result.error?.includes('duplicate'));
 });
 
-test('extractPreviousMonthProfile: symbol is recorded in output for hashing', () => {
+test('extractPreviousMonthProfile: symbol and profile_month returned for evidence hash', () => {
   const result = extractPreviousMonthProfile({
     studies: [{ name: 'Auto Key Levels', values: { 'Prev Monthly POC': '23.25 K', 'Prev Monthly VAH': '23.9 K', 'Prev Monthly VAL': '23.1 K' } }],
-    symbol: 'HOSE:HCM', marketDate: '2026-07-28', observedAt: '2026-07-28T10:30:00Z', maxAgeSeconds: 7200,
+    expectedSymbol: 'HOSE:HCM', marketDate: '2026-07-28', observedAt: obsBefore(10), maxAgeSeconds: 7200, now: NOW_FOR_TEST,
   });
   assert.ok(result.valid);
   assert.equal(result.symbol, 'HOSE:HCM');
+  assert.equal(result.profile_month, '2026-06');
+  assert.equal(result.cache_key, 'HCM:2026-06');
 });
 
-test('extractPreviousMonthProfile: previous month derivation handles year rollover', () => {
-  // Use a maxAgeSeconds large enough so staleness does not mask the year-rollover check
+test('extractPreviousMonthProfile: year rollover → December previous year', () => {
   const result = extractPreviousMonthProfile({
     studies: [{ name: 'Auto Key Levels', values: { 'Prev Monthly POC': '20.0 K', 'Prev Monthly VAH': '21.0 K', 'Prev Monthly VAL': '19.0 K' } }],
-    symbol: 'HOSE:ABC', marketDate: '2026-01-05', observedAt: new Date().toISOString(), maxAgeSeconds: 99999999,
+    expectedSymbol: 'HOSE:ABC', marketDate: '2026-01-05', observedAt: obsBefore(10), maxAgeSeconds: 99999999, now: NOW_FOR_TEST,
   });
   assert.ok(result.valid, result.error);
-  assert.equal(result.prevMonth, '2025-12');
+  assert.equal(result.profile_month, '2025-12');
 });
 
-test('extractPreviousMonthProfile: cache-month mismatch detection', () => {
+test('extractPreviousMonthProfile: cache-month mismatch shows correct profile', () => {
   const result = extractPreviousMonthProfile({
     studies: [{ name: 'Auto Key Levels', values: { 'Prev Monthly POC': '20.0 K', 'Prev Monthly VAH': '21.0 K', 'Prev Monthly VAL': '19.0 K' } }],
-    symbol: 'HOSE:ABC', marketDate: '2026-03-15', observedAt: new Date().toISOString(), maxAgeSeconds: 99999999,
+    expectedSymbol: 'HOSE:ABC', marketDate: '2026-03-15', observedAt: obsBefore(10), maxAgeSeconds: 99999999, now: NOW_FOR_TEST,
   });
   assert.ok(result.valid, result.error);
-  assert.equal(result.prevMonth, '2026-02');
+  assert.equal(result.profile_month, '2026-02');
+  assert.equal(result.cache_key, 'ABC:2026-02');
 });
 
 test('extractPreviousMonthProfile: rejects Footprint POC/VAH/VAL', () => {
-  // Footprint study has FP POC/VAH/VAL — must not be accepted as monthly profile
   const result = extractPreviousMonthProfile({
     studies: [{ name: 'Footprint Aggressor Analysis', values: { 'FP POC High': '25,300', 'FP VAH': '25,400', 'FP VAL': '25,000' } }],
-    symbol: 'HOSE:TEST', marketDate: '2026-07-28', observedAt: '2026-07-28T10:30:00Z', maxAgeSeconds: 7200,
+    expectedSymbol: 'HOSE:TEST', marketDate: '2026-07-28', observedAt: obsBefore(10), maxAgeSeconds: 7200, now: NOW_FOR_TEST,
   });
   assert.equal(result.valid, false);
 });
 
-// ── Task 1: classifyMaAnchor ──
+// ── classifyMaAnchor ──
 
-test('classifyMaAnchor: classifies SMA100 pullback reclaim within 7%', () => {
-  // price 22200 is 5.71% above sma100=21000 — within the 7% cap
+test('classifyMaAnchor: SMA100 within 7% — allowed', () => {
   const result = classifyMaAnchor({ price: 22200, sma20: 23000, sma100: 21000, preferredAnchor: null, maxExtensionPct: 7 });
+  assert.equal(result.allowed, true);
   assert.equal(result.anchor, 'sma100');
-  assert.equal(result.distancePct, 5.71);
+  assert.equal(result.extension_pct, 5.71);
+  assert.equal(result.blocker, null);
 });
 
-test('classifyMaAnchor: classifies SMA20 pullback when far from SMA100', () => {
-  // price 25000 is ~19% above sma100=21000 (overextended), but close to sma20=24800 (0.81%)
-  const result = classifyMaAnchor({ price: 25000, sma20: 24800, sma100: 21000, preferredAnchor: null, maxExtensionPct: 7 });
-  assert.equal(result.anchor, 'sma20');
-  assert.equal(result.distancePct, 0.81);
-});
-
-test('classifyMaAnchor: honors preferredAnchor', () => {
-  const result = classifyMaAnchor({ price: 22500, sma20: 23000, sma100: 21000, preferredAnchor: 'sma100', maxExtensionPct: 7 });
-  assert.equal(result.anchor, 'sma100');
-});
-
-test('classifyMaAnchor: returns none when price is overextended beyond ceiling', () => {
-  const result = classifyMaAnchor({ price: 30000, sma20: 25000, sma100: 21000, preferredAnchor: null, maxExtensionPct: 7 });
-  assert.equal(result.anchor, 'none');
-  assert.ok(result.overextended);
-});
-
-test('classifyMaAnchor: null MAs return null anchor', () => {
-  const result = classifyMaAnchor({ price: 25000, sma20: null, sma100: null, preferredAnchor: null, maxExtensionPct: 7 });
+test('classifyMaAnchor: price below SMA100 — BELOW_SMA100', () => {
+  const result = classifyMaAnchor({ price: 20000, sma20: 21000, sma100: 20500, preferredAnchor: null, maxExtensionPct: 7 });
+  assert.equal(result.allowed, false);
+  assert.equal(result.blocker, 'BELOW_SMA100');
   assert.equal(result.anchor, null);
+});
+
+test('classifyMaAnchor: price 20% above both — OVEREXTENDED', () => {
+  const result = classifyMaAnchor({ price: 25000, sma20: 21000, sma100: 20500, preferredAnchor: null, maxExtensionPct: 7 });
+  assert.equal(result.allowed, false);
+  assert.equal(result.blocker, 'OVEREXTENDED');
+  assert.equal(result.anchor, null);
+});
+
+test('classifyMaAnchor: exactly at 7% boundary — allowed', () => {
+  // 21400 is exactly 7% above sma100=20000 → (21400-20000)/20000*100 = 7.00%
+  const result = classifyMaAnchor({ price: 21400, sma20: 22000, sma100: 20000, preferredAnchor: null, maxExtensionPct: 7 });
+  assert.equal(result.allowed, true);
+  assert.equal(result.extension_pct, 7);
+});
+
+test('classifyMaAnchor: just over 7% boundary — OVEREXTENDED', () => {
+  const result = classifyMaAnchor({ price: 21500, sma20: 22000, sma100: 20000, preferredAnchor: null, maxExtensionPct: 7 });
+  assert.equal(result.allowed, false);
+  assert.equal(result.blocker, 'OVEREXTENDED');
+});
+
+test('classifyMaAnchor: preferredAnchor changes ordering only, cannot bypass 7%', () => {
+  // sma20=23000 (distance -6.5%), sma100=22000 (distance -2.3%) — both below
+  // preferredAnchor='sma20' but sma20 is below price? No, price is 21500.
+  // sma20=23000, price=21500 → price is below sma20. Let me fix: still BELOW_SMA100 since 21500 < 22000.
+  // Let's use: price=23500, sma20=23000 (dist +2.17%), sma100=22000 (dist +6.82% — near limit)
+  // preferredAnchor=sma20 → should pick sma20 since it's within 7% and preferred
+  const result = classifyMaAnchor({ price: 23500, sma20: 23000, sma100: 22000, preferredAnchor: 'sma20', maxExtensionPct: 7 });
+  assert.equal(result.allowed, true);
+  assert.equal(result.anchor, 'sma20');
+});
+
+test('classifyMaAnchor: preferredAnchor cannot pick OVEREXTENDED sma100', () => {
+  // price=24000, sma20=23000 (+4.35%), sma100=21000 (+14.3% — over 7%)
+  // preferredAnchor='sma100' but sma100 is overextended → should fall back to sma20
+  const result = classifyMaAnchor({ price: 24000, sma20: 23000, sma100: 21000, preferredAnchor: 'sma100', maxExtensionPct: 7 });
+  assert.equal(result.allowed, true);
+  assert.equal(result.anchor, 'sma20');
+});
+
+test('classifyMaAnchor: null MAs return MA_DATA_MISSING', () => {
+  const result = classifyMaAnchor({ price: 25000, sma20: null, sma100: null, preferredAnchor: null, maxExtensionPct: 7 });
+  assert.equal(result.allowed, false);
+  assert.equal(result.blocker, 'MA_DATA_MISSING');
+});
+
+// ── Adversarial: price below SMA100 blocks setup formation ──
+
+test('classifyMaAnchor: adversarial - price 1% below SMA100 still blocked', () => {
+  // Price 20295 vs SMA100 20500 → -1%
+  const result = classifyMaAnchor({ price: 20295, sma20: 20000, sma100: 20500, preferredAnchor: null, maxExtensionPct: 7 });
+  assert.equal(result.allowed, false);
+  assert.equal(result.blocker, 'BELOW_SMA100');
+});
+
+test('classifyMaAnchor: adversarial - price exactly 7% above — boundary allowed', () => {
+  const result = classifyMaAnchor({ price: 21400, sma20: 21500, sma100: 20000, preferredAnchor: null, maxExtensionPct: 7 });
+  assert.equal(result.allowed, true);
+  assert.ok(result.extension_pct <= 7);
+});
+
+test('classifyMaAnchor: adversarial - preferredAnchor 20% above still capped', () => {
+  // preferredAnchor='sma100' but both are >7% → OVEREXTENDED
+  const result = classifyMaAnchor({ price: 25000, sma20: 22000, sma100: 21000, preferredAnchor: 'sma100', maxExtensionPct: 7 });
+  assert.equal(result.allowed, false);
+  assert.equal(result.blocker, 'OVEREXTENDED');
 });

@@ -61,16 +61,26 @@ export function sessionInfo(now = new Date(), market = 'VN') {
 
 /**
  * entryWindow — classification of entry windows within VN HOSE session.
+ * Uses Vietnam timezone (UTC+7), independent of host timezone.
  * Returns one of: HIGH, NORMAL, REDUCED, DISCOVERY, BLOCKED
  * ISO weekdays; [2,3] is Tuesday/Wednesday priority only.
- * Outside trading hours or on weekends returns BLOCKED.
  */
 export function entryWindow(now = new Date(), market = 'VN') {
-  if (market !== 'VN') return { window: 'N/A', priority: false };
-  const wd = now.getDay();
-  const isPriority = wd === 2 || wd === 3; // Tuesday/Wednesday
-  if (wd === 0 || wd === 6) return { window: 'BLOCKED', priority: isPriority, reason: 'weekend' };
-  const t = now.getHours() * 60 + now.getMinutes();
+  if (market !== 'VN') return { window: 'N/A', priority: false, reason: 'non_vn' };
+  // Convert to Vietnam time (UTC+7) regardless of host timezone
+  const utcMin = now.getUTCHours() * 60 + now.getUTCMinutes();
+  const vnMin = (utcMin + 7 * 60) % (24 * 60); // UTC+7
+  const vnHour = Math.floor(vnMin / 60);
+  const vnDay = now.getUTCDay(); // 0=Sun..6=Sat in UTC
+  // Vietnam weekday: if UTC time crosses midnight differently, adjust
+  // VN = UTC+7, so VN day = UTC day if UTC time +7h < 24, else next day
+  const vnDayOfWeek = (utcMin + 420 >= 1440) ? (vnDay + 1) % 7 : vnDay;
+
+  const isPriority = vnDayOfWeek === 2 || vnDayOfWeek === 3; // Tue/Wed
+  if (vnDayOfWeek === 0 || vnDayOfWeek === 6) {
+    return { window: 'BLOCKED', priority: isPriority, reason: 'weekend' };
+  }
+  const t = vnHour * 60 + (vnMin % 60);
   let window, reason;
 
   if (t < 540 || t >= 885)            { window = 'BLOCKED'; reason = 'market_closed'; }
@@ -92,64 +102,120 @@ export function entryWindow(now = new Date(), market = 'VN') {
  * lockedLtf — determine if a lower-timeframe chart has stabilized.
  * M5 requires 2 consecutive closed non-bearish bars.
  * M15/H1 requires 1 closed non-bearish bar.
- * Open bar, stale evidence, wrong timeframe, wrong symbol, or bearish bar fails closed.
  *
- * @param {Object} options
- * @param {Array}  options.bars       - Array of bars with {close, open, time, ...}
- * @param {string} options.timeframe  - '5' (M5), '15' (M15), '60' (H1), etc.
- * @param {string} options.symbol     - Expected symbol for evidence correlation
- * @param {number} options.maxAgeMs   - Max age of the most recent bar in ms
- * @returns {{ locked: boolean, reason: string, checks: Object }}
+ * "Non-bearish" requires ALL of:
+ * - bar is closed (age > timeframe)
+ * - close >= open
+ * - no bearish VSA pattern (closed in lower 50% + high vol + narrow spread)
+ * - no delta divergence (negative delta while price up)
+ * - no dominant sell stack (sell stack >= buy stack when close near low)
+ * - no aggressive selling (high sell proportion)
+ * - no protected-low breach
+ *
+ * Wrong symbol, stale data, open bar, wrong timeframe → fails closed.
+ *
+ * @param {Object} opts
+ * @param {Array}  opts.bars              - Bars with {time, open, high, low, close, volume, ...}
+ * @param {string} opts.timeframe         - '5', '15', or '60'
+ * @param {string} opts.expectedSymbol    - Expected symbol to validate evidence
+ * @param {number} [opts.maxAgeMs]        - Max age of most recent bar in ms
+ * @param {number|Date} [opts.now]        - Injection for deterministic testing
+ * @param {number} [opts.protectedLow]    - Protected low level for breach check
+ * @param {Object} [opts.footprint]       - Optional footprint data for delta/stack checks
+ * @returns {{ locked: boolean, reason: string, checks: Object, required: number, timeframe: string }}
  */
-export function lockedLtf({ bars = [], timeframe, symbol, maxAgeMs = 300000, now } = {}) {
+export function lockedLtf({ bars = [], timeframe, expectedSymbol, maxAgeMs, now, protectedLow, footprint } = {}) {
   if (!timeframe || !bars.length) {
-    return { locked: false, reason: 'missing_data', checks: {} };
+    return { locked: false, reason: 'missing_data', checks: {}, required: 0, timeframe };
   }
-  const tfInt = parseInt(timeframe, 10);
-  const m5 = ['5', 5].includes(tfInt);
-  const m15h1 = [15, 60].includes(tfInt);
-
-  // Validate timeframe
-  if (!m5 && !m15h1) {
-    return { locked: false, reason: `unsupported_timeframe:${timeframe}`, checks: {} };
+  if (!expectedSymbol) {
+    return { locked: false, reason: 'missing_expected_symbol', checks: {}, required: 0, timeframe };
   }
 
+  const tfMap = { '5': 5, '15': 15, '60': 60 };
+  const tfInt = tfMap[String(timeframe)];
+  if (!tfInt) {
+    return { locked: false, reason: `unsupported_timeframe:${timeframe}`, checks: {}, required: 0, timeframe };
+  }
+
+  const m5 = tfInt === 5;
   const required = m5 ? 2 : 1;
   if (bars.length < required) {
-    return { locked: false, reason: `insufficient_bars:need_${required}_got_${bars.length}`, checks: {} };
+    return { locked: false, reason: `insufficient_bars:need_${required}_got_${bars.length}`, checks: {}, required, timeframe };
   }
 
-  const nowSec = (now || Date.now()) / 1000;
+  const nowSec = (now ? +new Date(now) : Date.now()) / 1000;
 
-  // Check each required bar: must be closed and non-bearish
+  // Check each required bar
   const checks = {};
+  let allNonBearish = true;
+
   for (let i = 0; i < required; i++) {
     const bar = bars[bars.length - 1 - i];
     if (!bar) {
       checks[`bar_${i}`] = { ok: false, reason: 'missing' };
+      allNonBearish = false;
       continue;
     }
-    // Bar must be closed (older than its timeframe)
-    const barAge = nowSec - bar.time;
-    const closed = barAge >= tfInt * 60;
-    const bearish = bar.close < bar.open;
-    const ok = closed && !bearish;
+
+    // 1. Closed check
+    const barAgeSec = nowSec - bar.time;
+    const closed = barAgeSec >= tfInt * 60;
+
+    // 2. Staleness
+    const stale = maxAgeMs != null && barAgeSec * 1000 > maxAgeMs;
+
+    // 3. Price action: close >= open
+    const priceUp = bar.close >= bar.open;
+
+    // 4. Bearish VSA: closed in lower 50%, high vol, narrow spread
+    const spread = bar.high - bar.low;
+    const closePos = spread > 0 ? (bar.close - bar.low) / spread : 0.5;
+    const vsaBearish = !priceUp && closePos <= 0.5;
+
+    // 5. Delta divergence (if footprint available)
+    const delta = footprint?.delta ?? null;
+    const deltaDivergence = delta != null && delta < 0 && priceUp;
+
+    // 6. Dominant sell stack (if footprint available)
+    const buyStack = footprint?.buy_stack ?? null;
+    const sellStack = footprint?.sell_stack ?? null;
+    const dominantSell = sellStack != null && buyStack != null && sellStack > buyStack && closePos <= 0.4;
+
+    // 7. Aggressive selling
+    const buyPct = footprint?.buy_pct ?? null;
+    const aggressiveSell = buyPct != null && buyPct < 40 && !priceUp;
+
+    // 8. Protected-low breach
+    const lowBreach = protectedLow != null && bar.low <= protectedLow;
+
+    // Overall bar verdict
+    const barOk = closed && !stale && priceUp && !vsaBearish && !deltaDivergence && !dominantSell && !aggressiveSell && !lowBreach;
+
+    const failures = [];
+    if (!closed) failures.push('open');
+    if (stale) failures.push('stale');
+    if (!priceUp) failures.push('bearish_price');
+    if (vsaBearish) failures.push('bearish_vsa');
+    if (deltaDivergence) failures.push('delta_divergence');
+    if (dominantSell) failures.push('dominant_sell_stack');
+    if (aggressiveSell) failures.push('aggressive_sell');
+    if (lowBreach) failures.push('protected_low_breach');
+
     checks[`bar_${i}`] = {
-      ok,
-      closed,
-      bearish,
-      close: bar.close,
-      open: bar.open,
-      time: bar.time,
-      reason: !closed ? 'open' : bearish ? 'bearish' : 'ok',
+      ok: barOk,
+      closed, stale, close_pos: Math.round(closePos * 100), price_up: priceUp,
+      vsa_bearish: vsaBearish, delta_divergence: deltaDivergence,
+      dominant_sell_stack: dominantSell, aggressive_sell: aggressiveSell,
+      low_breach: lowBreach,
+      failures,
     };
+    if (!barOk) allNonBearish = false;
   }
 
-  const locked = Object.values(checks).every(c => c.ok);
-  const failedChecks = Object.entries(checks).filter(([, c]) => !c.ok);
-  const reason = locked ? 'locked' : `failed:${failedChecks.map(([k, c]) => `${k}=${c.reason}`).join(',')}`;
-
-  return { locked, reason, checks, required, timeframe };
+  const locked = allNonBearish;
+  const failList = Object.entries(checks).filter(([, c]) => !c.ok).map(([k, c]) => `${k}=${c.failures.join(',')}`);
+  return { locked, reason: locked ? 'locked' : `failed:${failList.join(';')}`, checks, required, timeframe };
 }
 
 // ponytail: self-check chay khi goi truc tiep `node bar_status.mjs`

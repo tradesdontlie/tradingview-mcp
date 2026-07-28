@@ -107,15 +107,15 @@ export function scoreSignal(fp = {}, ma = {}, price, phase = 'UNKNOWN', volRatio
   return { ...common, sig };
 }
 
-// ── Task 1: Auto Key Levels Previous Month Profile ──
+// ── Auto Key Levels Previous Month Profile ──
 
 const AUTO_KEY_LEVELS_NAME = 'Auto Key Levels';
-const MONTHLY_KEYS = ['Prev Monthly POC', 'Prev Monthly VAH', 'Prev Monthly VAL'];
-const THIN_SPACE = /\s/g; // handle thin spaces, regular spaces, non-breaking spaces
+const PROFILE_KEYS = ['Prev Monthly POC', 'Prev Monthly VAH', 'Prev Monthly VAL'];
+const THIN_SPACE = /\s/;
+const DEFAULT_CLOCK_SKEW_MS = 60000; // 1 minute clock skew tolerance
 
 /**
  * Parse a TradingView formatted number like "23.25 K" or "71,845" or "23.1 K"
- * Handles: K suffix (×1000), thin spaces, commas as thousands separators
  */
 function parseProfileNumber(val) {
   if (val == null || val === '' || val === '∅') return null;
@@ -129,121 +129,192 @@ function parseProfileNumber(val) {
 
 /**
  * Derive the previous calendar month string "YYYY-MM" from a market date.
- * Handles year rollover (January → previous December).
  */
-function previousMonth(marketDate) {
+function profileMonth(marketDate) {
   const d = new Date(marketDate);
   if (isNaN(d.getTime())) return null;
   const y = d.getFullYear();
-  const m = d.getMonth(); // 0=Jan
+  const m = d.getMonth();
   if (m === 0) return `${y - 1}-12`;
   return `${y}-${String(m).padStart(2, '0')}`;
 }
 
 /**
- * Extract and validate the Previous Monthly Profile (POC, VAH, VAL) from
- * an Auto Key Levels study on a TradingView chart.
+ * Extract and validate the Previous Monthly Profile from Auto Key Levels.
  *
- * @param {Object} options
- * @param {Array}  options.studies       - Study array from TradingView chart state
- * @param {string} options.symbol        - Expected symbol (e.g. "HOSE:HCM")
- * @param {string} options.marketDate    - Market date string (e.g. "2026-07-28")
- * @param {string|Date} options.observedAt - When the observation was made
- * @param {number} options.maxAgeSeconds  - Max allowed age of the observation
- * @returns {{ valid: boolean, poc, vah, val, prevMonth, source, error?, stale? }}
+ * @param {Object} opts
+ * @param {Array}  opts.studies
+ * @param {string} opts.expectedSymbol    - Expected symbol, e.g. "HOSE:HCM"
+ * @param {string} opts.marketDate        - Market date "YYYY-MM-DD"
+ * @param {string|Date} opts.observedAt   - ISO-8601 observation timestamp
+ * @param {number} [opts.maxAgeSeconds=7200]
+ * @param {number|Date} [opts.now]        - Injection point for deterministic testing
+ * @param {number} [opts.clockSkewMs=60000]
+ * @returns {{
+ *   valid: boolean,
+ *   source: string|null,
+ *   symbol: string|null,
+ *   market_date: string|null,
+ *   profile_month: string|null,
+ *   poc: number|null,
+ *   vah: number|null,
+ *   val: number|null,
+ *   observed_at: string|null,
+ *   complete: boolean,
+ *   error: string|null,
+ *   evidence_hash_fields: Object|null
+ * }}
  */
-export function extractPreviousMonthProfile({ studies = [], symbol, marketDate, observedAt, maxAgeSeconds = 7200 }) {
+export function extractPreviousMonthProfile({ studies = [], expectedSymbol, marketDate, observedAt, maxAgeSeconds = 7200, now, clockSkewMs = DEFAULT_CLOCK_SKEW_MS }) {
+  const nowMs = now ? +new Date(now) : Date.now();
+  const obsMs = observedAt ? +new Date(observedAt) : NaN;
+  const normSym = sym => String(sym || '').split(':').pop().toUpperCase();
+
+  // 0. Validate inputs
+  if (!Number.isFinite(obsMs)) {
+    return { valid: false, error: 'observedAt is invalid', source: null, symbol: expectedSymbol || null, market_date: marketDate || null, profile_month: null, poc: null, vah: null, val: null, observed_at: observedAt || null, complete: false, evidence_hash_fields: null };
+  }
+
+  // Reject future observation beyond clock skew
+  if (obsMs > nowMs + clockSkewMs) {
+    return { valid: false, error: `observedAt (${observedAt}) is in the future beyond clock skew`, source: null, symbol: expectedSymbol || null, market_date: marketDate || null, profile_month: null, poc: null, vah: null, val: null, observed_at: observedAt, complete: false, evidence_hash_fields: null };
+  }
+
   // 1. Find Auto Key Levels studies
   const keyLevels = studies.filter(s => s?.name?.includes(AUTO_KEY_LEVELS_NAME));
   if (keyLevels.length === 0) {
-    return { valid: false, error: `Auto Key Levels study not found`, poc: null, vah: null, val: null, prevMonth: null, source: null, symbol };
+    return { valid: false, error: 'Auto Key Levels study not found', source: null, symbol: expectedSymbol || null, market_date: marketDate || null, profile_month: null, poc: null, vah: null, val: null, observed_at: observedAt || null, complete: false, evidence_hash_fields: null };
   }
   if (keyLevels.length > 1) {
-    return { valid: false, error: `Duplicate Auto Key Levels study (found ${keyLevels.length})`, poc: null, vah: null, val: null, prevMonth: null, source: null, symbol };
+    return { valid: false, error: `Duplicate Auto Key Levels study (found ${keyLevels.length})`, source: null, symbol: expectedSymbol || null, market_date: marketDate || null, profile_month: null, poc: null, vah: null, val: null, observed_at: observedAt || null, complete: false, evidence_hash_fields: null };
   }
 
-  const values = keyLevels[0].values || {};
-
   // 2. Extract the three required fields
+  const values = keyLevels[0].values || {};
   const poc = parseProfileNumber(values['Prev Monthly POC']);
   const vah = parseProfileNumber(values['Prev Monthly VAH']);
   const val = parseProfileNumber(values['Prev Monthly VAL']);
 
-  // 3. Validate all three are present and finite
   const missing = [];
   if (poc === null) missing.push('Prev Monthly POC');
   if (vah === null) missing.push('Prev Monthly VAH');
   if (val === null) missing.push('Prev Monthly VAL');
   if (missing.length > 0) {
-    return { valid: false, error: `Missing profile values: ${missing.join(', ')}`, poc, vah, val, prevMonth: null, source: AUTO_KEY_LEVELS_NAME, symbol };
+    return { valid: false, error: `Missing profile values: ${missing.join(', ')}`, source: AUTO_KEY_LEVELS_NAME, symbol: expectedSymbol || null, market_date: marketDate || null, profile_month: null, poc, vah, val, observed_at: observedAt || null, complete: false, evidence_hash_fields: null };
   }
 
-  // 4. Validate VAL < POC < VAH
+  // 3. Validate VAL < POC < VAH
   if (!(val < poc && poc < vah)) {
-    return { valid: false, error: `Profile invariant violation: VAL=${val} POC=${poc} VAH=${vah} (expected VAL < POC < VAH)`, poc, vah, val, prevMonth: null, source: AUTO_KEY_LEVELS_NAME, symbol };
+    return { valid: false, error: `Profile invariant violation: VAL=${val} POC=${poc} VAH=${vah}`, source: AUTO_KEY_LEVELS_NAME, symbol: expectedSymbol || null, market_date: marketDate || null, profile_month: null, poc, vah, val, observed_at: observedAt || null, complete: false, evidence_hash_fields: null };
   }
 
-  // 5. Derive previous month from market date
-  const prevMon = previousMonth(marketDate);
-  if (!prevMon) {
-    return { valid: false, error: `Cannot derive previous month from marketDate=${marketDate}`, poc, vah, val, prevMonth: null, source: AUTO_KEY_LEVELS_NAME, symbol };
+  // 4. Derive profile_month from market date
+  const pMonth = profileMonth(marketDate);
+  if (!pMonth) {
+    return { valid: false, error: `Cannot derive profile_month from marketDate=${marketDate}`, source: AUTO_KEY_LEVELS_NAME, symbol: expectedSymbol || null, market_date: marketDate || null, profile_month: null, poc, vah, val, observed_at: observedAt || null, complete: false, evidence_hash_fields: null };
   }
 
-  // 6. Check staleness
-  const observed = new Date(observedAt);
-  const ageSeconds = (Date.now() - observed.getTime()) / 1000;
-  const stale = ageSeconds > maxAgeSeconds;
+  // 5. Check staleness
+  const ageSec = (nowMs - obsMs) / 1000;
+  const stale = ageSec > maxAgeSeconds;
+
+  // 6. Cache key identity: expectedSymbol + profile_month
+  const cacheKey = expectedSymbol ? `${normSym(expectedSymbol)}:${pMonth}` : null;
+
+  // 7. Evidence hash fields
+  const evidenceHashFields = {
+    source: AUTO_KEY_LEVELS_NAME,
+    symbol: expectedSymbol || null,
+    market_date: marketDate || null,
+    profile_month: pMonth,
+    poc,
+    vah,
+    val,
+    observed_at: observedAt || null,
+  };
 
   return {
     valid: !stale,
-    poc, vah, val,
-    prevMonth: prevMon,
     source: AUTO_KEY_LEVELS_NAME,
-    symbol,
+    symbol: expectedSymbol || null,
+    market_date: marketDate || null,
+    profile_month: pMonth,
+    poc, vah, val,
+    observed_at: observedAt || null,
+    complete: !stale,
     stale,
-    error: stale ? `Observation stale: ${Math.round(ageSeconds)}s > ${maxAgeSeconds}s` : null,
+    cache_key: cacheKey,
+    evidence_hash_fields: evidenceHashFields,
+    error: stale ? `Observation stale: ${Math.round(ageSec)}s > ${maxAgeSeconds}s` : null,
   };
 }
 
 /**
- * Classify which moving average to anchor to based on price proximity.
+ * MA anchor classification with strict SMA gate.
  *
- * @param {Object} options
- * @param {number} options.price            - Current price
- * @param {number|null} options.sma20       - SMA20 value
- * @param {number|null} options.sma100      - SMA100 value
- * @param {string|null} options.preferredAnchor - Preferred anchor ('sma20' or 'sma100')
- * @param {number} options.maxExtensionPct  - Max allowed extension from SMA100 (default 7)
- * @returns {{ anchor: string|null, distancePct: number|null, overextended: boolean }}
+ * Rules:
+ * - Price below SMA100 → { allowed: false, blocker: 'BELOW_SMA100' }
+ * - Price must be within 0% to maxExtensionPct above at least SMA20 or SMA100
+ * - preferredAnchor only changes the candidate order, never bypasses limits
+ * - Price > maxExtensionPct above both → OVEREXTENDED
+ *
+ * @param {Object} opts
+ * @param {number} opts.price
+ * @param {number|null} opts.sma20
+ * @param {number|null} opts.sma100
+ * @param {string} [opts.preferredAnchor] - 'sma20' or 'sma100'; affects ordering only
+ * @param {number} [opts.maxExtensionPct=7]
+ * @returns {{ allowed: boolean, anchor: string|null, extension_pct: number|null, reason: string, blocker: string|null }}
  */
 export function classifyMaAnchor({ price, sma20, sma100, preferredAnchor, maxExtensionPct = 7 }) {
   if (price == null || !Number.isFinite(price)) {
-    return { anchor: null, distancePct: null, overextended: false };
+    return { allowed: false, anchor: null, extension_pct: null, reason: 'missing price', blocker: 'PRICE_UNAVAILABLE' };
   }
 
-  // Check SMA100 proximity
+  // Gate 1: price must be at or above SMA100
   if (sma100 != null && Number.isFinite(sma100)) {
-    const distancePct = Math.round((price - sma100) / sma100 * 10000) / 100;
-    const overextended = distancePct > maxExtensionPct;
-
-    if (preferredAnchor === 'sma100' || (!overextended && distancePct >= -maxExtensionPct)) {
-      return { anchor: 'sma100', distancePct, overextended };
+    if (price < sma100) {
+      const belowPct = Math.round((sma100 - price) / sma100 * 10000) / 100;
+      return { allowed: false, anchor: null, extension_pct: -belowPct, reason: `price ${price} below SMA100 ${sma100} (${belowPct}%)`, blocker: 'BELOW_SMA100' };
     }
   }
 
-  // Check SMA20 proximity
+  // Build candidate anchors ordered by preference
+  const candidates = [];
+  const preferred = preferredAnchor === 'sma20' ? 'sma20' : preferredAnchor === 'sma100' ? 'sma100' : null;
+
   if (sma20 != null && Number.isFinite(sma20)) {
-    const distancePct = Math.round((price - sma20) / sma20 * 10000) / 100;
-    if (preferredAnchor === 'sma20' || Math.abs(distancePct) <= maxExtensionPct) {
-      return { anchor: 'sma20', distancePct, overextended: false };
+    const extPct = Math.round((price - sma20) / sma20 * 10000) / 100;
+    candidates.push({ anchor: 'sma20', extension_pct: extPct });
+  }
+  if (sma100 != null && Number.isFinite(sma100)) {
+    const extPct = Math.round((price - sma100) / sma100 * 10000) / 100;
+    candidates.push({ anchor: 'sma100', extension_pct: extPct });
+  }
+
+  // Sort: preferred first, then by smallest non-negative extension_pct
+  candidates.sort((a, b) => {
+    if (preferred) {
+      if (a.anchor === preferred && b.anchor !== preferred) return -1;
+      if (a.anchor !== preferred && b.anchor === preferred) return 1;
+    }
+    const aOk = a.extension_pct >= 0 ? a.extension_pct : Infinity;
+    const bOk = b.extension_pct >= 0 ? b.extension_pct : Infinity;
+    return aOk - bOk;
+  });
+
+  // Gate 2: must be within 0% to maxExtensionPct above at least one anchor
+  for (const c of candidates) {
+    if (c.extension_pct >= 0 && c.extension_pct <= maxExtensionPct) {
+      return { allowed: true, anchor: c.anchor, extension_pct: c.extension_pct, reason: `${c.anchor} at +${c.extension_pct}%`, blocker: null };
     }
   }
 
-  // Overextended from SMA100, no good SMA20 proximity
-  if (sma100 != null && Number.isFinite(sma100)) {
-    const distancePct = Math.round((price - sma100) / sma100 * 10000) / 100;
-    return { anchor: 'none', distancePct, overextended: true };
+  // Both anchors exist but price is overextended
+  if (candidates.length > 0) {
+    const minExt = Math.min(...candidates.map(c => c.extension_pct));
+    return { allowed: false, anchor: null, extension_pct: minExt, reason: `price exceeds ${maxExtensionPct}% above all anchors (min extension ${minExt}%)`, blocker: 'OVEREXTENDED' };
   }
 
-  return { anchor: null, distancePct: null, overextended: false };
+  return { allowed: false, anchor: null, extension_pct: null, reason: 'no MA data', blocker: 'MA_DATA_MISSING' };
 }
