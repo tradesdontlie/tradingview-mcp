@@ -1,7 +1,7 @@
 // VN Unified Check — Computation tests (Task 3)
 // Run: node test_vn_check.mjs
 import assert from 'node:assert/strict';
-import { classifyVnSetup, buildClosedH6History, sma, buildVnAutoCore, buildVnGateView, buildVnPlanScenario } from './check_one.mjs';
+import { classifyVnSetup, buildClosedH6History, sma, buildVnAutoCore, buildVnGateView, buildVnPlanScenario, buildVnCoreAssembly } from './check_one.mjs';
 
 // ===== buildClosedH6History tests =====
 
@@ -122,7 +122,7 @@ assert.notEqual(classifyVnSetup({
 function core({ price, sma20, sma100, sma100Dist, volRatio, window, setup }) {
   return buildVnAutoCore({
     price,
-    h6History: { bars_completed: 100, sma20, sma100, avg_vol_20: 5000 },
+    h6History: { bars_completed: 100, sma20, sma100, structure: 'UPTREND', avg_vol_20: 5000 },
     h6Live: { vol_ratio: volRatio },
     entryWindow: { window: window || 'HIGH' },
     setup: setup || { setup: 'SMA20_PULLBACK', zone_low: 98, zone_high: 102, anchor: 'sma20', reason: '' },
@@ -165,7 +165,7 @@ assert.equal(core({ price: 103, sma20: 100, sma100: 95, volRatio: 1.01, window: 
 function makeCoreWithSetup({ price, sma20, sma100, volRatio, window: win, setup }) {
   return buildVnAutoCore({
     price,
-    h6History: { bars_completed: 100, sma20, sma100, avg_vol_20: 5000 },
+    h6History: { bars_completed: 100, sma20, sma100, structure: 'UPTREND', avg_vol_20: 5000 },
     h6Live: { vol_ratio: volRatio },
     entryWindow: { window: win || 'HIGH' },
     setup: setup !== undefined ? setup : sma20Setup,
@@ -197,6 +197,22 @@ assert.ok(buildVnAutoCore({
 }).blockers.includes('H6_HISTORY_INSUFFICIENT'), 'empty history must produce H6_HISTORY_INSUFFICIENT');
 
 // ===== Zone-consistency tests (Step 1) =====
+
+for (const [price, expectedSetup] of [[100, 'SMA20_PULLBACK'], [103, 'SMA20_PULLBACK']]) {
+  const setup = classifyVnSetup({ price, sma20: 100, sma100: 90, structure: 'UPTREND', aboveSma100: true });
+  assert.equal(setup.setup, expectedSetup);
+  assert.ok(setup.zone_low <= price && price <= setup.zone_high,
+    `price ${price} must be inside returned SMA20 zone`);
+}
+for (const price of [100, 105]) {
+  const setup = classifyVnSetup({ price, sma20: 110, sma100: 100, structure: 'SIDEWAYS', aboveSma100: true });
+  assert.equal(setup.setup, 'SMA100_PULLBACK_RECLAIM');
+  assert.ok(setup.zone_low <= price && price <= setup.zone_high,
+    `price ${price} must be inside returned SMA100 zone`);
+}
+assert.equal(classifyVnSetup({ price: 103.01, sma20: 100, sma100: 80, structure: 'UPTREND', aboveSma100: true }).setup, null);
+assert.equal(classifyVnSetup({ price: 105.01, sma20: 110, sma100: 100, structure: 'SIDEWAYS', aboveSma100: true }).setup, null);
+assert.equal(classifyVnSetup({ price: 105, sma20: 110, sma100: 100, structure: 'DOWNTREND', aboveSma100: true }).setup, null);
 
 // Returned setup must contain the current price
 {
@@ -238,6 +254,32 @@ assert.ok(buildVnAutoCore({
 
 // ===== buildVnGateView tests (Step 2) =====
 
+// Production and fixture assembly share this helper, so omitting setup from
+// buildVnAutoCore would make this canonical production seam ineligible.
+{
+  const assembled = buildVnCoreAssembly({
+    price: 103,
+    h6History: { bars_completed: 120, sma20: 100, sma100: 90, structure: 'UPTREND', protected_low: 85, avg_vol_20: 5000 },
+    h6Live: { price: 103, vol_ratio: 1.01 },
+    entryWindow: { window: 'HIGH', priority: true, reason: '' },
+    bar: { closed: false, age_pct: 60 },
+    overheadResistance: 115,
+    trail: { status: 'SAFE' },
+  });
+  assert.equal(assembled.setup.setup, 'SMA20_PULLBACK');
+  assert.equal(assembled.autoCore.eligible, true, 'production assembly must pass classified setup into auto core');
+  assert.equal(assembled.gateView.scenarios.length, 1);
+}
+
+// Main and the fixture emitter must consume the same production assembly seam.
+{
+  const productionSource = readFileSync(new URL('./check_one.mjs', import.meta.url), 'utf-8');
+  assert.match(productionSource, /vnAssembly\s*=\s*buildVnCoreAssembly\(\{/,
+    'production main must use buildVnCoreAssembly');
+  assert.match(productionSource, /buildVnAutoCore\(\{ price, h6History, h6Live, entryWindow, setup \}\)/,
+    'production assembly must pass classifyVnSetup result into buildVnAutoCore');
+}
+
 const validVn = {
   setup: sma20Setup,
   setup_state: 'IN_ZONE',
@@ -250,8 +292,8 @@ const validVn = {
 const validScenario = {
   label: 'sma20_pullback',
   direction: 'LONG',
-  entry_low: 99,
-  entry_high: 101,
+  entry_low: 98,
+  entry_high: 102,
   sl: 85,
   tp1: 115,
   trigger: 'AUTO_CORE_READY + CHECK_TAY_TRUOC_KHI_MUA',
@@ -288,6 +330,7 @@ const validScenario = {
 
 // ===== Fixture consistency test (Step 7) =====
 import { readFileSync } from 'fs';
+import { buildVnCoreFixture } from './tests/emit_vn_core_fixture.mjs';
 import { fileURLToPath } from 'url';
 import path from 'path';
 
@@ -295,16 +338,6 @@ import path from 'path';
   const __dirname = fileURLToPath(new URL('.', import.meta.url));
   const fixturePath = path.join(__dirname, 'tests', 'fixtures', 'vn_core_ready.json');
   const fixture = JSON.parse(readFileSync(fixturePath, 'utf-8'));
-
-  // Recompute from same parameters
-  const price = 101;
-  const h6History = { bars_completed: 120, sma20: 100, sma100: 90, structure: 'UPTREND', protected_low: 85, avg_vol_20: 5000 };
-  const setup = classifyVnSetup({ price, sma20: 100, sma100: 90, structure: 'UPTREND', aboveSma100: true });
-  const h6Live = { price, vol_ratio: 1.01, location_vs_sma20: 1, location_vs_sma100: 12.22 };
-  const entryWindow = { window: 'HIGH', priority: true, reason: 'window open' };
-  const autoCore = buildVnAutoCore({ price, h6History, h6Live, entryWindow, setup });
-  const setupState = setup.setup != null && autoCore.blockers.length === 0 ? 'IN_ZONE' : 'NO_SETUP';
-  const planScenario = buildVnPlanScenario({ setup, protectedLow: 85, overheadResistance: 115, trail: { status: 'SAFE' } });
 
   assert.equal(fixture.vn.setup.setup, 'SMA20_PULLBACK', 'fixture setup must be SMA20_PULLBACK');
   assert.equal(fixture.vn.setup_state, 'IN_ZONE', 'fixture setup_state must be IN_ZONE');
@@ -314,11 +347,7 @@ import path from 'path';
   assert.ok(fixture.scenarios.length === 1, 'fixture must have exactly 1 scenario');
   assert.equal(fixture.scenarios[0].label, 'sma20_pullback', 'fixture scenario label must be sma20_pullback');
 
-  // Verify recomputed values match (excluding evidence_hash, generated_at, as_of, market_date)
-  assert.equal(setup.setup, fixture.vn.setup.setup, 'regenerated setup must match fixture');
-  assert.equal(setupState, fixture.vn.setup_state, 'regenerated setup_state must match fixture');
-  assert.deepEqual(autoCore.blockers, fixture.vn.auto_core.blockers, 'regenerated blockers must match fixture');
-  assert.equal(planScenario.label, fixture.scenarios[0].label, 'regenerated scenario label must match fixture');
+  assert.deepEqual(buildVnCoreFixture(), fixture, 'fixture must equal full production-owned assembly');
 }
 
 console.log('ALL PASS');

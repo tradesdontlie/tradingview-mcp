@@ -285,28 +285,30 @@ function classifyVnSetup({ price, sma20, sma100, structure, aboveSma100 }) {
   if (!aboveSma100) return { setup: null, reason: 'price below SMA100', zone_low: null, zone_high: null, anchor: null };
   if (price == null) return { setup: null, reason: 'no price', zone_low: null, zone_high: null, anchor: null };
 
-  const sma20Dist = sma20 != null ? Math.round((price - sma20) / sma20 * 10000) / 100 : null;
-  const sma100Dist = sma100 != null ? Math.round((price - sma100) / sma100 * 10000) / 100 : null;
+  const sma20Dist = Number.isFinite(sma20) && sma20 > 0 ? (price - sma20) / sma20 * 100 : null;
+  const sma100Dist = Number.isFinite(sma100) && sma100 > 0 ? (price - sma100) / sma100 * 100 : null;
 
   // Automatic setups: only SMA-based. PM Profile, Breakout, VSA are manual-only.
 
   // 1. SMA20_PULLBACK: near SMA20, uptrend
-  if (sma20Dist != null && Math.abs(sma20Dist) <= 3 && structure === 'UPTREND') {
+  if (sma20Dist != null && sma20Dist >= 0 && sma20Dist <= 3 && structure === 'UPTREND') {
     return {
       setup: 'SMA20_PULLBACK',
-      zone_low: Math.round(sma20 * 0.99),
-      zone_high: Math.round(sma20 * 1.01),
+      zone_low: sma20,
+      zone_high: sma20 * 1.03,
       anchor: 'sma20',
       reason: `Gia quanh SMA20 (cach ${sma20Dist}%), pullback trong uptrend`,
     };
   }
 
   // 2. SMA100_PULLBACK_RECLAIM: above SMA100, SMA20 far
-  if (sma100Dist != null && sma100Dist <= 5 && sma20Dist != null && Math.abs(sma20Dist) > 3) {
+  if (sma100Dist != null && sma100Dist >= 0 && sma100Dist <= 5
+      && sma20Dist != null && Math.abs(sma20Dist) > 3
+      && (structure === 'UPTREND' || structure === 'SIDEWAYS')) {
     return {
       setup: 'SMA100_PULLBACK_RECLAIM',
-      zone_low: Math.round(sma100 * 0.99),
-      zone_high: Math.round(sma100 * 1.02),
+      zone_low: sma100,
+      zone_high: sma100 * 1.05,
       anchor: 'sma100',
       reason: `Gia tren SMA100 (cach ${sma100Dist}%), SMA20 con xa`,
     };
@@ -345,19 +347,6 @@ function buildVnAutoCore({ price, h6History, h6Live, entryWindow, setup }) {
     blockers.push('BELOW_SMA100');
   }
 
-  // --- MA extension: at least one non-negative anchor within 7% ---
-  if (aboveSma100 && sma20Ok && sma100Ok) {
-    const candidates = [];
-    if (h6History.sma20 != null && Number.isFinite(h6History.sma20)) {
-      candidates.push(Math.round((price - h6History.sma20) / h6History.sma20 * 10000) / 100);
-    }
-    candidates.push(Math.round((price - h6History.sma100) / h6History.sma100 * 10000) / 100);
-    const minExt = Math.min(...candidates);
-    if (minExt > 7) {
-      blockers.push('OVEREXTENDED');
-    }
-  }
-
   // --- Volume evidence: strict > 1.0 (equality is blocked) ---
   if (!h6Live || h6Live.vol_ratio == null || !Number.isFinite(h6Live.vol_ratio)) {
     blockers.push('H6_VOLUME_EVIDENCE_MISSING');
@@ -367,10 +356,22 @@ function buildVnAutoCore({ price, h6History, h6Live, entryWindow, setup }) {
 
   // --- Setup validation: only SMA20_PULLBACK or SMA100_PULLBACK_RECLAIM ---
   const SMA_SETUPS = new Set(['SMA20_PULLBACK', 'SMA100_PULLBACK_RECLAIM']);
+  const expectedAnchor = setup?.setup === 'SMA20_PULLBACK' ? 'sma20'
+    : setup?.setup === 'SMA100_PULLBACK_RECLAIM' ? 'sma100' : null;
+  const structureOk = setup?.setup === 'SMA20_PULLBACK'
+    ? h6History?.structure === 'UPTREND'
+    : setup?.setup === 'SMA100_PULLBACK_RECLAIM'
+      && (h6History?.structure === 'UPTREND' || h6History?.structure === 'SIDEWAYS');
+  const anchorValue = expectedAnchor ? h6History?.[expectedAnchor] : null;
+  const anchorExtension = priceOk && Number.isFinite(anchorValue) && anchorValue > 0
+    ? (price - anchorValue) / anchorValue * 100 : null;
+  const anchorWithin7Pct = anchorExtension != null && anchorExtension >= 0 && anchorExtension <= 7;
+  if (expectedAnchor && !anchorWithin7Pct) blockers.push('OVEREXTENDED');
   const setupOk = setup && SMA_SETUPS.has(setup.setup)
     && setup.zone_low != null && Number.isFinite(setup.zone_low)
     && setup.zone_high != null && Number.isFinite(setup.zone_high)
-    && setup.anchor != null
+    && setup.zone_low <= setup.zone_high
+    && setup.anchor === expectedAnchor && structureOk && anchorWithin7Pct
     && priceOk && price >= setup.zone_low && price <= setup.zone_high;
   if (!setup || !SMA_SETUPS.has(setup?.setup)) {
     blockers.push('NO_SETUP');
@@ -386,7 +387,7 @@ function buildVnAutoCore({ price, h6History, h6Live, entryWindow, setup }) {
 
   const conditions = {
     above_sma100: aboveSma100,
-    ma_anchor_within_7pct: !blockers.includes('OVEREXTENDED') && !blockers.includes('MA_DATA_MISSING'),
+    ma_anchor_within_7pct: anchorWithin7Pct,
     setup_supported: setupOk,
     h6_volume_above_avg20: h6Live && h6Live.vol_ratio != null && h6Live.vol_ratio > 1.0,
     entry_window_allowed: entryWindow && ALLOWED_WINDOWS.has(entryWindow.window),
@@ -405,7 +406,7 @@ function buildVnAutoCore({ price, h6History, h6Live, entryWindow, setup }) {
  *   protectedLow < setup.zone_low <= setup.zone_high < overheadResistance
  */
 function buildVnPlanScenario({ setup, protectedLow, overheadResistance, trail }) {
-  if (!setup || !setup.setup) return null;
+  if (!setup || !['SMA20_PULLBACK', 'SMA100_PULLBACK_RECLAIM'].includes(setup.setup)) return null;
   if (!protectedLow || !Number.isFinite(protectedLow)) return null;
   if (!setup.zone_low || !Number.isFinite(setup.zone_low)) return null;
   if (!setup.zone_high || !Number.isFinite(setup.zone_high)) return null;
@@ -438,7 +439,13 @@ function buildVnPlanScenario({ setup, protectedLow, overheadResistance, trail })
  * Build the canonical VN gate view from the VN cache and a single plan scenario.
  */
 function buildVnGateView({ bar, vn, planScenario }) {
-  const scenarios = planScenario ? [planScenario] : [];
+  const setupLabel = vn?.setup?.setup === 'SMA20_PULLBACK' ? 'sma20_pullback'
+    : vn?.setup?.setup === 'SMA100_PULLBACK_RECLAIM' ? 'sma100_pullback_reclaim' : null;
+  const scenarioMatchesSetup = planScenario && setupLabel
+    && planScenario.label === setupLabel && planScenario.direction === 'LONG'
+    && planScenario.entry_low === vn.setup.zone_low
+    && planScenario.entry_high === vn.setup.zone_high;
+  const scenarios = scenarioMatchesSetup ? [planScenario] : [];
   // Derive setup_state from vn.setup_state (not the legacy top-level)
   const setup_state = vn.setup_state || 'NO_SETUP';
 
@@ -451,6 +458,33 @@ function buildVnGateView({ bar, vn, planScenario }) {
     setup_state,
     scenarios,
   };
+}
+
+/** Shared production/fixture assembly for the canonical VN automatic core. */
+function buildVnCoreAssembly({ price, h6History, h6Live, entryWindow, bar, overheadResistance, trail }) {
+  const setup = classifyVnSetup({
+    price,
+    sma20: h6History?.sma20,
+    sma100: h6History?.sma100,
+    structure: h6History?.structure,
+    aboveSma100: Number.isFinite(price) && Number.isFinite(h6History?.sma100)
+      && price >= h6History.sma100,
+  });
+  const autoCore = buildVnAutoCore({ price, h6History, h6Live, entryWindow, setup });
+  const setupState = setup.setup == null ? 'NO_SETUP'
+    : autoCore.eligible ? 'IN_ZONE' : 'NEAR_ZONE';
+  const planScenario = buildVnPlanScenario({
+    setup: setup.setup ? setup : null,
+    protectedLow: h6History?.protected_low,
+    overheadResistance,
+    trail,
+  });
+  const gateView = buildVnGateView({
+    bar,
+    vn: { setup, setup_state: setupState, h6_history: h6History },
+    planScenario,
+  });
+  return { setup, autoCore, setupState, planScenario, gateView };
 }
 
 // Geometry only. Promotion to READY belongs to the deterministic readiness gate.
@@ -1017,6 +1051,7 @@ async function main() {
 
   // --- VN UNIFIED CHECK (simplified H6 automatic core + manual checklist) ---
   let vn = null;
+  let vnAssembly = null;
   if (isVnStock) {
     // 1. Extract Auto Key Levels profile (observed only, never gates READY)
     const pmProfile = extractPreviousMonthProfile({
@@ -1067,32 +1102,21 @@ async function main() {
       maxExtensionPct: 7,
     });
 
-    // 5. Setup from completed-history MAs only
-    const aboveSma100 = maAnchor.blocker !== 'BELOW_SMA100' && maAnchor.blocker !== 'MA_DATA_MISSING';
-    const setup = classifyVnSetup({
-      price,
-      sma20: h6History.sma20,
-      sma100: h6History.sma100,
-      structure: h6History.structure,
-      aboveSma100,
-    });
-
-    // 6. Entry window
+    // 5. Entry window
     const win = entryWindow(new Date());
+
+    // 6. Canonical production assembly (also owned by the fixture emitter)
+    vnAssembly = buildVnCoreAssembly({
+      price, h6History, h6Live, entryWindow: win, bar,
+      overheadResistance: overhead.resistance, trail,
+    });
+    const { setup, autoCore, setupState, planScenario } = vnAssembly;
 
     // 7. Locked LTF is manual-only
     const ltfManual = {
       mode: 'MANUAL', timeframe: '15', locked: null,
       reason: 'manual_confirmation_required',
     };
-
-    // 8. Automatic core via pure builder (H6 history, MA, volume, entry window only)
-    const autoCore = buildVnAutoCore({
-      price,
-      h6History,
-      h6Live,
-      entryWindow: win,
-    });
 
     // 9. Manual checklist (always rendered, never gates READY)
     const manualChecks = [
@@ -1103,20 +1127,8 @@ async function main() {
       { code: 'PM_PROFILE_CONFIRMATION', label_vi: 'Doi chieu PM POC/VAH/VAL' },
     ];
 
-    // 10. Setup state: IN_ZONE if setup exists and no core blockers
-    const hasAutoBlocker = autoCore.blockers.length > 0;
-    const setupState = setup.setup != null && !hasAutoBlocker ? 'IN_ZONE' : setup.setup != null ? 'NEAR_ZONE' : 'NO_SETUP';
-
     // Entry window permission: only HIGH/NORMAL promote
     const windowOk = win.window === 'HIGH' || win.window === 'NORMAL';
-
-    // 11. Canonical SMA plan scenario (only when core is eligible + geometry valid)
-    const planScenario = buildVnPlanScenario({
-      setup: setup.setup ? setup : null,
-      protectedLow: h6History.protected_low,
-      overheadResistance: overhead.resistance,
-      trail,
-    });
 
     vn = {
       pm_profile: pmProfile.valid ? {
@@ -1154,14 +1166,7 @@ async function main() {
   }
 
   // Canonical gate view for VN (computed from vn object if available)
-  const vnGateView = vn ? buildVnGateView({
-    bar,
-    vn: {
-      setup_state: vn.setup_state,
-      h6_history: vn.h6_history,
-    },
-    planScenario: vn.plan_scenario,
-  }) : null;
+  const vnGateView = vnAssembly?.gateView ?? null;
 
   // T+2.5: annotate sl_atr/rr_locked/tplus_warn vao scenario + tplus top-level (null neu khong phai VN stock)
   const tplus = annotateTplus(scenarios, { atr14, price, ticker });
@@ -1244,7 +1249,7 @@ async function main() {
   }
   });
 }
-export { buildScenarios, contRetestScenario, findDemandBar, rangeBreakoutScenario, resampleWeekly, weeklyTrend, classifyVnSetup, buildVnAutoCore, buildVnGateView, buildVnPlanScenario, sma };
+export { buildScenarios, contRetestScenario, findDemandBar, rangeBreakoutScenario, resampleWeekly, weeklyTrend, classifyVnSetup, buildVnAutoCore, buildVnGateView, buildVnPlanScenario, buildVnCoreAssembly, sma };
 
 // Chi chay engine khi goi truc tiep (node check_one.mjs ...), khong khi bi import vao test.
 if ((process.argv[1] || '').replace(/\\/g, '/').endsWith('check_one.mjs')) {
