@@ -236,14 +236,54 @@ function rangeBreakoutScenario({ resistance, headroomPct, price, atr14, dir }) {
     size_note: '1/2 size, chase' };
 }
 
-// VN unified setup classification with VSA whitelist/veto
+// VN unified setup classification with VSA whitelist/veto and setup-path proof
 const VSA_PULLBACK_OK = new Set(['TEST', 'NO_SUPPLY', 'SHAKEOUT', 'STOPPING_VOLUME']);
 const VSA_BREAKOUT_OK = new Set(['SIGN_OF_STRENGTH', 'EFFORT_TO_RISE', 'ABSORPTION_RETEST']);
 const VSA_VETO = new Set(['UPTHRUST', 'DISTRIBUTION', 'EFFORT_NO_RESULT']);
 
-function classifyVnSetup({ price, sma20, sma100, pmPoc, pmVah, pmVal, structure, vsaPattern, fromLowPct, aboveSma100 }) {
+/**
+ * Build H6 history fields from COMPLETED bars only.
+ * Active bar data never enters history calculations.
+ */
+export function buildClosedH6History({ bars, activeBarClosed }) {
+  // Use only bars that are definitely closed
+  const completed = activeBarClosed ? bars : bars.slice(0, -1);
+  if (completed.length === 0) {
+    return { bars_completed: 0, sma20: null, sma100: null, structure: null, protected_low: null, avg_vol_20: null };
+  }
+
+  const closes = completed.map(b => b.close);
+  const volumes = completed.map(b => b.volume);
+
+  const sma20Val = closes.length >= 20 ? Math.round(sma(closes, 20)) : null;
+  const sma100Val = closes.length >= 100 ? Math.round(sma(closes, 100)) : null;
+
+  const avgVol20 = volumes.length >= 20
+    ? Math.round(volumes.slice(-20).reduce((a, v) => a + v, 0) / 20)
+    : null;
+
+  // Structure from completed pivots
+  const { ph, pl } = findPivots(completed, 3);
+  const structure = marketStructure(ph, pl);
+
+  // Protected low from demand bar in completed bars
+  const demandBar = findDemandBar(completed, completed.length, avgVol20);
+  const protectedLow = demandBar ? Math.round(demandBar.shelf) : null;
+
+  return {
+    bars_completed: completed.length,
+    sma20: sma20Val,
+    sma100: sma100Val,
+    structure,
+    protected_low: protectedLow,
+    avg_vol_20: avgVol20,
+  };
+}
+
+function classifyVnSetup({ price, previousClosedPrice, sma20, sma100, pmPoc, pmVah, pmVal, structure, vsaPattern, breakoutLevel, breakoutConfirmed, fromLowPct, aboveSma100 }) {
   // No setup if price below SMA100
   if (!aboveSma100) return { setup: null, reason: 'price below SMA100', zone_low: null, zone_high: null, anchor: null };
+  if (price == null) return { setup: null, reason: 'no price', zone_low: null, zone_high: null, anchor: null };
 
   // Veto check: any VSA veto pattern blocks all setups
   if (vsaPattern && VSA_VETO.has(vsaPattern)) {
@@ -255,37 +295,42 @@ function classifyVnSetup({ price, sma20, sma100, pmPoc, pmVah, pmVal, structure,
 
   // Priority order — most specific first
 
-  // 1. BREAKOUT_RETEST: requires proof of breakout (fromLowPct >= 5%) AND retest (price pulled back to within 3% of recent swing)
-  // fromLowPct measures distance from recent 10-bar low
-  if (fromLowPct != null && fromLowPct >= 5 && vsaPattern && VSA_BREAKOUT_OK.has(vsaPattern)) {
+  // 1. BREAKOUT_RETEST: requires explicit breakoutLevel AND breakoutConfirmed
+  // (completed close above level). fromLowPct alone cannot create breakout.
+  if (breakoutLevel != null && breakoutConfirmed === true && price >= breakoutLevel * 0.99 && price <= breakoutLevel * 1.01) {
+    const anchor = sma20Dist != null && Math.abs(sma20Dist) <= 3 ? 'sma20' : 'sma100';
+    const vsaNote = (vsaPattern && VSA_BREAKOUT_OK.has(vsaPattern))
+      ? ` (VSA: ${vsaPattern})` : ', cho VSA xac nhan';
     return {
       setup: 'BREAKOUT_RETEST',
-      zone_low: Math.round(price * 0.99),
-      zone_high: Math.round(price * 1.01),
-      anchor: sma20Dist != null && Math.abs(sma20Dist) <= 3 ? 'sma20' : 'sma100',
-      reason: `Breakout + retest (tu day +${fromLowPct}%, VSA: ${vsaPattern})`,
+      zone_low: Math.round(breakoutLevel * 0.99),
+      zone_high: Math.round(breakoutLevel * 1.01),
+      anchor,
+      reason: `Breakout retest tai ${Math.round(breakoutLevel)}${vsaNote}`,
     };
   }
 
-  // 2. PM_VAH_PULLBACK_RETEST: price at VAH, pullback from above VAH
-  if (pmVah != null && price >= pmVah * 0.97 && price <= pmVah * 1.03 && price <= pmVah) {
+  // 2. PM_VAH_PULLBACK_RETEST: requires previousClose > pmVah and current at/below VAH
+  if (pmVah != null && previousClosedPrice != null && previousClosedPrice > pmVah &&
+      price >= pmVah * 0.97 && price <= pmVah) {
     return {
       setup: 'PM_VAH_PULLBACK_RETEST',
       zone_low: Math.round(pmVah * 0.98),
       zone_high: Math.round(pmVah),
       anchor: 'pm_vah',
-      reason: `PM VAH retest (VAH=${pmVah}, pullback tu tren VAH)`,
+      reason: `PM VAH retest tu ${Math.round(previousClosedPrice)} ve ${Math.round(price)} (VAH=${pmVah})`,
     };
   }
 
-  // 3. PM_VAL_PULLBACK_RECLAIM: price reclaimed VAL from below
-  if (pmVal != null && price >= pmVal * 0.97 && price <= pmVal * 1.05 && price >= pmVal) {
+  // 3. PM_VAL_PULLBACK_RECLAIM: requires previousClose < pmVal and current at/above VAL
+  if (pmVal != null && previousClosedPrice != null && previousClosedPrice < pmVal &&
+      price >= pmVal && price <= pmVal * 1.05) {
     return {
       setup: 'PM_VAL_PULLBACK_RECLAIM',
       zone_low: Math.round(pmVal),
       zone_high: Math.round(Math.min(pmVal * 1.03, pmVah || Infinity)),
       anchor: 'pm_val',
-      reason: `PM VAL reclaim (VAL=${pmVal}, phuc hoi tu duoi VAL)`,
+      reason: `PM VAL reclaim tu ${Math.round(previousClosedPrice)} len ${Math.round(price)} (VAL=${pmVal})`,
     };
   }
 
@@ -889,27 +934,23 @@ async function main() {
     });
 
     // 2. H6 history: SMA, structure, protected low, Avg20 from COMPLETED bars only
-    const completedCloses = barClosed ? closes : closes.slice(0, -1);
-    const completedBars = barClosed ? bars : bars.slice(0, -1);
-    const completedVolumes = completedBars.map(b => b.volume);
-    const h6Avg20 = completedVolumes.length >= 20
-      ? Math.round(completedVolumes.slice(-20).reduce((a, v) => a + v, 0) / 20)
-      : null;
-
-    // Protected low from completed bars
-    const demandBar = findDemandBar(completedBars, completedBars.length, h6Avg20);
-    const protectedLow = demandBar ? Math.round(demandBar.shelf) : null;
+    const h6History = buildClosedH6History({ bars, activeBarClosed: barClosed });
+    const protectedLow = h6History.protected_low;
 
     // 3. H6 live: ONLY current candle data
     const volDelta = fp.buyVol != null && fp.sellVol != null ? fp.buyVol - fp.sellVol : null;
+    const activeVolume = todayBar?.volume || 0;
+    const liveVolRatio = h6History.avg_vol_20 != null && h6History.avg_vol_20 > 0
+      ? Math.round(activeVolume / h6History.avg_vol_20 * 100) / 100
+      : null;
     const h6Live = {
       price: Math.round(price),
       location_vs_sma20: ma.ma20 ? Math.round((price - ma.ma20) / ma.ma20 * 10000) / 100 : null,
       location_vs_sma100: ma.ma100 ? Math.round((price - ma.ma100) / ma.ma100 * 10000) / 100 : null,
       range: todayBar ? Math.round(todayBar.high - todayBar.low) : null,
       range_atr,
-      vol_ratio: lastVolRatio,
-      vol_above_avg20: lastVolRatio != null && lastVolRatio >= 1.0,
+      vol_ratio: liveVolRatio,
+      vol_above_avg20: liveVolRatio != null && liveVolRatio >= 1.0,
       buy_pct: fp.buyPct,
       // Delta = bar Volume Delta (FP Buy Vol - FP Sell Vol), not cumDelta
       bar_vol_delta: volDelta,
@@ -934,16 +975,21 @@ async function main() {
       maxExtensionPct: 7,
     });
 
-    // 5. fromLowPct — distance from recent 10-bar low (for BREAKOUT_RETEST)
-    const recentLow = Math.min(...bars.slice(-10).map(b => b.low));
-    const fromLowPct = recentLow > 0 ? Math.round((price - recentLow) / recentLow * 10000) / 100 : null;
-
-    // 6. VSA pattern from topbot detection
+    // 5. VSA pattern from topbot detection
     const vsaPattern = topbot?.pattern || null;
 
-    // 7. Setup classification
+    // 6. previousClosedPrice from D-1
+    const previousClosedPrice = bars.length >= 2 ? bars[bars.length - 2]?.close ?? price : price;
+
+    // 7. Breakout detection: find nearest overhead resistance and check if price closed above it
+    const aboveHighs = ph.map(p => p.price).filter(p => p.price < price); // resistance levels below current price
+    const breakoutLevel = aboveHighs.length > 0 ? Math.max(...aboveHighs) : null;
+    const breakoutConfirmed = breakoutLevel != null && previousClosedPrice > breakoutLevel;
+
+    // 8. Setup classification
     const setup = classifyVnSetup({
       price,
+      previousClosedPrice,
       sma20: ma.ma20,
       sma100: ma.ma100,
       pmPoc: pmProfile.valid ? pmProfile.poc : null,
@@ -951,7 +997,8 @@ async function main() {
       pmVal: pmProfile.valid ? pmProfile.val : null,
       structure,
       vsaPattern,
-      fromLowPct,
+      breakoutLevel,
+      breakoutConfirmed,
       aboveSma100,
     });
 
@@ -1021,14 +1068,7 @@ async function main() {
         stale: pmProfile.stale,
         evidence_hash_fields: pmProfile.evidence_hash_fields,
       } : { error: pmProfile.error },
-      h6_history: {
-        sma20: ma.ma20 ? Math.round(ma.ma20) : null,
-        sma100: ma.ma100 ? Math.round(ma.ma100) : null,
-        structure,
-        protected_low: protectedLow,
-        avg_vol_20: h6Avg20,
-        bars_completed: completedBars.length,
-      },
+      h6_history: h6History,
       h6_live: h6Live,
       ma_anchor: maAnchor,
       setup,
@@ -1124,7 +1164,7 @@ async function main() {
   }
   });
 }
-export { buildScenarios, contRetestScenario, findDemandBar, rangeBreakoutScenario, resampleWeekly, weeklyTrend, classifyVnSetup };
+export { buildScenarios, contRetestScenario, findDemandBar, rangeBreakoutScenario, resampleWeekly, weeklyTrend, classifyVnSetup, sma };
 
 // Chi chay engine khi goi truc tiep (node check_one.mjs ...), khong khi bi import vao test.
 if ((process.argv[1] || '').replace(/\\/g, '/').endsWith('check_one.mjs')) {
