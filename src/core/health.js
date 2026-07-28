@@ -318,7 +318,7 @@ export async function launch({ port, kill_existing, _deps } = {}) {
     // MSIX/Windows Store install — InstallLocation is in WindowsApps, which is ACL-restricted
     // for normal `dir` enumeration but readable via Get-AppxPackage without elevation.
     try {
-      const ps = 'powershell -NoProfile -Command "(Get-AppxPackage -Name \'TradingView.Desktop\' -ErrorAction SilentlyContinue).InstallLocation"';
+      const ps = 'powershell -NoProfile -Command "(Get-AppxPackage -Name \'*TradingView*\' -ErrorAction SilentlyContinue).InstallLocation"';
       const installDir = deps.execSync(ps, { timeout: 5000 }).toString().trim();
       if (installDir) {
         const candidate = `${installDir}\\TradingView.exe`;
