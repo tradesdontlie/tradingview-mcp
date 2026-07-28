@@ -959,14 +959,13 @@ async function main() {
     const win = entryWindow(new Date());
 
     // 9. Locked LTF (stub: real M5/M15/H1 bars require LTF data from chart)
-    // When LTF bars are available, pass them here
+    // When LTF bars with per-bar footprints are available, pass them here
     const ltfResult = lockedLtf({
-      bars: [], // populated when LTF data is available
+      bars: [], // populated when LTF data with per-bar footprint is available
       timeframe: '15',
       expectedSymbol: ticker,
       now: new Date(),
       protectedLow,
-      footprint: { delta: volDelta, buy_stack: fp.buyStack, sell_stack: fp.sellStack, buy_pct: fp.buyPct },
     });
 
     // 10. Blockers for readiness

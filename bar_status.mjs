@@ -99,44 +99,46 @@ export function entryWindow(now = new Date(), market = 'VN') {
 }
 
 /**
- * lockedLtf — determine if a lower-timeframe chart has stabilized.
- * M5 requires 2 consecutive closed non-bearish bars.
- * M15/H1 requires 1 closed non-bearish bar.
+ * lockedLtf — determine if a lower-timeframe chart has stabilized using
+ * per-bar evidence. Each bar carries its own Footprint.
+ *
+ * M5 requires 2 consecutive qualifying closed bars.
+ * M15/H1 requires 1 qualifying closed bar.
  *
  * "Non-bearish" requires ALL of:
- * - bar is closed (age > timeframe)
+ * - bar.symbol matches expectedSymbol
+ * - bar.timeframe matches requested timeframe
+ * - bar.bar_closed === true, finite closed_at
  * - close >= open
- * - no bearish VSA pattern (closed in lower 50% + high vol + narrow spread)
- * - no delta divergence (negative delta while price up)
- * - no dominant sell stack (sell stack >= buy stack when close near low)
- * - no aggressive selling (high sell proportion)
+ * - no bearish VSA (footprint.bearish_vsa === true)
+ * - no delta divergence (footprint.bearish_divergence === true)
+ * - no dominant sell stack
+ * - no aggressive selling
  * - no protected-low breach
+ * - no trigger-zone breach
  *
- * Wrong symbol, stale data, open bar, wrong timeframe → fails closed.
+ * No global Footprint argument. Each bar.footprint is consumed independently.
  *
  * @param {Object} opts
- * @param {Array}  opts.bars              - Bars with {time, open, high, low, close, volume, ...}
- * @param {string} opts.timeframe         - '5', '15', or '60'
- * @param {string} opts.expectedSymbol    - Expected symbol to validate evidence
- * @param {number} [opts.maxAgeMs]        - Max age of most recent bar in ms
- * @param {number|Date} [opts.now]        - Injection for deterministic testing
- * @param {number} [opts.protectedLow]    - Protected low level for breach check
- * @param {Object} [opts.footprint]       - Optional footprint data for delta/stack checks
+ * @param {Array}  opts.bars           - Bars with per-bar {symbol, timeframe, bar_closed, closed_at, open, high, low, close, volume, footprint}
+ * @param {string} opts.timeframe      - '5', '15', or '60'
+ * @param {string} opts.expectedSymbol
+ * @param {number} opts.maxAgeMs       - Required max age of most recent closed_at in ms
+ * @param {number|Date} [opts.now]
+ * @param {number} [opts.protectedLow]
+ * @param {number} [opts.triggerZoneLow]
  * @returns {{ locked: boolean, reason: string, checks: Object, required: number, timeframe: string }}
  */
-export function lockedLtf({ bars = [], timeframe, expectedSymbol, maxAgeMs, now, protectedLow, footprint } = {}) {
-  if (!timeframe || !bars.length) {
-    return { locked: false, reason: 'missing_data', checks: {}, required: 0, timeframe };
-  }
-  if (!expectedSymbol) {
-    return { locked: false, reason: 'missing_expected_symbol', checks: {}, required: 0, timeframe };
-  }
-
+export function lockedLtf({ bars = [], timeframe, expectedSymbol, maxAgeMs, now, protectedLow, triggerZoneLow } = {}) {
   const tfMap = { '5': 5, '15': 15, '60': 60 };
+
+  if (!timeframe) return { locked: false, reason: 'missing_data', checks: {}, required: 0, timeframe };
+  if (!expectedSymbol) return { locked: false, reason: 'missing_expected_symbol', checks: {}, required: 0, timeframe };
+  if (maxAgeMs == null) return { locked: false, reason: 'missing_max_age', checks: {}, required: 0, timeframe };
+  if (!bars.length) return { locked: false, reason: 'missing_data', checks: {}, required: 0, timeframe };
+
   const tfInt = tfMap[String(timeframe)];
-  if (!tfInt) {
-    return { locked: false, reason: `unsupported_timeframe:${timeframe}`, checks: {}, required: 0, timeframe };
-  }
+  if (!tfInt) return { locked: false, reason: `unsupported_timeframe:${timeframe}`, checks: {}, required: 0, timeframe };
 
   const m5 = tfInt === 5;
   const required = m5 ? 2 : 1;
@@ -144,70 +146,90 @@ export function lockedLtf({ bars = [], timeframe, expectedSymbol, maxAgeMs, now,
     return { locked: false, reason: `insufficient_bars:need_${required}_got_${bars.length}`, checks: {}, required, timeframe };
   }
 
-  const nowSec = (now ? +new Date(now) : Date.now()) / 1000;
+  const nowMs = now ? +new Date(now) : Date.now();
+  const nowSec = nowMs / 1000;
+  const normSym = s => String(s || '').split(':').pop().toUpperCase();
+  const expectedNorm = normSym(expectedSymbol);
 
-  // Check each required bar
   const checks = {};
   let allNonBearish = true;
 
   for (let i = 0; i < required; i++) {
     const bar = bars[bars.length - 1 - i];
-    if (!bar) {
-      checks[`bar_${i}`] = { ok: false, reason: 'missing' };
-      allNonBearish = false;
-      continue;
+    const ft = bar?.footprint || {};
+    const failures = [];
+
+    if (!bar) { failures.push('missing'); allNonBearish = false; continue; }
+
+    // Symbol match
+    const symOk = normSym(bar.symbol) === expectedNorm;
+    if (!symOk) failures.push('wrong_symbol');
+
+    // Timeframe match
+    const tfOk = String(bar.timeframe) === String(timeframe);
+    if (!tfOk) failures.push('wrong_timeframe');
+
+    // Bar must be closed
+    if (bar.bar_closed !== true) failures.push('open');
+
+    // Finite closed_at
+    const closedAtMs = bar.closed_at ? +new Date(bar.closed_at) : NaN;
+    if (!Number.isFinite(closedAtMs)) failures.push('missing_closed_at');
+
+    // Freshness: now - closed_at within maxAgeMs, not in future beyond 60s skew
+    if (Number.isFinite(closedAtMs)) {
+      const ageMs = nowMs - closedAtMs;
+      if (ageMs < -60000) failures.push('future_closed_at');
+      else if (ageMs > maxAgeMs) failures.push('stale');
     }
 
-    // 1. Closed check
-    const barAgeSec = nowSec - bar.time;
-    const closed = barAgeSec >= tfInt * 60;
-
-    // 2. Staleness
-    const stale = maxAgeMs != null && barAgeSec * 1000 > maxAgeMs;
-
-    // 3. Price action: close >= open
+    // Price action
     const priceUp = bar.close >= bar.open;
+    if (!priceUp) failures.push('bearish_price');
 
-    // 4. Bearish VSA: closed in lower 50%, high vol, narrow spread
+    // VSA bearishness
+    if (ft.bearish_vsa === true) failures.push('bearish_vsa');
+
+    // Delta divergence
+    if (ft.bearish_divergence === true) failures.push('delta_divergence');
+
+    // Dominant sell stack
+    const bStack = ft.buy_stack;
+    const sStack = ft.sell_stack;
     const spread = bar.high - bar.low;
     const closePos = spread > 0 ? (bar.close - bar.low) / spread : 0.5;
-    const vsaBearish = !priceUp && closePos <= 0.5;
-
-    // 5. Delta divergence (if footprint available)
-    const delta = footprint?.delta ?? null;
-    const deltaDivergence = delta != null && delta < 0 && priceUp;
-
-    // 6. Dominant sell stack (if footprint available)
-    const buyStack = footprint?.buy_stack ?? null;
-    const sellStack = footprint?.sell_stack ?? null;
-    const dominantSell = sellStack != null && buyStack != null && sellStack > buyStack && closePos <= 0.4;
-
-    // 7. Aggressive selling
-    const buyPct = footprint?.buy_pct ?? null;
-    const aggressiveSell = buyPct != null && buyPct < 40 && !priceUp;
-
-    // 8. Protected-low breach
-    const lowBreach = protectedLow != null && bar.low <= protectedLow;
-
-    // Overall bar verdict
-    const barOk = closed && !stale && priceUp && !vsaBearish && !deltaDivergence && !dominantSell && !aggressiveSell && !lowBreach;
-
-    const failures = [];
-    if (!closed) failures.push('open');
-    if (stale) failures.push('stale');
-    if (!priceUp) failures.push('bearish_price');
-    if (vsaBearish) failures.push('bearish_vsa');
-    if (deltaDivergence) failures.push('delta_divergence');
+    const dominantSell = sStack != null && bStack != null && sStack > bStack && closePos <= 0.4;
     if (dominantSell) failures.push('dominant_sell_stack');
+
+    // Aggressive selling
+    const bPct = ft.buy_pct;
+    const aggressiveSell = bPct != null && bPct < 40 && !priceUp;
     if (aggressiveSell) failures.push('aggressive_sell');
+
+    // Protected-low breach
+    const lowBreach = protectedLow != null && bar.low <= protectedLow;
     if (lowBreach) failures.push('protected_low_breach');
 
+    // Trigger-zone breach
+    const triggerBreach = triggerZoneLow != null && bar.low <= triggerZoneLow;
+    if (triggerBreach) failures.push('trigger_zone_breach');
+
+    const barOk = failures.length === 0;
     checks[`bar_${i}`] = {
       ok: barOk,
-      closed, stale, close_pos: Math.round(closePos * 100), price_up: priceUp,
-      vsa_bearish: vsaBearish, delta_divergence: deltaDivergence,
-      dominant_sell_stack: dominantSell, aggressive_sell: aggressiveSell,
+      symbol: bar.symbol,
+      symbol_matched: symOk,
+      timeframe: bar.timeframe,
+      timeframe_matched: tfOk,
+      bar_closed: bar.bar_closed,
+      closed_at: bar.closed_at,
+      price_up: priceUp,
+      bearish_vsa: ft.bearish_vsa,
+      bearish_divergence: ft.bearish_divergence,
+      dominant_sell_stack: dominantSell,
+      aggressive_sell: aggressiveSell,
       low_breach: lowBreach,
+      trigger_breach: triggerBreach,
       failures,
     };
     if (!barOk) allNonBearish = false;
