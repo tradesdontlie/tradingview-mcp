@@ -5,6 +5,7 @@ import { getClient, getTargetInfo, evaluate, CDP_HOST, CDP_PORT } from '../conne
 import { existsSync, cpSync, rmSync, readdirSync } from 'fs';
 import { execSync, spawn } from 'child_process';
 import { dirname, basename, join } from 'path';
+import { EventEmitter } from 'events';
 
 // Best-effort git-pull update check: compare local HEAD to origin's default
 // branch on GitHub. Never throws — returns null on any failure (offline,
@@ -228,9 +229,19 @@ async function _probeCdp(cdpPort) {
 }
 
 function _spawnDetached(spawnFn, exe, args) {
-  const child = spawnFn(exe, args, { detached: true, stdio: 'ignore' });
-  child.unref();
-  return child;
+  try {
+    const child = spawnFn(exe, args, { detached: true, stdio: 'ignore' });
+    child.unref();
+    return child;
+  } catch (e) {
+    // Some Windows/MSIX setups throw EPERM synchronously instead of emitting
+    // an async 'error' event. Wrap it as an already-failed EventEmitter so
+    // callers (_spawnFailedEarly) can handle both cases the same way.
+    const child = new EventEmitter();
+    child.unref = () => {};
+    queueMicrotask(() => child.emit('error', e));
+    return child;
+  }
 }
 
 // Resolves once with an error string if the process fails/exits within graceMs,
