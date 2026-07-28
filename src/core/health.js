@@ -228,7 +228,15 @@ async function _probeCdp(cdpPort) {
 }
 
 function _spawnDetached(spawnFn, exe, args) {
-  const child = spawnFn(exe, args, { detached: true, stdio: 'ignore' });
+  // VS Code / Cursor extension hosts export ELECTRON_RUN_AS_NODE=1 into every child
+  // process. TradingView Desktop is itself an Electron app, so inheriting that var
+  // makes it boot headless-as-Node: no window opens and --remote-debugging-port is
+  // ignored, so CDP never binds. Strip it (and its console companion) from the child
+  // env so the GUI launches normally no matter what spawned the MCP server.
+  const env = { ...process.env };
+  delete env.ELECTRON_RUN_AS_NODE;
+  delete env.ELECTRON_NO_ATTACH_CONSOLE;
+  const child = spawnFn(exe, args, { detached: true, stdio: 'ignore', env });
   child.unref();
   return child;
 }
