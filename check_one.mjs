@@ -280,61 +280,17 @@ export function buildClosedH6History({ bars, activeBarClosed }) {
   };
 }
 
-function classifyVnSetup({ price, previousClosedPrice, sma20, sma100, pmPoc, pmVah, pmVal, structure, vsaPattern, breakoutLevel, breakoutConfirmed, fromLowPct, aboveSma100 }) {
+function classifyVnSetup({ price, sma20, sma100, structure, aboveSma100 }) {
   // No setup if price below SMA100
   if (!aboveSma100) return { setup: null, reason: 'price below SMA100', zone_low: null, zone_high: null, anchor: null };
   if (price == null) return { setup: null, reason: 'no price', zone_low: null, zone_high: null, anchor: null };
 
-  // Veto check: any VSA veto pattern blocks all setups
-  if (vsaPattern && VSA_VETO.has(vsaPattern)) {
-    return { setup: null, reason: `VSA veto: ${vsaPattern}`, zone_low: null, zone_high: null, anchor: null };
-  }
-
   const sma20Dist = sma20 != null ? Math.round((price - sma20) / sma20 * 10000) / 100 : null;
   const sma100Dist = sma100 != null ? Math.round((price - sma100) / sma100 * 10000) / 100 : null;
 
-  // Priority order — most specific first
+  // Automatic setups: only SMA-based. PM Profile, Breakout, VSA are manual-only.
 
-  // 1. BREAKOUT_RETEST: requires explicit breakoutLevel AND breakoutConfirmed
-  // (completed close above level). fromLowPct alone cannot create breakout.
-  if (breakoutLevel != null && breakoutConfirmed === true && price >= breakoutLevel * 0.99 && price <= breakoutLevel * 1.01) {
-    const anchor = sma20Dist != null && Math.abs(sma20Dist) <= 3 ? 'sma20' : 'sma100';
-    const vsaNote = (vsaPattern && VSA_BREAKOUT_OK.has(vsaPattern))
-      ? ` (VSA: ${vsaPattern})` : ', cho VSA xac nhan';
-    return {
-      setup: 'BREAKOUT_RETEST',
-      zone_low: Math.round(breakoutLevel * 0.99),
-      zone_high: Math.round(breakoutLevel * 1.01),
-      anchor,
-      reason: `Breakout retest tai ${Math.round(breakoutLevel)}${vsaNote}`,
-    };
-  }
-
-  // 2. PM_VAH_PULLBACK_RETEST: requires previousClose > pmVah and current at/below VAH
-  if (pmVah != null && previousClosedPrice != null && previousClosedPrice > pmVah &&
-      price >= pmVah * 0.97 && price <= pmVah) {
-    return {
-      setup: 'PM_VAH_PULLBACK_RETEST',
-      zone_low: Math.round(pmVah * 0.98),
-      zone_high: Math.round(pmVah),
-      anchor: 'pm_vah',
-      reason: `PM VAH retest tu ${Math.round(previousClosedPrice)} ve ${Math.round(price)} (VAH=${pmVah})`,
-    };
-  }
-
-  // 3. PM_VAL_PULLBACK_RECLAIM: requires previousClose < pmVal and current at/above VAL
-  if (pmVal != null && previousClosedPrice != null && previousClosedPrice < pmVal &&
-      price >= pmVal && price <= pmVal * 1.05) {
-    return {
-      setup: 'PM_VAL_PULLBACK_RECLAIM',
-      zone_low: Math.round(pmVal),
-      zone_high: Math.round(Math.min(pmVal * 1.03, pmVah || Infinity)),
-      anchor: 'pm_val',
-      reason: `PM VAL reclaim tu ${Math.round(previousClosedPrice)} len ${Math.round(price)} (VAL=${pmVal})`,
-    };
-  }
-
-  // 4. SMA20_PULLBACK: near SMA20, uptrend
+  // 1. SMA20_PULLBACK: near SMA20, uptrend
   if (sma20Dist != null && Math.abs(sma20Dist) <= 3 && structure === 'UPTREND') {
     return {
       setup: 'SMA20_PULLBACK',
@@ -345,7 +301,7 @@ function classifyVnSetup({ price, previousClosedPrice, sma20, sma100, pmPoc, pmV
     };
   }
 
-  // 5. SMA100_PULLBACK_RECLAIM: above SMA100, SMA20 far
+  // 2. SMA100_PULLBACK_RECLAIM: above SMA100, SMA20 far
   if (sma100Dist != null && sma100Dist <= 5 && sma20Dist != null && Math.abs(sma20Dist) > 3) {
     return {
       setup: 'SMA100_PULLBACK_RECLAIM',
@@ -357,6 +313,70 @@ function classifyVnSetup({ price, previousClosedPrice, sma20, sma100, pmPoc, pmV
   }
 
   return { setup: null, reason: 'khong co setup phu hop', zone_low: null, zone_high: null, anchor: null };
+}
+
+/**
+ * Build the automated VN core readiness evidence.
+ * Only H6 history, MA anchor, volume, and entry window.
+ * Profile, VSA, Footprint, Delta, M15 are manual-only.
+ */
+function buildVnAutoCore({ price, h6History, h6Live, entryWindow }) {
+  const blockers = [];
+
+  // H6 history sufficiency
+  if (!h6History || h6History.bars_completed < 100) {
+    blockers.push('H6_HISTORY_INSUFFICIENT');
+  }
+
+  // MA data: at least SMA100 is required
+  if (h6History.sma100 == null || !Number.isFinite(h6History.sma100)) {
+    blockers.push('MA_DATA_MISSING');
+  }
+
+  // Price below SMA100
+  const aboveSma100 = h6History.sma100 != null && price >= h6History.sma100;
+  if (!aboveSma100) {
+    blockers.push('BELOW_SMA100');
+  }
+
+  // Over-extended: check extension from the closest MA anchor (SMA20 or SMA100)
+  // Use rounded values (matching classifyMaAnchor) to avoid floating-point edge cases
+  if (aboveSma100 && h6History.sma100 != null) {
+    const candidates = [];
+    if (h6History.sma20 != null && Number.isFinite(h6History.sma20)) {
+      candidates.push(Math.round((price - h6History.sma20) / h6History.sma20 * 10000) / 100);
+    }
+    candidates.push(Math.round((price - h6History.sma100) / h6History.sma100 * 10000) / 100);
+    const minExt = Math.min(...candidates);
+    if (minExt > 7) {
+      blockers.push('OVEREXTENDED');
+    }
+  }
+
+  // Volume evidence: strict > 1.0 (equality is blocked)
+  if (h6Live.vol_ratio == null) {
+    blockers.push('H6_VOLUME_EVIDENCE_MISSING');
+  } else if (h6Live.vol_ratio <= 1.0) {
+    blockers.push('H6_VOLUME_NOT_ABOVE_AVG20');
+  }
+
+  // Entry window
+  if (entryWindow && entryWindow.window === 'BLOCKED') {
+    blockers.push('ENTRY_WINDOW_BLOCKED');
+  }
+
+  const conditions = {
+    above_sma100: aboveSma100,
+    ma_anchor_within_7pct: blockers.includes('OVEREXTENDED') === false && blockers.includes('MA_DATA_MISSING') === false,
+    h6_volume_above_avg20: h6Live.vol_ratio != null && h6Live.vol_ratio > 1.0,
+    entry_window_allowed: !entryWindow || entryWindow.window !== 'BLOCKED',
+  };
+
+  return {
+    eligible: blockers.length === 0,
+    conditions,
+    blockers,
+  };
 }
 
 // Geometry only. Promotion to READY belongs to the deterministic readiness gate.
@@ -921,10 +941,10 @@ async function main() {
     if (bo) scenarios.push(bo);
   }
 
-  // --- VN UNIFIED CHECK (replaces legacy VN scenario building) ---
+  // --- VN UNIFIED CHECK (simplified H6 automatic core + manual checklist) ---
   let vn = null;
   if (isVnStock) {
-    // 1. Extract Auto Key Levels profile
+    // 1. Extract Auto Key Levels profile (observed only, never gates READY)
     const pmProfile = extractPreviousMonthProfile({
       studies: sv.studies || [],
       expectedSymbol: ticker,
@@ -937,7 +957,7 @@ async function main() {
     const h6History = buildClosedH6History({ bars, activeBarClosed: barClosed });
     const protectedLow = h6History.protected_low;
 
-    // 3. H6 live: ONLY current candle data
+    // 3. H6 live: ONLY current candle data (observations, never gate READY)
     const volDelta = fp.buyVol != null && fp.sellVol != null ? fp.buyVol - fp.sellVol : null;
     const activeVolume = todayBar?.volume || 0;
     const liveVolRatio = h6History.avg_vol_20 != null && h6History.avg_vol_20 > 0
@@ -945,14 +965,13 @@ async function main() {
       : null;
     const h6Live = {
       price: Math.round(price),
-      location_vs_sma20: ma.ma20 ? Math.round((price - ma.ma20) / ma.ma20 * 10000) / 100 : null,
-      location_vs_sma100: ma.ma100 ? Math.round((price - ma.ma100) / ma.ma100 * 10000) / 100 : null,
+      location_vs_sma20: h6History.sma20 ? Math.round((price - h6History.sma20) / h6History.sma20 * 10000) / 100 : null,
+      location_vs_sma100: h6History.sma100 ? Math.round((price - h6History.sma100) / h6History.sma100 * 10000) / 100 : null,
       range: todayBar ? Math.round(todayBar.high - todayBar.low) : null,
       range_atr,
       vol_ratio: liveVolRatio,
-      vol_above_avg20: liveVolRatio != null && liveVolRatio >= 1.0,
+      vol_above_avg20: liveVolRatio != null && liveVolRatio > 1.0,
       buy_pct: fp.buyPct,
-      // Delta = bar Volume Delta (FP Buy Vol - FP Sell Vol), not cumDelta
       bar_vol_delta: volDelta,
       cum_delta: fp.cumD,
       delta_pct: fp.totalVol && volDelta != null && fp.totalVol > 0
@@ -965,91 +984,54 @@ async function main() {
       footprint_conf: fp.conf,
     };
 
-    // 4. MA anchor classification
-    const aboveSma100 = ma.ma100 != null && price >= ma.ma100;
+    // 4. MA anchor from COMPLETED H6 history
     const maAnchor = classifyMaAnchor({
       price,
-      sma20: ma.ma20,
-      sma100: ma.ma100,
+      sma20: h6History.sma20,
+      sma100: h6History.sma100,
       preferredAnchor: null,
       maxExtensionPct: 7,
     });
 
-    // 5. VSA pattern from topbot detection
-    const vsaPattern = topbot?.pattern || null;
-
-    // 6. previousClosedPrice from D-1
-    const previousClosedPrice = bars.length >= 2 ? bars[bars.length - 2]?.close ?? price : price;
-
-    // 7. Breakout detection: find nearest overhead resistance and check if price closed above it
-    const aboveHighs = ph.map(p => p.price).filter(p => p.price < price); // resistance levels below current price
-    const breakoutLevel = aboveHighs.length > 0 ? Math.max(...aboveHighs) : null;
-    const breakoutConfirmed = breakoutLevel != null && previousClosedPrice > breakoutLevel;
-
-    // 8. Setup classification
+    // 5. Setup from completed-history MAs only
+    const aboveSma100 = maAnchor.blocker !== 'BELOW_SMA100' && maAnchor.blocker !== 'MA_DATA_MISSING';
     const setup = classifyVnSetup({
       price,
-      previousClosedPrice,
-      sma20: ma.ma20,
-      sma100: ma.ma100,
-      pmPoc: pmProfile.valid ? pmProfile.poc : null,
-      pmVah: pmProfile.valid ? pmProfile.vah : null,
-      pmVal: pmProfile.valid ? pmProfile.val : null,
-      structure,
-      vsaPattern,
-      breakoutLevel,
-      breakoutConfirmed,
+      sma20: h6History.sma20,
+      sma100: h6History.sma100,
+      structure: h6History.structure,
       aboveSma100,
     });
 
-    // 8. Entry window
+    // 6. Entry window
     const win = entryWindow(new Date());
 
-    // 9. Locked LTF (stub: real M5/M15/H1 bars require LTF data from chart)
-    // When LTF bars with per-bar footprints are available, pass them here
-    const ltfResult = lockedLtf({
-      bars: [], // populated when LTF data with per-bar footprint is available
-      timeframe: '15',
-      expectedSymbol: ticker,
-      now: new Date(),
-      protectedLow,
+    // 7. Locked LTF is manual-only
+    const ltfManual = {
+      mode: 'MANUAL', timeframe: '15', locked: null,
+      reason: 'manual_confirmation_required',
+    };
+
+    // 8. Automatic core via pure builder (H6 history, MA, volume, entry window only)
+    const autoCore = buildVnAutoCore({
+      price,
+      h6History,
+      h6Live,
+      entryWindow: win,
     });
 
-    // 10. Blockers for readiness
-    const blockers = [];
-    // PM Profile
-    if (!pmProfile.valid && pmProfile.error?.includes('not found')) blockers.push('PM_PROFILE_MISSING');
-    else if (!pmProfile.valid) blockers.push('PM_PROFILE_STALE');
-    // MA gate
-    if (maAnchor.blocker === 'BELOW_SMA100') blockers.push('BELOW_SMA100');
-    else if (maAnchor.blocker === 'OVEREXTENDED') blockers.push('OVEREXTENDED');
-    // Setup
-    if (setup.setup == null) blockers.push('NO_SETUP');
-    // Profile below SMA100 → block even if setup exists
-    if (!aboveSma100) blockers.push('BELOW_SMA100');
-    // H6 live context
-    if (h6Live.vol_ratio == null) blockers.push('H6_VOLUME_EVIDENCE_MISSING');
-    if (!barClosed && h6Live.vol_ratio != null && h6Live.vol_ratio < 0.5) blockers.push('H6_LIVE_CONTEXT_INVALID');
-    // LTF
-    if (ltfResult.locked === false && ltfResult.reason !== 'missing_data') {
-      if (ltfResult.reason.includes('open')) blockers.push('LTF_OPEN');
-      else if (ltfResult.reason.includes('bearish')) blockers.push('LTF_BEARISH_CONTRADICTION');
-      else blockers.push('LTF_STABILITY_INSUFFICIENT');
-    }
-    // Entry window
-    if (win.window === 'BLOCKED') blockers.push('ENTRY_WINDOW_BLOCKED');
-    // VSA veto
-    if (vsaPattern && (vsaPattern === 'UPTHRUST' || vsaPattern === 'BUYING_CLIMAX')) {
-      blockers.push('H6_LIVE_VSA_UNCONFIRMED');
-    }
-    // Footprint
-    if (fp.conf == null) blockers.push('FOOTPRINT_MISSING');
-    else if (fp.div === 1) blockers.push('FOOTPRINT_BEARISH');
+    // 9. Manual checklist (always rendered, never gates READY)
+    const manualChecks = [
+      { code: 'M15_CLOSED_NOT_BEARISH', label_vi: 'M15 gan nhat da dong va khong bearish' },
+      { code: 'H6_LIVE_NO_UPTHRUST', label_vi: 'H6 live khong co Upthrust/Distribution/Effort-No-Result' },
+      { code: 'FOOTPRINT_NO_SELL_IMBALANCE', label_vi: 'Footprint khong co sell imbalance/aggressive sell' },
+      { code: 'DELTA_NO_BEARISH_DIVERGENCE', label_vi: 'Volume Delta khong bearish divergence' },
+      { code: 'PM_PROFILE_CONFIRMATION', label_vi: 'Doi chieu PM POC/VAH/VAL' },
+    ];
 
-    // Setup state: IN_ZONE if setup exists and no hard blockers
-    const hardBlockers = ['BELOW_SMA100', 'OVEREXTENDED', 'PM_PROFILE_MISSING', 'PM_PROFILE_STALE', 'NO_SETUP'];
-    const hasHardBlocker = blockers.some(b => hardBlockers.includes(b));
-    const setupState = setup.setup != null && !hasHardBlocker ? 'IN_ZONE' : setup.setup != null ? 'NEAR_ZONE' : 'NO_SETUP';
+    // 10. Setup state: IN_ZONE if setup exists and no core blockers
+    const hasAutoBlocker = autoCore.blockers.length > 0;
+    const setupState = setup.setup != null && !hasAutoBlocker ? 'IN_ZONE' : setup.setup != null ? 'NEAR_ZONE' : 'NO_SETUP';
 
     // Entry window permission: only HIGH/NORMAL promote
     const windowOk = win.window === 'HIGH' || win.window === 'NORMAL';
@@ -1072,14 +1054,16 @@ async function main() {
       h6_live: h6Live,
       ma_anchor: maAnchor,
       setup,
-      locked_ltf: ltfResult,
+      locked_ltf: ltfManual,
       entry_window: win,
       exit_policy: {
         sl: protectedLow,
         trail: trail.status,
         note: protectedLow ? `Cat lo neu dong cua duoi ${protectedLow}` : 'Trailing SMA20',
       },
-      blockers,
+      auto_core: autoCore,
+      manual_checks: manualChecks,
+      blockers: autoCore.blockers,
       setup_state: setupState,
       window_ok: windowOk,
     };
@@ -1164,7 +1148,7 @@ async function main() {
   }
   });
 }
-export { buildScenarios, contRetestScenario, findDemandBar, rangeBreakoutScenario, resampleWeekly, weeklyTrend, classifyVnSetup, sma };
+export { buildScenarios, contRetestScenario, findDemandBar, rangeBreakoutScenario, resampleWeekly, weeklyTrend, classifyVnSetup, buildVnAutoCore, sma };
 
 // Chi chay engine khi goi truc tiep (node check_one.mjs ...), khong khi bi import vao test.
 if ((process.argv[1] || '').replace(/\\/g, '/').endsWith('check_one.mjs')) {
