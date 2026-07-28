@@ -11,6 +11,7 @@ import { getClient } from './src/connection.js';
 import { computeRS, readVnindexCache } from './rs_util.mjs';
 import { barStatus, sessionInfo } from './bar_status.mjs';
 import { atomicWriteCache, cachePaths, evidenceHash, runtimeDataRoot, withChartLock } from './src/core/check_runtime.mjs';
+import { extractPreviousMonthProfile, classifyMaAnchor } from './src/scan_policy.mjs';
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function parseNum(val) {
@@ -233,6 +234,43 @@ function rangeBreakoutScenario({ resistance, headroomPct, price, atr14, dir }) {
     trigger: `dong tren ${Math.round(resistance)} + vol>=1.5x`,
     invalidation: `dong cua lai duoi ${Math.round(resistance)} (breakout that bai)`,
     size_note: '1/2 size, chase' };
+}
+
+// VN unified setup classification
+const VN_SETUP_LABELS = Object.freeze([
+  'SMA20_PULLBACK', 'SMA100_PULLBACK_RECLAIM', 'PM_VAH_PULLBACK_RETEST',
+  'PM_VAL_PULLBACK_RECLAIM', 'BREAKOUT_RETEST',
+]);
+
+function classifyVnSetup({ price, sma20, sma100, pmPoc, pmVah, pmVal, structure, fromLowPct }) {
+  if (price == null) return { setup: null, reason: 'no price' };
+  const aboveSma20 = sma20 != null && price >= sma20;
+  const aboveSma100 = sma100 != null && price >= sma100;
+  const sma20Dist = sma20 != null ? Math.round((price - sma20) / sma20 * 10000) / 100 : null;
+  const sma100Dist = sma100 != null ? Math.round((price - sma100) / sma100 * 10000) / 100 : null;
+
+  // Priority: most specific first
+  // 1. BREAKOUT_RETEST: after recent breakout (fromLowPct 3-8%)
+  if (fromLowPct != null && fromLowPct >= 3 && fromLowPct <= 8 && aboveSma20) {
+    return { setup: 'BREAKOUT_RETEST', zone_low: Math.round(price * 0.99), zone_high: Math.round(price * 1.01), anchor: 'price', reason: `Gia retest sau breakout (tu day +${fromLowPct}%)` };
+  }
+  // 2. PM_VAH_PULLBACK_RETEST
+  if (pmVah != null && price >= pmVah * 0.97 && price <= pmVah * 1.03) {
+    return { setup: 'PM_VAH_PULLBACK_RETEST', zone_low: Math.round(pmVah * 0.98), zone_high: Math.round(pmVah * 1.02), anchor: 'pm_vah', reason: `Gia test lai Previous Monthly VAH (${pmVah})` };
+  }
+  // 3. PM_VAL_PULLBACK_RECLAIM
+  if (pmVal != null && price >= pmVal * 0.97 && price <= pmVal * 1.05) {
+    return { setup: 'PM_VAL_PULLBACK_RECLAIM', zone_low: Math.round(pmVal * 0.98), zone_high: Math.round(pmVal * 1.03), anchor: 'pm_val', reason: `Gia phuc hoi tu Previous Monthly VAL (${pmVal})` };
+  }
+  // 4. SMA20_PULLBACK: near SMA20, uptrend
+  if (sma20Dist != null && Math.abs(sma20Dist) <= 3 && structure === 'UPTREND') {
+    return { setup: 'SMA20_PULLBACK', zone_low: Math.round(sma20 * 0.99), zone_high: Math.round(sma20 * 1.01), anchor: 'sma20', reason: `Gia quanh SMA20 (cach ${sma20Dist}%), pullback trong uptrend` };
+  }
+  // 5. SMA100_PULLBACK_RECLAIM: above SMA100, SMA20 far
+  if (aboveSma100 && sma100Dist != null && sma100Dist <= 5 && sma20Dist != null && Math.abs(sma20Dist) > 3) {
+    return { setup: 'SMA100_PULLBACK_RECLAIM', zone_low: Math.round(sma100 * 0.99), zone_high: Math.round(sma100 * 1.02), anchor: 'sma100', reason: `Gia phuc hoi tren SMA100 (cach ${sma100Dist}%), SMA20 con xa` };
+  }
+  return { setup: null, reason: 'khong co setup phu hop' };
 }
 
 // Geometry only. Promotion to READY belongs to the deterministic readiness gate.
@@ -797,6 +835,123 @@ async function main() {
     if (bo) scenarios.push(bo);
   }
 
+  // --- VN UNIFIED CHECK (replaces legacy VN scenario building) ---
+  let vn = null;
+  if (isVnStock) {
+    // 1. Extract Auto Key Levels profile
+    const pmProfile = extractPreviousMonthProfile({
+      studies: sv.studies || [],
+      symbol: ticker,
+      marketDate: out.date || new Date().toISOString().slice(0, 10),
+      observedAt: new Date().toISOString(),
+      maxAgeSeconds: 7200,
+    });
+
+    // 2. H6 history: SMA, structure, protected low, Avg20 from completed bars
+    const completedCloses = barClosed ? closes : closes.slice(0, -1);
+    const completedVolumes = barClosed ? bars.map(b => b.volume) : bars.slice(0, -1).map(b => b.volume);
+    const h6Avg20 = completedVolumes.length >= 20
+      ? Math.round(completedVolumes.slice(-20).reduce((a, v) => a + v, 0) / 20)
+      : null;
+
+    // Protected low (shelf from demand bar)
+    const demandBar = findDemandBar(barClosed ? bars : bars.slice(0, -1), barClosed ? n : n - 1, h6Avg20);
+    const protectedLow = demandBar ? Math.round(demandBar.shelf) : null;
+
+    // 3. H6 live: location, range, VSA from active bar
+    const h6Live = {
+      location_price: Math.round(price),
+      location_vs_sma20: ma.ma20 ? Math.round((price - ma.ma20) / ma.ma20 * 10000) / 100 : null,
+      location_vs_sma100: ma.ma100 ? Math.round((price - ma.ma100) / ma.ma100 * 10000) / 100 : null,
+      range: todayBar ? Math.round(todayBar.high - todayBar.low) : null,
+      range_atr,
+      vol_ratio: lastVolRatio,
+      vol_above_avg20: lastVolRatio != null && lastVolRatio >= 1.0,
+      buy_pct: fp.buyPct,
+      delta: fp.cumD,
+      delta_pct: fp.totalVol && fp.cumD != null && fp.totalVol > 0
+        ? Math.round(fp.cumD / fp.totalVol * 10000) / 100 : null,
+      buy_stack: fp.buyStack,
+      sell_stack: fp.sellStack,
+      divergence: fp.div,
+      vsa_churn: vsa_churn.flag,
+      vsa_signals: { no_demand: vsa_signals.no_demand.flag, no_supply: vsa_signals.no_supply.flag },
+      footprint_conf: fp.conf,
+    };
+
+    // 4. MA anchor classification
+    const maAnchor = classifyMaAnchor({
+      price,
+      sma20: ma.ma20,
+      sma100: ma.ma100,
+      preferredAnchor: null,
+      maxExtensionPct: 7,
+    });
+
+    // 5. fromLowPct — how far from recent 10-bar low
+    const recentLow = Math.min(...bars.slice(-10).map(b => b.low));
+    const fromLowPct = recentLow > 0 ? Math.round((price - recentLow) / recentLow * 10000) / 100 : null;
+
+    // 6. Setup classification
+    const setup = classifyVnSetup({
+      price,
+      sma20: ma.ma20,
+      sma100: ma.ma100,
+      pmPoc: pmProfile.valid ? pmProfile.poc : null,
+      pmVah: pmProfile.valid ? pmProfile.vah : null,
+      pmVal: pmProfile.valid ? pmProfile.val : null,
+      structure,
+      fromLowPct,
+    });
+
+    // 7. Blockers for readiness
+    const blockers = [];
+    if (pmProfile.valid === false) blockers.push('PM_PROFILE_MISSING');
+    if (pmProfile.stale) blockers.push('PM_PROFILE_STALE');
+    if (setup.setup == null) blockers.push('NO_SETUP');
+    if (maAnchor.anchor === 'none' || maAnchor.overextended) blockers.push('OVEREXTENDED');
+    if (h6Live.vol_ratio == null) blockers.push('H6_VOLUME_EVIDENCE_MISSING');
+    if (!barClosed && h6Live.vol_ratio != null && h6Live.vol_ratio < 0.5) blockers.push('H6_LIVE_CONTEXT_INVALID');
+    if (sess.trust_level === 'LOW' && sess.phase !== 'CLOSED') blockers.push('ENTRY_WINDOW_BLOCKED');
+
+    vn = {
+      pm_profile: pmProfile.valid ? {
+        poc: pmProfile.poc,
+        vah: pmProfile.vah,
+        val: pmProfile.val,
+        prev_month: pmProfile.prevMonth,
+        source: pmProfile.source,
+        stale: pmProfile.stale || false,
+      } : { error: pmProfile.error },
+      h6_history: {
+        sma20: ma.ma20 ? Math.round(ma.ma20) : null,
+        sma100: ma.ma100 ? Math.round(ma.ma100) : null,
+        structure,
+        protected_low: protectedLow,
+        avg_vol_20: h6Avg20,
+        bars_completed: completedCloses.length,
+      },
+      h6_live: h6Live,
+      ma_anchor: maAnchor,
+      setup,
+      locked_ltf: { status: 'PENDING', note: 'locked LTF requires M5/H1 data' },
+      session: {
+        phase: sess.phase,
+        trust: sess.trust_level,
+        next_phase: sess.next_phase,
+        minutes_remaining: sess.minutes_remaining,
+        phase_warning: sess.phase_warning,
+      },
+      exit_policy: {
+        sl: protectedLow,
+        trail: trail.status,
+        note: protectedLow ? `Cat lo neu dong cua duoi ${protectedLow}` : 'Trailing SMA20',
+      },
+      blockers,
+      setup_state: setup.setup != null ? 'IN_ZONE' : 'NO_SETUP',
+    };
+  }
+
   // T+2.5: annotate sl_atr/rr_locked/tplus_warn vao scenario + tplus top-level (null neu khong phai VN stock)
   const tplus = annotateTplus(scenarios, { atr14, price, ticker });
 
@@ -856,6 +1011,7 @@ async function main() {
       ph: ph.map(p => ({ price: p.price, d: `D-${n-1-p.i}` })),
       pl: pl.map(p => ({ price: p.price, d: `D-${n-1-p.i}` })),
     },
+    vn,  // VN unified check (null for non-VN)
   });
 
   try {
@@ -875,7 +1031,7 @@ async function main() {
   }
   });
 }
-export { buildScenarios, contRetestScenario, findDemandBar, rangeBreakoutScenario, resampleWeekly, weeklyTrend };
+export { buildScenarios, contRetestScenario, findDemandBar, rangeBreakoutScenario, resampleWeekly, weeklyTrend, classifyVnSetup };
 
 // Chi chay engine khi goi truc tiep (node check_one.mjs ...), khong khi bi import vao test.
 if ((process.argv[1] || '').replace(/\\/g, '/').endsWith('check_one.mjs')) {
