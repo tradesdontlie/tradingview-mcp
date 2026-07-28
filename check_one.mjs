@@ -317,31 +317,36 @@ function classifyVnSetup({ price, sma20, sma100, structure, aboveSma100 }) {
 
 /**
  * Build the automated VN core readiness evidence.
- * Only H6 history, MA anchor, volume, and entry window.
+ * Only H6 history, MA anchor, volume, entry window, and SMA setup.
  * Profile, VSA, Footprint, Delta, M15 are manual-only.
  */
-function buildVnAutoCore({ price, h6History, h6Live, entryWindow }) {
+function buildVnAutoCore({ price, h6History, h6Live, entryWindow, setup }) {
   const blockers = [];
 
-  // H6 history sufficiency
-  if (!h6History || h6History.bars_completed < 100) {
+  // --- H6 history sufficiency (from completed bars only) ---
+  if (!h6History || h6History.bars_completed == null || h6History.bars_completed < 100) {
     blockers.push('H6_HISTORY_INSUFFICIENT');
   }
 
-  // MA data: at least SMA100 is required
-  if (h6History.sma100 == null || !Number.isFinite(h6History.sma100)) {
+  // --- Finite MA data ---
+  const sma20Ok = h6History && h6History.sma20 != null && Number.isFinite(h6History.sma20);
+  const sma100Ok = h6History && h6History.sma100 != null && Number.isFinite(h6History.sma100);
+  const avgVol20Ok = h6History && h6History.avg_vol_20 != null && Number.isFinite(h6History.avg_vol_20);
+  if (!sma20Ok || !sma100Ok || !avgVol20Ok) {
     blockers.push('MA_DATA_MISSING');
   }
 
-  // Price below SMA100
-  const aboveSma100 = h6History.sma100 != null && price >= h6History.sma100;
-  if (!aboveSma100) {
+  // --- Price finite and above SMA100 ---
+  const priceOk = price != null && Number.isFinite(price);
+  const aboveSma100 = priceOk && sma100Ok && price >= h6History.sma100;
+  if (!priceOk) {
+    blockers.push('PRICE_MISSING');
+  } else if (!aboveSma100) {
     blockers.push('BELOW_SMA100');
   }
 
-  // Over-extended: check extension from the closest MA anchor (SMA20 or SMA100)
-  // Use rounded values (matching classifyMaAnchor) to avoid floating-point edge cases
-  if (aboveSma100 && h6History.sma100 != null) {
+  // --- MA extension: at least one non-negative anchor within 7% ---
+  if (aboveSma100 && sma20Ok && sma100Ok) {
     const candidates = [];
     if (h6History.sma20 != null && Number.isFinite(h6History.sma20)) {
       candidates.push(Math.round((price - h6History.sma20) / h6History.sma20 * 10000) / 100);
@@ -353,29 +358,98 @@ function buildVnAutoCore({ price, h6History, h6Live, entryWindow }) {
     }
   }
 
-  // Volume evidence: strict > 1.0 (equality is blocked)
-  if (h6Live.vol_ratio == null) {
+  // --- Volume evidence: strict > 1.0 (equality is blocked) ---
+  if (!h6Live || h6Live.vol_ratio == null || !Number.isFinite(h6Live.vol_ratio)) {
     blockers.push('H6_VOLUME_EVIDENCE_MISSING');
   } else if (h6Live.vol_ratio <= 1.0) {
     blockers.push('H6_VOLUME_NOT_ABOVE_AVG20');
   }
 
-  // Entry window
-  if (entryWindow && entryWindow.window === 'BLOCKED') {
+  // --- Setup validation: only SMA20_PULLBACK or SMA100_PULLBACK_RECLAIM ---
+  const SMA_SETUPS = new Set(['SMA20_PULLBACK', 'SMA100_PULLBACK_RECLAIM']);
+  const setupOk = setup && SMA_SETUPS.has(setup.setup)
+    && setup.zone_low != null && Number.isFinite(setup.zone_low)
+    && setup.zone_high != null && Number.isFinite(setup.zone_high)
+    && setup.anchor != null
+    && priceOk && price >= setup.zone_low && price <= setup.zone_high;
+  if (!setup || !SMA_SETUPS.has(setup?.setup)) {
+    blockers.push('NO_SETUP');
+  } else if (!setupOk) {
+    blockers.push('SETUP_ZONE_MISMATCH');
+  }
+
+  // --- Entry window: only HIGH/NORMAL promote ---
+  const ALLOWED_WINDOWS = new Set(['HIGH', 'NORMAL']);
+  if (!entryWindow || !ALLOWED_WINDOWS.has(entryWindow.window)) {
     blockers.push('ENTRY_WINDOW_BLOCKED');
   }
 
   const conditions = {
     above_sma100: aboveSma100,
-    ma_anchor_within_7pct: blockers.includes('OVEREXTENDED') === false && blockers.includes('MA_DATA_MISSING') === false,
-    h6_volume_above_avg20: h6Live.vol_ratio != null && h6Live.vol_ratio > 1.0,
-    entry_window_allowed: !entryWindow || entryWindow.window !== 'BLOCKED',
+    ma_anchor_within_7pct: !blockers.includes('OVEREXTENDED') && !blockers.includes('MA_DATA_MISSING'),
+    setup_supported: setupOk,
+    h6_volume_above_avg20: h6Live && h6Live.vol_ratio != null && h6Live.vol_ratio > 1.0,
+    entry_window_allowed: entryWindow && ALLOWED_WINDOWS.has(entryWindow.window),
   };
 
   return {
     eligible: blockers.length === 0,
     conditions,
     blockers,
+  };
+}
+
+/**
+ * Build one VN plan scenario from the canonical SMA setup.
+ * Returns null unless all geometry is finite and:
+ *   protectedLow < setup.zone_low <= setup.zone_high < overheadResistance
+ */
+function buildVnPlanScenario({ setup, protectedLow, overheadResistance, trail }) {
+  if (!setup || !setup.setup) return null;
+  if (!protectedLow || !Number.isFinite(protectedLow)) return null;
+  if (!setup.zone_low || !Number.isFinite(setup.zone_low)) return null;
+  if (!setup.zone_high || !Number.isFinite(setup.zone_high)) return null;
+
+  // Validate geometry: protectedLow < zone_low <= zone_high < overheadResistance
+  if (!(protectedLow < setup.zone_low && setup.zone_low <= setup.zone_high)) return null;
+
+  if (!overheadResistance || !Number.isFinite(overheadResistance)) return null;
+  if (!(setup.zone_high < overheadResistance)) return null;
+
+  const label = setup.setup === 'SMA20_PULLBACK'
+    ? 'sma20_pullback'
+    : 'sma100_pullback_reclaim';
+
+  return {
+    label,
+    direction: 'LONG',
+    entry_low: setup.zone_low,
+    entry_high: setup.zone_high,
+    sl: protectedLow,
+    tp1: overheadResistance,
+    tp2: null,
+    trigger: 'AUTO_CORE_READY + CHECK_TAY_TRUOC_KHI_MUA',
+    invalidation: `dong cua duoi ${protectedLow}`,
+    size_note: trail?.status || 'trailing SMA20',
+  };
+}
+
+/**
+ * Build the canonical VN gate view from the VN cache and a single plan scenario.
+ */
+function buildVnGateView({ bar, vn, planScenario }) {
+  const scenarios = planScenario ? [planScenario] : [];
+  // Derive setup_state from vn.setup_state (not the legacy top-level)
+  const setup_state = vn.setup_state || 'NO_SETUP';
+
+  return {
+    bar: {
+      closed: bar.closed,
+      age_pct: bar.age_pct,
+      closed_bars: vn.h6_history?.bars_completed ?? 0,
+    },
+    setup_state,
+    scenarios,
   };
 }
 
@@ -1036,6 +1110,14 @@ async function main() {
     // Entry window permission: only HIGH/NORMAL promote
     const windowOk = win.window === 'HIGH' || win.window === 'NORMAL';
 
+    // 11. Canonical SMA plan scenario (only when core is eligible + geometry valid)
+    const planScenario = buildVnPlanScenario({
+      setup: setup.setup ? setup : null,
+      protectedLow: h6History.protected_low,
+      overheadResistance: overhead.resistance,
+      trail,
+    });
+
     vn = {
       pm_profile: pmProfile.valid ? {
         source: pmProfile.source,
@@ -1066,8 +1148,20 @@ async function main() {
       blockers: autoCore.blockers,
       setup_state: setupState,
       window_ok: windowOk,
+      plan_scenario: planScenario,
     };
+
   }
+
+  // Canonical gate view for VN (computed from vn object if available)
+  const vnGateView = vn ? buildVnGateView({
+    bar,
+    vn: {
+      setup_state: vn.setup_state,
+      h6_history: vn.h6_history,
+    },
+    planScenario: vn.plan_scenario,
+  }) : null;
 
   // T+2.5: annotate sl_atr/rr_locked/tplus_warn vao scenario + tplus top-level (null neu khong phai VN stock)
   const tplus = annotateTplus(scenarios, { atr14, price, ticker });
@@ -1092,7 +1186,7 @@ async function main() {
     vol_state,
     spread: spreadOut,
     bar_read,
-    bar,
+    bar: isVnStock && vnGateView ? vnGateView.bar : bar,
     prev_closed,
     session: {
       phase: sess.phase,
@@ -1111,9 +1205,11 @@ async function main() {
     adtv_20_bn,
     days_to_vn30f_expiry,
     overhead,
-    scenarios,
-    setup_state: computeDecision(scenarios, price).setup_state,
-    decision: computeDecision(scenarios, price),
+    scenarios: isVnStock && vnGateView ? vnGateView.scenarios : scenarios,
+    setup_state: isVnStock && vnGateView ? vnGateView.setup_state : computeDecision(scenarios, price).setup_state,
+    decision: isVnStock && vnGateView
+      ? { setup_state: vnGateView.setup_state, reason: vnGateView.scenarios.length > 0 ? `canonical ${vnGateView.scenarios[0].label}` : 'no canonical scenario', setup: vnGateView.scenarios[0]?.label ?? null }
+      : computeDecision(scenarios, price),
     phase_evidence: phaseEvidence({ volRatio: lastVolRatio, closePos: fp.closePos, conf: fp.conf,
       buyPct: fp.buyPct, buyStack: fp.buyStack, churn: vsa_churn.flag,
       resistance: overhead.resistance ?? bars[n-2]?.high, price,
@@ -1148,7 +1244,7 @@ async function main() {
   }
   });
 }
-export { buildScenarios, contRetestScenario, findDemandBar, rangeBreakoutScenario, resampleWeekly, weeklyTrend, classifyVnSetup, buildVnAutoCore, sma };
+export { buildScenarios, contRetestScenario, findDemandBar, rangeBreakoutScenario, resampleWeekly, weeklyTrend, classifyVnSetup, buildVnAutoCore, buildVnGateView, buildVnPlanScenario, sma };
 
 // Chi chay engine khi goi truc tiep (node check_one.mjs ...), khong khi bi import vao test.
 if ((process.argv[1] || '').replace(/\\/g, '/').endsWith('check_one.mjs')) {

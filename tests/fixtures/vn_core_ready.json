@@ -1,0 +1,108 @@
+{
+  "ticker": "HOSE:AAA",
+  "price": 101,
+  "timeframe": "360",
+  "tf_confirmed": true,
+  "symbol_confirmed": true,
+  "dir": "LONG",
+  "date": "2026-07-28",
+  "bar": {
+    "closed": false,
+    "age_pct": 60,
+    "closed_bars": 120
+  },
+  "setup_state": "IN_ZONE",
+  "scenarios": [
+    {
+      "label": "sma20_pullback",
+      "direction": "LONG",
+      "entry_low": 99,
+      "entry_high": 101,
+      "sl": 85,
+      "tp1": 115,
+      "tp2": null,
+      "trigger": "AUTO_CORE_READY + CHECK_TAY_TRUOC_KHI_MUA",
+      "invalidation": "dong cua duoi 85",
+      "size_note": "SAFE"
+    }
+  ],
+  "setup": {
+    "setup": "SMA20_PULLBACK",
+    "zone_low": 99,
+    "zone_high": 101,
+    "anchor": "sma20",
+    "reason": "Gia quanh SMA20 (cach 1%), pullback trong uptrend"
+  },
+  "vn": {
+    "setup": {
+      "setup": "SMA20_PULLBACK",
+      "zone_low": 99,
+      "zone_high": 101,
+      "anchor": "sma20",
+      "reason": "Gia quanh SMA20 (cach 1%), pullback trong uptrend"
+    },
+    "setup_state": "IN_ZONE",
+    "h6_history": {
+      "bars_completed": 120,
+      "sma20": 100,
+      "sma100": 90,
+      "structure": "UPTREND",
+      "protected_low": 85,
+      "avg_vol_20": 5000
+    },
+    "h6_live": {
+      "price": 101,
+      "vol_ratio": 1.01,
+      "location_vs_sma20": 1,
+      "location_vs_sma100": 12.22,
+      "range": 3,
+      "range_atr": 1.2,
+      "vol_above_avg20": true,
+      "buy_pct": 55,
+      "bar_vol_delta": 1000,
+      "cum_delta": 500,
+      "delta_pct": 2.5,
+      "buy_stack": 2,
+      "sell_stack": 0,
+      "divergence": 0,
+      "vsa_churn": false,
+      "vsa_signals": {
+        "no_demand": false,
+        "no_supply": false
+      },
+      "footprint_conf": 65
+    },
+    "entry_window": {
+      "window": "HIGH",
+      "priority": true,
+      "reason": "window open"
+    },
+    "auto_core": {
+      "eligible": true,
+      "conditions": {
+        "above_sma100": true,
+        "ma_anchor_within_7pct": true,
+        "setup_supported": true,
+        "h6_volume_above_avg20": true,
+        "entry_window_allowed": true
+      },
+      "blockers": []
+    },
+    "plan_scenario": {
+      "label": "sma20_pullback",
+      "direction": "LONG",
+      "entry_low": 99,
+      "entry_high": 101,
+      "sl": 85,
+      "tp1": 115,
+      "tp2": null,
+      "trigger": "AUTO_CORE_READY + CHECK_TAY_TRUOC_KHI_MUA",
+      "invalidation": "dong cua duoi 85",
+      "size_note": "SAFE"
+    }
+  },
+  "schema_version": 1,
+  "market_date": "2026-07-28",
+  "generated_at": "2026-07-28T10:00:00.000Z",
+  "as_of": "2026-07-28T10:00:00.000Z"
+}
