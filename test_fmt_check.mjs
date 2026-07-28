@@ -176,9 +176,9 @@ assert.ok(outVn1.includes('LTF'), `VN must show LTF safety (got:\n${outVn1})`);
 	// VN-6: deep output includes MA gate diagnostics
 	const outVnDeep = fmtCheck('--deep DATA_JSON:' + JSON.stringify(vnPayload));
 	assert.ok(outVnDeep.includes('MA GATE'), `VN deep must show MA gate (got:\n${outVnDeep})`);
-	
+
 	// ===== VN manual checklist tests =====
-	
+
 	// VN-M1: engine + gate blockers are deduplicated
 	const vnM1Payload = {
 	    ticker: 'HOSE:ACB', price: 25000, date: '2026-07-21',
@@ -204,7 +204,7 @@ assert.ok(outVn1.includes('LTF'), `VN must show LTF safety (got:\n${outVn1})`);
 	    },
 	};
 	const rawM1 = 'DATA_JSON:' + JSON.stringify(vnM1Payload);
-	
+
 	// VN-M1a: with override that also has blockers → union
 	const outM1a = fmtCheck(rawM1, {
 	    setup_state: 'IN_ZONE', plan_status: 'READY', gate_state: 'PASSED',
@@ -214,7 +214,7 @@ assert.ok(outVn1.includes('LTF'), `VN must show LTF safety (got:\n${outVn1})`);
 	    `VN-M1a must show deduplicated blockers (got:\n${outM1a})`);
 	assert.match(outM1a, /CHECK TAY TRUOC KHI MUA:/,
 	    `VN-M1a must show manual checklist header (got:\n${outM1a})`);
-	
+
 	// VN-M1b: all five manual checks rendered
 	assert.match(outM1a, /M15 gan nhat da dong va khong bearish/,
 	    `VN-M1b must show M15 check (got:\n${outM1a})`);
@@ -226,7 +226,7 @@ assert.ok(outVn1.includes('LTF'), `VN must show LTF safety (got:\n${outVn1})`);
 	    `VN-M1b must show Delta check (got:\n${outM1a})`);
 	assert.match(outM1a, /Doi chieu PM POC\/VAH\/VAL/,
 	    `VN-M1b must show PM Profile check (got:\n${outM1a})`);
-	
+
 	// VN-M2: valid READY proof → PLAN: READY, ACTION: CHECK TAY TRUOC KHI MUA, never ACTION: YES
 	assert.match(outM1a, /^PLAN: READY$/m,
 	    `VN-M2 must show READY plan (got:\n${outM1a})`);
@@ -234,7 +234,7 @@ assert.ok(outVn1.includes('LTF'), `VN must show LTF safety (got:\n${outVn1})`);
 	    `VN-M2 must show manual ACTION (got:\n${outM1a})`);
 	assert.doesNotMatch(outM1a, /^ACTION: YES$/m,
 	    `VN-M2 must never render ACTION: YES (got:\n${outM1a})`);
-	
+
 	// VN-M3: no override → maximum WATCH, no READY
 	const outM3 = fmtCheck(rawM1);
 	assert.match(outM3, /^PLAN: WATCH$/m,
@@ -243,7 +243,7 @@ assert.ok(outVn1.includes('LTF'), `VN must show LTF safety (got:\n${outVn1})`);
 	    `VN-M3 must have ACTION line (got:\n${outM3})`);
 	assert.doesNotMatch(outM3, /^PLAN: READY$/m,
 	    `VN-M3 must NOT render READY without override (got:\n${outM3})`);
-	
+
 	// VN-M4: malformed READY must include INVALID_READY_STATE
 	const outM4 = fmtCheck(rawM1, {
 	    setup_state: 'NO_SETUP', plan_status: 'READY', gate_state: 'PASSED',
@@ -251,5 +251,5 @@ assert.ok(outVn1.includes('LTF'), `VN must show LTF safety (got:\n${outVn1})`);
 	});
 	assert.match(outM4, /INVALID_READY_STATE/,
 	    `VN-M4 must show INVALID_READY_STATE (got:\n${outM4})`);
-	
+
 	console.log('ALL PASS');

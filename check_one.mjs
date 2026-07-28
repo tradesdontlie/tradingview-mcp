@@ -9,7 +9,7 @@ import * as chart from './src/core/chart.js';
 import * as data from './src/core/data.js';
 import { getClient } from './src/connection.js';
 import { computeRS, readVnindexCache } from './rs_util.mjs';
-import { barStatus, sessionInfo, entryWindow, lockedLtf } from './bar_status.mjs';
+import { barStatus, sessionInfo, entryWindow } from './bar_status.mjs';
 import { atomicWriteCache, cachePaths, evidenceHash, runtimeDataRoot, withChartLock } from './src/core/check_runtime.mjs';
 import { extractPreviousMonthProfile, classifyMaAnchor } from './src/scan_policy.mjs';
 
