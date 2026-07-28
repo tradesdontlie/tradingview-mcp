@@ -157,7 +157,7 @@ const outVn3 = fmtCheck(raw, {
 });
 assert.ok(outVn3.includes('PLAN: BLOCKED'), `VN-3 must show BLOCKED (got:\n${outVn3})`);
 assert.ok(outVn3.includes('GATE: BLOCKED'), `VN-3 must show BLOCKED gate (got:\n${outVn3})`);
-assert.ok(outVn3.includes('BLOCKERS: BELOW_SMA100'), `VN-3 must show blockers (got:\n${outVn3})`);
+	assert.ok(outVn3.includes('BELOW_SMA100'), `VN-3 must show blockers (got:\n${outVn3})`);
 
 // VN-4: READY override but different setup_state → not actionable
 const outVn4 = fmtCheck(raw, {
@@ -173,8 +173,83 @@ assert.ok(outVn1.includes('Div 0'), `VN must show divergence (got:\n${outVn1})`)
 assert.ok(outVn1.includes('B3/S1'), `VN must show stacks (got:\n${outVn1})`);
 assert.ok(outVn1.includes('LTF'), `VN must show LTF safety (got:\n${outVn1})`);
 
-// VN-6: deep output includes MA gate diagnostics
-const outVnDeep = fmtCheck('--deep DATA_JSON:' + JSON.stringify(vnPayload));
-assert.ok(outVnDeep.includes('MA GATE'), `VN deep must show MA gate (got:\n${outVnDeep})`);
-
-console.log('ALL PASS');
+	// VN-6: deep output includes MA gate diagnostics
+	const outVnDeep = fmtCheck('--deep DATA_JSON:' + JSON.stringify(vnPayload));
+	assert.ok(outVnDeep.includes('MA GATE'), `VN deep must show MA gate (got:\n${outVnDeep})`);
+	
+	// ===== VN manual checklist tests =====
+	
+	// VN-M1: engine + gate blockers are deduplicated
+	const vnM1Payload = {
+	    ticker: 'HOSE:ACB', price: 25000, date: '2026-07-21',
+	    vn: {
+	        h6_history: { sma20: 24000, sma100: 23000, structure: 'UPTREND', avg_vol_20: 1000000, bars_completed: 80 },
+	        h6_live: { vol_ratio: 1.2, buy_pct: 60, bar_vol_delta: 5000, cum_delta: 20000, delta_pct: 8.5, buy_stack: 3, sell_stack: 1, divergence: 0, vsa_churn: false, footprint_conf: 72 },
+	        ma_anchor: { allowed: true, anchor: 'sma20', extension_pct: 4.17, blocker: null },
+	        setup: { setup: 'SMA20_PULLBACK', zone_low: 23700, zone_high: 24300, anchor: 'sma20' },
+	        pm_profile: { poc: 24000, vah: 24800, val: 23500, profile_month: '2026-06' },
+	        locked_ltf: { mode: 'MANUAL', timeframe: '15', locked: null, reason: 'manual_confirmation_required' },
+	        entry_window: { window: 'HIGH' },
+	        exit_policy: { sl: 24500, trail: 'SAFE' },
+	        auto_core: { eligible: true, conditions: {}, blockers: [] },
+	        manual_checks: [
+	            { code: 'M15_CLOSED_NOT_BEARISH', label_vi: 'M15 gan nhat da dong va khong bearish' },
+	            { code: 'H6_LIVE_NO_UPTHRUST', label_vi: 'H6 live khong co Upthrust/Distribution/Effort-No-Result' },
+	            { code: 'FOOTPRINT_NO_SELL_IMBALANCE', label_vi: 'Footprint khong co sell imbalance/aggressive sell' },
+	            { code: 'DELTA_NO_BEARISH_DIVERGENCE', label_vi: 'Volume Delta khong bearish divergence' },
+	            { code: 'PM_PROFILE_CONFIRMATION', label_vi: 'Doi chieu PM POC/VAH/VAL' },
+	        ],
+	        blockers: ['ENGINE_BLOCKER'],
+	        setup_state: 'IN_ZONE', window_ok: true,
+	    },
+	};
+	const rawM1 = 'DATA_JSON:' + JSON.stringify(vnM1Payload);
+	
+	// VN-M1a: with override that also has blockers → union
+	const outM1a = fmtCheck(rawM1, {
+	    setup_state: 'IN_ZONE', plan_status: 'READY', gate_state: 'PASSED',
+	    permission_state: 'ALLOWED', blockers: ['GATE_BLOCKER'],
+	});
+	assert.match(outM1a, /BLOCKERS: ENGINE_BLOCKER, GATE_BLOCKER/,
+	    `VN-M1a must show deduplicated blockers (got:\n${outM1a})`);
+	assert.match(outM1a, /CHECK TAY TRUOC KHI MUA:/,
+	    `VN-M1a must show manual checklist header (got:\n${outM1a})`);
+	
+	// VN-M1b: all five manual checks rendered
+	assert.match(outM1a, /M15 gan nhat da dong va khong bearish/,
+	    `VN-M1b must show M15 check (got:\n${outM1a})`);
+	assert.match(outM1a, /H6 live khong co Upthrust\/Distribution\/Effort-No-Result/,
+	    `VN-M1b must show H6 VSA check (got:\n${outM1a})`);
+	assert.match(outM1a, /Footprint khong co sell imbalance\/aggressive sell/,
+	    `VN-M1b must show Footprint check (got:\n${outM1a})`);
+	assert.match(outM1a, /Volume Delta khong bearish divergence/,
+	    `VN-M1b must show Delta check (got:\n${outM1a})`);
+	assert.match(outM1a, /Doi chieu PM POC\/VAH\/VAL/,
+	    `VN-M1b must show PM Profile check (got:\n${outM1a})`);
+	
+	// VN-M2: valid READY proof → PLAN: READY, ACTION: CHECK TAY TRUOC KHI MUA, never ACTION: YES
+	assert.match(outM1a, /^PLAN: READY$/m,
+	    `VN-M2 must show READY plan (got:\n${outM1a})`);
+	assert.match(outM1a, /^ACTION: CHECK TAY TRUOC KHI MUA$/m,
+	    `VN-M2 must show manual ACTION (got:\n${outM1a})`);
+	assert.doesNotMatch(outM1a, /^ACTION: YES$/m,
+	    `VN-M2 must never render ACTION: YES (got:\n${outM1a})`);
+	
+	// VN-M3: no override → maximum WATCH, no READY
+	const outM3 = fmtCheck(rawM1);
+	assert.match(outM3, /^PLAN: WATCH$/m,
+	    `VN-M3 must show WATCH without override (got:\n${outM3})`);
+	assert.match(outM3, /^ACTION: /m,
+	    `VN-M3 must have ACTION line (got:\n${outM3})`);
+	assert.doesNotMatch(outM3, /^PLAN: READY$/m,
+	    `VN-M3 must NOT render READY without override (got:\n${outM3})`);
+	
+	// VN-M4: malformed READY must include INVALID_READY_STATE
+	const outM4 = fmtCheck(rawM1, {
+	    setup_state: 'NO_SETUP', plan_status: 'READY', gate_state: 'PASSED',
+	    permission_state: 'ALLOWED', blockers: [],
+	});
+	assert.match(outM4, /INVALID_READY_STATE/,
+	    `VN-M4 must show INVALID_READY_STATE (got:\n${outM4})`);
+	
+	console.log('ALL PASS');

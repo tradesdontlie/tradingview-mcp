@@ -40,16 +40,18 @@ function fmtCompact(d, readinessOverride) {
         const planStatus = hasOverride ? ready.plan_status || 'WATCH' : 'WATCH';
         const gateState = hasOverride ? ready.gate_state || 'WAITING' : 'WAITING';
         const permissionState = hasOverride ? ready.permission_state || 'UNKNOWN' : 'UNKNOWN';
-        const blockers = hasOverride
-            ? (Array.isArray(ready.blockers) ? ready.blockers : [])
-            : (Array.isArray(vn.blockers) ? vn.blockers : []);
+
+        // Always deduplicate blockers from engine and gate
+        const finalBlockers = [...new Set([
+            ...(Array.isArray(vn.blockers) ? vn.blockers : []),
+            ...(Array.isArray(ready.blockers) ? ready.blockers : []),
+        ])];
 
         // Validate READY consistency: IN_ZONE + READY + PASSED + ALLOWED|REDUCED
         const readyInvalid = hasProof && !isActionable;
         let finalPlanStatus = planStatus;
         let finalGateState = gateState;
         let finalPermissionState = permissionState;
-        let finalBlockers = blockers.slice();
 
         if (readyInvalid) {
             // READY without proper backing → downgrade
@@ -65,13 +67,29 @@ function fmtCompact(d, readinessOverride) {
             }
         }
 
+        // Manual checklist from vn.manual_checks or canonical fallback
+        const manualChecks = Array.isArray(vn.manual_checks) && vn.manual_checks.length > 0
+            ? vn.manual_checks
+            : [
+                { code: 'M15_CLOSED_NOT_BEARISH', label_vi: 'M15 gan nhat da dong va khong bearish' },
+                { code: 'H6_LIVE_NO_UPTHRUST', label_vi: 'H6 live khong co Upthrust/Distribution/Effort-No-Result' },
+                { code: 'FOOTPRINT_NO_SELL_IMBALANCE', label_vi: 'Footprint khong co sell imbalance/aggressive sell' },
+                { code: 'DELTA_NO_BEARISH_DIVERGENCE', label_vi: 'Volume Delta khong bearish divergence' },
+                { code: 'PM_PROFILE_CONFIRMATION', label_vi: 'Doi chieu PM POC/VAH/VAL' },
+            ];
+
+        // LTF line: show manual confirmation when mode is MANUAL
+        const ltfLine = vn.locked_ltf?.mode === 'MANUAL'
+            ? 'M15: KIEM TRA TAY'
+            : `LTF SAFETY: ${vn.locked_ltf?.locked ? '✅ Locked' : (vn.locked_ltf?.reason || 'N/A')}`;
+
         const lines = [
             `📊 ${d.ticker} ${num(d.price)} (${d.date})`,
             `CONTEXT: ${vn.h6_history?.structure || '?'} | SMA100 ${num(vn.h6_history?.sma100)} | SMA20 ${num(vn.h6_history?.sma20)}`,
             `SETUP: ${vnSetup.setup || 'NONE'}${vnSetup.anchor ? ' @ ' + vnSetup.anchor : ''}`,
             `H6 VSA: ${vnLive.vsa_churn ? '⚠️ Churn' : 'Neutral'} | Vol ${vnLive.vol_ratio != null ? (vnLive.vol_ratio * 100).toFixed(0) + '%' : '?'} / Avg20 ${num(vn.h6_history?.avg_vol_20)}`,
             `FOOTPRINT: Buy ${vnLive.buy_pct ?? '?'}% | Bar Delta ${num(vnLive.bar_vol_delta)} | Delta% ${vnLive.delta_pct ?? '?'}% | B${vnLive.buy_stack ?? '?'}/S${vnLive.sell_stack ?? '?'} | Div ${vnLive.divergence ?? 0}`,
-            `LTF SAFETY: ${vn.locked_ltf?.locked ? '✅ Locked' : (vn.locked_ltf?.reason || 'N/A')}`,
+            ltfLine,
             `TIME: ${vn.entry_window?.window || '?'}${vn.entry_window?.priority ? ' [Priority]' : ''}`,
             `ENTRY: ${vnSetup.zone_low != null ? `${num(vnSetup.zone_low)}-${num(vnSetup.zone_high)}` : 'N/A'} | SL: ${num(vn.exit_policy?.sl)}`,
             `EXIT: ${vn.exit_policy?.trail || '?'}`,
@@ -85,8 +103,13 @@ function fmtCompact(d, readinessOverride) {
         if (finalBlockers.length) {
             lines.push(`BLOCKERS: ${finalBlockers.join(', ')}`);
         }
+        // Manual checklist: always render CHECK TAY TRUOC KHI MUA
+        lines.push('CHECK TAY TRUOC KHI MUA:');
+        for (const mc of manualChecks) {
+            lines.push(`  [ ] ${mc.label_vi}`);
+        }
         if (isActionable) {
-            lines.push('ACTION: YES');
+            lines.push('ACTION: CHECK TAY TRUOC KHI MUA');
         } else if (hasProof && !isActionable) {
             lines.push('ACTION: NO — trang thai READY khong hop le');
         } else if (finalPlanStatus === 'BLOCKED' || finalBlockers.length > 0) {
