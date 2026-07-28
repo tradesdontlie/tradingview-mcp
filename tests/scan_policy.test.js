@@ -361,3 +361,65 @@ test('classifyMaAnchor: adversarial - preferredAnchor 20% above still capped', (
   assert.equal(result.allowed, false);
   assert.equal(result.blocker, 'OVEREXTENDED');
 });
+
+// ── Adversarial: SMA100 missing → MA_DATA_MISSING ──
+test('classifyMaAnchor: missing SMA100 with SMA20 present returns MA_DATA_MISSING', () => {
+  const result = classifyMaAnchor({ price: 105, sma20: 100, sma100: null, preferredAnchor: null, maxExtensionPct: 7 });
+  assert.equal(result.blocker, 'MA_DATA_MISSING');
+});
+
+// ── Adversarial: observed symbol mismatch ──
+test('extractPreviousMonthProfile: symbol mismatch fails closed', () => {
+  const studies = [{ name: 'Auto Key Levels', values: { 'Prev Monthly POC': '23.25 K', 'Prev Monthly VAH': '23.9 K', 'Prev Monthly VAL': '23.1 K' } }];
+  const result = extractPreviousMonthProfile({
+    studies,
+    expectedSymbol: 'HOSE:HCM',
+    observedSymbol: 'HOSE:WRONG',
+    expectedCacheKey: 'HCM:2026-06',
+    marketDate: '2026-07-28',
+    observedAt: obsBefore(10),
+    maxAgeSeconds: 7200,
+    now: NOW_FOR_TEST,
+  });
+  assert.equal(result.valid, false);
+  assert.ok(result.error?.toLowerCase().includes('symbol'), `error must mention symbol: ${result.error}`);
+});
+
+// ── Adversarial: cache key mismatch ──
+test('extractPreviousMonthProfile: cache key mismatch fails closed', () => {
+  const studies = [{ name: 'Auto Key Levels', values: { 'Prev Monthly POC': '20.0 K', 'Prev Monthly VAH': '21.0 K', 'Prev Monthly VAL': '19.0 K' } }];
+  // marketDate 2026-03-15 → profile_month 2026-02 → cache_key "ABC:2026-02"
+  // expectedCacheKey "ABC:2026-05" → mismatch
+  const result = extractPreviousMonthProfile({
+    studies,
+    expectedSymbol: 'HOSE:ABC',
+    observedSymbol: 'HOSE:ABC',
+    expectedCacheKey: 'ABC:2026-05',
+    marketDate: '2026-03-15',
+    observedAt: obsBefore(10),
+    maxAgeSeconds: 99999999,
+    now: NOW_FOR_TEST,
+  });
+  assert.equal(result.valid, false);
+  assert.ok(result.error?.toLowerCase().includes('cache'), `error must mention cache: ${result.error}`);
+});
+
+// ── Adversarial: SHA-256 hash tampering ──
+test('extractPreviousMonthProfile: changing POC changes evidence_hash', () => {
+  function makeResult(poc) {
+    return extractPreviousMonthProfile({
+      studies: [{ name: 'Auto Key Levels', values: { 'Prev Monthly POC': poc, 'Prev Monthly VAH': '24.0 K', 'Prev Monthly VAL': '22.0 K' } }],
+      expectedSymbol: 'HOSE:TEST',
+      observedSymbol: 'HOSE:TEST',
+      expectedCacheKey: 'TEST:2026-06',
+      marketDate: '2026-07-28',
+      observedAt: obsBefore(10),
+      maxAgeSeconds: 7200,
+      now: NOW_FOR_TEST,
+    });
+  }
+  const a = makeResult('23.0 K');
+  const b = makeResult('23.5 K');
+  assert.ok(a.valid && b.valid);
+  assert.notEqual(a.evidence_hash, b.evidence_hash, 'different POC must produce different hash');
+});

@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 export const SCAN_ENGINE_VERSION = 'h6-footprint-v3';
 export const MARKET_ADJ = Object.freeze({ RISK_ON: 5, NEUTRAL: -5, RISK_OFF: -15 });
 
@@ -165,29 +167,23 @@ function profileMonth(marketDate) {
  *   evidence_hash_fields: Object|null
  * }}
  */
-export function extractPreviousMonthProfile({ studies = [], expectedSymbol, marketDate, observedAt, maxAgeSeconds = 7200, now, clockSkewMs = DEFAULT_CLOCK_SKEW_MS }) {
+export function extractPreviousMonthProfile({ studies = [], expectedSymbol, observedSymbol, expectedCacheKey, marketDate, observedAt, maxAgeSeconds = 7200, now, clockSkewMs = DEFAULT_CLOCK_SKEW_MS }) {
   const nowMs = now ? +new Date(now) : Date.now();
   const obsMs = observedAt ? +new Date(observedAt) : NaN;
   const normSym = sym => String(sym || '').split(':').pop().toUpperCase();
+  const fail = (err) => ({ valid: false, error: err, source: null, symbol: expectedSymbol || null, market_date: marketDate || null, profile_month: null, poc: null, vah: null, val: null, observed_at: observedAt || null, complete: false, cache_key: null, evidence_hash: null });
 
   // 0. Validate inputs
-  if (!Number.isFinite(obsMs)) {
-    return { valid: false, error: 'observedAt is invalid', source: null, symbol: expectedSymbol || null, market_date: marketDate || null, profile_month: null, poc: null, vah: null, val: null, observed_at: observedAt || null, complete: false, evidence_hash_fields: null };
-  }
-
-  // Reject future observation beyond clock skew
-  if (obsMs > nowMs + clockSkewMs) {
-    return { valid: false, error: `observedAt (${observedAt}) is in the future beyond clock skew`, source: null, symbol: expectedSymbol || null, market_date: marketDate || null, profile_month: null, poc: null, vah: null, val: null, observed_at: observedAt, complete: false, evidence_hash_fields: null };
+  if (!Number.isFinite(obsMs)) return fail('observedAt is invalid');
+  if (obsMs > nowMs + clockSkewMs) return fail(`observedAt (${observedAt}) is in the future beyond clock skew`);
+  if (expectedSymbol && observedSymbol && normSym(expectedSymbol) !== normSym(observedSymbol)) {
+    return fail(`symbol mismatch: expected ${normSym(expectedSymbol)}, observed ${normSym(observedSymbol)}`);
   }
 
   // 1. Find Auto Key Levels studies
   const keyLevels = studies.filter(s => s?.name?.includes(AUTO_KEY_LEVELS_NAME));
-  if (keyLevels.length === 0) {
-    return { valid: false, error: 'Auto Key Levels study not found', source: null, symbol: expectedSymbol || null, market_date: marketDate || null, profile_month: null, poc: null, vah: null, val: null, observed_at: observedAt || null, complete: false, evidence_hash_fields: null };
-  }
-  if (keyLevels.length > 1) {
-    return { valid: false, error: `Duplicate Auto Key Levels study (found ${keyLevels.length})`, source: null, symbol: expectedSymbol || null, market_date: marketDate || null, profile_month: null, poc: null, vah: null, val: null, observed_at: observedAt || null, complete: false, evidence_hash_fields: null };
-  }
+  if (keyLevels.length === 0) return fail('Auto Key Levels study not found');
+  if (keyLevels.length > 1) return fail(`Duplicate Auto Key Levels study (found ${keyLevels.length})`);
 
   // 2. Extract the three required fields
   const values = keyLevels[0].values || {};
@@ -199,30 +195,27 @@ export function extractPreviousMonthProfile({ studies = [], expectedSymbol, mark
   if (poc === null) missing.push('Prev Monthly POC');
   if (vah === null) missing.push('Prev Monthly VAH');
   if (val === null) missing.push('Prev Monthly VAL');
-  if (missing.length > 0) {
-    return { valid: false, error: `Missing profile values: ${missing.join(', ')}`, source: AUTO_KEY_LEVELS_NAME, symbol: expectedSymbol || null, market_date: marketDate || null, profile_month: null, poc, vah, val, observed_at: observedAt || null, complete: false, evidence_hash_fields: null };
-  }
+  if (missing.length > 0) return fail(`Missing profile values: ${missing.join(', ')}`);
 
   // 3. Validate VAL < POC < VAH
-  if (!(val < poc && poc < vah)) {
-    return { valid: false, error: `Profile invariant violation: VAL=${val} POC=${poc} VAH=${vah}`, source: AUTO_KEY_LEVELS_NAME, symbol: expectedSymbol || null, market_date: marketDate || null, profile_month: null, poc, vah, val, observed_at: observedAt || null, complete: false, evidence_hash_fields: null };
-  }
+  if (!(val < poc && poc < vah)) return fail(`Profile invariant violation: VAL=${val} POC=${poc} VAH=${vah}`);
 
-  // 4. Derive profile_month from market date
+  // 4. Derive profile_month
   const pMonth = profileMonth(marketDate);
-  if (!pMonth) {
-    return { valid: false, error: `Cannot derive profile_month from marketDate=${marketDate}`, source: AUTO_KEY_LEVELS_NAME, symbol: expectedSymbol || null, market_date: marketDate || null, profile_month: null, poc, vah, val, observed_at: observedAt || null, complete: false, evidence_hash_fields: null };
-  }
+  if (!pMonth) return fail(`Cannot derive profile_month from marketDate=${marketDate}`);
 
   // 5. Check staleness
   const ageSec = (nowMs - obsMs) / 1000;
   const stale = ageSec > maxAgeSeconds;
 
-  // 6. Cache key identity: expectedSymbol + profile_month
+  // 6. Cache key
   const cacheKey = expectedSymbol ? `${normSym(expectedSymbol)}:${pMonth}` : null;
+  if (expectedCacheKey != null && cacheKey !== expectedCacheKey) {
+    return fail(`cache key mismatch: expected ${expectedCacheKey}, computed ${cacheKey}`);
+  }
 
-  // 7. Evidence hash fields
-  const evidenceHashFields = {
+  // 7. SHA-256 evidence hash over canonical JSON with keys in exact order
+  const evidenceSource = {
     source: AUTO_KEY_LEVELS_NAME,
     symbol: expectedSymbol || null,
     market_date: marketDate || null,
@@ -232,6 +225,8 @@ export function extractPreviousMonthProfile({ studies = [], expectedSymbol, mark
     val,
     observed_at: observedAt || null,
   };
+  const canonicalJson = JSON.stringify(evidenceSource, Object.keys(evidenceSource).sort());
+  const evidenceHash = createHash('sha256').update(canonicalJson).digest('hex');
 
   return {
     valid: !stale,
@@ -244,7 +239,8 @@ export function extractPreviousMonthProfile({ studies = [], expectedSymbol, mark
     complete: !stale,
     stale,
     cache_key: cacheKey,
-    evidence_hash_fields: evidenceHashFields,
+    evidence_hash: evidenceHash,
+    evidence_hash_fields: evidenceSource,
     error: stale ? `Observation stale: ${Math.round(ageSec)}s > ${maxAgeSeconds}s` : null,
   };
 }
@@ -271,12 +267,15 @@ export function classifyMaAnchor({ price, sma20, sma100, preferredAnchor, maxExt
     return { allowed: false, anchor: null, extension_pct: null, reason: 'missing price', blocker: 'PRICE_UNAVAILABLE' };
   }
 
+  // Gate 0: SMA100 is required for VN long setup
+  if (sma100 == null || !Number.isFinite(sma100)) {
+    return { allowed: false, anchor: null, extension_pct: null, reason: 'SMA100 missing or non-finite', blocker: 'MA_DATA_MISSING' };
+  }
+
   // Gate 1: price must be at or above SMA100
-  if (sma100 != null && Number.isFinite(sma100)) {
-    if (price < sma100) {
-      const belowPct = Math.round((sma100 - price) / sma100 * 10000) / 100;
-      return { allowed: false, anchor: null, extension_pct: -belowPct, reason: `price ${price} below SMA100 ${sma100} (${belowPct}%)`, blocker: 'BELOW_SMA100' };
-    }
+  if (price < sma100) {
+    const belowPct = Math.round((sma100 - price) / sma100 * 10000) / 100;
+    return { allowed: false, anchor: null, extension_pct: -belowPct, reason: `price ${price} below SMA100 ${sma100} (${belowPct}%)`, blocker: 'BELOW_SMA100' };
   }
 
   // Build candidate anchors ordered by preference
