@@ -59,6 +59,97 @@ export function sessionInfo(now = new Date(), market = 'VN') {
   return { phase, trust_level, warnings, ...outNext };
 }
 
+/**
+ * entryWindow — classification of entry windows within VN HOSE session.
+ * Returns one of: HIGH, NORMAL, REDUCED, DISCOVERY, BLOCKED
+ * ISO weekdays; [2,3] is Tuesday/Wednesday priority only.
+ * Outside trading hours or on weekends returns BLOCKED.
+ */
+export function entryWindow(now = new Date(), market = 'VN') {
+  if (market !== 'VN') return { window: 'N/A', priority: false };
+  const wd = now.getDay();
+  const isPriority = wd === 2 || wd === 3; // Tuesday/Wednesday
+  if (wd === 0 || wd === 6) return { window: 'BLOCKED', priority: isPriority, reason: 'weekend' };
+  const t = now.getHours() * 60 + now.getMinutes();
+  let window, reason;
+
+  if (t < 540 || t >= 885)            { window = 'BLOCKED'; reason = 'market_closed'; }
+  else if (t < 555)                   { window = 'BLOCKED'; reason = 'ato'; }
+  else if (t < 570)                   { window = 'DISCOVERY'; reason = 'early_discovery'; }
+  else if (t < 630)                   { window = 'HIGH'; reason = 'am_high_liquidity'; }
+  else if (t < 675)                   { window = 'NORMAL'; reason = 'am_normal'; }
+  else if (t < 690)                   { window = 'REDUCED'; reason = 'am_reduced'; }
+  else if (t < 780)                   { window = 'BLOCKED'; reason = 'lunch'; }
+  else if (t < 795)                   { window = 'DISCOVERY'; reason = 'pm_discovery'; }
+  else if (t < 850)                   { window = 'HIGH'; reason = 'pm_high_liquidity'; }
+  else if (t < 870)                   { window = 'REDUCED'; reason = 'pm_reduced'; }
+  else                                { window = 'BLOCKED'; reason = 'atc'; }
+
+  return { window, priority: isPriority, reason };
+}
+
+/**
+ * lockedLtf — determine if a lower-timeframe chart has stabilized.
+ * M5 requires 2 consecutive closed non-bearish bars.
+ * M15/H1 requires 1 closed non-bearish bar.
+ * Open bar, stale evidence, wrong timeframe, wrong symbol, or bearish bar fails closed.
+ *
+ * @param {Object} options
+ * @param {Array}  options.bars       - Array of bars with {close, open, time, ...}
+ * @param {string} options.timeframe  - '5' (M5), '15' (M15), '60' (H1), etc.
+ * @param {string} options.symbol     - Expected symbol for evidence correlation
+ * @param {number} options.maxAgeMs   - Max age of the most recent bar in ms
+ * @returns {{ locked: boolean, reason: string, checks: Object }}
+ */
+export function lockedLtf({ bars = [], timeframe, symbol, maxAgeMs = 300000 }) {
+  if (!timeframe || !bars.length) {
+    return { locked: false, reason: 'missing_data', checks: {} };
+  }
+  const tfInt = parseInt(timeframe, 10);
+  const m5 = ['5', 5].includes(tfInt);
+  const m15h1 = [15, 60].includes(tfInt);
+
+  // Validate timeframe
+  if (!m5 && !m15h1) {
+    return { locked: false, reason: `unsupported_timeframe:${timeframe}`, checks: {} };
+  }
+
+  const required = m5 ? 2 : 1;
+  if (bars.length < required) {
+    return { locked: false, reason: `insufficient_bars:need_${required}_got_${bars.length}`, checks: {} };
+  }
+
+  // Check each required bar: must be closed and non-bearish
+  const checks = {};
+  for (let i = 0; i < required; i++) {
+    const bar = bars[bars.length - 1 - i];
+    if (!bar) {
+      checks[`bar_${i}`] = { ok: false, reason: 'missing' };
+      continue;
+    }
+    // Bar must be closed (older than its timeframe)
+    const barAge = Date.now() / 1000 - bar.time;
+    const closed = barAge >= tfInt * 60;
+    const bearish = bar.close < bar.open;
+    const ok = closed && !bearish;
+    checks[`bar_${i}`] = {
+      ok,
+      closed,
+      bearish,
+      close: bar.close,
+      open: bar.open,
+      time: bar.time,
+      reason: !closed ? 'open' : bearish ? 'bearish' : 'ok',
+    };
+  }
+
+  const locked = Object.values(checks).every(c => c.ok);
+  const failedChecks = Object.entries(checks).filter(([, c]) => !c.ok);
+  const reason = locked ? 'locked' : `failed:${failedChecks.map(([k, c]) => `${k}=${c.reason}`).join(',')}`;
+
+  return { locked, reason, checks, required, timeframe };
+}
+
 // ponytail: self-check chay khi goi truc tiep `node bar_status.mjs`
 if (process.argv[1] && process.argv[1].endsWith('bar_status.mjs')) {
   const mk = (h, m) => new Date(2026, 5, 23, h, m); // 23/06/2026
