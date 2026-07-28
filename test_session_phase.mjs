@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { entryWindow, lockedLtf, sessionInfo } from './bar_status.mjs';
 
 function mk(h, m, d = 9) { return new Date(2026, 6, d, h, m); } // July 2026
+const NOW = new Date('2026-07-09T10:30:00Z').getTime(); // deterministic reference
 
 // ===== entryWindow =====
 
@@ -57,14 +58,14 @@ assert.equal(entryWindow(mk(10, 0), 'FX').window, 'N/A', 'FX market = N/A');
 // ===== lockedLtf =====
 
 function bar(close, open, ageMin) {
-  return { close, open, time: Date.now() / 1000 - ageMin * 60 };
+  return { close, open, time: NOW / 1000 - ageMin * 60 };
 }
 
 // M5 locked: 2 consecutive closed non-bearish bars
 {
   const result = lockedLtf({
     bars: [bar(101, 100, 12), bar(102, 101, 6)], // both closed (>5min), both non-bearish
-    timeframe: '5', symbol: 'HOSE:TEST', maxAgeMs: 300000,
+    timeframe: '5', symbol: 'HOSE:TEST', maxAgeMs: 300000, now: NOW,
   });
   assert.equal(result.locked, true, 'M5 2 non-bearish closed bars = locked');
 }
@@ -73,7 +74,7 @@ function bar(close, open, ageMin) {
 {
   const result = lockedLtf({
     bars: [bar(99, 100, 12), bar(102, 101, 6)],
-    timeframe: '5', symbol: 'HOSE:TEST',
+    timeframe: '5', symbol: 'HOSE:TEST', now: NOW,
   });
   assert.equal(result.locked, false, 'M5 bearish bar = not locked');
 }
@@ -82,7 +83,7 @@ function bar(close, open, ageMin) {
 {
   const result = lockedLtf({
     bars: [bar(101, 100, 2), bar(102, 101, 6)], // first bar is only 2 min old, not closed
-    timeframe: '5', symbol: 'HOSE:TEST',
+    timeframe: '5', symbol: 'HOSE:TEST', now: NOW,
   });
   assert.equal(result.locked, false, 'M5 open bar = not locked');
 }
@@ -91,7 +92,7 @@ function bar(close, open, ageMin) {
 {
   const result = lockedLtf({
     bars: [bar(101, 100, 12)],
-    timeframe: '5', symbol: 'HOSE:TEST',
+    timeframe: '5', symbol: 'HOSE:TEST', now: NOW,
   });
   assert.equal(result.locked, false, 'M5 insufficient bars = not locked');
 }
@@ -100,7 +101,7 @@ function bar(close, open, ageMin) {
 {
   const result = lockedLtf({
     bars: [bar(101, 100, 70)], // 70 min old, well past 60 min
-    timeframe: '60', symbol: 'HOSE:TEST',
+    timeframe: '60', symbol: 'HOSE:TEST', now: NOW,
   });
   assert.equal(result.locked, true, 'H1 1 non-bearish closed bar = locked');
 }
@@ -109,7 +110,7 @@ function bar(close, open, ageMin) {
 {
   const result = lockedLtf({
     bars: [bar(99, 100, 70)],
-    timeframe: '60', symbol: 'HOSE:TEST',
+    timeframe: '60', symbol: 'HOSE:TEST', now: NOW,
   });
   assert.equal(result.locked, false, 'H1 bearish = not locked');
 }
@@ -118,7 +119,7 @@ function bar(close, open, ageMin) {
 {
   const result = lockedLtf({
     bars: [bar(101, 100, 20)], // 20 min old, past 15 min
-    timeframe: '15', symbol: 'HOSE:TEST',
+    timeframe: '15', symbol: 'HOSE:TEST', now: NOW,
   });
   assert.equal(result.locked, true, 'M15 locked');
 }
@@ -127,7 +128,7 @@ function bar(close, open, ageMin) {
 {
   const result = lockedLtf({
     bars: [bar(101, 100, 70)],
-    timeframe: '360', symbol: 'HOSE:TEST',
+    timeframe: '360', symbol: 'HOSE:TEST', now: NOW,
   });
   assert.equal(result.locked, false, 'H6 unsupported = not locked');
   assert.ok(result.reason.includes('unsupported_timeframe'));
@@ -135,7 +136,7 @@ function bar(close, open, ageMin) {
 
 // No bars
 {
-  const result = lockedLtf({ bars: [], timeframe: '5', symbol: 'HOSE:TEST' });
+  const result = lockedLtf({ bars: [], timeframe: '5', symbol: 'HOSE:TEST', now: NOW });
   assert.equal(result.locked, false, 'no bars = not locked');
 }
 

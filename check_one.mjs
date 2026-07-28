@@ -842,7 +842,7 @@ async function main() {
     const pmProfile = extractPreviousMonthProfile({
       studies: sv.studies || [],
       symbol: ticker,
-      marketDate: out.date || new Date().toISOString().slice(0, 10),
+      marketDate: bars[n-1]?.time ? new Date(bars[n-1].time * 1000).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
       observedAt: new Date().toISOString(),
       maxAgeSeconds: 7200,
     });

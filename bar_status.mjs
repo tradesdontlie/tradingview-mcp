@@ -101,7 +101,7 @@ export function entryWindow(now = new Date(), market = 'VN') {
  * @param {number} options.maxAgeMs   - Max age of the most recent bar in ms
  * @returns {{ locked: boolean, reason: string, checks: Object }}
  */
-export function lockedLtf({ bars = [], timeframe, symbol, maxAgeMs = 300000 }) {
+export function lockedLtf({ bars = [], timeframe, symbol, maxAgeMs = 300000, now } = {}) {
   if (!timeframe || !bars.length) {
     return { locked: false, reason: 'missing_data', checks: {} };
   }
@@ -119,6 +119,8 @@ export function lockedLtf({ bars = [], timeframe, symbol, maxAgeMs = 300000 }) {
     return { locked: false, reason: `insufficient_bars:need_${required}_got_${bars.length}`, checks: {} };
   }
 
+  const nowSec = (now || Date.now()) / 1000;
+
   // Check each required bar: must be closed and non-bearish
   const checks = {};
   for (let i = 0; i < required; i++) {
@@ -128,7 +130,7 @@ export function lockedLtf({ bars = [], timeframe, symbol, maxAgeMs = 300000 }) {
       continue;
     }
     // Bar must be closed (older than its timeframe)
-    const barAge = Date.now() / 1000 - bar.time;
+    const barAge = nowSec - bar.time;
     const closed = barAge >= tfInt * 60;
     const bearish = bar.close < bar.open;
     const ok = closed && !bearish;
