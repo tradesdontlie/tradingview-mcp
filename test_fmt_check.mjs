@@ -114,4 +114,67 @@ const out10 = fmtCheck('DATA_JSON:{not-json', {
 assert.ok(out10.includes('SETUP: UNKNOWN'), `F10 must label malformed engine data (got:\n${out10})`);
 assert.ok(out10.includes('BLOCKERS: ENGINE_DATA_MALFORMED'), `F10 must preserve malformed-data blocker (got:\n${out10})`);
 
+// ===== VN readiness tests =====
+
+// VN engine payload with no override → must NOT render READY
+const vnPayload = {
+    ticker: 'HOSE:ACB', price: 25000, date: '2026-07-21',
+    vn: {
+        h6_history: { sma20: 24000, sma100: 23000, structure: 'UPTREND', protected_low: 24500, avg_vol_20: 1000000, bars_completed: 80 },
+        h6_live: { price: 25000, location_vs_sma20: 4.17, location_vs_sma100: 8.7, vol_ratio: 1.2, buy_pct: 60, bar_vol_delta: 5000, cum_delta: 20000, delta_pct: 8.5, buy_stack: 3, sell_stack: 1, divergence: 0 },
+        ma_anchor: { allowed: true, anchor: 'sma20', extension_pct: 4.17, blocker: null },
+        setup: { setup: 'SMA20_PULLBACK', zone_low: 23700, zone_high: 24300, anchor: 'sma20' },
+        pm_profile: { poc: 24000, vah: 24800, val: 23500, profile_month: '2026-06' },
+        locked_ltf: { locked: false, reason: 'missing_data' },
+        entry_window: { window: 'HIGH', priority: false },
+        exit_policy: { sl: 24500, trail: 'SAFE' },
+        blockers: ['LTF_STABILITY_INSUFFICIENT'],
+        setup_state: 'IN_ZONE',
+        window_ok: true,
+    },
+};
+const raw = 'DATA_JSON:' + JSON.stringify(vnPayload);
+
+// VN-1: no override → PLAN: WATCH, GATE: WAITING
+const outVn1 = fmtCheck(raw);
+assert.ok(outVn1.includes('PLAN: WATCH'), `VN-1 must show WATCH without override (got:\n${outVn1})`);
+assert.ok(outVn1.includes('GATE: WAITING'), `VN-1 must show WAITING without override (got:\n${outVn1})`);
+assert.ok(outVn1.includes('ACTION:'), `VN-1 must have ACTION line (got:\n${outVn1})`);
+assert.ok(!outVn1.includes('PLAN: READY'), `VN-1 must NOT render READY without override (got:\n${outVn1})`);
+
+// VN-2: READY override → PLAN: READY, GATE: PASSED, ACTION: YES
+const outVn2 = fmtCheck(raw, {
+    setup_state: 'IN_ZONE', plan_status: 'READY', gate_state: 'PASSED',
+    permission_state: 'ALLOWED', blockers: [],
+});
+assert.ok(outVn2.includes('PLAN: READY'), `VN-2 must show READY (got:\n${outVn2})`);
+assert.ok(outVn2.includes('GATE: PASSED'), `VN-2 must show PASSED (got:\n${outVn2})`);
+
+// VN-3: BLOCKED override → PLAN: BLOCKED, GATE: BLOCKED, ACTION: NO
+const outVn3 = fmtCheck(raw, {
+    setup_state: 'IN_ZONE', plan_status: 'BLOCKED', gate_state: 'BLOCKED',
+    permission_state: 'BLOCKED', blockers: ['BELOW_SMA100'],
+});
+assert.ok(outVn3.includes('PLAN: BLOCKED'), `VN-3 must show BLOCKED (got:\n${outVn3})`);
+assert.ok(outVn3.includes('GATE: BLOCKED'), `VN-3 must show BLOCKED gate (got:\n${outVn3})`);
+assert.ok(outVn3.includes('BLOCKERS: BELOW_SMA100'), `VN-3 must show blockers (got:\n${outVn3})`);
+
+// VN-4: READY override but different setup_state → not actionable
+const outVn4 = fmtCheck(raw, {
+    setup_state: 'NO_SETUP', plan_status: 'READY', gate_state: 'PASSED',
+    permission_state: 'ALLOWED', blockers: [],
+});
+assert.ok(!outVn4.includes('PLAN: READY'), `VN-4 must not render READY without IN_ZONE setup (got:\n${outVn4})`);
+
+// VN-5: Default and deep output keep Buy%, Delta, Delta%, stacks, divergence, H6 vol/Avg20, LTF safety
+assert.ok(outVn1.includes('Buy 60%'), `VN must show Buy% (got:\n${outVn1})`);
+assert.ok(outVn1.includes('Delta%'), `VN must show Delta% (got:\n${outVn1})`);
+assert.ok(outVn1.includes('Div 0'), `VN must show divergence (got:\n${outVn1})`);
+assert.ok(outVn1.includes('B3/S1'), `VN must show stacks (got:\n${outVn1})`);
+assert.ok(outVn1.includes('LTF'), `VN must show LTF safety (got:\n${outVn1})`);
+
+// VN-6: deep output includes MA gate diagnostics
+const outVnDeep = fmtCheck('--deep DATA_JSON:' + JSON.stringify(vnPayload));
+assert.ok(outVnDeep.includes('MA GATE'), `VN deep must show MA gate (got:\n${outVnDeep})`);
+
 console.log('ALL PASS');

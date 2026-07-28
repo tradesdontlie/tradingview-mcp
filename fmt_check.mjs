@@ -18,7 +18,7 @@ function fmtUnavailable(raw, readiness = {}) {
     ].join('\n');
 }
 
-function fmtCompact(d) {
+function fmtCompact(d, readinessOverride) {
     const fp = d.fp || {};
     const wave = d.wave || {};
     const trail = d.trail || {};
@@ -29,37 +29,70 @@ function fmtCompact(d) {
         const vnSetup = vn.setup || {};
         const vnLive = vn.h6_live || {};
 
-        // Readiness state from vn block
-        const setupState = vn.setup_state || 'UNKNOWN';
-        // blockers define readiness — no separate plan_status/gate_state here (computed in task 5)
-        const blockers = Array.isArray(vn.blockers) ? vn.blockers : [];
-        const hasHardBlock = blockers.length > 0;
-        const planStatus = hasHardBlock ? 'BLOCKED' : (setupState === 'IN_ZONE' ? 'WATCH' : 'NONE');
-        const gateState = 'WAITING'; // gate is task 5
-        const windowOk = vn.window_ok !== false;
+        // Readiness from override or from vn block
+        const ready = readinessOverride || {};
+        const setupState = ready.setup_state || vn.setup_state || 'UNKNOWN';
+        const hasOverride = !!readinessOverride;
+        const hasProof = hasOverride && ready.plan_status === 'READY' && ready.gate_state === 'PASSED';
+        const isActionable = hasProof && ready.setup_state === 'IN_ZONE'
+            && ['ALLOWED', 'REDUCED'].includes(ready.permission_state);
+
+        const planStatus = hasOverride ? ready.plan_status || 'WATCH' : 'WATCH';
+        const gateState = hasOverride ? ready.gate_state || 'WAITING' : 'WAITING';
+        const permissionState = hasOverride ? ready.permission_state || 'UNKNOWN' : 'UNKNOWN';
+        const blockers = hasOverride
+            ? (Array.isArray(ready.blockers) ? ready.blockers : [])
+            : (Array.isArray(vn.blockers) ? vn.blockers : []);
+
+        // Validate READY consistency: IN_ZONE + READY + PASSED + ALLOWED|REDUCED
+        const readyInvalid = hasProof && !isActionable;
+        let finalPlanStatus = planStatus;
+        let finalGateState = gateState;
+        let finalPermissionState = permissionState;
+        let finalBlockers = blockers.slice();
+
+        if (readyInvalid) {
+            // READY without proper backing → downgrade
+            if (ready.setup_state !== 'IN_ZONE') {
+                finalPlanStatus = 'WATCH';
+                finalGateState = 'WAITING';
+                finalPermissionState = 'UNKNOWN';
+            } else if (!['ALLOWED', 'REDUCED'].includes(ready.permission_state)) {
+                finalPermissionState = 'BLOCKED';
+            }
+            if (!finalBlockers.includes('INVALID_READY_STATE')) {
+                finalBlockers.push('INVALID_READY_STATE');
+            }
+        }
 
         const lines = [
             `📊 ${d.ticker} ${num(d.price)} (${d.date})`,
-            `CONTEXT: ${vn.h6_history.structure || '?'} | SMA100 ${num(vn.h6_history.sma100)} | SMA20 ${num(vn.h6_history.sma20)}`,
+            `CONTEXT: ${vn.h6_history?.structure || '?'} | SMA100 ${num(vn.h6_history?.sma100)} | SMA20 ${num(vn.h6_history?.sma20)}`,
             `SETUP: ${vnSetup.setup || 'NONE'}${vnSetup.anchor ? ' @ ' + vnSetup.anchor : ''}`,
-            `H6 VSA: ${vnLive.vsa_churn ? '⚠️ Churn' : 'Neutral'} | Vol ${vnLive.vol_ratio != null ? (vnLive.vol_ratio * 100).toFixed(0) + '%' : '?'} / Avg20 ${num(vn.h6_history.avg_vol_20)}`,
+            `H6 VSA: ${vnLive.vsa_churn ? '⚠️ Churn' : 'Neutral'} | Vol ${vnLive.vol_ratio != null ? (vnLive.vol_ratio * 100).toFixed(0) + '%' : '?'} / Avg20 ${num(vn.h6_history?.avg_vol_20)}`,
             `FOOTPRINT: Buy ${vnLive.buy_pct ?? '?'}% | Bar Delta ${num(vnLive.bar_vol_delta)} | Delta% ${vnLive.delta_pct ?? '?'}% | B${vnLive.buy_stack ?? '?'}/S${vnLive.sell_stack ?? '?'} | Div ${vnLive.divergence ?? 0}`,
             `LTF SAFETY: ${vn.locked_ltf?.locked ? '✅ Locked' : (vn.locked_ltf?.reason || 'N/A')}`,
             `TIME: ${vn.entry_window?.window || '?'}${vn.entry_window?.priority ? ' [Priority]' : ''}`,
             `ENTRY: ${vnSetup.zone_low != null ? `${num(vnSetup.zone_low)}-${num(vnSetup.zone_high)}` : 'N/A'} | SL: ${num(vn.exit_policy?.sl)}`,
             `EXIT: ${vn.exit_policy?.trail || '?'}`,
-            `PLAN: ${planStatus}`,
-            `GATE: ${gateState}`,
+            `PLAN: ${finalPlanStatus}`,
+            `GATE: ${finalGateState}`,
+            `PERMISSION: ${finalPermissionState}`,
         ];
         if (vn.pm_profile?.poc != null) {
-            lines.push(`PM PROFILE: POC ${num(vn.pm_profile.poc)} VAH ${num(vn.pm_profile.vah)} VAL ${num(vn.pm_profile.val)} (${vn.pm_profile.profile_month})`);
+            lines.push(`PM PROFILE: POC ${num(vn.pm_profile.poc)} VAH ${num(vn.pm_profile.vah)} VAL ${num(vn.pm_profile.val)} (${vn.pm_profile.profile_month || vn.pm_profile.month || ''})`);
         }
-        if (blockers.length) {
-            lines.push(`BLOCKERS: ${blockers.join(', ')}`);
-        } else if (setupState === 'IN_ZONE' && windowOk) {
+        if (finalBlockers.length) {
+            lines.push(`BLOCKERS: ${finalBlockers.join(', ')}`);
+        }
+        if (isActionable) {
+            lines.push('ACTION: YES');
+        } else if (hasProof && !isActionable) {
+            lines.push('ACTION: NO — trang thai READY khong hop le');
+        } else if (finalPlanStatus === 'BLOCKED' || finalBlockers.length > 0) {
+            lines.push('ACTION: NO');
+        } else if (setupState === 'IN_ZONE') {
             lines.push('ACTION: WATCH — cho tin hieu xac nhan');
-        } else if (setupState === 'NO_SETUP') {
-            lines.push('ACTION: KHONG CO SETUP');
         } else {
             lines.push('ACTION: CHO');
         }
@@ -90,11 +123,10 @@ function fmtCompact(d) {
     return lines.join('\n');
 }
 
-function fmtDeep(d) {
-    const compact = fmtCompact(d);
+function fmtDeep(d, readinessOverride) {
+    const compact = fmtCompact(d, readinessOverride);
     const lines = compact.split('\n');
 
-    // VN deep: add diagnostics
     if (d.vn) {
         const vn = d.vn;
         if (vn.h6_live) {
@@ -106,7 +138,7 @@ function fmtDeep(d) {
         }
         if (vn.locked_ltf?.checks) {
             for (const [k, c] of Object.entries(vn.locked_ltf.checks)) {
-                lines.push(`LTF ${k}: ok=${c.ok} closed=${c.closed} failures=${(c.failures || []).join(',') || 'none'}`);
+                lines.push(`LTF ${k}: ok=${c.ok} failures=${(c.failures || []).join(',') || 'none'}`);
             }
         }
         if (vn.exit_policy) {
@@ -139,10 +171,10 @@ function fmtCheck(raw, readinessOverride) {
     try { d = JSON.parse(raw.slice(idx + 'DATA_JSON:'.length).trim()); }
     catch { return readinessOverride ? fmtUnavailable(raw, readinessOverride) : raw; }
 
-    // VN unified path
+    // VN path: pass readinessOverride to compact/deep
     if (d.vn) {
         const isDeep = raw.includes('--deep') || process.env.FMT_DEEP === '1';
-        return isDeep ? fmtDeep(d) : fmtCompact(d);
+        return isDeep ? fmtDeep(d, readinessOverride) : fmtCompact(d, readinessOverride);
     }
 
     // Legacy non-VN path — readiness from override or d.readiness
