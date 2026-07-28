@@ -1,0 +1,25 @@
+{
+  "description": "Auto Key Levels Previous Month fixture for HOSE:HCM on 2026-07-28",
+  "studies": [
+    {
+      "name": "Auto Key Levels",
+      "values": {
+        "Prev Monthly POC": "23.25 K",
+        "Prev Monthly VAH": "23.9 K",
+        "Prev Monthly VAL": "23.1 K"
+      }
+    }
+  ],
+  "symbol": "HOSE:HCM",
+  "marketDate": "2026-07-28",
+  "observedAt": "2026-07-28T10:30:00Z",
+  "maxAgeSeconds": 7200,
+  "expected": {
+    "poc": 23250,
+    "vah": 23900,
+    "val": 23100,
+    "prevMonth": "2026-06",
+    "source": "Auto Key Levels",
+    "valid": true
+  }
+}
