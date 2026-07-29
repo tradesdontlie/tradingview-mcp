@@ -9,6 +9,7 @@ import { execFileSync } from 'child_process';
 import { computeRS, writeVnindexCache, VNINDEX_SYM } from './rs_util.mjs';
 import { barStatus, sessionInfo } from './bar_status.mjs';
 import { MARKET_ADJ, SCAN_ENGINE_VERSION, assertH6Resolution, confirmSymbol, extractMovingAverages, scoreSignal as policyScoreSignal } from './src/scan_policy.mjs';
+import { computeVnStructure } from './src/core/vn_structure.mjs';
 
 let chart;
 let data;
@@ -39,17 +40,50 @@ function exchangePrefix(raw) {
   return 'HOSE';
 }
 
-function loadExchangeMap() {
+function localDateKey(now = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(now);
+  const value = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return `${value.year}-${value.month}-${value.day}`;
+}
+
+function parseForeignSnapshot(payload, now = new Date()) {
+  const snapshotDate = String(payload?.date || '').slice(0, 10);
+  if (snapshotDate !== localDateKey(now) || !payload?.data || typeof payload.data !== 'object') {
+    return { date: null, data: {}, warnings: ['foreign snapshot unavailable or not current local date'] };
+  }
+  return { date: snapshotDate, data: payload.data, warnings: [] };
+}
+
+function loadForeignSnapshot(now = new Date()) {
   try {
     const payload = JSON.parse(readFileSync(FOREIGN_LATEST_PATH, 'utf-8'));
-    const rows = payload.data || {};
-    return Object.fromEntries(Object.entries(rows).map(([ticker, row]) => [
-      ticker.toUpperCase(),
-      exchangePrefix(row?.exchange),
-    ]));
+    return parseForeignSnapshot(payload, now);
   } catch {
-    return {};
+    return { date: null, data: {}, warnings: ['foreign snapshot unavailable or invalid'] };
   }
+}
+
+function foreignModifier(ticker, snapshot) {
+  if (!snapshot.date) return null;
+  const row = snapshot.data[String(ticker || '').toUpperCase()];
+  if (!row || typeof row !== 'object') return null;
+  const net = Number.isFinite(row.foreign_net_val_bn) ? row.foreign_net_val_bn : null;
+  const room = Number.isFinite(row.room_remaining_pct) ? row.room_remaining_pct : null;
+  const full = typeof row.is_full_room === 'boolean' ? row.is_full_room : null;
+  const warnings = [];
+  if (net !== null && net < 0) warnings.push('foreign net sell');
+  if (full === true) warnings.push('foreign room full or near full');
+  return { foreign_net_val_bn: net, room_remaining_pct: room, is_full_room: full, warnings };
+}
+
+const foreignSnapshot = SELF_TEST ? { date: null, data: {}, warnings: [] } : loadForeignSnapshot();
+
+function loadExchangeMap() {
+  return Object.fromEntries(Object.entries(foreignSnapshot.data).map(([ticker, row]) => [
+    ticker.toUpperCase(), exchangePrefix(row?.exchange),
+  ]));
 }
 
 function loadWatchlist() {
@@ -375,6 +409,8 @@ function buildScoutResult(r, marketRegime) {
     healthy_accumulation: discovery.healthy,
     discovery_fundamentals: r.discovery?.fundamentals ?? null,
     discovery_signal: discovery.signal,
+    foreign_modifier: foreignModifier(r.name, foreignSnapshot),
+    structure_v2: r.structureV2 ?? null,
   };
 }
 
@@ -432,6 +468,9 @@ async function scanOne(ticker, name, idxCloses, marketRegime) {
   const tableRows = parseFPTable(fpTbl);
   const bars = (ohlcv.bars || []).slice(-65);
   const { phase, vol_ratio, churn, bar_closed, bar_age_pct } = computeWave(bars, price);
+  // VN Structure v2 from completed bars
+  const completedForV2 = bar_closed ? bars : bars.slice(0, -1);
+  const structureV2 = computeVnStructure(completedForV2, { sma20: ma.ma20, sma100: ma.ma100 });
   // Session phase (VN HOSE gate)
   const isVnStock = /^(HOSE|HNX|UPCOM):/i.test(ticker || '') && !(ticker || '').includes('!');
   const sess = sessionInfo(new Date(), isVnStock ? 'VN' : 'N/A');
@@ -442,7 +481,7 @@ async function scanOne(ticker, name, idxCloses, marketRegime) {
   });
   const rs = idxCloses ? computeRS(bars, idxCloses) : { rs_20: null, leader: null };
 
-  return { price, chg_pct, fp, ma, scored, tableRows, phase, vol_ratio, churn, barClosed: bar_closed, barAgePct: bar_age_pct, rs, session: sess };
+  return { price, chg_pct, fp, ma, scored, tableRows, phase, vol_ratio, churn, barClosed: bar_closed, barAgePct: bar_age_pct, rs, session: sess, structureV2 };
 }
 
 async function main() {
@@ -485,6 +524,25 @@ async function main() {
     const bad = classifyDiscovery({ ...base, vol_ratio: 1.2 });
     console.log(JSON.stringify({ good, bad }));
     process.exit(good.healthy && !bad.healthy ? 0 : 1);
+  }
+  if (process.argv.includes('--self-test-foreign')) {
+    const today = localDateKey(new Date());
+    const current = parseForeignSnapshot({ date: today, data: {
+      TEST: { foreign_net_val_bn: -12.5, room_remaining_pct: 0.2, is_full_room: true },
+    }});
+    const stale = parseForeignSnapshot({ date: '2000-01-01', data: { TEST: { foreign_net_val_bn: 99 } } });
+    const base = { name: 'TEST', sig: 'WATCH', scored: { sig: 'WATCH', score_pct: 50 }, price: 100,
+      readiness: 'READY', fp: {}, ma: {}, rs: {} };
+    const before = JSON.stringify({ sig: base.sig, score: base.scored.score_pct, price: base.price, readiness: base.readiness });
+    const modifier = foreignModifier('TEST', current);
+    const staleModifier = foreignModifier('TEST', stale);
+    const absentModifier = foreignModifier('ABSENT', current);
+    const after = JSON.stringify({ sig: base.sig, score: base.scored.score_pct, price: base.price, readiness: base.readiness });
+    console.log(JSON.stringify({ snapshot_date: current.date, modifier, stale, staleModifier, absentModifier }));
+    process.exit(current.date === today && stale.date === null && Object.keys(stale.data).length === 0 &&
+      modifier.foreign_net_val_bn === -12.5 && modifier.is_full_room === true &&
+      modifier.warnings.length === 2 && staleModifier === null && absentModifier === null &&
+      before === after ? 0 : 1);
   }
   ({ getClient } = await import('./src/connection.js'));
   chart = await import('./src/core/chart.js');
@@ -583,6 +641,12 @@ async function main() {
       market_regime: marketRegime,
       heat,
       sector_warnings: sectorClusterWarnings,
+      foreign_snapshot_date: foreignSnapshot.date,
+      foreign_warnings: [
+        ...foreignSnapshot.warnings,
+        ...results.flatMap(r => (foreignModifier(r.name, foreignSnapshot)?.warnings || [])
+          .map(warning => `${r.name}: ${warning}`)),
+      ],
     };
     writeFileSync(SCOUT_SCAN_PATH, JSON.stringify(scoutPayload, null, 2), 'utf-8');
     writeFileSync(SCAN_LATEST_PATH, JSON.stringify(scoutPayload, null, 2), 'utf-8');

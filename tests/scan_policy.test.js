@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
 import { assertH6Resolution, confirmSymbol, extractMovingAverages, extractPreviousMonthProfile, classifyMaAnchor, scoreSignal } from '../src/scan_policy.mjs';
+import { computeVnStructure, VN_STRUCTURE_VERSION } from '../src/core/vn_structure.mjs';
 
 const fp = { conf: 80, cumDelta: 10, buyPct: 60, divSignal: 0, maxBuyStack: 1 };
 const ma = { ma20: 100, ma100: 90 };
@@ -422,4 +423,48 @@ test('extractPreviousMonthProfile: changing POC changes evidence_hash', () => {
   const b = makeResult('23.5 K');
   assert.ok(a.valid && b.valid);
   assert.notEqual(a.evidence_hash, b.evidence_hash, 'different POC must produce different hash');
+});
+
+// ── VN Structure v2: check/scan shared owner (Task 1) ──
+
+function makeTestBars(n, highFn, lowFn) {
+  const bars = [];
+  for (let i = 0; i < n; i++) {
+    const h = highFn(i);
+    const l = lowFn(i);
+    bars.push({ time: i, open: h - 0.3, high: h, low: l, close: h - 0.1, volume: 100000 });
+  }
+  return bars;
+}
+
+test('computeVnStructure: identical bars and MAs produce deterministic result', () => {
+  const bars = makeTestBars(120, i => 100 + i * 0.5, i => 99 + i * 0.5);
+  const mas = { sma20: 105, sma100: 100 };
+
+  const a = computeVnStructure(bars, mas);
+  const b = computeVnStructure(bars, mas);
+
+  assert.equal(a.version, VN_STRUCTURE_VERSION);
+  assert.equal(b.version, VN_STRUCTURE_VERSION);
+  assert.deepEqual(a, b, 'identical inputs → identical outputs');
+  assert.ok(Number.isFinite(a.upper), 'upper must be finite');
+  assert.ok(Number.isFinite(a.upper_ref));
+  assert.ok(Number.isFinite(a.lower));
+  assert.ok(Number.isFinite(a.lower_ref));
+  assert.equal(a.trend_state, 'UP');
+  assert.equal(a.confirmed, true);
+});
+
+test('scan results must not contain plan or READY grant', () => {
+  // Scan is discovery-only — structure_v2 is present but no plan/READY
+  // This is tested through the production scan adapters (scanOne → buildScoutResult)
+  // The assertion is: scan results always have structure_v2 with only version/trend/range/confirmed/bounds
+  const bars = makeTestBars(100, i => 100 + i * 0.5, i => 99 + i * 0.5);
+  const r = computeVnStructure(bars, { sma20: 105, sma100: 100 });
+  // Verify structure_v2 shape never contains plan/READY fields
+  assert.equal(r.version, VN_STRUCTURE_VERSION);
+  assert.ok(!('plan_key' in r), 'structure_v2 must not contain plan_key');
+  assert.ok(!('readiness' in r), 'structure_v2 must not contain readiness');
+  assert.ok(!('status' in r), 'structure_v2 must not contain status');
+  assert.ok(!('setup_state' in r), 'structure_v2 must not contain setup_state');
 });

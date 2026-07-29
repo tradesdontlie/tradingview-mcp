@@ -70,6 +70,17 @@
       "sma20": 100,
       "sma100": 90,
       "structure": "UPTREND",
+      "structure_v2": {
+        "version": "vn-structure-v2-channel-20-3-005-2",
+        "trend_state": "UP",
+        "range_state": "SHIFTING",
+        "confirmed": true,
+        "upper": 112,
+        "upper_ref": 109,
+        "lower": 110,
+        "lower_ref": 107,
+        "as_of": "2026-07-28T09:55:00.000Z"
+      },
       "protected_low": 85,
       "avg_vol_20": 5000
     },

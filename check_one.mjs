@@ -7,11 +7,12 @@ import fs from 'fs';
 import path from 'path';
 import * as chart from './src/core/chart.js';
 import * as data from './src/core/data.js';
-import { getClient } from './src/connection.js';
+import { disconnect, getClient } from './src/connection.js';
 import { computeRS, readVnindexCache } from './rs_util.mjs';
 import { barStatus, sessionInfo, entryWindow } from './bar_status.mjs';
 import { atomicWriteCache, cachePaths, evidenceHash, runtimeDataRoot, withChartLock } from './src/core/check_runtime.mjs';
 import { extractPreviousMonthProfile, classifyMaAnchor } from './src/scan_policy.mjs';
+import { computeVnStructure, compatibilityStructure } from './src/core/vn_structure.mjs';
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function parseNum(val) {
@@ -266,6 +267,9 @@ export function buildClosedH6History({ bars, activeBarClosed }) {
   const { ph, pl } = findPivots(completed, 3);
   const structure = marketStructure(ph, pl);
 
+  // VN Structure v2: rolling-channel owner
+  const structureV2 = computeVnStructure(completed, { sma20: sma20Val, sma100: sma100Val });
+
   // Protected low from demand bar in completed bars
   const demandBar = findDemandBar(completed, completed.length, avgVol20);
   const protectedLow = demandBar ? Math.round(demandBar.shelf) : null;
@@ -275,12 +279,13 @@ export function buildClosedH6History({ bars, activeBarClosed }) {
     sma20: sma20Val,
     sma100: sma100Val,
     structure,
+    structure_v2: structureV2,
     protected_low: protectedLow,
     avg_vol_20: avgVol20,
   };
 }
 
-function classifyVnSetup({ price, sma20, sma100, structure, aboveSma100 }) {
+function classifyVnSetup({ price, sma20, sma100, structure, structureV2, aboveSma100 }) {
   // No setup if price below SMA100
   if (!aboveSma100) return { setup: null, reason: 'price below SMA100', zone_low: null, zone_high: null, anchor: null };
   if (price == null) return { setup: null, reason: 'no price', zone_low: null, zone_high: null, anchor: null };
@@ -288,10 +293,14 @@ function classifyVnSetup({ price, sma20, sma100, structure, aboveSma100 }) {
   const sma20Dist = Number.isFinite(sma20) && sma20 > 0 ? (price - sma20) / sma20 * 100 : null;
   const sma100Dist = Number.isFinite(sma100) && sma100 > 0 ? (price - sma100) / sma100 * 100 : null;
 
+  // VN Structure v2: confirmed trend from rolling-channel owner
+  const v2Trend = structureV2?.trend_state;
+  const v2Confirmed = structureV2?.confirmed === true;
+
   // Automatic setups: only SMA-based. PM Profile, Breakout, VSA are manual-only.
 
-  // 1. SMA20_PULLBACK: near SMA20, uptrend
-  if (sma20Dist != null && sma20Dist >= 0 && sma20Dist <= 3 && structure === 'UPTREND') {
+  // 1. SMA20_PULLBACK: near SMA20, confirmed UP trend
+  if (sma20Dist != null && sma20Dist >= 0 && sma20Dist <= 3 && v2Confirmed && v2Trend === 'UP') {
     return {
       setup: 'SMA20_PULLBACK',
       zone_low: sma20,
@@ -301,10 +310,10 @@ function classifyVnSetup({ price, sma20, sma100, structure, aboveSma100 }) {
     };
   }
 
-  // 2. SMA100_PULLBACK_RECLAIM: above SMA100, SMA20 far
+  // 2. SMA100_PULLBACK_RECLAIM: above SMA100, SMA20 far, confirmed UP or RANGE
   if (sma100Dist != null && sma100Dist >= 0 && sma100Dist <= 5
       && sma20Dist != null && Math.abs(sma20Dist) > 3
-      && (structure === 'UPTREND' || structure === 'SIDEWAYS')) {
+      && v2Confirmed && (v2Trend === 'UP' || v2Trend === 'RANGE')) {
     return {
       setup: 'SMA100_PULLBACK_RECLAIM',
       zone_low: sma100,
@@ -359,9 +368,10 @@ function buildVnAutoCore({ price, h6History, h6Live, entryWindow, setup }) {
   const expectedAnchor = setup?.setup === 'SMA20_PULLBACK' ? 'sma20'
     : setup?.setup === 'SMA100_PULLBACK_RECLAIM' ? 'sma100' : null;
   const structureOk = setup?.setup === 'SMA20_PULLBACK'
-    ? h6History?.structure === 'UPTREND'
+    ? h6History?.structure_v2?.trend_state === 'UP' && h6History?.structure_v2?.confirmed === true
     : setup?.setup === 'SMA100_PULLBACK_RECLAIM'
-      && (h6History?.structure === 'UPTREND' || h6History?.structure === 'SIDEWAYS');
+      && h6History?.structure_v2?.confirmed === true
+      && (h6History?.structure_v2?.trend_state === 'UP' || h6History?.structure_v2?.trend_state === 'RANGE');
   const anchorValue = expectedAnchor ? h6History?.[expectedAnchor] : null;
   const anchorExtension = priceOk && Number.isFinite(anchorValue) && anchorValue > 0
     ? (price - anchorValue) / anchorValue * 100 : null;
@@ -467,6 +477,7 @@ function buildVnCoreAssembly({ price, h6History, h6Live, entryWindow, bar, overh
     sma20: h6History?.sma20,
     sma100: h6History?.sma100,
     structure: h6History?.structure,
+    structureV2: h6History?.structure_v2,
     aboveSma100: Number.isFinite(price) && Number.isFinite(h6History?.sma100)
       && price >= h6History.sma100,
   });
@@ -1246,6 +1257,7 @@ async function main() {
   return out;
   } finally {
     try { await restoreChartState(chart, initState); } catch(e) {}
+    try { await disconnect(); } catch(e) {}
   }
   });
 }

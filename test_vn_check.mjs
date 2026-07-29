@@ -2,6 +2,13 @@
 // Run: node test_vn_check.mjs
 import assert from 'node:assert/strict';
 import { classifyVnSetup, buildClosedH6History, sma, buildVnAutoCore, buildVnGateView, buildVnPlanScenario, buildVnCoreAssembly } from './check_one.mjs';
+import { computeVnStructure, VN_STRUCTURE_VERSION, compatibilityStructure } from './src/core/vn_structure.mjs';
+
+// ponytail: shared v2 structure fixtures for old tests
+const v2_CONFIRMED_UP = { trend_state: 'UP', confirmed: true };
+const v2_CONFIRMED_RANGE = { trend_state: 'RANGE', confirmed: true };
+const v2_CONFIRMED_DOWN = { trend_state: 'DOWN', confirmed: true };
+const v2_PROVISIONAL = { trend_state: 'UP', confirmed: false };
 
 // ===== buildClosedH6History tests =====
 
@@ -38,7 +45,7 @@ function bar(close, open, high, low, volume) {
 {
   const r = classifyVnSetup({
     price: 23500, sma20: 23000, sma100: 22000,
-    structure: 'UPTREND', aboveSma100: true,
+    structure: 'UPTREND', structureV2: v2_CONFIRMED_UP, aboveSma100: true,
   });
   // SMA20_PULLBACK works because price is within 3% of SMA20; PM is ignored
   assert.notEqual(r.setup, 'PM_VAH_PULLBACK_RETEST', 'PM VAH not auto-classified');
@@ -49,7 +56,7 @@ function bar(close, open, high, low, volume) {
 {
   const r = classifyVnSetup({
     price: 23500, sma20: 23300, sma100: 22000,
-    structure: 'UPTREND', aboveSma100: true,
+    structure: 'UPTREND', structureV2: v2_CONFIRMED_UP, aboveSma100: true,
   });
   assert.equal(r.setup, 'SMA20_PULLBACK', 'SMA20 pullback still works');
 }
@@ -58,7 +65,7 @@ function bar(close, open, high, low, volume) {
 {
   const r = classifyVnSetup({
     price: 23500, sma20: 23300, sma100: 22000,
-    structure: 'UPTREND', aboveSma100: true,
+    structure: 'UPTREND', structureV2: v2_CONFIRMED_UP, aboveSma100: true,
   });
   assert.equal(r.setup, 'SMA20_PULLBACK', 'VSA veto is manual, SMA20 still classified');
 }
@@ -66,12 +73,12 @@ function bar(close, open, high, low, volume) {
 // ===== SMA20/SMA100/Pullback tests =====
 
 {
-  const r = classifyVnSetup({ price: 23500, sma20: 23300, sma100: 22000, structure: 'UPTREND', aboveSma100: true });
+  const r = classifyVnSetup({ price: 23500, sma20: 23300, sma100: 22000, structure: 'UPTREND', structureV2: v2_CONFIRMED_UP, aboveSma100: true });
   assert.equal(r.setup, 'SMA20_PULLBACK', 'SMA20 pullback');
 }
 
 {
-  const r = classifyVnSetup({ price: 94, sma20: 100, sma100: 90, structure: 'SIDEWAYS', aboveSma100: true });
+  const r = classifyVnSetup({ price: 94, sma20: 100, sma100: 90, structure: 'SIDEWAYS', structureV2: v2_CONFIRMED_RANGE, aboveSma100: true });
   assert.equal(r.setup, 'SMA100_PULLBACK_RECLAIM', 'price below SMA20 but above SMA100 => SMA100 reclaim');
 }
 
@@ -82,7 +89,7 @@ function bar(close, open, high, low, volume) {
 
 // VSA is manual-only — classifyVnSetup does not veto on VSA patterns
 {
-  const r = classifyVnSetup({ price: 23500, sma20: 23300, sma100: 22000, structure: 'UPTREND', aboveSma100: true });
+  const r = classifyVnSetup({ price: 23500, sma20: 23300, sma100: 22000, structure: 'UPTREND', structureV2: v2_CONFIRMED_UP, aboveSma100: true });
   assert.equal(r.setup, 'SMA20_PULLBACK', 'VSA is manual, SMA20 still classified');
 }
 
@@ -96,24 +103,24 @@ function bar(close, open, high, low, volume) {
 
 // SMA20_PULLBACK with only auto-relevant params
 assert.equal(classifyVnSetup({
-  price: 103, sma20: 100, sma100: 90, structure: 'UPTREND', aboveSma100: true,
+  price: 103, sma20: 100, sma100: 90, structure: 'UPTREND', structureV2: v2_CONFIRMED_UP, aboveSma100: true,
 }).setup, 'SMA20_PULLBACK');
 
 // SMA100_PULLBACK_RECLAIM
 assert.equal(classifyVnSetup({
-  price: 101, sma20: 110, sma100: 100, structure: 'SIDEWAYS', aboveSma100: true,
+  price: 101, sma20: 110, sma100: 100, structure: 'SIDEWAYS', structureV2: v2_CONFIRMED_RANGE, aboveSma100: true,
 }).setup, 'SMA100_PULLBACK_RECLAIM');
 
 // PM Profile is manual-only — must NOT auto-classify
 assert.equal(classifyVnSetup({
   price: 103, previousClosedPrice: 106, pmVah: 105, sma100: 90,
-  structure: 'UPTREND', aboveSma100: true,
+  structure: 'UPTREND', structureV2: v2_CONFIRMED_UP, aboveSma100: true,
 }).setup, null);
 
 // Breakout is manual-only — must NOT auto-classify as BREAKOUT_RETEST
 assert.notEqual(classifyVnSetup({
   price: 101, breakoutLevel: 100, breakoutConfirmed: true, sma100: 90,
-  structure: 'UPTREND', aboveSma100: true,
+  structure: 'UPTREND', structureV2: v2_CONFIRMED_UP, aboveSma100: true,
 }).setup, 'BREAKOUT_RETEST');
 
 // ===== buildVnAutoCore pure builder =====
@@ -122,7 +129,7 @@ assert.notEqual(classifyVnSetup({
 function core({ price, sma20, sma100, sma100Dist, volRatio, window, setup }) {
   return buildVnAutoCore({
     price,
-    h6History: { bars_completed: 100, sma20, sma100, structure: 'UPTREND', avg_vol_20: 5000 },
+    h6History: { bars_completed: 100, sma20, sma100, structure: 'UPTREND', structure_v2: v2_CONFIRMED_UP, avg_vol_20: 5000 },
     h6Live: { vol_ratio: volRatio },
     entryWindow: { window: window || 'HIGH' },
     setup: setup || { setup: 'SMA20_PULLBACK', zone_low: 98, zone_high: 102, anchor: 'sma20', reason: '' },
@@ -165,7 +172,7 @@ assert.equal(core({ price: 103, sma20: 100, sma100: 95, volRatio: 1.01, window: 
 function makeCoreWithSetup({ price, sma20, sma100, volRatio, window: win, setup }) {
   return buildVnAutoCore({
     price,
-    h6History: { bars_completed: 100, sma20, sma100, structure: 'UPTREND', avg_vol_20: 5000 },
+    h6History: { bars_completed: 100, sma20, sma100, structure: 'UPTREND', structure_v2: v2_CONFIRMED_UP, avg_vol_20: 5000 },
     h6Live: { vol_ratio: volRatio },
     entryWindow: { window: win || 'HIGH' },
     setup: setup !== undefined ? setup : sma20Setup,
@@ -199,26 +206,26 @@ assert.ok(buildVnAutoCore({
 // ===== Zone-consistency tests (Step 1) =====
 
 for (const [price, expectedSetup] of [[100, 'SMA20_PULLBACK'], [103, 'SMA20_PULLBACK']]) {
-  const setup = classifyVnSetup({ price, sma20: 100, sma100: 90, structure: 'UPTREND', aboveSma100: true });
+  const setup = classifyVnSetup({ price, sma20: 100, sma100: 90, structure: 'UPTREND', structureV2: v2_CONFIRMED_UP, aboveSma100: true });
   assert.equal(setup.setup, expectedSetup);
   assert.ok(setup.zone_low <= price && price <= setup.zone_high,
     `price ${price} must be inside returned SMA20 zone`);
 }
 for (const price of [100, 105]) {
-  const setup = classifyVnSetup({ price, sma20: 110, sma100: 100, structure: 'SIDEWAYS', aboveSma100: true });
+  const setup = classifyVnSetup({ price, sma20: 110, sma100: 100, structure: 'SIDEWAYS', structureV2: v2_CONFIRMED_RANGE, aboveSma100: true });
   assert.equal(setup.setup, 'SMA100_PULLBACK_RECLAIM');
   assert.ok(setup.zone_low <= price && price <= setup.zone_high,
     `price ${price} must be inside returned SMA100 zone`);
 }
-assert.equal(classifyVnSetup({ price: 103.01, sma20: 100, sma100: 80, structure: 'UPTREND', aboveSma100: true }).setup, null);
-assert.equal(classifyVnSetup({ price: 105.01, sma20: 110, sma100: 100, structure: 'SIDEWAYS', aboveSma100: true }).setup, null);
-assert.equal(classifyVnSetup({ price: 105, sma20: 110, sma100: 100, structure: 'DOWNTREND', aboveSma100: true }).setup, null);
+assert.equal(classifyVnSetup({ price: 103.01, sma20: 100, sma100: 80, structure: 'UPTREND', structureV2: v2_CONFIRMED_UP, aboveSma100: true }).setup, null);
+assert.equal(classifyVnSetup({ price: 105.01, sma20: 110, sma100: 100, structure: 'SIDEWAYS', structureV2: v2_CONFIRMED_RANGE, aboveSma100: true }).setup, null);
+assert.equal(classifyVnSetup({ price: 105, sma20: 110, sma100: 100, structure: 'DOWNTREND', structureV2: v2_CONFIRMED_DOWN, aboveSma100: true }).setup, null);
 
 // Returned setup must contain the current price
 {
   const setup = classifyVnSetup({
     price: 100, sma20: 100, sma100: 90,
-    structure: 'UPTREND', aboveSma100: true,
+    structure: 'UPTREND', structureV2: v2_CONFIRMED_UP, aboveSma100: true,
   });
   assert.ok(setup.zone_low <= 100 && 100 <= setup.zone_high,
     `SMA20 setup zone [${setup.zone_low}, ${setup.zone_high}] must include price 100`);
@@ -226,7 +233,7 @@ assert.equal(classifyVnSetup({ price: 105, sma20: 110, sma100: 100, structure: '
 
 // SMA20 setup extension must be in [0,3]
 {
-  const r = classifyVnSetup({ price: 103, sma20: 100, sma100: 90, structure: 'UPTREND', aboveSma100: true });
+  const r = classifyVnSetup({ price: 103, sma20: 100, sma100: 90, structure: 'UPTREND', structureV2: v2_CONFIRMED_UP, aboveSma100: true });
   assert.equal(r.setup, 'SMA20_PULLBACK');
   const ext = (103 - 100) / 100 * 100;
   assert.ok(ext >= 0 && ext <= 3, `SMA20 extension ${ext}% must be in [0,3]`);
@@ -234,21 +241,21 @@ assert.equal(classifyVnSetup({ price: 105, sma20: 110, sma100: 100, structure: '
 
 // Negative extension → no SMA20 setup (price below SMA20 but still above SMA100)
 {
-  const r = classifyVnSetup({ price: 94, sma20: 100, sma100: 90, structure: 'UPTREND', aboveSma100: true });
+  const r = classifyVnSetup({ price: 94, sma20: 100, sma100: 90, structure: 'UPTREND', structureV2: v2_CONFIRMED_UP, aboveSma100: true });
   // SMA100_PULLBACK_RECLAIM: extension from SMA100 = (94-90)/90*100 = 4.44% → within [0,5]
   assert.equal(r.setup, 'SMA100_PULLBACK_RECLAIM', 'price below SMA20 but above SMA100 => SMA100 reclaim');
 }
 
 // Price outside zone must not be IN_ZONE (relies on setup_state helper)
 {
-  const setup = classifyVnSetup({ price: 110, sma20: 100, sma100: 90, structure: 'UPTREND', aboveSma100: true });
+  const setup = classifyVnSetup({ price: 110, sma20: 100, sma100: 90, structure: 'UPTREND', structureV2: v2_CONFIRMED_UP, aboveSma100: true });
   // SMA20_PULLBACK zone = [99, 101], price=110 outside
   assert.ok(110 > setup.zone_high, 'price outside zone_high');
 }
 
 // Downtrend should not produce SMA20_PULLBACK
 {
-  const r = classifyVnSetup({ price: 103, sma20: 100, sma100: 90, structure: 'DOWNTREND', aboveSma100: true });
+  const r = classifyVnSetup({ price: 103, sma20: 100, sma100: 90, structure: 'DOWNTREND', structureV2: v2_CONFIRMED_DOWN, aboveSma100: true });
   assert.equal(r.setup, null, 'downtrend must not produce SMA setup');
 }
 
@@ -259,7 +266,7 @@ assert.equal(classifyVnSetup({ price: 105, sma20: 110, sma100: 100, structure: '
 {
   const assembled = buildVnCoreAssembly({
     price: 103,
-    h6History: { bars_completed: 120, sma20: 100, sma100: 90, structure: 'UPTREND', protected_low: 85, avg_vol_20: 5000 },
+    h6History: { bars_completed: 120, sma20: 100, sma100: 90, structure: 'UPTREND', structure_v2: v2_CONFIRMED_UP, protected_low: 85, avg_vol_20: 5000 },
     h6Live: { price: 103, vol_ratio: 1.01 },
     entryWindow: { window: 'HIGH', priority: true, reason: '' },
     bar: { closed: false, age_pct: 60 },
@@ -283,7 +290,7 @@ assert.equal(classifyVnSetup({ price: 105, sma20: 110, sma100: 100, structure: '
 const validVn = {
   setup: sma20Setup,
   setup_state: 'IN_ZONE',
-  h6_history: { bars_completed: 120, sma20: 100, sma100: 90, structure: 'UPTREND', protected_low: 85, avg_vol_20: 5000 },
+  h6_history: { bars_completed: 120, sma20: 100, sma100: 90, structure: 'UPTREND', structure_v2: v2_CONFIRMED_UP, protected_low: 85, avg_vol_20: 5000 },
   h6_live: { price: 103, vol_ratio: 1.01 },
   entry_window: { window: 'HIGH', priority: true, reason: '' },
   auto_core: { eligible: true, conditions: {}, blockers: [] },
@@ -326,6 +333,110 @@ const validScenario = {
   // A scenario may still exist when entry zone matches, but no breakout/retest/range
   assert.ok(!view.scenarios.some(s => s.label === 'breakout' || s.label === 'retest' || s.label === 'range'),
     'gate must never contain legacy breakout/retest/range scenarios');
+}
+
+// ===== VN Structure v2 integration tests (Task 1) =====
+
+// Helper: create bars that produce known structure
+function makeStructBars(n, factory) {
+  const bars = [];
+  for (let i = 0; i < n; i++) {
+    const { high, low } = factory(i);
+    bars.push({ time: i, open: high - 0.3, high, low, close: high - 0.1, volume: 100000 });
+  }
+  return bars;
+}
+
+// buildClosedH6History must include structure_v2 when sufficient bars exist
+{
+  const bars = makeStructBars(120, i => ({ high: 100 + i * 0.5, low: 99 + i * 0.5 }));
+  const history = buildClosedH6History({ bars, activeBarClosed: true });
+  assert.ok(history.structure_v2, 'buildClosedH6History must include structure_v2');
+  assert.equal(history.structure_v2.version, VN_STRUCTURE_VERSION);
+  assert.ok(Number.isFinite(history.structure_v2.upper), 'structure_v2.upper must be finite');
+  assert.ok(Number.isFinite(history.structure_v2.upper_ref));
+  assert.ok(Number.isFinite(history.structure_v2.lower));
+  assert.ok(Number.isFinite(history.structure_v2.lower_ref));
+  assert.equal(history.structure_v2.trend_state, 'UP');
+  assert.equal(history.structure_v2.confirmed, true);
+}
+
+// classifyVnSetup: SMA20_PULLBACK requires confirmed UP from structure_v2
+{
+  const bars = makeStructBars(120, i => ({ high: 100 + i * 0.5, low: 99 + i * 0.5 }));
+  const h6History = buildClosedH6History({ bars, activeBarClosed: true });
+  
+  const r = classifyVnSetup({
+    price: 103, sma20: 100, sma100: 90,
+    structure: h6History.structure,
+    structureV2: h6History.structure_v2,
+    aboveSma100: true,
+  });
+  assert.equal(r.setup, 'SMA20_PULLBACK', 'confirmed UP + price near SMA20 → SMA20_PULLBACK');
+}
+
+// classifyVnSetup: SMA100_PULLBACK_RECLAIM requires confirmed UP or RANGE
+{
+  // Create bars that produce RANGE/STABLE (all flat bars)
+  const bars = makeStructBars(120, i => ({ high: 100, low: 99 }));
+  const h6History = buildClosedH6History({ bars, activeBarClosed: true });
+  
+  const r = classifyVnSetup({
+    price: 103, sma20: 110, sma100: 100,
+    structure: h6History.structure,
+    structureV2: h6History.structure_v2,
+    aboveSma100: true,
+  });
+  // With confirmed RANGE, SMA100_PULLBACK_RECLAIM should match
+  assert.equal(r.setup, 'SMA100_PULLBACK_RECLAIM', 'confirmed RANGE + SMA100 near → reclaim');
+}
+
+// classifyVnSetup: MIXED/EXPANDING produces no setup
+{
+  // HCM facts: price=25300, sma20=24608, sma100=22738 — with MIXED/EXPANDING → no setup
+  const r = classifyVnSetup({
+    price: 25300, sma20: 24608, sma100: 22738,
+    structureV2: { trend_state: 'MIXED', range_state: 'EXPANDING', confirmed: true },
+    aboveSma100: true,
+  });
+  assert.equal(r.setup, null, 'MIXED trend → no setup');
+}
+
+// classifyVnSetup: provisional structure produces no setup
+{
+  const r = classifyVnSetup({
+    price: 103, sma20: 100, sma100: 90,
+    structureV2: { trend_state: 'UP', range_state: 'SHIFTING', confirmed: false },
+    aboveSma100: true,
+  });
+  assert.equal(r.setup, null, 'provisional UP → no setup (not confirmed)');
+}
+
+// classifyVnSetup: MIXED with SMA100 extension does NOT invent overextension
+{
+  const r = classifyVnSetup({
+    price: 25300, sma20: 24608, sma100: 22738,
+    structureV2: { trend_state: 'MIXED', range_state: 'EXPANDING', confirmed: true },
+    aboveSma100: true,
+  });
+  assert.equal(r.setup, null, 'HCM with MIXED → no setup, no SMA100 overextension invented');
+}
+
+// buildVnAutoCore: structure_v2 trend gates block correctly
+{
+  // Forged structure_v2: UP but not confirmed → should be blocked
+  const result = buildVnAutoCore({
+    price: 103,
+    h6History: {
+      bars_completed: 120, sma20: 100, sma100: 90,
+      structure_v2: { trend_state: 'UP', confirmed: false },
+      avg_vol_20: 5000,
+    },
+    h6Live: { vol_ratio: 1.01 },
+    entryWindow: { window: 'HIGH' },
+    setup: { setup: 'SMA20_PULLBACK', zone_low: 98, zone_high: 102, anchor: 'sma20', reason: '' },
+  });
+  assert.equal(result.eligible, false, 'provisional UP in auto core → not eligible');
 }
 
 // ===== Fixture consistency test (Step 7) =====
