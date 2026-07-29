@@ -88,6 +88,28 @@ describe('launch() — MSIX WindowsApps handling', { skip: !onWindows }, () => {
     assert.ok(state.killed >= 2);
   });
 
+  it('synchronous EPERM throw on direct spawn falls back to local copy', async () => {
+    // Windows raises EPERM/EACCES *synchronously* for WindowsApps execution
+    // aliases, so spawn throws rather than emitting an async 'error' event.
+    const { deps, state } = msixDeps({ cdpBindsFor: ['tradingview-mcp'] });
+    const baseSpawn = deps.spawn;
+    deps.spawn = (exe, args, opts) => {
+      if (exe.includes('WindowsApps')) {
+        state.spawned.push(exe);
+        throw Object.assign(new Error('spawn EPERM'), { code: 'EPERM' });
+      }
+      return baseSpawn(exe, args, opts);
+    };
+    const result = await launch({ _deps: deps });
+    assert.equal(result.success, true);
+    assert.equal(result.msix_local_copy, true);
+    assert.equal(result.binary, LOCAL_COPY_EXE);
+    assert.equal(state.copies.length, 1);
+    assert.equal(state.spawned.length, 2);
+    assert.match(state.spawned[0], /WindowsApps/);
+    assert.match(state.spawned[1], /tradingview-mcp/);
+  });
+
   it('CDP never binding on direct spawn falls back to local copy', async () => {
     const { deps, state } = msixDeps({ cdpBindsFor: ['tradingview-mcp'] });
     const result = await launch({ _deps: deps });

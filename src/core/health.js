@@ -360,18 +360,30 @@ export async function launch({ port, kill_existing, _deps } = {}) {
   if (killFirst) await killExisting();
 
   const cdpArgs = [`--remote-debugging-port=${cdpPort}`];
-  let child = _spawnDetached(deps.spawn, tvPath, cdpArgs);
+  const isWindowsApps = platform === 'win32' && WINDOWS_APPS_RE.test(tvPath);
+  let child = null;
   let info = null;
   let usedLocalCopy = false;
 
-  if (platform === 'win32' && WINDOWS_APPS_RE.test(tvPath)) {
-    const earlyFailure = await _spawnFailedEarly(child);
-    if (!earlyFailure) {
-      info = await _waitForCdp({ cdpPort, attempts: 15, delay: deps.delay, probeCdp: deps.probeCdp });
+  // Spawning a WindowsApps execution alias can throw EPERM/EACCES *synchronously*
+  // (not just fail via the async 'error' event), so guard it and let the MSIX
+  // fallback below handle it. On other platforms preserve the original throw.
+  try {
+    child = _spawnDetached(deps.spawn, tvPath, cdpArgs);
+  } catch (err) {
+    if (!isWindowsApps) throw err;
+  }
+
+  if (isWindowsApps) {
+    if (child) {
+      const earlyFailure = await _spawnFailedEarly(child);
+      if (!earlyFailure) {
+        info = await _waitForCdp({ cdpPort, attempts: 15, delay: deps.delay, probeCdp: deps.probeCdp });
+      }
     }
     if (!info) {
-      // Direct WindowsApps launch was blocked or CDP never bound — fall back to
-      // a local copy of the package (see _copyMsixPackageLocal).
+      // Direct WindowsApps launch was blocked (sync throw, early exit, or CDP
+      // never bound) — fall back to a local copy of the package (_copyMsixPackageLocal).
       const localExe = _copyMsixPackageLocal(tvPath, deps);
       await killExisting();
       child = _spawnDetached(deps.spawn, localExe, cdpArgs);
