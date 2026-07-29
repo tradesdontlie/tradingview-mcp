@@ -26,6 +26,13 @@ const FIND_MONACO = `
         var env = current.memoizedProps.value.monacoEnv;
         if (env.editor && typeof env.editor.getEditors === 'function') {
           var editors = env.editor.getEditors();
+          // Multiple instances can exist (hidden dialog/preview editors); only
+          // the one attached to the visible tab reflects what Save writes.
+          var visible = editors.filter(function(e) {
+            var dom = e.getDomNode();
+            return !!(dom && dom.offsetParent);
+          });
+          if (visible.length > 0) return { editor: visible[0], env: env };
           if (editors.length > 0) return { editor: editors[0], env: env };
         }
       }
@@ -278,7 +285,10 @@ export async function setSource({ source }) {
   `);
 
   if (!set) throw new Error('Monaco found but setValue() failed.');
-  return { success: true, lines_set: source.split('\n').length };
+  // Saves write to the tab shown in the editor header — surface it so callers
+  // can catch a wrong-tab write before compiling.
+  const currentScript = await getCurrentScriptName();
+  return { success: true, lines_set: source.split('\n').length, current_script: currentScript };
 }
 
 export async function compile() {
@@ -499,93 +509,259 @@ export async function smartCompile() {
   return {
     success: true,
     button_clicked: buttonClicked || 'keyboard_shortcut',
+    // Saves land in the editor's active tab — report it so a wrong-tab save
+    // is caught immediately instead of silently overwriting another script.
+    current_script: await getCurrentScriptName(),
     has_errors: errors?.length > 0,
     errors: errors || [],
     study_added: studyAdded,
   };
 }
 
-export async function newScript({ type }) {
-  const editorReady = await ensurePineEditorOpen();
-  if (!editorReady) throw new Error('Could not open Pine Editor.');
-
-  const typeMap = { indicator: 'indicator', strategy: 'strategy', library: 'library' };
-  const templates = {
-    indicator: '//@version=6\nindicator("My script")\nplot(close)',
-    strategy: '//@version=6\nstrategy("My strategy", overlay=true)\n',
-    library: '//@version=6\n// @description TODO: add library description here\nlibrary("MyLibrary")\n',
+// ── Editor tab helpers (injected) ──
+// The Pine editor keeps ONE Monaco instance whose content belongs to the tab
+// shown in the header title widget. Saving writes to THAT script, so any
+// "new"/"open" implementation that only calls editor.setValue() silently
+// redirects the next save into whatever tab happened to be open. These
+// helpers drive the real header dropdown so the tab identity actually
+// changes, and every flow verifies the header title afterwards.
+const TAB_HELPERS = `
+  var sleep = function(ms) { return new Promise(function(r) { setTimeout(r, ms); }); };
+  var tabName = function() {
+    var nb = document.querySelector('.tv-script-widget [class*="nameButton"]');
+    return nb ? nb.textContent.trim() : null;
   };
+  var overlap = function() { return document.getElementById('overlap-manager-root') || document.body; };
+  // Menu items break if a synthetic pointerdown precedes the click (the menu
+  // dismisses itself and unmounts before the click lands), while the
+  // Open-script dialog rows only react to pointer events. Use fire() for
+  // menus/buttons and firePointer() for dialog rows.
+  var fire = function(el) {
+    ['mousedown', 'mouseup', 'click'].forEach(function(t) {
+      el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, button: 0 }));
+    });
+  };
+  var firePointer = function(el) {
+    [['pointerdown', PointerEvent], ['mousedown', MouseEvent],
+     ['pointerup', PointerEvent], ['mouseup', MouseEvent],
+     ['click', MouseEvent]].forEach(function(p) {
+      el.dispatchEvent(new p[1](p[0], { bubbles: true, cancelable: true, button: 0 }));
+    });
+  };
+  var closeSearchDialog = function() {
+    var inp = Array.prototype.slice.call(document.querySelectorAll('input')).find(function(x) {
+      return x.placeholder === 'Search' && x.offsetParent !== null;
+    });
+    if (!inp) return;
+    var scope = inp.closest('[class*="wrapper"]');
+    var btn = scope && scope.querySelector('button[data-name="close"], [class*="close"]');
+    if (btn) btn.click();
+  };
+  var openTitleMenu = async function() {
+    var btn = document.querySelector('.tv-script-widget [class*="nameButton"]');
+    if (!btn) return null;
+    fire(btn);
+    for (var i = 0; i < 10; i++) {
+      var items = overlap().querySelectorAll('[role="menuitem"]');
+      if (items.length > 0) return items;
+      await sleep(100);
+    }
+    return null;
+  };
+  var closeMenus = function() {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  };
+  // "Save script before switching?" appears when the current tab has unsaved
+  // edits. mode: 'save' | 'discard' | 'cancel'. Returns what happened.
+  var handleWarning = function(mode) {
+    var dlg = overlap().querySelector('[data-name="warning-dialog"]');
+    if (!dlg || !/Save script before switching/.test(dlg.textContent)) return null;
+    var want = mode === 'save' ? 'Save' : mode === 'discard' ? "Don't save" : 'Cancel';
+    var btn = Array.prototype.slice.call(dlg.querySelectorAll('button')).find(function(b) {
+      return b.textContent.trim() === want;
+    });
+    if (!btn) return null;
+    btn.click();
+    return mode === 'cancel' ? 'cancelled' : mode === 'save' ? 'saved' : 'discarded';
+  };
+  // Poll until the header shows the wanted tab, resolving the unsaved-changes
+  // dialog along the way. Returns {ok, warning, current}.
+  var awaitTab = async function(matchFn, unsavedMode, timeoutMs) {
+    var warning = null;
+    var deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      var w = handleWarning(unsavedMode);
+      if (w) {
+        warning = w;
+        if (w === 'cancelled') return { ok: false, warning: warning, current: tabName() };
+      }
+      var t = tabName();
+      if (t && matchFn(t)) return { ok: true, warning: warning, current: t };
+      await sleep(150);
+    }
+    return { ok: false, warning: warning, current: tabName() };
+  };
+`;
 
-  const template = templates[type] || templates.indicator;
-
-  // Simply set the source to a new template — this is the most reliable approach
-  const escaped = JSON.stringify(template);
-  const set = await evaluate(`
+export async function getCurrentScriptName() {
+  return evaluate(`
     (function() {
-      var m = ${FIND_MONACO};
-      if (!m) return false;
-      m.editor.setValue(${escaped});
-      return true;
+      var nb = document.querySelector('.tv-script-widget [class*="nameButton"]');
+      return nb ? nb.textContent.trim() : null;
     })()
   `);
-
-  if (!set) throw new Error('Monaco editor not found. Ensure Pine Editor is open.');
-
-  return { success: true, type, action: 'new_script_created', template: typeMap[type] };
 }
 
-export async function openScript({ name }) {
+export async function newScript({ type, unsaved = 'cancel' }) {
   const editorReady = await ensurePineEditorOpen();
   if (!editorReady) throw new Error('Could not open Pine Editor.');
 
-  const escapedName = JSON.stringify(name.toLowerCase());
-
   const result = await evaluateAsync(`
-    (function() {
-      var target = ${escapedName};
-      return fetch('https://pine-facade.tradingview.com/pine-facade/list/?filter=saved', { credentials: 'include' })
-        .then(function(r) { return r.json(); })
-        .then(function(scripts) {
-          if (!Array.isArray(scripts)) return {error: 'pine-facade returned unexpected data'};
-          var match = null;
-          for (var i = 0; i < scripts.length; i++) {
-            var sn = (scripts[i].scriptName || '').toLowerCase();
-            var st = (scripts[i].scriptTitle || '').toLowerCase();
-            if (sn === target || st === target) { match = scripts[i]; break; }
-          }
-          if (!match) {
-            for (var j = 0; j < scripts.length; j++) {
-              var sn2 = (scripts[j].scriptName || '').toLowerCase();
-              var st2 = (scripts[j].scriptTitle || '').toLowerCase();
-              if (sn2.indexOf(target) !== -1 || st2.indexOf(target) !== -1) { match = scripts[j]; break; }
-            }
-          }
-          if (!match) return {error: 'Script "' + target + '" not found. Use pine_list_scripts to see available scripts.'};
+    (async function() {
+      ${TAB_HELPERS}
+      var wantType = ${JSON.stringify(type || 'indicator')};
+      var before = tabName();
 
-          var id = match.scriptIdPart;
-          var ver = match.version || 1;
-          return fetch('https://pine-facade.tradingview.com/pine-facade/get/' + id + '/' + ver, { credentials: 'include' })
-            .then(function(r2) { return r2.json(); })
-            .then(function(data) {
-              var source = data.source || '';
-              if (!source) return {error: 'Script source is empty', name: match.scriptName || match.scriptTitle};
-              var m = ${FIND_MONACO};
-              if (m) {
-                m.editor.setValue(source);
-                return {success: true, name: match.scriptName || match.scriptTitle, id: id, lines: source.split('\\n').length};
-              }
-              return {error: 'Monaco editor not found to inject source', name: match.scriptName || match.scriptTitle};
-            });
-        })
-        .catch(function(e) { return {error: e.message}; });
+      var items = await openTitleMenu();
+      if (!items) return { error: 'Could not open the script title menu.' };
+      var createNew = Array.prototype.slice.call(items).find(function(e) {
+        return /^Create new/.test(e.textContent.trim());
+      });
+      if (!createNew) { closeMenus(); return { error: '"Create new" menu item not found.' }; }
+
+      // Expand the submenu (it opens on hover) and pick the script type.
+      ['pointerenter', 'mouseenter', 'mouseover', 'mousemove'].forEach(function(t) {
+        createNew.dispatchEvent(new MouseEvent(t, { bubbles: true }));
+      });
+      var typeItem = null;
+      for (var i = 0; i < 15; i++) {
+        await sleep(100);
+        typeItem = Array.prototype.slice.call(overlap().querySelectorAll('[role="menuitem"], [role="menuitemcheckbox"]'))
+          .find(function(e) {
+            var t = e.textContent.trim().toLowerCase();
+            return t === wantType || t.indexOf(wantType) === 0;
+          });
+        if (typeItem) break;
+      }
+      if (!typeItem) { fire(createNew); await sleep(300);
+        typeItem = Array.prototype.slice.call(overlap().querySelectorAll('[role="menuitem"], [role="menuitemcheckbox"]'))
+          .find(function(e) {
+            var t = e.textContent.trim().toLowerCase();
+            return t === wantType || t.indexOf(wantType) === 0;
+          });
+      }
+      if (!typeItem) { closeMenus(); return { error: '"Create new" submenu entry for "' + wantType + '" not found.' }; }
+      fire(typeItem);
+
+      var res = await awaitTab(function(t) { return t !== before; }, ${JSON.stringify(unsaved)}, 6000);
+      if (!res.ok) {
+        return { error: res.warning === 'cancelled'
+          ? 'Current tab has unsaved changes; pass unsaved: "save" or "discard" to proceed.'
+          : 'Editor tab did not change after Create new (still "' + res.current + '").',
+          current_script: res.current, unsaved_handling: res.warning };
+      }
+      return { success: true, current_script: res.current, previous_script: before, unsaved_handling: res.warning };
     })()
   `);
 
   if (result?.error) {
-    throw new Error(result.error);
+    const err = new Error(result.error);
+    err.details = result;
+    throw err;
   }
+  return { success: true, type, action: 'new_script_created', ...result };
+}
 
-  return { success: true, name: result.name, script_id: result.id, lines: result.lines, source: 'internal_api', opened: true };
+export async function openScript({ name, unsaved = 'cancel' }) {
+  const editorReady = await ensurePineEditorOpen();
+  if (!editorReady) throw new Error('Could not open Pine Editor.');
+
+  const result = await evaluateAsync(`
+    (async function() {
+      ${TAB_HELPERS}
+      var target = ${JSON.stringify(name)};
+      var lc = target.toLowerCase();
+      var matches = function(t) {
+        var v = (t || '').trim().toLowerCase();
+        return v === lc || v.indexOf(lc) !== -1;
+      };
+
+      var before = tabName();
+      if (before && before.trim().toLowerCase() === lc) {
+        return { success: true, current_script: before, already_open: true };
+      }
+
+      var items = await openTitleMenu();
+      if (!items) return { error: 'Could not open the script title menu.' };
+
+      // Fast path: the "Recently used" list in the dropdown.
+      var recents = Array.prototype.slice.call(overlap().querySelectorAll('[role="menuitemcheckbox"]'));
+      var hit = recents.find(function(e) { return (e.getAttribute('aria-label') || '').trim().toLowerCase() === lc; })
+        || recents.find(function(e) { return matches(e.getAttribute('aria-label')); });
+
+      if (hit) {
+        fire(hit);
+      } else {
+        // Fallback: the "Open script…" search dialog.
+        var openItem = Array.prototype.slice.call(overlap().querySelectorAll('[role="menuitem"]')).find(function(e) {
+          return /^Open script/.test((e.getAttribute('aria-label') || e.textContent).trim());
+        });
+        if (!openItem) { closeMenus(); return { error: '"Open script…" menu item not found.' }; }
+        fire(openItem);
+
+        var inp = null;
+        for (var i = 0; i < 20; i++) {
+          await sleep(150);
+          inp = Array.prototype.slice.call(document.querySelectorAll('input')).find(function(x) {
+            return x.placeholder === 'Search' && x.offsetParent !== null;
+          });
+          if (inp) break;
+        }
+        if (!inp) return { error: '"Open script" dialog did not appear.' };
+
+        var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+        setter.call(inp, target);
+        inp.dispatchEvent(new Event('input', { bubbles: true }));
+
+        // The list is virtualized and filters async — poll for a matching row.
+        var scope = inp.closest('[class*="wrapper"]') || document;
+        var rowTitle = function(r) {
+          var t = r.querySelector('[class*="titleText"], [class*="title"]');
+          return t ? t.textContent.trim() : '';
+        };
+        var row = null;
+        for (var k = 0; k < 20; k++) {
+          await sleep(150);
+          var rows = Array.prototype.slice.call(scope.querySelectorAll('[class*="itemRow"]'));
+          row = rows.find(function(r) { return rowTitle(r).toLowerCase() === lc; })
+            || rows.find(function(r) { return matches(rowTitle(r)); });
+          if (row) break;
+        }
+        if (!row) {
+          closeSearchDialog();
+          return { error: 'Script "' + target + '" not found in the Open script dialog. Use pine_list_scripts to see available scripts.' };
+        }
+        firePointer(row.querySelector('[class*="itemInfo"]') || row);
+      }
+
+      var res = await awaitTab(matches, ${JSON.stringify(unsaved)}, 6000);
+      closeSearchDialog();
+      if (!res.ok) {
+        return { error: res.warning === 'cancelled'
+          ? 'Current tab "' + before + '" has unsaved changes; pass unsaved: "save" or "discard" to proceed.'
+          : 'Editor tab did not switch to "' + target + '" (still "' + res.current + '").',
+          current_script: res.current, unsaved_handling: res.warning };
+      }
+      return { success: true, current_script: res.current, previous_script: before, unsaved_handling: res.warning };
+    })()
+  `);
+
+  if (result?.error) {
+    const err = new Error(result.error);
+    err.details = result;
+    throw err;
+  }
+  return { success: true, name: result.current_script, opened: true, source: 'editor_ui', ...result };
 }
 
 export async function listScripts() {

@@ -40,18 +40,20 @@ export function registerPineTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('pine_new', 'Create a new blank Pine Script', {
+  server.tool('pine_new', 'Create a new blank Pine Script as its own editor tab (verified via the editor header; subsequent saves write to the new script)', {
     type: z.enum(['indicator', 'strategy', 'library']).describe('Type of script to create'),
-  }, async ({ type }) => {
-    try { return jsonResult(await core.newScript({ type })); }
-    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+    unsaved: z.enum(['save', 'discard', 'cancel']).optional().describe('What to do with unsaved changes in the current tab (default cancel: refuse and report)'),
+  }, async ({ type, unsaved }) => {
+    try { return jsonResult(await core.newScript({ type, unsaved })); }
+    catch (err) { return jsonResult({ success: false, error: err.message, ...(err.details || {}) }, true); }
   });
 
-  server.tool('pine_open', 'Open a saved Pine Script by name', {
+  server.tool('pine_open', 'Switch the editor to a saved Pine Script by name (real tab switch, verified via the editor header; subsequent saves write to that script)', {
     name: z.string().describe('Name of the saved script to open (case-insensitive match)'),
-  }, async ({ name }) => {
-    try { return jsonResult(await core.openScript({ name })); }
-    catch (err) { return jsonResult({ success: false, source: 'internal_api', error: err.message }, true); }
+    unsaved: z.enum(['save', 'discard', 'cancel']).optional().describe('What to do with unsaved changes in the current tab (default cancel: refuse and report)'),
+  }, async ({ name, unsaved }) => {
+    try { return jsonResult(await core.openScript({ name, unsaved })); }
+    catch (err) { return jsonResult({ success: false, source: 'editor_ui', error: err.message, ...(err.details || {}) }, true); }
   });
 
   server.tool('pine_list_scripts', 'List saved Pine Scripts', {}, async () => {
