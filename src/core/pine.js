@@ -35,6 +35,137 @@ const FIND_MONACO = `
   })()
 `;
 
+// ── Action-button finder (injected): clicks "Add to chart" / "Update on chart"
+//    in ANY UI language, then falls back to Save. Returns {clicked, kind, label}.
+//    Root cause of the old bug: the button is icon-only (empty textContent) and
+//    its label lives only in a *localized* title attr, so English-text regexes
+//    never matched on non-English UIs (e.g. Arabic title "add to chart").
+const CLICK_ADD_TO_CHART = `
+  (function clickAddToChart(){
+    function ok(el){ return el && el.offsetParent !== null && !el.disabled; }
+
+    // (1) Structural & language-independent: the Add/Update button is the
+    //     lightButton sibling of the Pine editor's saveButton.
+    var save = document.querySelector('[class*="saveButton"]');
+    if (save) {
+      // Prefer the immediate previous sibling — in observed DOM the Add-to-chart
+      // button sits directly before saveButton, while More (vertical dots) lives
+      // in a different container. This avoids ever grabbing the More button.
+      var prev = save.previousElementSibling;
+      if (prev && prev.tagName === 'BUTTON' && /lightButton/.test(prev.className || '') && ok(prev)) {
+        prev.click();
+        return { clicked: true, kind: 'add_to_chart', label: prev.getAttribute('title') || 'add' };
+      }
+      // Otherwise scan siblings in the same toolbar (still excludes saveButton).
+      if (save.parentElement) {
+        var sibs = save.parentElement.querySelectorAll('button');
+        for (var i = 0; i < sibs.length; i++) {
+          var b = sibs[i];
+          if (b !== save && /lightButton/.test(b.className || '') && ok(b)) {
+            b.click();
+            return { clicked: true, kind: 'add_to_chart', label: b.getAttribute('title') || 'add' };
+          }
+        }
+      }
+    }
+
+    // (2) Fallback for other layouts / combined buttons — English text match.
+    //     Non-Latin UIs are handled by the structural step (1) above, so this is
+    //     kept ASCII-only on purpose (avoids RTL byte-order corruption in source).
+    var btns = document.querySelectorAll('button, [role="button"]');
+    var reCombo = /save and add to chart/i;
+    var reAdd   = /add to chart|update on chart/i;
+    var combined = null, add = null;
+    for (var j = 0; j < btns.length; j++) {
+      var e = btns[j];
+      if (!ok(e)) continue;
+      var hay = (e.textContent || '') + ' ' + (e.getAttribute('aria-label') || '') + ' ' + (e.getAttribute('title') || '');
+      if (!combined && reCombo.test(hay)) combined = e;
+      else if (!add && reAdd.test(hay)) add = e;
+    }
+    var target = combined || add;
+    if (target) {
+      target.click();
+      return { clicked: true, kind: combined ? 'save_and_add' : 'add_to_chart',
+               label: (target.getAttribute('title') || target.textContent || '').trim().slice(0, 40) };
+    }
+
+    // (3) Last resort: click Save so the script at least persists.
+    if (ok(save)) { save.click(); return { clicked: true, kind: 'save_only', label: 'save' }; }
+    return { clicked: false, kind: 'none', label: '' };
+  })()
+`;
+
+// ── Save-Script name-dialog handler (injected): a brand-new/unsaved script can
+//    pop a "Save Script" dialog after Add-to-chart. Confirms it if present.
+//    Prefers a stable submit control (language-independent) before the English
+//    "Save" text. Callers wrap this in try/catch — it must never throw.
+const HANDLE_SAVE_DIALOG = `
+  (function(){
+    var scope = document.querySelector('[class*="dialog"], [class*="modal"], [class*="popup"], [role="dialog"]');
+    if (!scope) return false;
+    var btn = scope.querySelector('button[data-name="submit-button"], button[name="submit"]');
+    if (!btn) {
+      var btns = scope.querySelectorAll('button');
+      for (var i = 0; i < btns.length; i++) {
+        if (btns[i].offsetParent !== null && btns[i].textContent.trim() === 'Save') { btn = btns[i]; break; }
+      }
+    }
+    if (btn && btn.offsetParent !== null) { btn.click(); return true; }
+    return false;
+  })()
+`;
+
+// ── Confirm-dialog handler (injected): clicking Add-to-chart on a script that
+//    requests another symbol/timeframe pops a [data-name="confirm-dialog"] modal
+//    that AUTO-CANCELS on a short window. Selects the primary action button in a
+//    strictly language-independent way (stable data-names first, then a className
+//    pattern) — never matches Arabic/English text. Returns what it clicked, or false.
+const HANDLE_CONFIRM_DIALOG = `
+  (function(){
+    var dlg = document.querySelector('[data-name="confirm-dialog"]');
+    if (!dlg) return false;
+    var btn = dlg.querySelector('button[data-name="yes-button"]')
+      || dlg.querySelector('button[data-name="ok-button"]');
+    if (!btn) {
+      var btns = dlg.querySelectorAll('button');
+      for (var i = 0; i < btns.length; i++) {
+        var cls = btns[i].className;
+        if (typeof cls !== 'string') cls = '';
+        if (/actionButton|primary|submit/.test(cls) && btns[i].offsetParent !== null) { btn = btns[i]; break; }
+      }
+    }
+    if (btn && btn.offsetParent !== null) {
+      btn.click();
+      return btn.getAttribute('data-name') || (String(btn.className).split(' ')[0]) || 'confirm';
+    }
+    return false;
+  })()
+`;
+
+// ── Post-Add dialog poller (shared by compile + smartCompile so both behave
+//    identically). After the Add-to-chart click one of two modals can appear:
+//      • confirm-dialog → cross-symbol/timeframe scripts; auto-cancels fast.
+//      • Save-Script name dialog → brand-new/unsaved scripts.
+//    Poll every 150ms for up to 3000ms, checking BOTH each tick, so the
+//    auto-cancelling confirm modal is caught before it dismisses. Strictly
+//    non-fatal: returns 'failed' on any CDP/eval error, never throws.
+async function pollPostAddDialog() {
+  try {
+    const deadline = Date.now() + 3000;
+    while (Date.now() < deadline) {
+      const confirmed = await evaluate(HANDLE_CONFIRM_DIALOG);
+      if (confirmed) return 'confirm-dialog';
+      const saved = await evaluate(HANDLE_SAVE_DIALOG);
+      if (saved) return 'save-dialog-confirmed';
+      await new Promise(r => setTimeout(r, 150));
+    }
+    return 'none';
+  } catch (e) {
+    return 'failed';
+  }
+}
+
 /**
  * Opens the Pine Editor panel and waits for Monaco to become available.
  * Returns true if editor is accessible, false on timeout.
@@ -285,38 +416,27 @@ export async function compile() {
   const editorReady = await ensurePineEditorOpen();
   if (!editorReady) throw new Error('Could not open Pine Editor.');
 
-  const clicked = await evaluate(`
-    (function() {
-      var btns = document.querySelectorAll('button');
-      var fallback = null;
-      var saveBtn = null;
-      for (var i = 0; i < btns.length; i++) {
-        var text = btns[i].textContent.trim();
-        if (/save and add to chart/i.test(text)) {
-          btns[i].click();
-          return 'Save and add to chart';
-        }
-        if (!fallback && /^(Add to chart|Update on chart)/i.test(text)) {
-          fallback = btns[i];
-        }
-        if (!saveBtn && btns[i].className.indexOf('saveButton') !== -1 && btns[i].offsetParent !== null) {
-          saveBtn = btns[i];
-        }
-      }
-      if (fallback) { fallback.click(); return fallback.textContent.trim(); }
-      if (saveBtn) { saveBtn.click(); return 'Pine Save'; }
-      return null;
-    })()
-  `);
+  const click = await evaluate(CLICK_ADD_TO_CHART);
 
-  if (!clicked) {
+  // Only fall back to the CDP keyboard gesture (Ctrl+Enter) when NO button could
+  // be located. On UWP this CDP Input path is the one that wedges the connection,
+  // so we avoid it whenever the in-page DOM click already worked.
+  if (!click || click.kind === 'none') {
     const c = await getClient();
     await c.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: 2, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
     await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 'Enter', code: 'Enter' });
   }
 
+  const buttonClicked = (click && click.clicked && click.kind !== 'none')
+    ? (click.kind === 'save_only' ? 'Pine Save (add-to-chart button not found)' : (click.label || click.kind))
+    : 'keyboard_shortcut';
+
+  // Strictly non-fatal: handle whichever post-Add modal appears (confirm-dialog
+  // or Save-Script name dialog). Fast poll — the confirm modal auto-cancels.
+  const dialog = await pollPostAddDialog();
+
   await new Promise(r => setTimeout(r, 2000));
-  return { success: true, button_clicked: clicked || 'keyboard_shortcut', source: 'dom_fallback' };
+  return { success: true, button_clicked: buttonClicked, dialog, source: 'dom_fallback' };
 }
 
 export async function getErrors() {
@@ -430,46 +550,66 @@ export async function smartCompile() {
   const editorReady = await ensurePineEditorOpen();
   if (!editorReady) throw new Error('Could not open Pine Editor.');
 
-  const studiesBefore = await evaluate(`
+  // Shared sampler: snapshot the study list as { count, ids } so the post-Add
+  // poll can detect either a count increase or a brand-new study id. Returns
+  // null on any failure so callers can treat it as "couldn't measure".
+  const SAMPLE_STUDIES = `
     (function() {
       try {
         var chart = window.TradingViewApi._activeChartWidgetWV.value();
-        if (chart && typeof chart.getAllStudies === 'function') return chart.getAllStudies().length;
+        if (chart && typeof chart.getAllStudies === 'function') {
+          var all = chart.getAllStudies();
+          return { count: all.length, ids: all.map(function(s){ return s.id; }) };
+        }
       } catch(e) {}
       return null;
     })()
-  `);
+  `;
 
-  const buttonClicked = await evaluate(`
-    (function() {
-      var btns = document.querySelectorAll('button');
-      var addBtn = null;
-      var updateBtn = null;
-      var saveBtn = null;
-      for (var i = 0; i < btns.length; i++) {
-        var text = btns[i].textContent.trim();
-        if (/save and add to chart/i.test(text)) {
-          btns[i].click();
-          return 'Save and add to chart';
-        }
-        if (!addBtn && /^add to chart$/i.test(text)) addBtn = btns[i];
-        if (!updateBtn && /^update on chart$/i.test(text)) updateBtn = btns[i];
-        if (!saveBtn && btns[i].className.indexOf('saveButton') !== -1 && btns[i].offsetParent !== null) saveBtn = btns[i];
-      }
-      if (addBtn) { addBtn.click(); return 'Add to chart'; }
-      if (updateBtn) { updateBtn.click(); return 'Update on chart'; }
-      if (saveBtn) { saveBtn.click(); return 'Pine Save'; }
-      return null;
-    })()
-  `);
+  const studiesBefore = await evaluate(SAMPLE_STUDIES);
 
-  if (!buttonClicked) {
+  const click = await evaluate(CLICK_ADD_TO_CHART);
+
+  // Only fall back to the CDP keyboard gesture (Ctrl+Enter) when NO button could
+  // be located. On UWP this CDP Input path is the one that wedges the connection,
+  // so we avoid it whenever the in-page DOM click already worked.
+  if (!click || click.kind === 'none') {
     const c = await getClient();
     await c.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: 2, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
     await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 'Enter', code: 'Enter' });
   }
 
-  await new Promise(r => setTimeout(r, 2500));
+  const buttonClicked = (click && click.clicked && click.kind !== 'none')
+    ? (click.kind === 'save_only' ? 'Pine Save (add-to-chart button not found)' : (click.label || click.kind))
+    : 'keyboard_shortcut';
+
+  // Strictly non-fatal: handle whichever post-Add modal appears (confirm-dialog
+  // or Save-Script name dialog). Fast poll — the confirm modal auto-cancels.
+  const dialog = await pollPostAddDialog();
+
+  // Only AFTER dialog handling has resolved: poll for the new study instead of
+  // sampling once after a fixed settle. confirm-dialog adds register late —
+  // TradingView re-requests external data before the study lands — so a single
+  // early sample races the add and reports a false negative. Re-sample every
+  // 300ms for up to 5000ms; stop the instant the study count grows or a new
+  // study id appears. If the budget elapses with no change, study_added: false
+  // is a genuine miss, not a race. Strictly non-fatal — a failed sample tick is
+  // simply skipped, never thrown.
+  let studyAdded = null;
+  if (studiesBefore !== null) {
+    const beforeCount = studiesBefore.count;
+    const beforeIds = new Set(studiesBefore.ids || []);
+    studyAdded = false;
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      const snap = await evaluate(SAMPLE_STUDIES);
+      if (snap !== null && (snap.count > beforeCount || (snap.ids || []).some(id => !beforeIds.has(id)))) {
+        studyAdded = true;
+        break;
+      }
+      await new Promise(r => setTimeout(r, 300));
+    }
+  }
 
   const errors = await evaluate(`
     (function() {
@@ -484,21 +624,10 @@ export async function smartCompile() {
     })()
   `);
 
-  const studiesAfter = await evaluate(`
-    (function() {
-      try {
-        var chart = window.TradingViewApi._activeChartWidgetWV.value();
-        if (chart && typeof chart.getAllStudies === 'function') return chart.getAllStudies().length;
-      } catch(e) {}
-      return null;
-    })()
-  `);
-
-  const studyAdded = (studiesBefore !== null && studiesAfter !== null) ? studiesAfter > studiesBefore : null;
-
   return {
     success: true,
-    button_clicked: buttonClicked || 'keyboard_shortcut',
+    button_clicked: buttonClicked,
+    dialog,
     has_errors: errors?.length > 0,
     errors: errors || [],
     study_added: studyAdded,
