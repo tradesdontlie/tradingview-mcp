@@ -132,7 +132,10 @@ async function execute(handler, values, positionals) {
   try {
     const result = await handler(values, positionals);
     console.log(JSON.stringify(result, null, 2));
-    process.exit(0);
+    // Set exitCode and let the event loop drain — avoids a Windows libuv
+    // double-close assertion when undici's fetch keepalive socket is still
+    // open at process.exit() time.
+    process.exitCode = 0;
   } catch (err) {
     handleError(err);
   }
