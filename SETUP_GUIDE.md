@@ -125,5 +125,5 @@ Then `tv status`, `tv quote`, `tv pine compile`, etc. work from anywhere.
 ## What to Read Next
 
 - `CLAUDE.md` — Decision tree for which tool to use when (auto-loaded by Claude Code)
-- `README.md` — Full tool reference (78 MCP tools, 30 CLI commands)
+- `README.md` — Full tool reference (84 MCP tools, 30 CLI commands)
 - `RESEARCH.md` — Research context and open questions
