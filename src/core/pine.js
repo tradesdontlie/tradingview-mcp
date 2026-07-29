@@ -296,7 +296,10 @@ export async function compile() {
           btns[i].click();
           return 'Save and add to chart';
         }
-        if (!fallback && /^(Add to chart|Update on chart)/i.test(text)) {
+        if (!fallback && /^(Add to chart|Update on chart|차트에 넣기|차트 업데이트)/i.test(text)) {
+          fallback = btns[i];
+        }
+        if (!fallback && btns[i].getAttribute('title') && /^(Add to chart|Update on chart|차트에 넣기|차트 업데이트)/.test(btns[i].getAttribute('title'))) {
           fallback = btns[i];
         }
         if (!saveBtn && btns[i].className.indexOf('saveButton') !== -1 && btns[i].offsetParent !== null) {
@@ -452,8 +455,10 @@ export async function smartCompile() {
           btns[i].click();
           return 'Save and add to chart';
         }
-        if (!addBtn && /^add to chart$/i.test(text)) addBtn = btns[i];
-        if (!updateBtn && /^update on chart$/i.test(text)) updateBtn = btns[i];
+        if (!addBtn && /^(add to chart|차트에 넣기)$/i.test(text)) addBtn = btns[i];
+        if (!updateBtn && /^(update on chart|차트 업데이트)$/i.test(text)) updateBtn = btns[i];
+        if (!addBtn && !updateBtn && btns[i].getAttribute('title') && /^(Add to chart|차트에 넣기)$/.test(btns[i].getAttribute('title'))) addBtn = btns[i];
+        if (!addBtn && !updateBtn && btns[i].getAttribute('title') && /^(Update on chart|차트 업데이트)$/.test(btns[i].getAttribute('title'))) updateBtn = btns[i];
         if (!saveBtn && btns[i].className.indexOf('saveButton') !== -1 && btns[i].offsetParent !== null) saveBtn = btns[i];
       }
       if (addBtn) { addBtn.click(); return 'Add to chart'; }
