@@ -8,7 +8,14 @@ import { evaluate, evaluateAsync, getClient } from '../connection.js';
 // ── Monaco finder (injected into TV page) ──
 const FIND_MONACO = `
   (function findMonacoEditor() {
-    var container = document.querySelector('.monaco-editor.pine-editor-monaco');
+    // Panel close/reopen can leave a stale invisible container behind —
+    // prefer the visible instance (offsetParent set) over DOM order.
+    var candidates = document.querySelectorAll('.monaco-editor.pine-editor-monaco');
+    var container = null;
+    for (var ci = 0; ci < candidates.length; ci++) {
+      if (candidates[ci].offsetParent !== null) { container = candidates[ci]; break; }
+    }
+    if (!container) container = candidates[0] || null;
     if (!container) return null;
     var el = container;
     var fiberKey;
@@ -26,7 +33,18 @@ const FIND_MONACO = `
         var env = current.memoizedProps.value.monacoEnv;
         if (env.editor && typeof env.editor.getEditors === 'function') {
           var editors = env.editor.getEditors();
-          if (editors.length > 0) return { editor: editors[0], env: env };
+          // getEditors() lists every mounted editor oldest-first; with
+          // multiple tabs (or a stale hidden instance) editors[0] is NOT
+          // the active one. Prefer focused, then visible, then first.
+          var pick = null;
+          for (var e = 0; e < editors.length; e++) {
+            var node = editors[e].getDomNode && editors[e].getDomNode();
+            var vis = !!(node && node.offsetParent !== null);
+            if (typeof editors[e].hasTextFocus === 'function' && editors[e].hasTextFocus()) { pick = editors[e]; break; }
+            if (vis && !pick) pick = editors[e];
+          }
+          if (!pick && editors.length > 0) pick = editors[0];
+          if (pick) return { editor: pick, env: env };
         }
       }
       current = current.return;
