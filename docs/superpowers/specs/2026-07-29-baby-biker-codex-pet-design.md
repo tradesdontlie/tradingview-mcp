@@ -6,7 +6,8 @@ Create a Codex-compatible v2 animated pet inspired by the baby in the four suppl
 
 ## Visual identity
 
-- Preserve the recognizable round face, black knit beanie, white sunglasses, black-and-cream biker jacket, dark trousers, and black boots.
+- Preserve the recognizable round face, black knit beanie, white-framed sunglasses with clearly black lenses, black-and-cream biker jacket, dark trousers, and black boots.
+- Keep the black-lensed sunglasses on the baby in every animation cell; they are a permanent identity feature rather than a removable prop.
 - Use a polished chibi sprite style with a large head, compact body, clean silhouette, soft facial features, and restrained black, cream, white, and graphite-gray palette.
 - Simplify the motorcycle into a compact toy-like three-wheeler so the baby, handlebars, front wheel, and vehicle silhouette remain readable at pet size.
 - Avoid photorealism, readable logos, license-plate text, watermarks, loose props, or a separate standing character.
@@ -23,9 +24,8 @@ The baby stays seated and connected to the vehicle throughout all standard Codex
 - Waiting: patient tapping or subtle handlebar movement.
 - Running: energetic in-place rev with wheel and suspension motion.
 - Review: rider inspects a small abstract panel without readable text.
-- Look directions: head, eyes, and sunglasses orientation communicate all 16 directions while the seated pose and vehicle identity stay stable.
+- Look directions: head angle and sunglasses orientation communicate all 16 directions while the opaque black lenses, seated pose, and vehicle identity stay stable.
 
 ## Deliverable and acceptance
 
 Package an 8-column by 11-row transparent PNG atlas with all nine standard animation rows and two look-direction rows, plus a Codex pet manifest using `spriteVersionNumber: 2`. Acceptance requires deterministic atlas validation, contact-sheet inspection, motion-preview inspection, transparent-background validation, stable identity, and the baby visibly seated on the motorcycle in every cell.
-
