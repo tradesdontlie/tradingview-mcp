@@ -53,7 +53,8 @@ export async function ensurePineEditorOpen() {
       var bwb = window.TradingView && window.TradingView.bottomWidgetBar;
       if (!bwb) return;
       if (typeof bwb.activateScriptEditorTab === 'function') bwb.activateScriptEditorTab();
-      else if (typeof bwb.showWidget === 'function') bwb.showWidget('pine-editor');
+      // Widget renamed 'pine-editor' → 'scripteditor' in TV Desktop 3.3; unknown names no-op, so try both.
+      else if (typeof bwb.showWidget === 'function') { bwb.showWidget('scripteditor'); bwb.showWidget('pine-editor'); }
     })()
   `);
 

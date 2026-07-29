@@ -685,7 +685,7 @@ describe('TradingView MCP — Full E2E (70 tools)', () => {
         (function() {
           var bwb = window.TradingView && window.TradingView.bottomWidgetBar;
           if (bwb && typeof bwb.activateScriptEditorTab === 'function') bwb.activateScriptEditorTab();
-          else if (bwb && typeof bwb.showWidget === 'function') bwb.showWidget('pine-editor');
+          else if (bwb && typeof bwb.showWidget === 'function') { bwb.showWidget('scripteditor'); bwb.showWidget('pine-editor'); }
         })()
       `);
       for (let i = 0; i < 50; i++) {
@@ -1039,8 +1039,14 @@ val = array.get(a, 5)`;
       const bwb = await apiExists(BOTTOM_BAR);
       assert.ok(bwb, 'bottomWidgetBar exists');
 
-      // Open
-      await evaluate(`${BOTTOM_BAR}.showWidget('pine-editor')`);
+      // Open — widget renamed 'pine-editor' → 'scripteditor' in TV Desktop 3.3; unknown names no-op, so try both
+      await evaluate(`
+        (function() {
+          var bwb = ${BOTTOM_BAR};
+          if (typeof bwb.activateScriptEditorTab === 'function') bwb.activateScriptEditorTab();
+          else { bwb.showWidget('scripteditor'); bwb.showWidget('pine-editor'); }
+        })()
+      `);
       await sleep(500);
       const isOpen = await evaluate(`!!document.querySelector('.monaco-editor.pine-editor-monaco')`);
 
