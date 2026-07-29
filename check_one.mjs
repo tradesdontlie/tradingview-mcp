@@ -250,7 +250,16 @@ export function buildClosedH6History({ bars, activeBarClosed }) {
   // Use only bars that are definitely closed
   const completed = activeBarClosed ? bars : bars.slice(0, -1);
   if (completed.length === 0) {
-    return { bars_completed: 0, sma20: null, sma100: null, structure: null, protected_low: null, avg_vol_20: null };
+    const structureV2 = computeVnStructure([], { sma20: null, sma100: null });
+    return {
+      bars_completed: 0,
+      sma20: null,
+      sma100: null,
+      structure: compatibilityStructure(structureV2.trend_state),
+      structure_v2: structureV2,
+      protected_low: null,
+      avg_vol_20: null,
+    };
   }
 
   const closes = completed.map(b => b.close);
@@ -263,12 +272,9 @@ export function buildClosedH6History({ bars, activeBarClosed }) {
     ? Math.round(volumes.slice(-20).reduce((a, v) => a + v, 0) / 20)
     : null;
 
-  // Structure from completed pivots
-  const { ph, pl } = findPivots(completed, 3);
-  const structure = marketStructure(ph, pl);
-
   // VN Structure v2: rolling-channel owner
   const structureV2 = computeVnStructure(completed, { sma20: sma20Val, sma100: sma100Val });
+  const structure = compatibilityStructure(structureV2.trend_state);
 
   // Protected low from demand bar in completed bars
   const demandBar = findDemandBar(completed, completed.length, avgVol20);

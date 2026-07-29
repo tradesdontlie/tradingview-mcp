@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
 import { assertH6Resolution, confirmSymbol, extractMovingAverages, extractPreviousMonthProfile, classifyMaAnchor, scoreSignal } from '../src/scan_policy.mjs';
-import { computeVnStructure, VN_STRUCTURE_VERSION } from '../src/core/vn_structure.mjs';
+import { VN_STRUCTURE_VERSION } from '../src/core/vn_structure.mjs';
+import { buildClosedH6History } from '../check_one.mjs';
+import { buildScanStructure, buildScoutResult } from '../scan_live.mjs';
 
 const fp = { conf: 80, cumDelta: 10, buyPct: 60, divSignal: 0, maxBuyStack: 1 };
 const ma = { ma20: 100, ma100: 90 };
@@ -205,9 +207,10 @@ test('extractPreviousMonthProfile: rejects stale observation', () => {
 });
 
 test('extractPreviousMonthProfile: rejects future observation beyond clock skew', () => {
+  const now = '2026-07-28T00:00:00.000Z';
   const result = extractPreviousMonthProfile({
     studies: [{ name: 'Auto Key Levels', values: { 'Prev Monthly POC': '23.25 K', 'Prev Monthly VAH': '23.9 K', 'Prev Monthly VAL': '23.1 K' } }],
-    expectedSymbol: 'HOSE:HCM', marketDate: '2026-07-28', observedAt: '2026-07-29T00:00:00Z', maxAgeSeconds: 7200, now: NOW_FOR_TEST,
+    expectedSymbol: 'HOSE:HCM', marketDate: '2026-07-28', observedAt: '2026-07-29T00:00:00Z', maxAgeSeconds: 7200, now,
   });
   assert.equal(result.valid, false);
   assert.ok(result.error?.includes('future'));
@@ -437,34 +440,46 @@ function makeTestBars(n, highFn, lowFn) {
   return bars;
 }
 
-test('computeVnStructure: identical bars and MAs produce deterministic result', () => {
+test('check and scan production adapters emit identical structure truth', () => {
   const bars = makeTestBars(120, i => 100 + i * 0.5, i => 99 + i * 0.5);
-  const mas = { sma20: 105, sma100: 100 };
+  const checkHistory = buildClosedH6History({ bars, activeBarClosed: true });
+  const scanHistory = buildScanStructure({
+    bars,
+    activeBarClosed: true,
+    sma20: checkHistory.sma20,
+    sma100: checkHistory.sma100,
+  });
 
-  const a = computeVnStructure(bars, mas);
-  const b = computeVnStructure(bars, mas);
+  assert.equal(checkHistory.structure_v2.version, VN_STRUCTURE_VERSION);
+  assert.equal(checkHistory.structure, scanHistory.structure);
+  for (const field of [
+    'version',
+    'trend_state',
+    'range_state',
+    'confirmed',
+    'upper',
+    'upper_ref',
+    'lower',
+    'lower_ref',
+  ]) {
+    assert.equal(checkHistory.structure_v2[field], scanHistory.structure_v2[field], field);
+  }
 
-  assert.equal(a.version, VN_STRUCTURE_VERSION);
-  assert.equal(b.version, VN_STRUCTURE_VERSION);
-  assert.deepEqual(a, b, 'identical inputs → identical outputs');
-  assert.ok(Number.isFinite(a.upper), 'upper must be finite');
-  assert.ok(Number.isFinite(a.upper_ref));
-  assert.ok(Number.isFinite(a.lower));
-  assert.ok(Number.isFinite(a.lower_ref));
-  assert.equal(a.trend_state, 'UP');
-  assert.equal(a.confirmed, true);
-});
+  const scanResult = buildScoutResult({
+    name: 'TEST',
+    sig: 'WATCH',
+    scored: {},
+    fp: {},
+    ma: { ma20: checkHistory.sma20, ma100: checkHistory.sma100 },
+    rs: {},
+    discovery: {},
+    structure: scanHistory.structure,
+    structureV2: scanHistory.structure_v2,
+  }, { regime: 'N/A', note: null });
 
-test('scan results must not contain plan or READY grant', () => {
-  // Scan is discovery-only — structure_v2 is present but no plan/READY
-  // This is tested through the production scan adapters (scanOne → buildScoutResult)
-  // The assertion is: scan results always have structure_v2 with only version/trend/range/confirmed/bounds
-  const bars = makeTestBars(100, i => 100 + i * 0.5, i => 99 + i * 0.5);
-  const r = computeVnStructure(bars, { sma20: 105, sma100: 100 });
-  // Verify structure_v2 shape never contains plan/READY fields
-  assert.equal(r.version, VN_STRUCTURE_VERSION);
-  assert.ok(!('plan_key' in r), 'structure_v2 must not contain plan_key');
-  assert.ok(!('readiness' in r), 'structure_v2 must not contain readiness');
-  assert.ok(!('status' in r), 'structure_v2 must not contain status');
-  assert.ok(!('setup_state' in r), 'structure_v2 must not contain setup_state');
+  assert.equal(scanResult.structure, checkHistory.structure);
+  assert.deepEqual(scanResult.structure_v2, checkHistory.structure_v2);
+  for (const forbidden of ['plan', 'plan_key', 'readiness', 'status', 'setup_state']) {
+    assert.ok(!(forbidden in scanResult), `scan result must not grant ${forbidden}`);
+  }
 });

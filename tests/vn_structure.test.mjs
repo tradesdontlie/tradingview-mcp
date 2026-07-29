@@ -118,6 +118,11 @@ test('deriveCandidate table rows', () => {
     deriveCandidate({ upperDirection: 'UP', lowerDirection: 'UNKNOWN', sma20: 100, sma100: 90 }),
     { trendState: 'UNKNOWN', rangeState: 'UNKNOWN' },
   );
+  assert.deepEqual(
+    deriveCandidate({ upperDirection: 'UP', lowerDirection: 'DOWN', sma20: null, sma100: 90 }),
+    { trendState: 'UNKNOWN', rangeState: 'UNKNOWN' },
+    'non-finite current MA input fails closed for every boundary combination',
+  );
 });
 
 // ── compatibilityStructure ──
@@ -161,6 +166,33 @@ test('computeVnStructure: 24 bars monotonically rising → confirmed UP/SHIFTING
   assert.equal(r.trend_state, 'UP');
   assert.equal(r.range_state, 'SHIFTING');
   assert.equal(r.confirmed, true, '24 bars = 2 consistent evaluations → confirmed');
+});
+
+test('computeVnStructure: current MA order overlays the confirmed channel state', () => {
+  const closes = [
+    ...Array(81).fill(100),
+    ...Array(19).fill(99),
+    130,
+  ];
+  const bars = closes.map((close, i) => ({
+    time: i,
+    open: close,
+    high: 100 + i,
+    low: 99 + i,
+    close,
+    volume: 100000,
+  }));
+
+  const up = computeVnStructure(bars, { sma20: 100.55, sma100: 100.11 });
+  assert.equal(up.trend_state, 'UP');
+  assert.equal(up.range_state, 'SHIFTING');
+  assert.equal(up.confirmed, true);
+
+  const mixed = computeVnStructure(bars, { sma20: 99.05, sma100: 99.81 });
+  assert.equal(mixed.trend_state, 'MIXED');
+  assert.equal(mixed.range_state, 'SHIFTING');
+  assert.equal(mixed.confirmed, true,
+    'confirmation owns consecutive channel directions; current MA order maps the current state');
 });
 
 test('computeVnStructure: MIXED/EXPANDING when lower drops', () => {

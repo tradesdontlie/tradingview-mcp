@@ -43,20 +43,21 @@ export function deriveCandidate({ upperDirection, lowerDirection, sma20, sma100 
   const l = lowerDirection;
   const maFinite = Number.isFinite(sma20) && Number.isFinite(sma100);
 
-  // Missing/non-finite directions → UNKNOWN
-  if (u === 'UNKNOWN' || l === 'UNKNOWN') return { trendState: 'UNKNOWN', rangeState: 'UNKNOWN' };
+  // Missing/non-finite input → UNKNOWN
+  if (!maFinite || u === 'UNKNOWN' || l === 'UNKNOWN') {
+    return { trendState: 'UNKNOWN', rangeState: 'UNKNOWN' };
+  }
 
   if (u === 'UP' && l === 'UP') {
-    if (maFinite && sma20 > sma100) return { trendState: 'UP', rangeState: 'SHIFTING' };
+    if (sma20 > sma100) return { trendState: 'UP', rangeState: 'SHIFTING' };
     return { trendState: 'MIXED', rangeState: 'SHIFTING' };
   }
   if (u === 'DOWN' && l === 'DOWN') {
-    if (maFinite && sma20 < sma100) return { trendState: 'DOWN', rangeState: 'SHIFTING' };
+    if (sma20 < sma100) return { trendState: 'DOWN', rangeState: 'SHIFTING' };
     return { trendState: 'MIXED', rangeState: 'SHIFTING' };
   }
   if (u === 'FLAT' && l === 'FLAT') {
-    if (maFinite) return { trendState: 'RANGE', rangeState: 'STABLE' };
-    return { trendState: 'UNKNOWN', rangeState: 'UNKNOWN' };
+    return { trendState: 'RANGE', rangeState: 'STABLE' };
   }
   if (u === 'UP' && l === 'DOWN') return { trendState: 'MIXED', rangeState: 'EXPANDING' };
   if (u === 'DOWN' && l === 'UP') return { trendState: 'MIXED', rangeState: 'CONTRACTING' };
@@ -123,26 +124,48 @@ export function computeVnStructure(completedBars, { sma20, sma100 }) {
       refLows.push(completedBars[i].low);
     }
 
+    const inputsFinite = [...curHighs, ...curLows, ...refHighs, ...refLows]
+      .every(Number.isFinite);
+    if (!inputsFinite) {
+      return {
+        upper: null,
+        lower: null,
+        upperRef: null,
+        lowerRef: null,
+        upperDirection: 'UNKNOWN',
+        lowerDirection: 'UNKNOWN',
+      };
+    }
+
     const upper = Math.max(...curHighs);
     const lower = Math.min(...curLows);
     const upperRef = Math.max(...refHighs);
     const lowerRef = Math.min(...refLows);
 
-    const upperDir = classifyBoundary(upper, upperRef);
-    const lowerDir = classifyBoundary(lower, lowerRef);
-    const candidate = deriveCandidate({ upperDirection: upperDir, lowerDirection: lowerDir, sma20, sma100 });
-
-    return { upper, lower, upperRef, lowerRef, trendState: candidate.trendState, rangeState: candidate.rangeState };
+    return {
+      upper,
+      lower,
+      upperRef,
+      lowerRef,
+      upperDirection: classifyBoundary(upper, upperRef),
+      lowerDirection: classifyBoundary(lower, lowerRef),
+    };
   };
 
   const cur = boundsAt(n - 1);
+  const candidate = deriveCandidate({
+    upperDirection: cur.upperDirection,
+    lowerDirection: cur.lowerDirection,
+    sma20,
+    sma100,
+  });
 
   // First evaluation only → provisional
   if (n < 24) {
     return {
       version: VN_STRUCTURE_VERSION,
-      trend_state: cur.trendState,
-      range_state: cur.rangeState,
+      trend_state: candidate.trendState,
+      range_state: candidate.rangeState,
       confirmed: false,
       upper: cur.upper,
       upper_ref: cur.upperRef,
@@ -154,12 +177,14 @@ export function computeVnStructure(completedBars, { sma20, sma100 }) {
 
   // Two consecutive evaluations needed for confirmation
   const prev = boundsAt(n - 2);
-  const confirmed = cur.trendState === prev.trendState && cur.rangeState === prev.rangeState;
+  const confirmed = candidate.trendState !== 'UNKNOWN'
+    && cur.upperDirection === prev.upperDirection
+    && cur.lowerDirection === prev.lowerDirection;
 
   return {
     version: VN_STRUCTURE_VERSION,
-    trend_state: cur.trendState,
-    range_state: cur.rangeState,
+    trend_state: candidate.trendState,
+    range_state: candidate.rangeState,
     confirmed,
     upper: cur.upper,
     upper_ref: cur.upperRef,

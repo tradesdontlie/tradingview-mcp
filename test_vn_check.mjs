@@ -39,6 +39,14 @@ function bar(close, open, high, low, volume) {
   assert.equal(history.protected_low, history2.protected_low, 'mutating active must not change protected low');
 }
 
+{
+  const history = buildClosedH6History({ bars: [], activeBarClosed: true });
+  assert.equal(history.structure_v2.version, VN_STRUCTURE_VERSION);
+  assert.equal(history.structure_v2.trend_state, 'UNKNOWN');
+  assert.equal(history.structure_v2.confirmed, false);
+  assert.equal(history.structure, 'INSUFFICIENT_DATA');
+}
+
 // ==== classifyVnSetup setup-path tests =====
 
 // PM Profile is manual-only — classifyVnSetup only sees SMA-based setups
@@ -353,6 +361,7 @@ function makeStructBars(n, factory) {
   const history = buildClosedH6History({ bars, activeBarClosed: true });
   assert.ok(history.structure_v2, 'buildClosedH6History must include structure_v2');
   assert.equal(history.structure_v2.version, VN_STRUCTURE_VERSION);
+  assert.equal(history.structure, compatibilityStructure(history.structure_v2.trend_state));
   assert.ok(Number.isFinite(history.structure_v2.upper), 'structure_v2.upper must be finite');
   assert.ok(Number.isFinite(history.structure_v2.upper_ref));
   assert.ok(Number.isFinite(history.structure_v2.lower));
@@ -420,6 +429,23 @@ function makeStructBars(n, factory) {
     aboveSma100: true,
   });
   assert.equal(r.setup, null, 'HCM with MIXED → no setup, no SMA100 overextension invented');
+
+  const autoCore = buildVnAutoCore({
+    price: 25300,
+    h6History: {
+      bars_completed: 120,
+      sma20: 24608,
+      sma100: 22738,
+      structure: 'MIXED',
+      structure_v2: { trend_state: 'MIXED', range_state: 'EXPANDING', confirmed: true },
+      avg_vol_20: 5000,
+    },
+    h6Live: { vol_ratio: 1.01 },
+    entryWindow: { window: 'HIGH' },
+    setup: r,
+  });
+  assert.ok(autoCore.blockers.includes('NO_SETUP'));
+  assert.ok(!autoCore.blockers.includes('OVEREXTENDED'));
 }
 
 // buildVnAutoCore: structure_v2 trend gates block correctly

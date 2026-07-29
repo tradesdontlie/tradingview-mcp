@@ -9,7 +9,7 @@ import { execFileSync } from 'child_process';
 import { computeRS, writeVnindexCache, VNINDEX_SYM } from './rs_util.mjs';
 import { barStatus, sessionInfo } from './bar_status.mjs';
 import { MARKET_ADJ, SCAN_ENGINE_VERSION, assertH6Resolution, confirmSymbol, extractMovingAverages, scoreSignal as policyScoreSignal } from './src/scan_policy.mjs';
-import { computeVnStructure } from './src/core/vn_structure.mjs';
+import { compatibilityStructure, computeVnStructure } from './src/core/vn_structure.mjs';
 
 let chart;
 let data;
@@ -17,7 +17,8 @@ let getClient;
 let candidateBatch = null;
 
 // Evening Scout feed: scan_live ghi ket qua footprint cho morning brief (scout_promote.py doc file nay)
-const SELF_TEST = process.argv.some(arg => arg.startsWith('--self-test-'));
+const IS_DIRECT = (process.argv[1] || '').replace(/\\/g, '/').endsWith('/scan_live.mjs');
+const SELF_TEST = !IS_DIRECT || process.argv.some(arg => arg.startsWith('--self-test-'));
 const requiredEnv = name => {
   if (SELF_TEST) return process.env[name] || '';
   if (!process.env[name]) throw new Error(`Missing ${name}; run via cos.py scan-live`);
@@ -361,7 +362,16 @@ function classifyDiscovery(r) {
     (r.discovery?.primary_discovery_track ?? null) };
 }
 
-function buildScoutResult(r, marketRegime) {
+export function buildScanStructure({ bars, activeBarClosed, sma20, sma100 }) {
+  const completed = activeBarClosed ? bars : bars.slice(0, -1);
+  const structureV2 = computeVnStructure(completed, { sma20, sma100 });
+  return {
+    structure: compatibilityStructure(structureV2.trend_state),
+    structure_v2: structureV2,
+  };
+}
+
+export function buildScoutResult(r, marketRegime) {
   const discovery = classifyDiscovery(r);
   return {
     ticker: r.name,
@@ -410,6 +420,7 @@ function buildScoutResult(r, marketRegime) {
     discovery_fundamentals: r.discovery?.fundamentals ?? null,
     discovery_signal: discovery.signal,
     foreign_modifier: foreignModifier(r.name, foreignSnapshot),
+    structure: r.structure ?? compatibilityStructure(r.structureV2?.trend_state),
     structure_v2: r.structureV2 ?? null,
   };
 }
@@ -468,9 +479,15 @@ async function scanOne(ticker, name, idxCloses, marketRegime) {
   const tableRows = parseFPTable(fpTbl);
   const bars = (ohlcv.bars || []).slice(-65);
   const { phase, vol_ratio, churn, bar_closed, bar_age_pct } = computeWave(bars, price);
-  // VN Structure v2 from completed bars
-  const completedForV2 = bar_closed ? bars : bars.slice(0, -1);
-  const structureV2 = computeVnStructure(completedForV2, { sma20: ma.ma20, sma100: ma.ma100 });
+  const {
+    structure,
+    structure_v2: structureV2,
+  } = buildScanStructure({
+    bars,
+    activeBarClosed: bar_closed,
+    sma20: ma.ma20,
+    sma100: ma.ma100,
+  });
   // Session phase (VN HOSE gate)
   const isVnStock = /^(HOSE|HNX|UPCOM):/i.test(ticker || '') && !(ticker || '').includes('!');
   const sess = sessionInfo(new Date(), isVnStock ? 'VN' : 'N/A');
@@ -481,7 +498,7 @@ async function scanOne(ticker, name, idxCloses, marketRegime) {
   });
   const rs = idxCloses ? computeRS(bars, idxCloses) : { rs_20: null, leader: null };
 
-  return { price, chg_pct, fp, ma, scored, tableRows, phase, vol_ratio, churn, barClosed: bar_closed, barAgePct: bar_age_pct, rs, session: sess, structureV2 };
+  return { price, chg_pct, fp, ma, scored, tableRows, phase, vol_ratio, churn, barClosed: bar_closed, barAgePct: bar_age_pct, rs, session: sess, structure, structureV2 };
 }
 
 async function main() {
@@ -732,4 +749,6 @@ async function main() {
   process.exit(persistOk ? 0 : 1);
 }
 
-main().catch(e => { console.error(e); process.exit(1); });
+if (IS_DIRECT) {
+  main().catch(e => { console.error(e); process.exit(1); });
+}
