@@ -233,6 +233,18 @@ function _spawnDetached(spawnFn, exe, args) {
   return child;
 }
 
+function _activateWindowsStoreApp(appId, cdpPort, deps) {
+  const safeAppId = appId.replace(/'/g, "''");
+  const ps = `powershell -NoProfile -Command "Start-Process -FilePath 'shell:AppsFolder\\${safeAppId}' -ArgumentList '--remote-debugging-port=${cdpPort}'"`;
+  try {
+    deps.execSync(ps, { timeout: 5000 });
+  } catch {
+    // Some Store activations return a non-zero PowerShell status even after
+    // TradingView starts. The CDP probe below is the source of truth.
+  }
+  return { pid: undefined };
+}
+
 // Resolves once with an error string if the process fails/exits within graceMs,
 // or with null if it survives that long.
 function _spawnFailedEarly(child, graceMs = 1500) {
@@ -273,7 +285,7 @@ function _copyMsixPackageLocal(tvPath, { cpSync, rmSync, readdirSync, existsSync
   if (!existsSync(dstExe)) {
     try {
       for (const entry of readdirSync(cacheRoot)) {
-        if (entry !== pkgName && /^TradingView\./i.test(entry)) {
+        if (entry !== pkgName && /TradingView/i.test(entry)) {
           rmSync(join(cacheRoot, entry), { recursive: true, force: true });
         }
       }
@@ -309,6 +321,7 @@ export async function launch({ port, kill_existing, _deps } = {}) {
   };
 
   let tvPath = null;
+  let windowsStoreAppId = null;
   const candidates = pathMap[platform] || pathMap.linux;
   for (const p of candidates) {
     if (p && deps.existsSync(p)) { tvPath = p; break; }
@@ -318,8 +331,10 @@ export async function launch({ port, kill_existing, _deps } = {}) {
     // MSIX/Windows Store install — InstallLocation is in WindowsApps, which is ACL-restricted
     // for normal `dir` enumeration but readable via Get-AppxPackage without elevation.
     try {
-      const ps = 'powershell -NoProfile -Command "(Get-AppxPackage -Name \'TradingView.Desktop\' -ErrorAction SilentlyContinue).InstallLocation"';
-      const installDir = deps.execSync(ps, { timeout: 5000 }).toString().trim();
+      const ps = 'powershell -NoProfile -Command "$pkg = Get-AppxPackage | Where-Object { $_.Name -like \'*TradingView*\' -or $_.PackageFullName -like \'*TradingView*\' } | Select-Object -First 1; if ($pkg) { $manifest = [xml](Get-Content (Join-Path $pkg.InstallLocation \'AppxManifest.xml\')); Write-Output $pkg.InstallLocation; Write-Output ($pkg.PackageFamilyName + \'!\' + $manifest.Package.Applications.Application.Id) }"';
+      const lines = deps.execSync(ps, { timeout: 5000 }).toString().trim().split(/\r?\n/).filter(Boolean);
+      const installDir = lines[0];
+      windowsStoreAppId = lines[1] || null;
       if (installDir) {
         const candidate = `${installDir}\\TradingView.exe`;
         if (deps.existsSync(candidate)) tvPath = candidate;
@@ -351,7 +366,7 @@ export async function launch({ port, kill_existing, _deps } = {}) {
 
   const killExisting = async () => {
     try {
-      if (platform === 'win32') deps.execSync('taskkill /F /IM TradingView.exe', { timeout: 5000 });
+      if (platform === 'win32') deps.execSync('taskkill /F /IM TradingView.exe >nul 2>nul', { timeout: 5000 });
       else deps.execSync('pkill -f TradingView', { timeout: 5000 });
       await deps.delay(1500);
     } catch { /* may not be running */ }
@@ -369,11 +384,17 @@ export async function launch({ port, kill_existing, _deps } = {}) {
     if (!earlyFailure) {
       info = await _waitForCdp({ cdpPort, attempts: 15, delay: deps.delay, probeCdp: deps.probeCdp });
     }
+    if (!info && windowsStoreAppId) {
+      if (killFirst) await killExisting();
+      child = _activateWindowsStoreApp(windowsStoreAppId, cdpPort, deps);
+      tvPath = `shell:AppsFolder\\${windowsStoreAppId}`;
+      info = await _waitForCdp({ cdpPort, attempts: 15, delay: deps.delay, probeCdp: deps.probeCdp });
+    }
     if (!info) {
       // Direct WindowsApps launch was blocked or CDP never bound — fall back to
       // a local copy of the package (see _copyMsixPackageLocal).
       const localExe = _copyMsixPackageLocal(tvPath, deps);
-      await killExisting();
+      if (killFirst) await killExisting();
       child = _spawnDetached(deps.spawn, localExe, cdpArgs);
       tvPath = localExe;
       usedLocalCopy = true;
