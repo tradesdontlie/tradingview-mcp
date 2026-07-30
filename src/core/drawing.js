@@ -44,9 +44,10 @@ export async function drawShape({ shape, point, point2, overrides: overridesRaw,
   return { success: true, shape, entity_id: result?.entity_id };
 }
 
-export async function listDrawings() {
-  const apiPath = await _getChartApi();
-  const shapes = await _evaluate(`
+export async function listDrawings(_deps) {
+  const { evaluate, getChartApi } = _resolve(_deps);
+  const apiPath = await getChartApi();
+  const shapes = await evaluate(`
     (function() {
       var api = ${apiPath};
       var all = api.getAllShapes();
@@ -56,9 +57,10 @@ export async function listDrawings() {
   return { success: true, count: shapes?.length || 0, shapes: shapes || [] };
 }
 
-export async function getProperties({ entity_id }) {
-  const apiPath = await _getChartApi();
-  const result = await _evaluate(`
+export async function getProperties({ entity_id, _deps }) {
+  const { evaluate, getChartApi } = _resolve(_deps);
+  const apiPath = await getChartApi();
+  const result = await evaluate(`
     (function() {
       var api = ${apiPath};
       var eid = ${safeString(entity_id)};
@@ -85,9 +87,10 @@ export async function getProperties({ entity_id }) {
   return { success: true, ...result };
 }
 
-export async function removeOne({ entity_id }) {
-  const apiPath = await _getChartApi();
-  const result = await _evaluate(`
+export async function removeOne({ entity_id, _deps }) {
+  const { evaluate, getChartApi } = _resolve(_deps);
+  const apiPath = await getChartApi();
+  const result = await evaluate(`
     (function() {
       var api = ${apiPath};
       var eid = ${safeString(entity_id)};
@@ -106,8 +109,9 @@ export async function removeOne({ entity_id }) {
   return { success: true, entity_id: result?.entity_id, removed: result?.removed, remaining_shapes: result?.remaining_shapes };
 }
 
-export async function clearAll() {
-  const apiPath = await _getChartApi();
-  await _evaluate(`${apiPath}.removeAllShapes()`);
+export async function clearAll(_deps) {
+  const { evaluate, getChartApi } = _resolve(_deps);
+  const apiPath = await getChartApi();
+  await evaluate(`${apiPath}.removeAllShapes()`);
   return { success: true, action: 'all_shapes_removed' };
 }
