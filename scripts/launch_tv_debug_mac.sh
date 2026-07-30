@@ -4,54 +4,67 @@
 
 PORT="${1:-9222}"
 
-# Auto-detect TradingView install location
-APP=""
+# Auto-detect TradingView install location. `open -a` needs the .app bundle,
+# not the inner Mach-O binary.
+BUNDLE=""
 LOCATIONS=(
-  "/Applications/TradingView.app/Contents/MacOS/TradingView"
-  "$HOME/Applications/TradingView.app/Contents/MacOS/TradingView"
+  "/Applications/TradingView.app"
+  "$HOME/Applications/TradingView.app"
 )
 
 for loc in "${LOCATIONS[@]}"; do
-  if [ -f "$loc" ]; then
-    APP="$loc"
+  if [ -d "$loc" ]; then
+    BUNDLE="$loc"
     break
   fi
 done
 
 # Fallback: search with mdfind (Spotlight)
-if [ -z "$APP" ]; then
-  APP=$(mdfind "kMDItemCFBundleIdentifier == 'com.niceincontact.TradingView'" 2>/dev/null | head -1)
-  if [ -n "$APP" ]; then
-    APP="$APP/Contents/MacOS/TradingView"
-  fi
+if [ -z "$BUNDLE" ]; then
+  BUNDLE=$(mdfind "kMDItemCFBundleIdentifier == 'com.niceincontact.TradingView'" 2>/dev/null | head -1)
 fi
 
 # Fallback: find any TradingView.app
-if [ -z "$APP" ] || [ ! -f "$APP" ]; then
-  APP=$(find /Applications "$HOME/Applications" -name "TradingView.app" -maxdepth 2 2>/dev/null | head -1)
-  if [ -n "$APP" ]; then
-    APP="$APP/Contents/MacOS/TradingView"
-  fi
+if [ -z "$BUNDLE" ] || [ ! -d "$BUNDLE" ]; then
+  BUNDLE=$(find /Applications "$HOME/Applications" -name "TradingView.app" -maxdepth 2 2>/dev/null | head -1)
 fi
 
-if [ -z "$APP" ] || [ ! -f "$APP" ]; then
+if [ -z "$BUNDLE" ] || [ ! -d "$BUNDLE" ]; then
   echo "Error: TradingView not found."
   echo "Checked: /Applications/TradingView.app, ~/Applications/TradingView.app"
   echo ""
   echo "If installed elsewhere, run manually:"
-  echo "  /path/to/TradingView.app/Contents/MacOS/TradingView --remote-debugging-port=$PORT"
+  echo "  open -a /path/to/TradingView.app --args --remote-debugging-port=$PORT"
   exit 1
 fi
 
-# Kill any existing TradingView
-pkill -f "TradingView" 2>/dev/null
-sleep 1
+BIN="$BUNDLE/Contents/MacOS/TradingView"
 
-echo "Found TradingView at: $APP"
+# Quit any running instance: `open --args` only forwards arguments when the app
+# is not already running. Match $BIN rather than the bare name — `pkill -f TradingView`
+# also matches unrelated processes that merely mention it.
+osascript -e 'quit app "TradingView"' 2>/dev/null
+for _ in $(seq 1 10); do
+  pgrep -f "$BIN" > /dev/null 2>&1 || break
+  sleep 1
+done
+if pgrep -f "$BIN" > /dev/null 2>&1; then
+  pkill -f "$BIN" 2>/dev/null
+  sleep 2
+fi
+
+echo "Found TradingView at: $BUNDLE"
 echo "Launching with --remote-debugging-port=$PORT ..."
-"$APP" --remote-debugging-port=$PORT &
-TV_PID=$!
-echo "PID: $TV_PID"
+
+# Launch via `open` so launchd owns the process (PPID 1). Launching $BIN directly
+# makes it a child of the calling shell; under a degraded GUI session — e.g. an
+# editor extension host — CDP answers but the renderer never finishes booting:
+# the chart sits on a spinner and api_available stays false indefinitely.
+#
+# ELECTRON_RUN_AS_NODE is exported by some editor extension hosts. When set, the
+# Electron stub runs as a plain Node interpreter and rejects the flag with
+# "bad option: --remote-debugging-port=$PORT".
+env -u ELECTRON_RUN_AS_NODE open -a "$BUNDLE" --args --remote-debugging-port="$PORT"
 
 # Wait for CDP to be ready
 echo "Waiting for CDP..."
