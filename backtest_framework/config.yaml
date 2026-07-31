@@ -1,0 +1,137 @@
+# Kronos Institutional Backtest Configuration
+# ============================================================================
+
+# Universe Configuration
+universe:
+  symbols:
+    - "SPY"
+    - "QQQ"
+    - "NIFTY50"
+    - "XAUUSD"
+    - "BTCUSDT"
+    - "ETHUSDT"
+    - "XAGUSD"
+    - "TLT"
+  timeframes:
+    - "1m"
+    - "15m"
+    - "4h"
+    - "1d"
+
+# Walk-Forward Configuration
+walkforward:
+  train_ratio: 0.65
+  val_ratio: 0.20
+  test_ratio: 0.15
+  min_bars_per_period: 500
+
+# Monte Carlo Configuration
+monte_carlo:
+  n_iterations: 10000
+  n_bootstrap: 1000
+  random_seed: 42
+
+# Target Metrics (Institutional Grade)
+targets:
+  sharpe_ratio: 1.5
+  max_drawdown: 0.20
+  win_rate: 0.666
+  sortino_ratio: 1.0
+  calmar_ratio: 2.0
+  icir: 0.5
+  profit_factor: 1.5
+  expectancy_r: 0.5
+
+# Risk Management Defaults
+risk:
+  risk_per_trade_pct: 1.0
+  max_leverage: 1.0
+  rr_ratio: 1.0
+  atr_stop_mult: 2.0
+  atr_trail_mult: 2.5
+  cooldown_bars: 3
+
+# Drawdown Governor
+dd_governor:
+  enabled: true
+  dd_cap_pct: 8.0
+  min_risk_frac: 0.25
+  dd_hard_pct: 12.0
+  resume_bars: 8
+
+# Data Configuration
+data:
+  lookback_days: 1000
+  data_source: "simulated"  # Change to "lse", "binance", "polygon", "ibkr"
+  cache_dir: "./data_cache"
+
+# Output Configuration
+output:
+  results_dir: "./backtest_results"
+  save_top_n: 100
+  generate_plots: true
+  export_pine_inputs: true
+
+# Kronos Model Configuration
+kronos:
+  enabled: true
+  model_size: "small"  # mini, small, base
+  lookback_candles: 400
+  prediction_horizon: 6
+  vote_weight: 1.5
+  conviction_threshold: 4.0
+  freshness_bars: 3
+
+# Confluence Engine
+confluence:
+  quorum: 7
+  conflict_negation: true
+  voter_weights:
+    momentum: 1.0
+    ema_stack: 1.0
+    ema_cross: 1.0
+    rsi: 1.0
+    adx: 1.0
+    volume: 1.0
+    vwap: 1.0
+    gaussian_channel: 1.0
+    nw_kernel: 1.0
+    connors_rsi: 1.0
+    vol_sweet: 1.0
+    absorption: 1.0
+    kronos: 1.5
+
+# Absorption & Liquidity
+absorption:
+  piv_len: 10
+  sweep_window: 8
+  absorp_threshold: 1.5
+  vol_prof_len: 50
+  show_bubbles: true
+
+# Dynamic Hold Logic
+hold_logic:
+  min_hold: 2
+  max_hold: 6
+  absorp_exit: true
+  liquidity_exit: true
+  kronos_flip_exit: true
+  mom_inversion_exit: true
+
+# Quality Gates
+quality_gates:
+  klmf_regime: true
+  klmf_threshold: -0.15
+  vol_regime: true
+  trend_52w: true
+  vwap_chase_filter: true
+  confirmation_1bar: true
+
+# Visualization
+visualization:
+  show_entries: true
+  show_exits: true
+  show_confluence_dashboard: true
+  show_kronos_predictions: true
+  show_absorption_bubbles: true
+  show_bsl_ssl: true
