@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__tradingview__data_get_ohlcv",
+      "mcp__tradingview__data_get_study_values",
+      "mcp__tradingview__chart_get_state",
+      "mcp__tradingview__quote_get",
+      "mcp__tradingview__tv_health_check",
+      "mcp__tradingview__alert_list",
+      "mcp__tradingview__data_get_pine_lines",
+      "mcp__tradingview__data_get_pine_labels"
+    ]
+  }
+}
