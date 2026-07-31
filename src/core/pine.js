@@ -1475,10 +1475,20 @@ export async function withSave({ script_id_or_name, source, expected_version, in
     has_il_blob: !!saveRes?.has_il_blob,
     layout_saved: layoutSaved,
     ...(settingsDelta && { settings_delta: settingsDelta }),
-    // A verified ship that did not persist is the exact silent-revert hazard.
-    ...(verification === 'passed' && save_layout && !layoutSaved && {
-      durability_warning: 'VERIFIED BUT NOT DURABLE — the chart layout was not saved, so the next app ' +
-                          'restart or layout re-sync will re-instantiate the PREVIOUS version of this study.',
+    // A verified ship that did not persist is the exact silent-revert hazard —
+    // and it is warned about even when the caller opted out, because the hazard
+    // is a property of the chart, not of the caller's intent. Measured
+    // 2026-07-31 with a matched pair: the same version shipped through the same
+    // path reverted on the next restart without this save and survived with it.
+    // Note the failure is TIMING-DEPENDENT, which is what makes it so easy to
+    // miss: TV's auto-save flushes the layout eventually, so an un-saved ship
+    // that sits for ~35s before a restart survives, while the same ship
+    // restarted ~1s later reverts. Do not read one lucky survival as safety.
+    ...(verification === 'passed' && !layoutSaved && {
+      durability_warning: 'VERIFIED BUT NOT DURABLE — the chart layout was not saved' +
+        (save_layout ? '' : ' (save_layout was disabled by the caller)') +
+        ', so an app restart or layout re-sync before TradingView\'s auto-save flushes will ' +
+        're-instantiate the PREVIOUS version of this study, under a fresh entity id.',
     }),
   };
 }
