@@ -102,5 +102,12 @@ register('pine', {
       description: 'Get Pine Script console/log output',
       handler: () => core.getConsole(),
     }],
+    ['save-layout', {
+      description: 'Persist the chart layout so a shipped study survives a restart (asserts the change flag clears)',
+      options: {
+        timeout: { type: 'string', description: 'Milliseconds to wait for the change flag to clear (default 8000)' },
+      },
+      handler: (opts) => core.saveLayout({ timeout_ms: opts.timeout ? Number(opts.timeout) : undefined }),
+    }],
   ]),
 });

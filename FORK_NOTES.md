@@ -923,3 +923,86 @@ constant `true`, which was indistinguishable from the degraded case). Live on a
 FRESH Desktop: cycle 1 `success:true` + `isReplayStarted:false` (no false
 positive), cycles 2–3 `success:false` + still started — matching ground truth
 every time.
+
+---
+
+## §26 — durable Pine ships: layout save, add-then-remove reload, input restore (2026-07-31)
+
+**The problem.** `withSave` reported `final_verification: passed`, a follow-up
+graphics read confirmed the new version, and minutes later the chart was running
+the OLD version again — under a **fresh entity id**, so it never read as a
+revert. Both observations were true. The orchestrator updates the cloud script
+and swaps the **live** study instance, but the **chart layout's saved copy still
+references the previously-compiled version**, and any page reload, layout
+re-sync or app restart re-instantiates from that copy.
+
+This is not cosmetic for anyone driving TradingView from automation: a
+supervisor that kills and relaunches the app on a failed health probe hands the
+next scheduled read an old indicator, with nothing anywhere saying so.
+
+**Five changes, each from an observed failure.**
+
+1. **`saveLayout()` + a `layout_save` step in `withSave`.** Calls
+   `_chartWidgetCollection._saveChartService.saveChartSilently()` and then polls
+   `_hasChanges.value()` until it reads `false` — the flag going `true → false`
+   is the only proof the save actually flushed. **Auto-save being enabled is not
+   sufficient**; it was on and had not flushed in the case above. The step is
+   skipped when verification did not pass (never persist a chart you could not
+   confirm), and a verified-but-unsaved result returns a `durability_warning`
+   field rather than reading as a clean pass. Exposed standalone as
+   `chart_save_layout` (MCP) and `tv pine save-layout` (CLI).
+   **Do not substitute a blind Ctrl+S** — the save target is sticky to whatever
+   last had focus, so with the Pine Editor focused it saves the *script*, which
+   is the same hazard that deprecated `pine_save` (§10).
+
+2. **The reload is add-then-remove.** It used to remove every matching study and
+   then add. That is not atomic: in one observed ship the remove succeeded and
+   every add retry failed, leaving the chart with **no indicator at all** —
+   strictly worse than the stale version being replaced. Adding first makes the
+   worst case "old version still on the chart", which is visible and
+   recoverable. Verification now resolves the study by the **entity id just
+   added** rather than by name substring, because a transient second instance
+   makes a name match ambiguous.
+
+3. **A version mismatch is terminal, not retried.** New status
+   `failed_version_mismatch`. `max_retries` defaults to 2 and each retry is
+   another non-atomic chart mutation; a retry cannot change the version string a
+   script *declares*, so retrying a mismatch only churns the chart. Observed: a
+   source whose version-history comment was bumped while its header and
+   `indicator()` title were not produced a two-minute hang with the chart in
+   flux. Retries still cover catalog/reload faults, where they genuinely help.
+
+4. **User inputs are snapshotted before the reload and restored after.**
+   `remove + add` recreates the study at its **declared defaults**, silently
+   discarding anything the operator tuned — and saving the layout afterwards
+   makes that loss permanent. `withSave` now captures the inputs first, re-applies
+   them to the new instance (`restore_settings`, default true), diffs, and
+   **refuses the layout save** on anything still different (`force_layout_save`
+   overrides). Two guards matter:
+   - **Filtered to `in_<N>`.** A Pine study's input list also carries TV
+     internals — `text` (the multi-KB encrypted compiled source), `pineId`,
+     `pineVersion`, `pineFeatures` — and **every one of them changes on a normal
+     correct ship**. Diffing them would flag every save as a settings loss and
+     refuse every layout save, i.e. break the exact thing this protects.
+   - **Restore is skipped when the input COUNT changed.** Pine input ids are
+     positional, so restoring across a version that added or removed an input
+     writes values into the *wrong* inputs — worse than the reset it undoes. On a
+     count change nothing is restored, the delta is reported, and the layout save
+     is refused.
+
+5. **`refreshCatalog` self-primes the Indicators dialog.** TV builds
+   `_studyMarket._dialog._initIndicatorsPromises` on the first dialog **open**,
+   so after an app restart the function threw `dialog state not initialized` —
+   which sent the descriptor lookup down its bare-title fallback, which
+   `createStudy` rejects for user scripts. That chain is how the empty-chart case
+   in (2) started. It now clicks `[data-name="open-indicators-dialog"]`, polls
+   for the state (≤3s), dispatches Escape via CDP, and retries once, reporting
+   `auto_primed`.
+
+**Validated live** on TradingView Desktop 3.3.0: a docs-only version bump shipped
+through `withSave` — snapshot 18 inputs → add-then-remove (removed 1) → verify
+matched → **2 tuned inputs restored, diff empty** → `layout_save`
+`has_changes_before: true → has_changes_after: false`. The app was then killed
+and relaunched by its supervisor; the chart came back on the **new** version under
+the **same entity id** with both tuned inputs intact. `node --check` + eslint
+clean (0 errors).

@@ -941,8 +941,71 @@ export async function listScripts() {
  *   - _updateUserStudies: present (function)
  *   - _studies['Script$USER']: 6 entries at probe time
  */
-export async function refreshCatalog() {
-  const result = await evaluateAsync(`
+// Lazy-init the Indicators dialog so `refreshCatalog` has state to refresh.
+//
+// TV builds `_studyMarket._dialog._initIndicatorsPromises` on the first dialog
+// OPEN. After an app restart it does not exist, so `refreshCatalog` used to
+// throw "dialog state not initialized" — which sent the descriptor lookup down
+// its bare-title fallback, which `createStudy` rejects for user scripts. On the
+// 2026-07-28 Patterns ship that chain removed the study and then failed every
+// add retry, leaving the chart with NO indicator: strictly worse than the stale
+// version it was replacing. The documented manual recovery was "click the
+// indicators button, press Escape, retry" — so do exactly that, in code.
+async function primeIndicatorsDialog() {
+  const clicked = await evaluate(`
+    (function() {
+      var btn = document.querySelector('[data-name="open-indicators-dialog"]');
+      if (!btn) return { ok: false, reason: 'indicators button not found in DOM' };
+      btn.click();
+      return { ok: true };
+    })()
+  `);
+  if (!clicked?.ok) return { primed: false, reason: clicked?.reason || 'click failed' };
+
+  // Wait for TV to construct the dialog state, then dismiss it. Escape goes via
+  // CDP rather than a synthetic KeyboardEvent — React's handler ignores
+  // untrusted events (same reason watchlist.js dispatches it this way).
+  let primed = false;
+  for (let i = 0; i < 12; i++) {
+    await new Promise(r => setTimeout(r, 250));
+    const probe = await evaluate(`
+      (function() {
+        var d = window.TradingViewApi && window.TradingViewApi._studyMarket && window.TradingViewApi._studyMarket._dialog;
+        return { ready: !!(d && d._initIndicatorsPromises && d._updateUserStudies) };
+      })()
+    `);
+    if (probe?.ready) { primed = true; break; }
+  }
+  try {
+    const c = await getClient();
+    await c.Input.dispatchKeyEvent({ type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+    await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 'Escape', code: 'Escape' });
+  } catch (_) { /* dialog may already be closed; never fatal */ }
+  return { primed, reason: primed ? null : 'dialog state did not appear within 3s' };
+}
+
+export async function refreshCatalog({ auto_prime = true } = {}) {
+  let primed = null;
+  let result = await _refreshCatalogOnce();
+  if (result?.error && /dialog state not initialized/i.test(result.error) && auto_prime) {
+    primed = await primeIndicatorsDialog();
+    if (primed.primed) result = await _refreshCatalogOnce();
+  }
+  if (result && result.error) throw new Error(result.error + (primed && !primed.primed ? ` (auto-prime failed: ${primed.reason})` : ''));
+  return {
+    success: true,
+    cache_before_count: result?.before ?? null,
+    cache_after_count: result?.after ?? null,
+    delta: (result?.after ?? 0) - (result?.before ?? 0),
+    scripts: result?.scripts || [],
+    ...(primed && { auto_primed: primed.primed }),
+    source: 'pine_facade_rest',
+    note: 'TV chart-side Indicators-dialog catalog refreshed. New scripts are now visible in the dialog without page reload.',
+  };
+}
+
+async function _refreshCatalogOnce() {
+  return evaluateAsync(`
     (function() {
       try {
         var market = window.TradingViewApi && window.TradingViewApi._studyMarket;
@@ -970,15 +1033,159 @@ export async function refreshCatalog() {
       } catch(e) { return { error: 'refreshCatalog threw: ' + e.message }; }
     })()
   `);
-  if (result && result.error) throw new Error(result.error);
+}
+
+// ── T184 — layout save ──
+//
+// A Pine ship is NOT durable until the chart LAYOUT is saved. `withSave` updates
+// the cloud script and swaps the LIVE study instance, but the layout's saved
+// copy still references the previously-compiled version. Any page reload, layout
+// re-sync or app restart re-instantiates from that copy and silently reverts the
+// chart — under a FRESH entity id, so it does not read as a revert. Measured
+// 2026-07-28: verification passed, the panel read the new version, and minutes
+// later the chart was back on the old one.
+//
+// This matters because downstream automation restarts the app unattended and
+// then reads the panel — so an un-saved ship means scheduled work can be scoring
+// against an old indicator with nothing anywhere saying so.
+//
+// Do NOT substitute a blind Ctrl+S: TradingView's save target is sticky to
+// whatever last had focus, so with the Pine Editor focused it saves the SCRIPT,
+// not the layout (the same sticky-target hazard that deprecated `pine_save`).
+export async function saveLayout({ timeout_ms = 8000 } = {}) {
+  const t0 = Date.now();
+  const before = await evaluate(`
+    (function() {
+      try {
+        var cw = window.TradingViewApi && window.TradingViewApi._chartWidgetCollection;
+        if (!cw) return { error: 'chart widget collection not available' };
+        if (!cw._saveChartService || typeof cw._saveChartService.saveChartSilently !== 'function')
+          return { error: '_saveChartService.saveChartSilently not available' };
+        var has = cw._hasChanges && typeof cw._hasChanges.value === 'function' ? cw._hasChanges.value() : null;
+        cw._saveChartService.saveChartSilently();
+        return { ok: true, has_changes_before: has };
+      } catch (e) { return { error: 'saveLayout threw: ' + e.message }; }
+    })()
+  `);
+  if (before?.error) throw new Error(before.error);
+
+  // `_hasChanges` going true → false is the assertion that the save actually
+  // flushed. Auto-save being enabled is NOT sufficient — it was on, and had not
+  // flushed, on the ship that motivated this.
+  let after = before.has_changes_before;
+  while (Date.now() - t0 < timeout_ms) {
+    await new Promise(r => setTimeout(r, 250));
+    const probe = await evaluate(`
+      (function() {
+        var cw = window.TradingViewApi && window.TradingViewApi._chartWidgetCollection;
+        var h = cw && cw._hasChanges && typeof cw._hasChanges.value === 'function' ? cw._hasChanges.value() : null;
+        return { has_changes: h };
+      })()
+    `);
+    after = probe?.has_changes ?? after;
+    if (after === false) break;
+  }
+
   return {
-    success: true,
-    cache_before_count: result?.before ?? null,
-    cache_after_count: result?.after ?? null,
-    delta: (result?.after ?? 0) - (result?.before ?? 0),
-    scripts: result?.scripts || [],
-    source: 'pine_facade_rest',
-    note: 'TV chart-side Indicators-dialog catalog refreshed. New scripts are now visible in the dialog without page reload.',
+    success: after === false,
+    has_changes_before: before.has_changes_before,
+    has_changes_after: after,
+    ms: Date.now() - t0,
+    ...(after !== false && {
+      error: `_hasChanges is still ${String(after)} after ${Date.now() - t0}ms — the layout save did not flush. ` +
+             'The chart will revert to the previously-saved study version on the next restart.',
+    }),
+  };
+}
+
+// Snapshot a study's input values. `remove + add` recreates the study at its
+// DECLARED DEFAULTS, so any input the operator tuned by hand is silently lost —
+// and saving the layout afterwards makes that loss permanent. Comparing this
+// snapshot before and after the reload turns an invisible loss into a reported
+// one, and gates the layout save on it.
+// Only `in_<N>` are operator-facing. A Pine study's input list ALSO carries
+// TradingView internals — `text` (the ~6 KB encrypted compiled source), `pineId`,
+// `pineVersion`, `pineFeatures` — every one of which changes on a normal, correct
+// ship. Diffing them would flag every single save as a settings loss and refuse
+// every layout save, i.e. it would break the exact thing this is here to protect.
+const USER_INPUT_RE = /^in_\d+$/;
+
+async function studyInputs(entityId) {
+  const res = await evaluate(`
+    (function() {
+      try {
+        var chart = window.TradingViewApi._activeChartWidgetWV.value();
+        var study = chart.getStudyById(${JSON.stringify(entityId)});
+        if (!study || typeof study.getInputValues !== 'function') return { error: 'inputs unsupported for this study' };
+        var out = {};
+        var vals = study.getInputValues() || [];
+        for (var i = 0; i < vals.length; i++) out[vals[i].id] = vals[i].value;
+        return { ok: true, inputs: out, count: vals.length };
+      } catch (e) { return { error: String(e && e.message || e) }; }
+    })()
+  `);
+  if (!res?.ok) return null;
+  const user = {};
+  for (const [k, v] of Object.entries(res.inputs || {})) if (USER_INPUT_RE.test(k)) user[k] = v;
+  return { inputs: user, count: Object.keys(user).length };
+}
+
+// Re-apply a snapshot onto the freshly-added study, so an operator's tuned
+// inputs survive the reload instead of merely being reported as lost. Guarded on
+// the input COUNT matching: the ids are positional, so restoring across a
+// version that added or removed an input would write values into the WRONG
+// inputs — worse than the reset it is undoing. On a count change we restore
+// nothing and let the diff refuse the layout save.
+async function restoreStudyInputs(entityId, snapshot) {
+  const current = await studyInputs(entityId);
+  if (!current) return { restored: null, reason: 'could not read the new study inputs' };
+  if (current.count !== snapshot.count) {
+    return { restored: null, count_before: snapshot.count, count_after: current.count,
+             reason: 'input count changed — positional ids no longer line up, restore refused' };
+  }
+  const wanted = {};
+  for (const [k, v] of Object.entries(snapshot.inputs)) {
+    if (JSON.stringify(current.inputs[k]) !== JSON.stringify(v)) wanted[k] = v;
+  }
+  if (!Object.keys(wanted).length) return { restored: [], reason: 'already at the snapshot values' };
+  await evaluate(`
+    (function() {
+      var chart = window.TradingViewApi._activeChartWidgetWV.value();
+      var study = chart.getStudyById(${JSON.stringify(entityId)});
+      if (!study || typeof study.getInputValues !== 'function') return { error: 'inputs unsupported' };
+      var vals = study.getInputValues();
+      var want = ${JSON.stringify(wanted)};
+      for (var i = 0; i < vals.length; i++) if (want.hasOwnProperty(vals[i].id)) vals[i].value = want[vals[i].id];
+      study.setInputValues(vals);
+      return { ok: true };
+    })()
+  `);
+  return { restored: Object.keys(wanted), values: wanted };
+}
+
+// NB: Pine input ids are POSITIONAL (`in_0`, `in_1`, …), so a version that
+// inserts or removes an input shifts the meaning of every id after it and this
+// diff will report spurious changes. That is deliberately left noisy rather than
+// silenced: the consequence is a refused layout save with the deltas printed,
+// which a human resolves in seconds — whereas the failure it guards against
+// (silently persisting a reset of tuned inputs) is unrecoverable.
+function diffInputs(before, after) {
+  if (!before || !after) return null;
+  const changed = [];
+  for (const k of Object.keys(before.inputs || {})) {
+    if (!(k in (after.inputs || {}))) continue;          // input removed by the new version — not a loss
+    if (JSON.stringify(before.inputs[k]) !== JSON.stringify(after.inputs[k])) {
+      changed.push({ id: k, was: before.inputs[k], now: after.inputs[k] });
+    }
+  }
+  return {
+    count_before: before.count,
+    count_after: after.count,
+    changed,
+    ...(before.count !== after.count && {
+      note: 'the input COUNT changed, so the positional in_<N> ids no longer line up — ' +
+            'treat any reported change as unreliable and verify by eye',
+    }),
   };
 }
 
@@ -990,17 +1197,44 @@ export async function refreshCatalog() {
 // cache miss / verification failure.
 //
 // Signature:
-//   { script_id_or_name, source, expected_version?, indicator_display_name?, max_retries=2 }
+//   { script_id_or_name, source, expected_version?, indicator_display_name?,
+//     max_retries=2, save_layout=true, force_layout_save=false }
 // Response:
 //   { success, steps: [{name, success, ms, detail}], final_verification,
-//     total_ms, source_lines, has_il_blob }
+//     total_ms, source_lines, has_il_blob, layout_saved, settings_delta }
+//
+// ── T184 hardening (2026-07-31), three changes, each from an observed failure ──
+//
+//  1. **The reload is ADD-then-REMOVE.** It used to remove every matching study
+//     and then add the new one, which is not atomic: on the 2026-07-28 Patterns
+//     ship the remove succeeded and every add retry failed, leaving the chart
+//     with NO indicator — strictly worse than the stale version it was
+//     replacing. Adding first means the worst case is "old version still on the
+//     chart", which the caller can see and act on.
+//
+//  2. **A version mismatch is NOT retried.** Retries exist for a cache miss,
+//     where a second attempt genuinely helps. A wrong `expected_version` cannot
+//     be fixed by retrying — the string is wrong at the source — so retrying it
+//     only churns the chart through more non-atomic mutations. That is exactly
+//     what turned a half-bumped version into a two-minute hang on 2026-07-31.
+//     Distinguished terminal status: `failed_version_mismatch`.
+//
+//  3. **The layout is saved, and gated on a settings-loss check.** See
+//     `saveLayout` above for why the ship is not durable without it. `remove +
+//     add` recreates the study at its declared defaults, so the inputs are
+//     snapshotted before the reload and compared after; if anything the operator
+//     had tuned was reset, they are RESTORED where that is safe (`restore_settings`,
+//     default true) and the layout save is REFUSED on anything still lost
+//     (persisting it would make the loss permanent) unless `force_layout_save`.
 
 function _stepTimer() {
   const t = Date.now();
   return () => Date.now() - t;
 }
 
-export async function withSave({ script_id_or_name, source, expected_version, indicator_display_name, max_retries = 2 } = {}) {
+export async function withSave({ script_id_or_name, source, expected_version, indicator_display_name,
+                                 max_retries = 2, save_layout = true, force_layout_save = false,
+                                 restore_settings = true } = {}) {
   if (!script_id_or_name) throw new Error('script_id_or_name required');
   if (!source) throw new Error('source required');
   const t0 = Date.now();
@@ -1053,60 +1287,105 @@ export async function withSave({ script_id_or_name, source, expected_version, in
     return { success: false, steps, final_verification: 'failed_save', total_ms: Date.now() - t0, source_lines: source.split('\n').length, has_il_blob: false, error: err.message };
   }
 
-  // (c)+(d)+(e) refresh + reload + verify, with retries on cache miss
+  // (b2) settings snapshot — BEFORE any chart mutation. `remove + add` resets
+  // every input to its declared default; without this the loss is invisible.
+  let inputsBefore = null;
+  let newEntityId = null;
+  if (indicator_display_name) {
+    stepMs = _stepTimer();
+    try {
+      const state = await chartGetState();
+      const live = (state?.studies || []).find(s => (s.name || '').toLowerCase().includes(indicator_display_name.toLowerCase()));
+      inputsBefore = live ? await studyInputs(live.id) : null;
+      recordStep('settings_snapshot', !!inputsBefore, {
+        entity_id: live?.id ?? null,
+        input_count: inputsBefore?.count ?? null,
+        note: live ? undefined : 'study not on chart before reload — nothing to lose',
+      }, stepMs());
+    } catch (err) {
+      recordStep('settings_snapshot', false, { error: err.message, note: 'best-effort; continuing' }, stepMs());
+    }
+  }
+
+  // (c)+(d)+(e) refresh + reload + verify. Retries cover cache/reload faults
+  // ONLY — see the header note: a version mismatch is terminal, because a retry
+  // cannot change a wrong version string and each retry is another non-atomic
+  // chart mutation.
   let verification = 'not_attempted';
+  let versionFound = null;
   for (let attempt = 0; attempt <= max_retries; attempt++) {
     const suffix = attempt > 0 ? `[retry${attempt}]` : '';
 
-    // (c) refresh catalog — best-effort
+    // (c) refresh catalog — best-effort (self-primes the dialog since T184)
     stepMs = _stepTimer();
     try {
       const refRes = await refreshCatalog();
       recordStep('pine_refresh_catalog' + suffix, !!refRes?.success, {
         cache_after_count: refRes?.cache_after_count,
         delta: refRes?.delta,
+        ...(refRes?.auto_primed !== undefined && { auto_primed: refRes.auto_primed }),
       }, stepMs());
     } catch (err) {
       recordStep('pine_refresh_catalog' + suffix, false, { error: err.message, note: 'best-effort; continuing' }, stepMs());
     }
 
-    // (d) chart_manage_indicator(remove + add) — only if indicator_display_name was passed
+    // (d) reload: ADD FIRST, then remove the old instances. Never the reverse —
+    // a failed add after a successful remove leaves the chart with no indicator.
     if (indicator_display_name) {
       stepMs = _stepTimer();
       try {
         const state = await chartGetState();
         const existing = (state?.studies || []).filter(s => (s.name || '').toLowerCase().includes(indicator_display_name.toLowerCase()));
-        for (const e of existing) {
-          await manageIndicator({ action: 'remove', indicator: indicator_display_name, entity_id: e.id });
-        }
         const addRes = await manageIndicator({ action: 'add', indicator: indicator_display_name });
-        const reloadOk = !!addRes?.success;
+        const reloadOk = !!addRes?.success && !!addRes?.entity_id;
+        let removed = 0;
+        if (reloadOk) {
+          newEntityId = addRes.entity_id;
+          for (const e of existing) {
+            if (e.id === newEntityId) continue;
+            try { await manageIndicator({ action: 'remove', indicator: indicator_display_name, entity_id: e.id }); removed++; }
+            catch (_) { /* a stale instance left behind is visible; not worth failing the ship */ }
+          }
+        }
         recordStep('chart_reload' + suffix, reloadOk, {
-          removed: existing.length,
+          order: 'add_then_remove',
+          removed,
+          kept_on_add_failure: reloadOk ? 0 : existing.length,
           add_resolution: addRes?.resolution,
           add_entity_id: addRes?.entity_id,
+          ...(reloadOk ? {} : { error: addRes?.error, note: 'add failed — the OLD study was deliberately left on the chart' }),
         }, stepMs());
         if (!reloadOk) {
           if (attempt < max_retries) continue;
-          return { success: false, steps, final_verification: 'failed_reload', total_ms: Date.now() - t0, source_lines: source.split('\n').length, has_il_blob: true, error: addRes?.error || 'chart_manage_indicator(add) failed' };
+          return { success: false, steps, final_verification: 'failed_reload', total_ms: Date.now() - t0, source_lines: source.split('\n').length, has_il_blob: true, layout_saved: false, error: addRes?.error || 'chart_manage_indicator(add) failed' };
         }
       } catch (err) {
         recordStep('chart_reload' + suffix, false, { error: err.message }, stepMs());
         if (attempt < max_retries) continue;
-        return { success: false, steps, final_verification: 'failed_reload', total_ms: Date.now() - t0, source_lines: source.split('\n').length, has_il_blob: true, error: err.message };
+        return { success: false, steps, final_verification: 'failed_reload', total_ms: Date.now() - t0, source_lines: source.split('\n').length, has_il_blob: true, layout_saved: false, error: err.message };
       }
     }
 
-    // (e) verify — by expected_version label (preferred) or by row count
+    // (e) verify — by expected_version label (preferred) or by row count.
+    // Resolve the study we just ADDED by its entity id, not by name substring:
+    // with an old instance transiently present, a name match can read either one.
     stepMs = _stepTimer();
     if (expected_version && indicator_display_name) {
       try {
         const state = await chartGetState();
-        const reloaded = (state?.studies || []).find(s => (s.name || '').toLowerCase().includes(indicator_display_name.toLowerCase()));
+        const reloaded = (state?.studies || []).find(s => s.id === newEntityId)
+          || (state?.studies || []).find(s => (s.name || '').toLowerCase().includes(indicator_display_name.toLowerCase()));
         const found = reloaded ? reloaded.name : null;
         const matched = found && found.toLowerCase().includes(expected_version.toLowerCase());
+        versionFound = found;
         recordStep('verify' + suffix, !!matched, { expected_version, found, matched }, stepMs());
         if (matched) { verification = 'passed'; break; }
+        if (found) {
+          // The study loaded and declares a DIFFERENT version. Terminal — a
+          // retry churns the chart and cannot change the declared string.
+          verification = 'failed_version_mismatch';
+          break;
+        }
       } catch (err) {
         recordStep('verify' + suffix, false, { error: err.message }, stepMs());
       }
@@ -1129,12 +1408,77 @@ export async function withSave({ script_id_or_name, source, expected_version, in
 
   if (verification === 'not_attempted') verification = 'failed_after_retries';
 
+  // (f) settings restore + loss check. The reload recreated the study at its
+  // DECLARED DEFAULTS, so anything the operator had tuned is now reset. Put it
+  // back where it is safe to do so, then diff — what remains changed after the
+  // restore is a real, unrecoverable loss and blocks the layout save.
+  let settingsDelta = null;
+  if (inputsBefore && newEntityId) {
+    stepMs = _stepTimer();
+    let restore = null;
+    if (restore_settings) {
+      try { restore = await restoreStudyInputs(newEntityId, inputsBefore); }
+      catch (err) { restore = { restored: null, reason: `restore threw: ${err.message}` }; }
+    }
+    const after = await studyInputs(newEntityId);
+    settingsDelta = diffInputs(inputsBefore, after);
+    recordStep('settings_precheck', !settingsDelta || settingsDelta.changed.length === 0, {
+      inputs_compared: settingsDelta?.count_before ?? null,
+      restored: restore?.restored ?? null,
+      ...(restore?.reason && { restore_note: restore.reason }),
+      changed: settingsDelta?.changed ?? null,
+    }, stepMs());
+  }
+
+  // (g) layout save — the durability half. Skipped on a failed verification
+  // (never persist a chart we could not confirm) and refused on a settings loss
+  // (persisting it would make the loss permanent).
+  let layoutSaved = false;
+  const settingsLost = !!(settingsDelta && settingsDelta.changed.length);
+  if (save_layout && verification === 'passed') {
+    stepMs = _stepTimer();
+    if (settingsLost && !force_layout_save) {
+      recordStep('layout_save', false, {
+        skipped: 'settings_loss',
+        changed: settingsDelta.changed,
+        note: 'reload reset inputs that differed from the declared defaults. Layout NOT saved — ' +
+              'saving would make the loss permanent. Restore the inputs and save the layout, or ' +
+              're-run with force_layout_save.',
+      }, stepMs());
+    } else {
+      try {
+        const ls = await saveLayout();
+        layoutSaved = !!ls.success;
+        recordStep('layout_save', layoutSaved, {
+          has_changes_before: ls.has_changes_before,
+          has_changes_after: ls.has_changes_after,
+          ...(ls.error && { error: ls.error }),
+        }, stepMs());
+      } catch (err) {
+        recordStep('layout_save', false, { error: err.message }, stepMs());
+      }
+    }
+  }
+
   return {
     success: verification === 'passed' || verification === 'save_only',
     steps,
     final_verification: verification,
+    ...(verification === 'failed_version_mismatch' && {
+      error: `the reloaded study declares "${versionFound}" but expected_version was "${expected_version}". ` +
+             'NOT retried — a retry cannot change a declared version string, it only churns the chart through ' +
+             'more non-atomic mutations. Check that the version is bumped in BOTH the header comment AND the ' +
+             'indicator() declaration, not only the version-history comment.',
+    }),
     total_ms: Date.now() - t0,
     source_lines: source.split('\n').length,
     has_il_blob: !!saveRes?.has_il_blob,
+    layout_saved: layoutSaved,
+    ...(settingsDelta && { settings_delta: settingsDelta }),
+    // A verified ship that did not persist is the exact silent-revert hazard.
+    ...(verification === 'passed' && save_layout && !layoutSaved && {
+      durability_warning: 'VERIFIED BUT NOT DURABLE — the chart layout was not saved, so the next app ' +
+                          'restart or layout re-sync will re-instantiate the PREVIOUS version of this study.',
+    }),
   };
 }

@@ -106,12 +106,22 @@ export function registerPineTools(server) {
     source: z.string().describe('Full Pine v6 source. Will be compiled via pine_check before save.'),
     expected_version: z.string().optional().describe('Version substring to assert in the reloaded entity name (e.g. "v2.12.1"). Most reliable verification probe.'),
     indicator_display_name: z.string().optional().describe('Display name used by chart_manage_indicator(add). Required for chart reload + verification. Omit for save-only mode.'),
-    max_retries: z.number().int().min(0).max(5).optional().describe('Retries on cache miss / verification failure. Default 2.'),
-  }, async ({ script_id_or_name, source, expected_version, indicator_display_name, max_retries }) => {
+    max_retries: z.number().int().min(0).max(5).optional().describe('Retries on cache miss / RELOAD failure. Default 2. A version mismatch is never retried — a retry cannot change a declared version string and each retry is another non-atomic chart mutation.'),
+    save_layout: z.boolean().optional().describe('Save the chart layout after a passing verification. Default true — without it the ship is NOT durable: the layout keeps instantiating the previous compiled version after any restart.'),
+    force_layout_save: z.boolean().optional().describe('Save the layout even if the reload reset tuned inputs to their declared defaults. Default false (refusing protects you from persisting a settings loss).'),
+    restore_settings: z.boolean().optional().describe('Snapshot the study\'s user inputs before the reload and re-apply them after, so operator tuning survives. Default true. Skipped automatically when the input COUNT changed, since the ids are positional.'),
+  }, async ({ script_id_or_name, source, expected_version, indicator_display_name, max_retries, save_layout, force_layout_save, restore_settings }) => {
     try {
-      return jsonResult(await core.withSave({ script_id_or_name, source, expected_version, indicator_display_name, max_retries }));
+      return jsonResult(await core.withSave({ script_id_or_name, source, expected_version, indicator_display_name, max_retries, save_layout, force_layout_save, restore_settings }));
     } catch (err) {
       return jsonResult({ success: false, error: err.message }, true);
     }
+  });
+
+  server.tool('chart_save_layout', 'Persist the current chart layout (studies, their versions, drawings) via TradingView\'s own silent-save service, then assert the change flag actually cleared. Needed because updating a script and swapping the live study does NOT update the layout\'s saved copy — any reload, layout re-sync or app restart re-instantiates the OLD compiled version under a fresh entity id, which does not read as a revert. Auto-save being enabled is not sufficient; it can fail to flush. Do NOT substitute Ctrl+S — the save target is sticky to whatever last had focus, so with the Pine Editor focused it saves the script instead of the layout.', {
+    timeout_ms: z.number().int().min(1000).max(60000).optional().describe('How long to wait for the change flag to clear. Default 8000.'),
+  }, async ({ timeout_ms }) => {
+    try { return jsonResult(await core.saveLayout({ timeout_ms })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 }
