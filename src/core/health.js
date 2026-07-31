@@ -283,6 +283,47 @@ function _copyMsixPackageLocal(tvPath, { cpSync, rmSync, readdirSync, existsSync
   return dstExe;
 }
 
+/**
+ * Resolves the AUMID (PackageFamilyName!AppId) of the installed TradingView
+ * package, for use with shell:AppsFolder activation. Returns null on any
+ * failure — this is a best-effort last resort, never the primary path.
+ */
+function _resolveAumid(deps) {
+  try {
+    const ps = 'powershell -NoProfile -Command "' +
+      '$p = Get-AppxPackage | Where-Object { $_.Name -like \'*TradingView*\' } | Select-Object -First 1; ' +
+      'if ($p) { $a = (Get-AppxPackageManifest $p).Package.Applications.Application; ' +
+      'if ($a -is [System.Array]) { $a = $a[0] }; ' +
+      'Write-Output ($p.PackageFamilyName + \'!\' + $a.Id) }"';
+    const out = deps.execSync(ps, { timeout: 5000 }).toString().trim().split('\n').pop().trim();
+    return out.includes('!') ? out : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Some Desktop Bridge builds verify package identity at startup and silently
+ * exit (no CDP, exit code 9) when launched from anywhere but a proper
+ * activation — even from a byte-identical local copy outside WindowsApps.
+ * A bare `explorer.exe shell:AppsFolder\<aumid>` launch drops arguments, but
+ * a .lnk shortcut targeting that same shell path still forwards its
+ * Arguments string through to a Desktop Bridge app's command line, so we
+ * build one on the fly and launch that instead.
+ */
+function _launchViaAppsFolderShortcut(aumid, cdpArgs, deps) {
+  const lnkPath = join(process.env.TEMP || process.env.TMP || '.', 'tradingview-mcp-launch.lnk');
+  const argString = cdpArgs.join(' ');
+  const ps = 'powershell -NoProfile -Command "' +
+    '$s = New-Object -ComObject WScript.Shell; ' +
+    `$sc = $s.CreateShortcut('${lnkPath}'); ` +
+    `$sc.TargetPath = 'shell:AppsFolder\\${aumid}'; ` +
+    `$sc.Arguments = '${argString}'; ` +
+    '$sc.Save(); ' +
+    `Start-Process '${lnkPath}'"`;
+  deps.execSync(ps, { timeout: 8000 });
+}
+
 export async function launch({ port, kill_existing, _deps } = {}) {
   const deps = _resolveLaunchDeps(_deps);
   const cdpPort = port || CDP_PORT;
@@ -317,8 +358,10 @@ export async function launch({ port, kill_existing, _deps } = {}) {
   if (!tvPath && platform === 'win32') {
     // MSIX/Windows Store install — InstallLocation is in WindowsApps, which is ACL-restricted
     // for normal `dir` enumeration but readable via Get-AppxPackage without elevation.
+    // Match by Name substring, not exact: 'TradingView.Desktop' is the manifest AppId, not the
+    // package Name (e.g. the retail listing installs as '31178TradingViewInc.TradingView').
     try {
-      const ps = 'powershell -NoProfile -Command "(Get-AppxPackage -Name \'TradingView.Desktop\' -ErrorAction SilentlyContinue).InstallLocation"';
+      const ps = 'powershell -NoProfile -Command "(Get-AppxPackage | Where-Object { $_.Name -like \'*TradingView*\' } | Select-Object -First 1).InstallLocation"';
       const installDir = deps.execSync(ps, { timeout: 5000 }).toString().trim();
       if (installDir) {
         const candidate = `${installDir}\\TradingView.exe`;
@@ -363,12 +406,14 @@ export async function launch({ port, kill_existing, _deps } = {}) {
   let child = _spawnDetached(deps.spawn, tvPath, cdpArgs);
   let info = null;
   let usedLocalCopy = false;
+  let usedAppsFolderShortcut = false;
 
   if (platform === 'win32' && WINDOWS_APPS_RE.test(tvPath)) {
     const earlyFailure = await _spawnFailedEarly(child);
     if (!earlyFailure) {
       info = await _waitForCdp({ cdpPort, attempts: 15, delay: deps.delay, probeCdp: deps.probeCdp });
     }
+
     if (!info) {
       // Direct WindowsApps launch was blocked or CDP never bound — fall back to
       // a local copy of the package (see _copyMsixPackageLocal).
@@ -377,25 +422,46 @@ export async function launch({ port, kill_existing, _deps } = {}) {
       child = _spawnDetached(deps.spawn, localExe, cdpArgs);
       tvPath = localExe;
       usedLocalCopy = true;
+      info = await _waitForCdp({ cdpPort, attempts: 15, delay: deps.delay, probeCdp: deps.probeCdp });
     }
-  }
 
-  if (!info) {
+    if (!info) {
+      // The local copy didn't bind CDP either — fall back to proper package
+      // activation via a shell:AppsFolder shortcut (see _launchViaAppsFolderShortcut).
+      const aumid = _resolveAumid(deps);
+      if (aumid) {
+        await killExisting();
+        try {
+          _launchViaAppsFolderShortcut(aumid, cdpArgs, deps);
+          usedAppsFolderShortcut = true;
+          info = await _waitForCdp({ cdpPort, attempts: 15, delay: deps.delay, probeCdp: deps.probeCdp });
+        } catch { /* leave info null; fall through to the not-ready response below */ }
+      }
+    }
+  } else {
     info = await _waitForCdp({ cdpPort, attempts: 15, delay: deps.delay, probeCdp: deps.probeCdp });
   }
 
+  // A shortcut launch is fire-and-forget through PowerShell/explorer — there's no
+  // child process handle for the actual TradingView instance it spawns.
+  const pid = usedAppsFolderShortcut ? undefined : child.pid;
+  const extraFlags = {
+    ...(usedLocalCopy && { msix_local_copy: true }),
+    ...(usedAppsFolderShortcut && { msix_apps_folder_shortcut: true }),
+  };
+
   if (info) {
     return {
-      success: true, platform, binary: tvPath, pid: child.pid,
+      success: true, platform, binary: tvPath, pid,
       cdp_port: cdpPort, cdp_url: `http://${CDP_HOST}:${cdpPort}`,
       browser: info.Browser, user_agent: info['User-Agent'],
-      ...(usedLocalCopy && { msix_local_copy: true }),
+      ...extraFlags,
     };
   }
 
   return {
-    success: true, platform, binary: tvPath, pid: child.pid, cdp_port: cdpPort, cdp_ready: false,
-    ...(usedLocalCopy && { msix_local_copy: true }),
+    success: true, platform, binary: tvPath, pid, cdp_port: cdpPort, cdp_ready: false,
+    ...extraFlags,
     warning: 'TradingView launched but CDP not responding yet. It may still be loading. Try tv_health_check in a few seconds.',
   };
 }

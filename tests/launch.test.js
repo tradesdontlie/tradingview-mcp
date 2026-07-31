@@ -28,9 +28,11 @@ function mockChild({ failWith } = {}) {
  *   spawnFailures — spawn paths (substring) that emit EACCES
  *   cdpBindsFor  — spawn paths (substring) after which probeCdp starts succeeding
  *   copyExists   — local copy already present
+ *   shortcutBinds — CDP starts succeeding once the AppsFolder shortcut is launched
+ *   noAumid      — simulate Get-AppxPackageManifest failing to resolve an AUMID
  */
-function msixDeps({ spawnFailures = [], cdpBindsFor = [], copyExists = false } = {}) {
-  const state = { spawned: [], copies: [], removed: [], killed: 0, cdpUp: false };
+function msixDeps({ spawnFailures = [], cdpBindsFor = [], copyExists = false, shortcutBinds = false, noAumid = false } = {}) {
+  const state = { spawned: [], copies: [], removed: [], killed: 0, cdpUp: false, shortcutLaunched: false };
   const deps = {
     existsSync: (p) => {
       if (p === MSIX_EXE) return true;
@@ -38,8 +40,17 @@ function msixDeps({ spawnFailures = [], cdpBindsFor = [], copyExists = false } =
       return false;
     },
     execSync: (cmd) => {
+      if (cmd.includes('Get-AppxPackageManifest')) {
+        if (noAumid) return '\n';
+        return 'TradingView.Desktop_n534cwy3pjxzj!TradingView.Desktop\n';
+      }
       if (cmd.includes('Get-AppxPackage')) {
         return 'C:\\Program Files\\WindowsApps\\TradingView.Desktop_3.1.0.7818_x64__n534cwy3pjxzj\n';
+      }
+      if (cmd.includes('WScript.Shell')) {
+        state.shortcutLaunched = true;
+        if (shortcutBinds) state.cdpUp = true;
+        return '';
       }
       if (cmd.includes('taskkill')) { state.killed++; return ''; }
       throw new Error(`unexpected execSync: ${cmd}`);
@@ -113,6 +124,27 @@ describe('launch() — MSIX WindowsApps handling', { skip: !onWindows }, () => {
     assert.equal(result.cdp_ready, false);
     assert.equal(result.msix_local_copy, true);
     assert.ok(result.warning);
+  });
+
+  it('falls back to an AppsFolder shortcut when the local copy also fails to bind CDP', async () => {
+    const { deps, state } = msixDeps({ shortcutBinds: true });
+    const result = await launch({ _deps: deps });
+    assert.equal(result.success, true);
+    assert.equal(result.msix_local_copy, true);
+    assert.equal(result.msix_apps_folder_shortcut, true);
+    assert.equal(result.pid, undefined);
+    assert.equal(result.cdp_url, 'http://127.0.0.1:9222');
+    assert.equal(state.shortcutLaunched, true);
+  });
+
+  it('skips the AppsFolder shortcut when no AUMID can be resolved', async () => {
+    const { deps, state } = msixDeps({ noAumid: true });
+    const result = await launch({ _deps: deps });
+    assert.equal(result.success, true);
+    assert.equal(result.cdp_ready, false);
+    assert.equal(result.msix_local_copy, true);
+    assert.equal(result.msix_apps_folder_shortcut, undefined);
+    assert.equal(state.shortcutLaunched, false);
   });
 });
 
