@@ -60,14 +60,20 @@ const FIND_MONACO = `
  * Returns true if editor is accessible, false on timeout.
  */
 export async function ensurePineEditorOpen() {
-  const already = await evaluate(`
-    (function() {
-      var m = ${FIND_MONACO};
-      return m !== null;
-    })()
-  `);
-  if (already) return true;
+  async function waitForEditor(attempts, delay = 100) {
+    for (let i = 0; i < attempts; i++) {
+      const ready = await evaluate(`(function() { var m = ${FIND_MONACO}; return m !== null; })()`);
+      if (ready) return true;
+      await new Promise(r => setTimeout(r, delay));
+    }
+    return false;
+  }
 
+  if (await waitForEditor(1, 0)) return true;
+
+  // Prefer TradingView's internal panel API, but give the editor time to mount
+  // before falling back to UI input. Some Desktop builds expose these methods
+  // while silently ignoring them for the right-side Pine panel.
   await evaluate(`
     (function() {
       var bwb = window.TradingView && window.TradingView.bottomWidgetBar;
@@ -76,21 +82,44 @@ export async function ensurePineEditorOpen() {
       else if (typeof bwb.showWidget === 'function') bwb.showWidget('pine-editor');
     })()
   `);
+  if (await waitForEditor(10)) return true;
 
-  await evaluate(`
+  const panelState = await evaluate(`
     (function() {
-      var btn = document.querySelector('[aria-label="Pine"]')
-        || document.querySelector('[data-name="pine-dialog-button"]');
-      if (btn) btn.click();
+      function visible(el) {
+        if (!el || !el.isConnected) return false;
+        var rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      }
+      var sideTitle = Array.from(document.querySelectorAll('[data-qa-id="pine-script-title-button"]')).find(visible);
+      var editorContainer = Array.from(document.querySelectorAll('.monaco-editor.pine-editor-monaco')).find(visible);
+      if (sideTitle || editorContainer) return { panelVisible: true, button: null };
+
+      var buttons = Array.from(document.querySelectorAll('[aria-label="Pine"], [data-name="pine-dialog-button"]'));
+      var button = buttons.find(visible);
+      if (!button) return { panelVisible: false, button: null };
+      var rect = button.getBoundingClientRect();
+      return {
+        panelVisible: false,
+        button: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+      };
     })()
   `);
 
-  for (let i = 0; i < 50; i++) {
-    await new Promise(r => setTimeout(r, 200));
-    const ready = await evaluate(`(function() { return ${FIND_MONACO} !== null; })()`);
-    if (ready) return true;
-  }
-  return false;
+  // If the panel is already visible, clicking its toolbar button would close it.
+  // Allow a slower Monaco mount before deciding that it is unavailable.
+  if (panelState?.panelVisible) return waitForEditor(40, 200);
+  if (!panelState?.button) return false;
+
+  // TradingView Desktop ignores HTMLElement.click() for this toolbar button in
+  // some builds. Dispatch real CDP mouse input, matching an actual user click.
+  const c = await getClient();
+  const { x, y } = panelState.button;
+  await c.Input.dispatchMouseEvent({ type: 'mouseMoved', x, y });
+  await c.Input.dispatchMouseEvent({ type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
+  await c.Input.dispatchMouseEvent({ type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
+
+  return waitForEditor(50, 200);
 }
 
 // ── Pure / offline functions ──
@@ -967,7 +996,12 @@ export async function newScript({ type }) {
   const label = labels[type];
   if (!label) throw new Error(`Unsupported Pine script type: ${type}`);
 
-  // Never destroy an unsaved editor buffer while establishing a new script identity.
+  const currentSource = await getSource();
+  const previousName = await getCurrentScriptName();
+
+  // Never destroy meaningful unsaved user content while establishing a new
+  // script identity. TradingView marks a blank Untitled buffer as dirty too;
+  // replacing that empty recovery buffer is safe and must remain possible.
   await openCurrentScriptMenu();
   await new Promise(r => setTimeout(r, 200));
   const dirtyState = await evaluate(`
@@ -986,11 +1020,10 @@ export async function newScript({ type }) {
     })()
   `);
   await dismissOpenMenu();
-  if (dirtyState?.known && dirtyState.dirty) {
+  if (dirtyState?.known && dirtyState.dirty && currentSource.source.trim() !== '') {
     throw new Error('The current Pine editor has unsaved changes. Save them before creating a new script.');
   }
 
-  const previousName = await getCurrentScriptName();
   const placement = await ensureSidePineEditorForCreate();
 
   const titleOpened = await evaluate(`

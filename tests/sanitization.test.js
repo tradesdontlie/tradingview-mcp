@@ -348,6 +348,30 @@ describe('Pine editor persistence safety', () => {
   const pineCore = readFileSync(new URL('../src/core/pine.js', import.meta.url), 'utf8');
   const pineTools = readFileSync(new URL('../src/tools/pine.js', import.meta.url), 'utf8');
 
+  it('opens a closed Pine panel with real CDP mouse input instead of HTMLElement.click()', () => {
+    const ensureBody = pineCore.slice(
+      pineCore.indexOf('export async function ensurePineEditorOpen'),
+      pineCore.indexOf('// ── Pure / offline functions')
+    );
+    assert.ok(ensureBody.includes('var m = ${FIND_MONACO}; return m !== null;'));
+    assert.ok(ensureBody.includes('await getClient()'));
+    assert.ok(ensureBody.includes("Input.dispatchMouseEvent({ type: 'mouseMoved'"));
+    assert.ok(ensureBody.includes("Input.dispatchMouseEvent({ type: 'mousePressed'"));
+    assert.ok(ensureBody.includes("Input.dispatchMouseEvent({ type: 'mouseReleased'"));
+    assert.ok(ensureBody.includes('panelState?.panelVisible'));
+    assert.ok(!ensureBody.includes('btn.click()'));
+  });
+
+  it('allows replacing a blank dirty buffer but protects non-empty unsaved Pine source', () => {
+    const newBody = pineCore.slice(
+      pineCore.indexOf('export async function newScript'),
+      pineCore.indexOf('export async function openScript')
+    );
+    assert.ok(newBody.includes('const currentSource = await getSource()'));
+    assert.ok(newBody.includes("dirtyState.dirty && currentSource.source.trim() !== ''"));
+    assert.ok(newBody.includes('The current Pine editor has unsaved changes'));
+  });
+
   it('writes through Monaco executeEdits so TradingView receives a dirty edit event', () => {
     const setSourceBody = pineCore.slice(
       pineCore.indexOf('export async function setSource'),
