@@ -323,8 +323,138 @@ describe('path traversal prevention', () => {
     assert.ok(source.includes(".replace(/[\\/\\\\]/g, '_')"));
   });
 
-  it('batch.js strips path separators from filename', () => {
-    const source = readFileSync(new URL('../src/core/batch.js', import.meta.url), 'utf8');
-    assert.ok(source.includes(".replace(/[\\/\\\\]/g, '_')"));
+});
+
+// ── Screenshot tools are not exposed ─────────────────────────────────────
+
+describe('screenshot tools disabled', () => {
+  it('server does not register capture_screenshot', () => {
+    const source = readFileSync(new URL('../src/server.js', import.meta.url), 'utf8');
+    assert.ok(!source.includes('registerCaptureTools(server)'));
+  });
+
+  it('batch_run does not accept the screenshot action', () => {
+    const toolSource = readFileSync(new URL('../src/tools/batch.js', import.meta.url), 'utf8');
+    const coreSource = readFileSync(new URL('../src/core/batch.js', import.meta.url), 'utf8');
+    assert.ok(!toolSource.includes("'screenshot'"));
+    assert.ok(!coreSource.includes("action === 'screenshot'"));
+    assert.ok(!coreSource.includes('Page.captureScreenshot'));
+  });
+});
+
+// ── Pine editor persistence safety ───────────────────────────────────────
+
+describe('Pine editor persistence safety', () => {
+  const pineCore = readFileSync(new URL('../src/core/pine.js', import.meta.url), 'utf8');
+  const pineTools = readFileSync(new URL('../src/tools/pine.js', import.meta.url), 'utf8');
+
+  it('opens a closed Pine panel with real CDP mouse input instead of HTMLElement.click()', () => {
+    const ensureBody = pineCore.slice(
+      pineCore.indexOf('export async function ensurePineEditorOpen'),
+      pineCore.indexOf('// ── Pure / offline functions')
+    );
+    assert.ok(ensureBody.includes('var m = ${FIND_MONACO}; return m !== null;'));
+    assert.ok(ensureBody.includes('await getClient()'));
+    assert.ok(ensureBody.includes("Input.dispatchMouseEvent({ type: 'mouseMoved'"));
+    assert.ok(ensureBody.includes("Input.dispatchMouseEvent({ type: 'mousePressed'"));
+    assert.ok(ensureBody.includes("Input.dispatchMouseEvent({ type: 'mouseReleased'"));
+    assert.ok(ensureBody.includes('panelState?.panelVisible'));
+    assert.ok(!ensureBody.includes('btn.click()'));
+  });
+
+  it('allows replacing a blank dirty buffer but protects non-empty unsaved Pine source', () => {
+    const newBody = pineCore.slice(
+      pineCore.indexOf('export async function newScript'),
+      pineCore.indexOf('export async function openScript')
+    );
+    assert.ok(newBody.includes('const currentSource = await getSource()'));
+    assert.ok(newBody.includes("dirtyState.dirty && currentSource.source.trim() !== ''"));
+    assert.ok(newBody.includes('The current Pine editor has unsaved changes'));
+  });
+
+  it('writes through Monaco executeEdits so TradingView receives a dirty edit event', () => {
+    const setSourceBody = pineCore.slice(
+      pineCore.indexOf('export async function setSource'),
+      pineCore.indexOf('export async function compile')
+    );
+    assert.ok(setSourceBody.includes("executeEdits('tradingview-mcp'"));
+    assert.ok(!setSourceBody.includes('.setValue('));
+    assert.ok(setSourceBody.includes('after === nextSource'));
+    assert.ok(setSourceBody.includes("model.getEOL"));
+    assert.ok(setSourceBody.includes("requestedSource.replace(/\\\\n/g, modelEol)"));
+  });
+
+  it('rejects a disabled Save script menu item instead of reporting click success', () => {
+    const saveBody = pineCore.slice(
+      pineCore.indexOf('export async function save'),
+      pineCore.indexOf('export async function getSavedSource')
+    );
+    assert.ok(saveBody.includes("getAttribute('aria-disabled') === 'true'"));
+    assert.ok(saveBody.includes('Save script is disabled'));
+    assert.ok(saveBody.includes('does not match the editor'));
+    assert.ok(!saveBody.includes('Ctrl+S_dispatched'));
+  });
+
+
+  it('opens the Pine tab menu from its own container, not by Y-coordinate proximity', () => {
+    const menuBody = pineCore.slice(
+      pineCore.indexOf('async function openCurrentScriptMenu'),
+      pineCore.indexOf('async function submitInitialSaveDialog')
+    );
+    assert.ok(menuBody.includes('button[data-qa-id=\"scripteditor\"]'));
+    assert.ok(menuBody.includes('tab.parentElement'));
+    assert.ok(menuBody.includes('tabContainer.querySelector'));
+    assert.ok(!menuBody.includes('candidates.sort'));
+  });
+
+  it('fills and submits the first-save naming dialog', () => {
+    const dialogBody = pineCore.slice(
+      pineCore.indexOf('async function submitInitialSaveDialog'),
+      pineCore.indexOf('export async function save')
+    );
+    assert.ok(dialogBody.includes('window.HTMLInputElement.prototype'));
+    assert.ok(dialogBody.includes("new Event('input', { bubbles: true })"));
+    assert.ok(dialogBody.includes("/^save$/i"));
+    assert.ok(dialogBody.includes('saveButton.click()'));
+  });
+
+  it('verifies that moving the Pine editor back to the bottom actually completed', () => {
+    const restoreBody = pineCore.slice(
+      pineCore.indexOf('async function restorePineEditorToBottom'),
+      pineCore.indexOf('export async function newScript')
+    );
+    assert.ok(restoreBody.includes('bottom_tab_visible'));
+    assert.ok(restoreBody.includes('side_title_visible'));
+    assert.ok(restoreBody.includes('if (state?.restored) return true'));
+    assert.ok(!restoreBody.includes('if (result?.found) return true'));
+  });
+
+  it('creates a genuine TradingView script identity instead of replacing the model text', () => {
+    const newBody = pineCore.slice(
+      pineCore.indexOf('export async function newScript'),
+      pineCore.indexOf('export async function openScript')
+    );
+    assert.ok(newBody.includes("action: 'new_tradingview_script_created'"));
+    assert.ok(newBody.includes('identity_created: true'));
+    assert.ok(newBody.includes('Create new'));
+    assert.ok(!newBody.includes('setSource({ source: template })'));
+    assert.ok(pineTools.includes('Create a genuine new TradingView Pine script identity'));
+  });
+
+  it('exposes non-destructive saved-source verification', () => {
+    const savedReaderBody = pineCore.slice(
+      pineCore.indexOf('export async function getSavedSource'),
+      pineCore.indexOf('export async function getConsole')
+    );
+    assert.ok(savedReaderBody.includes('pine-facade/list/?filter=saved'));
+    assert.ok(savedReaderBody.includes('pine-facade/get/'));
+    assert.ok(!savedReaderBody.includes('.setValue('));
+    assert.ok(!savedReaderBody.includes('.executeEdits('));
+    assert.ok(pineTools.includes("server.tool('pine_get_saved_source'"));
+  });
+
+  it('documents pine_open as destructive and unsuitable for save verification', () => {
+    assert.ok(pineTools.includes('does not switch script identity'));
+    assert.ok(pineTools.includes('must not be used to verify saving'));
   });
 });

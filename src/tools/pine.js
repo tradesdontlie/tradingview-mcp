@@ -25,8 +25,10 @@ export function registerPineTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('pine_save', 'Save the current Pine Script (Ctrl+S)', {}, async () => {
-    try { return jsonResult(await core.save()); }
+  server.tool('pine_save', 'Save the current Pine Script and verify the persisted server source. For a new script, fills and submits TradingView’s initial naming dialog.', {
+    name: z.string().optional().describe('Script name. Required on the first save; optional for an existing saved script when its name can be read from the editor.'),
+  }, async ({ name }) => {
+    try { return jsonResult(await core.save({ name })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
@@ -40,18 +42,25 @@ export function registerPineTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('pine_new', 'Create a new blank Pine Script', {
+  server.tool('pine_new', 'Create a genuine new TradingView Pine script identity using Create new. Refuses to discard unsaved editor changes.', {
     type: z.enum(['indicator', 'strategy', 'library']).describe('Type of script to create'),
   }, async ({ type }) => {
     try { return jsonResult(await core.newScript({ type })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('pine_open', 'Open a saved Pine Script by name', {
+  server.tool('pine_open', 'Destructively inject a saved Pine Script source into the current editor. This does not switch script identity and must not be used to verify saving.', {
     name: z.string().describe('Name of the saved script to open (case-insensitive match)'),
   }, async ({ name }) => {
     try { return jsonResult(await core.openScript({ name })); }
     catch (err) { return jsonResult({ success: false, source: 'internal_api', error: err.message }, true); }
+  });
+
+  server.tool('pine_get_saved_source', 'Read a saved Pine Script source from TradingView without changing the editor. Use this to verify persistence after pine_save.', {
+    name: z.string().describe('Saved script name (case-insensitive; full exact name recommended)'),
+  }, async ({ name }) => {
+    try { return jsonResult(await core.getSavedSource({ name })); }
+    catch (err) { return jsonResult({ success: false, origin: 'pine_facade', error: err.message }, true); }
   });
 
   server.tool('pine_list_scripts', 'List saved Pine Scripts', {}, async () => {

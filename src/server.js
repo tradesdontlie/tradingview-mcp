@@ -4,7 +4,6 @@ import { registerHealthTools } from './tools/health.js';
 import { registerChartTools } from './tools/chart.js';
 import { registerPineTools } from './tools/pine.js';
 import { registerDataTools } from './tools/data.js';
-import { registerCaptureTools } from './tools/capture.js';
 import { registerDrawingTools } from './tools/drawing.js';
 import { registerAlertTools } from './tools/alerts.js';
 import { registerBatchTools } from './tools/batch.js';
@@ -22,7 +21,7 @@ const server = new McpServer(
     description: 'AI-assisted TradingView chart analysis and Pine Script development via Chrome DevTools Protocol',
   },
   {
-    instructions: `TradingView MCP — 84 tools for reading and controlling a live TradingView Desktop chart.
+    instructions: `TradingView MCP — structured tools for reading and controlling a live TradingView Desktop chart.
 
 TOOL SELECTION GUIDE — use this to pick the right tool:
 
@@ -47,11 +46,13 @@ Changing the chart:
 - indicator_set_inputs → change indicator settings (length, source, etc.)
 
 Pine Script development:
-- pine_set_source → inject code, pine_smart_compile → compile + check errors
+- pine_set_source → inject code with Monaco edit events, pine_smart_compile → compile + check errors
 - pine_get_errors → read errors, pine_get_console → read log output
+- pine_save → save through the enabled Pine context-menu command and verify server persistence
+- pine_get_saved_source → non-destructively read the saved server source for verification
+- WARNING: pine_open overwrites the current editor and does not switch script identity; never use it to verify a save
 - WARNING: pine_get_source can return 200KB+ for complex scripts — avoid unless editing
 
-Screenshots: capture_screenshot → regions: "full", "chart", "strategy_tester"
 Replay: replay_start → replay_step → replay_trade → replay_status → replay_stop
 Batch: batch_run → run action across multiple symbols/timeframes
 Drawing: draw_shape → horizontal_line, trend_line, rectangle, text
@@ -64,7 +65,8 @@ CONTEXT MANAGEMENT:
 - ALWAYS use summary=true on data_get_ohlcv
 - ALWAYS use study_filter on pine tools when you know which indicator you want
 - NEVER use verbose=true unless user specifically asks for raw data
-- Prefer capture_screenshot for visual context over pulling large datasets
+- Use structured TradingView tools for all operations
+- Screenshots and image recognition are disabled; if a structured tool fails, report the error instead of attempting visual inspection
 - Call chart_get_state ONCE at start, reuse entity IDs`,
   }
 );
@@ -74,7 +76,6 @@ registerHealthTools(server);
 registerChartTools(server);
 registerPineTools(server);
 registerDataTools(server);
-registerCaptureTools(server);
 registerDrawingTools(server);
 registerAlertTools(server);
 registerBatchTools(server);
