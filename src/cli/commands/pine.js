@@ -73,8 +73,8 @@ register('pine', {
       },
     }],
     ['save', {
-      description: 'Save the current Pine Script (Ctrl+S)',
-      handler: () => core.save(),
+      description: 'Save the current Pine Script; pass a name for the first save',
+      handler: (opts, positionals) => core.save({ name: positionals.join(' ') || undefined }),
     }],
     ['new', {
       description: 'Create a new blank Pine Script (indicator, strategy, library)',

@@ -8,30 +8,50 @@ import { evaluate, evaluateAsync, getClient } from '../connection.js';
 // ── Monaco finder (injected into TV page) ──
 const FIND_MONACO = `
   (function findMonacoEditor() {
-    var container = document.querySelector('.monaco-editor.pine-editor-monaco');
-    if (!container) return null;
-    var el = container;
-    var fiberKey;
-    for (var i = 0; i < 20; i++) {
-      if (!el) break;
-      fiberKey = Object.keys(el).find(function(k) { return k.startsWith('__reactFiber$'); });
-      if (fiberKey) break;
-      el = el.parentElement;
-    }
-    if (!fiberKey) return null;
-    var current = el[fiberKey];
-    for (var d = 0; d < 15; d++) {
-      if (!current) break;
-      if (current.memoizedProps && current.memoizedProps.value && current.memoizedProps.value.monacoEnv) {
-        var env = current.memoizedProps.value.monacoEnv;
-        if (env.editor && typeof env.editor.getEditors === 'function') {
-          var editors = env.editor.getEditors();
-          if (editors.length > 0) return { editor: editors[0], env: env };
-        }
+    var containers = Array.from(document.querySelectorAll('.monaco-editor.pine-editor-monaco'));
+    if (containers.length === 0) return null;
+    containers.sort(function(a, b) {
+      var ar = a.getBoundingClientRect();
+      var br = b.getBoundingClientRect();
+      var av = a.isConnected && ar.width > 0 && ar.height > 0 ? 1 : 0;
+      var bv = b.isConnected && br.width > 0 && br.height > 0 ? 1 : 0;
+      return bv - av;
+    });
+
+    var fallback = null;
+    for (var c = 0; c < containers.length; c++) {
+      var el = containers[c];
+      var fiberKey = null;
+      for (var i = 0; i < 20; i++) {
+        if (!el) break;
+        fiberKey = Object.keys(el).find(function(k) { return k.startsWith('__reactFiber$'); });
+        if (fiberKey) break;
+        el = el.parentElement;
       }
-      current = current.return;
+      if (!fiberKey) continue;
+      var current = el[fiberKey];
+      for (var d = 0; d < 15; d++) {
+        if (!current) break;
+        if (current.memoizedProps && current.memoizedProps.value && current.memoizedProps.value.monacoEnv) {
+          var env = current.memoizedProps.value.monacoEnv;
+          if (env.editor && typeof env.editor.getEditors === 'function') {
+            var editors = env.editor.getEditors();
+            for (var e = 0; e < editors.length; e++) {
+              var editor = editors[e];
+              var node = editor && typeof editor.getDomNode === 'function' ? editor.getDomNode() : null;
+              var rect = node ? node.getBoundingClientRect() : null;
+              if (node && node.isConnected && rect.width > 0 && rect.height > 0) {
+                if (typeof editor.hasTextFocus === 'function' && editor.hasTextFocus()) return { editor: editor, env: env };
+                if (!fallback) fallback = { editor: editor, env: env };
+              }
+            }
+            if (!fallback && editors.length > 0) fallback = { editor: editors[0], env: env };
+          }
+        }
+        current = current.return;
+      }
     }
-    return null;
+    return fallback;
   })()
 `;
 
@@ -267,18 +287,52 @@ export async function setSource({ source }) {
   const editorReady = await ensurePineEditorOpen();
   if (!editorReady) throw new Error('Could not open Pine Editor.');
 
-  const escaped = JSON.stringify(source);
-  const set = await evaluate(`
+  const escaped = JSON.stringify(source.replace(/\r\n/g, '\n'));
+  const result = await evaluate(`
     (function() {
       var m = ${FIND_MONACO};
-      if (!m) return false;
-      m.editor.setValue(${escaped});
-      return true;
+      if (!m) return { success: false, error: 'Monaco editor not found' };
+      var model = m.editor.getModel();
+      if (!model) return { success: false, error: 'Monaco model not found' };
+      var before = model.getValue();
+      var beforeVersion = model.getAlternativeVersionId();
+      var requestedSource = ${escaped};
+      var modelEol = typeof model.getEOL === 'function' ? model.getEOL() : '\\n';
+      var nextSource = modelEol === '\\n' ? requestedSource : requestedSource.replace(/\\n/g, modelEol);
+      m.editor.pushUndoStop();
+      var applied = m.editor.executeEdits('tradingview-mcp', [{
+        range: model.getFullModelRange(),
+        text: nextSource,
+        forceMoveMarkers: true
+      }]);
+      m.editor.pushUndoStop();
+      var after = model.getValue();
+      var afterVersion = model.getAlternativeVersionId();
+      if (typeof m.editor.focus === 'function') m.editor.focus();
+      return {
+        success: applied !== false && after === nextSource,
+        changed: before !== after,
+        before_version: beforeVersion,
+        after_version: afterVersion,
+        eol: modelEol === '\\r\\n' ? 'CRLF' : 'LF',
+        line_count: after.split('\\n').length,
+        char_count: after.length,
+        error: after === nextSource ? null : 'Editor contents do not match requested source'
+      };
     })()
   `);
 
-  if (!set) throw new Error('Monaco found but setValue() failed.');
-  return { success: true, lines_set: source.split('\n').length };
+  if (!result?.success) throw new Error(result?.error || 'Monaco executeEdits() failed.');
+  return {
+    success: true,
+    lines_set: result.line_count,
+    chars_set: result.char_count,
+    changed: result.changed,
+    before_version: result.before_version,
+    after_version: result.after_version,
+    eol: result.eol,
+    method: 'monaco_executeEdits',
+  };
 }
 
 export async function compile() {
@@ -344,36 +398,298 @@ export async function getErrors() {
   };
 }
 
-export async function save() {
-  const editorReady = await ensurePineEditorOpen();
-  if (!editorReady) throw new Error('Could not open Pine Editor.');
-
-  const c = await getClient();
-  await c.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: 2, key: 's', code: 'KeyS', windowsVirtualKeyCode: 83 });
-  await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 's', code: 'KeyS' });
-  await new Promise(r => setTimeout(r, 800));
-
-  // Handle "Save Script" name dialog that appears for new/unsaved scripts
-  const dialogHandled = await evaluate(`
+async function getCurrentScriptName() {
+  return evaluate(`
     (function() {
-      var saveBtn = null;
-      var btns = document.querySelectorAll('button');
-      for (var i = 0; i < btns.length; i++) {
-        var text = btns[i].textContent.trim();
-        if (text === 'Save' && btns[i].offsetParent !== null) {
-          // Check if it's in a dialog (not the Pine Editor save button)
-          var parent = btns[i].closest('[class*="dialog"], [class*="modal"], [class*="popup"], [role="dialog"]');
-          if (parent) { saveBtn = btns[i]; break; }
-        }
+      function visible(el) {
+        if (!el || !el.isConnected) return false;
+        var rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
       }
-      if (saveBtn) { saveBtn.click(); return true; }
-      return false;
+      var sideTitle = Array.from(document.querySelectorAll('[data-qa-id="pine-script-title-button"]')).find(visible);
+      if (sideTitle) return (sideTitle.textContent || '').trim() || null;
+
+      var tab = Array.from(document.querySelectorAll('button[data-qa-id="scripteditor"]')).find(visible);
+      if (!tab) {
+        tab = Array.from(document.querySelectorAll('button[aria-label="Close Pine Editor"]')).find(function(el) {
+          return visible(el) && !el.closest('[class*="fakeTabs"]');
+        });
+      }
+      return tab ? ((tab.textContent || '').trim() || null) : null;
+    })()
+  `);
+}
+
+async function openCurrentScriptMenu() {
+  const result = await evaluate(`
+    (function() {
+      function visible(el) {
+        if (!el || !el.isConnected) return false;
+        var rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      }
+      var alreadyOpen = Array.from(document.querySelectorAll('[role="menuitem"][aria-label="Save script"]')).find(visible);
+      if (alreadyOpen) return { success: true, already_open: true };
+
+      var sideTitle = Array.from(document.querySelectorAll('[data-qa-id="pine-script-title-button"]')).find(visible);
+      if (sideTitle) {
+        sideTitle.click();
+        return { success: true, location: 'right', name: (sideTitle.textContent || '').trim() };
+      }
+
+      var tab = Array.from(document.querySelectorAll('button[data-qa-id="scripteditor"]')).find(visible);
+      if (!tab) {
+        tab = Array.from(document.querySelectorAll('button[aria-label="Close Pine Editor"]')).find(function(el) {
+          return visible(el) && !el.closest('[class*="fakeTabs"]');
+        });
+      }
+      if (!tab) return { success: false, error: 'Visible Pine Editor tab was not found' };
+
+      // The Strategy Tester and Pine Editor menus can share the same Y coordinate.
+      // Resolve the trigger from the Pine tab's own container instead of sorting all
+      // context-menu buttons by vertical distance.
+      var tabContainer = tab.parentElement;
+      var menuButton = tabContainer && tabContainer.querySelector(
+        'button[data-qa-id="tab-menu-trigger"], button[title="Open context menu"]'
+      );
+      if (!menuButton || !visible(menuButton)) {
+        return { success: false, error: 'Pine Editor context-menu button was not found' };
+      }
+      menuButton.click();
+      return { success: true, location: 'bottom', name: (tab.textContent || '').trim() };
     })()
   `);
 
-  if (dialogHandled) await new Promise(r => setTimeout(r, 500));
+  if (!result?.success) throw new Error(result?.error || 'Could not open the Pine Editor script menu.');
+  return result;
+}
 
-  return { success: true, action: dialogHandled ? 'saved_with_dialog' : 'Ctrl+S_dispatched' };
+async function submitInitialSaveDialog(name) {
+  const escapedName = JSON.stringify(name || '');
+  for (let attempt = 0; attempt < 15; attempt++) {
+    const result = await evaluate(`
+      (function() {
+        function visible(el) {
+          if (!el || !el.isConnected) return false;
+          var rect = el.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0;
+        }
+        var dialogs = Array.from(document.querySelectorAll('[role="dialog"]')).filter(visible);
+        var dialog = dialogs.find(function(el) {
+          var text = (el.textContent || '').trim();
+          return /save script/i.test(text) && !!el.querySelector('input');
+        });
+        if (!dialog) return { found: false };
+
+        var requestedName = ${escapedName};
+        if (!requestedName) {
+          var cancel = Array.from(dialog.querySelectorAll('button')).find(function(button) {
+            return /^cancel$/i.test((button.textContent || '').trim());
+          });
+          if (cancel) cancel.click();
+          return { found: true, submitted: false, error: 'A name is required when saving a new script' };
+        }
+
+        var input = dialog.querySelector('input');
+        if (!input) return { found: true, submitted: false, error: 'Save script name input was not found' };
+        input.focus();
+        var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+        if (setter && setter.set) setter.set.call(input, requestedName);
+        else input.value = requestedName;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+
+        var saveButton = Array.from(dialog.querySelectorAll('button')).find(function(button) {
+          return /^save$/i.test((button.textContent || '').trim());
+        });
+        if (!saveButton) return { found: true, submitted: false, error: 'Save dialog submit button was not found' };
+        if (saveButton.disabled || saveButton.getAttribute('aria-disabled') === 'true') {
+          return { found: true, submitted: false, error: 'Save dialog submit button is disabled' };
+        }
+        saveButton.click();
+        return { found: true, submitted: true };
+      })()
+    `);
+    if (result?.found) return result;
+    await new Promise(r => setTimeout(r, 100));
+  }
+  return { found: false, submitted: false };
+}
+
+export async function save({ name } = {}) {
+  const editorReady = await ensurePineEditorOpen();
+  if (!editorReady) throw new Error('Could not open Pine Editor.');
+
+  const editor = await getSource();
+  const currentName = await getCurrentScriptName();
+  let currentSaved = null;
+  if (currentName) {
+    try { currentSaved = await getSavedSource({ name: currentName }); } catch { /* new/unsaved script */ }
+  }
+
+  const requestedName = (name || '').trim();
+  if (currentSaved && requestedName) {
+    const target = requestedName.toLowerCase();
+    const aliases = [currentSaved.name, currentSaved.title].filter(Boolean).map(value => value.toLowerCase());
+    if (!aliases.includes(target)) {
+      throw new Error(
+        `The editor is attached to saved script "${currentSaved.name}", not "${requestedName}". `
+        + 'pine_save does not rename or create a copy of an existing script.'
+      );
+    }
+  }
+
+  const verificationName = requestedName || currentSaved?.name || (currentName || '').trim();
+  if (!verificationName || (!currentSaved && !requestedName)) {
+    throw new Error('A script name is required for the first save. Pass name explicitly to pine_save.');
+  }
+
+  await openCurrentScriptMenu();
+  await new Promise(r => setTimeout(r, 250));
+
+  const saveAction = await evaluate(`
+    (function() {
+      function visible(el) {
+        if (!el || !el.isConnected) return false;
+        var rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      }
+      var items = Array.from(document.querySelectorAll('[role="menuitem"][aria-label="Save script"]')).filter(visible);
+      if (items.length === 0) {
+        items = Array.from(document.querySelectorAll('[role="menuitem"]')).filter(function(el) {
+          return visible(el) && /^save script(?:\s|$)/i.test((el.textContent || '').trim());
+        });
+      }
+      if (items.length === 0) return { success: false, error: 'Save script menu item was not found' };
+      var item = items[0];
+      var disabled = item.getAttribute('aria-disabled') === 'true'
+        || item.hasAttribute('disabled')
+        || item.getAttribute('data-disabled') === 'true';
+      if (disabled) return { success: false, disabled: true, error: 'Save script menu item is disabled' };
+      item.click();
+      return { success: true, disabled: false };
+    })()
+  `);
+
+  if (!saveAction?.success) {
+    if (saveAction?.disabled) {
+      const saved = await getSavedSource({ name: verificationName });
+      if (saved.source.replace(/\r\n/g, '\n') === editor.source.replace(/\r\n/g, '\n')) {
+        return {
+          success: true,
+          action: 'already_persisted',
+          name: saved.name,
+          script_id: saved.script_id,
+          version: saved.version,
+          verified: true,
+        };
+      }
+      throw new Error(`Save script is disabled and the saved server source for "${verificationName}" does not match the editor. The editor change was not registered as dirty.`);
+    }
+    throw new Error(saveAction?.error || 'Could not activate Save script.');
+  }
+
+  const dialog = await submitInitialSaveDialog(requestedName);
+  if (dialog.found && !dialog.submitted) throw new Error(dialog.error || 'Could not submit the initial Save script dialog.');
+
+  const deadline = Date.now() + 10000;
+  let lastSaved = null;
+  let lastError = null;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 500));
+    try {
+      lastSaved = await getSavedSource({ name: verificationName });
+      if (lastSaved.source.replace(/\r\n/g, '\n') === editor.source.replace(/\r\n/g, '\n')) {
+        return {
+          success: true,
+          action: dialog.found ? 'created_and_saved_via_dialog' : 'saved_via_script_menu',
+          name: lastSaved.name,
+          script_id: lastSaved.script_id,
+          version: lastSaved.version,
+          modified: lastSaved.modified,
+          verified: true,
+        };
+      }
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  const detail = lastError?.message
+    ? ` Last verification error: ${lastError.message}`
+    : lastSaved
+      ? ' The server still returns different source code.'
+      : '';
+  throw new Error(`TradingView did not persist the current editor source for "${verificationName}" within 10 seconds.${detail}`);
+}
+
+export async function getSavedSource({ name }) {
+  if (!name || !name.trim()) throw new Error('Script name is required. Spaces and full-width parentheses are supported.');
+  const escapedName = JSON.stringify(name.trim().toLowerCase());
+
+  const result = await evaluateAsync(`
+    (function() {
+      var target = ${escapedName};
+      function responseJson(response, label) {
+        if (!response.ok) throw new Error(label + ' returned HTTP ' + response.status);
+        return response.json();
+      }
+      return fetch('https://pine-facade.tradingview.com/pine-facade/list/?filter=saved', { credentials: 'include' })
+        .then(function(r) { return responseJson(r, 'Script list'); })
+        .then(function(scripts) {
+          if (!Array.isArray(scripts)) return { error: 'pine-facade returned unexpected script-list data' };
+          var exact = scripts.filter(function(script) {
+            var scriptName = (script.scriptName || '').toLowerCase();
+            var scriptTitle = (script.scriptTitle || '').toLowerCase();
+            return scriptName === target || scriptTitle === target;
+          });
+          var matches = exact.length > 0 ? exact : scripts.filter(function(script) {
+            var scriptName = (script.scriptName || '').toLowerCase();
+            var scriptTitle = (script.scriptTitle || '').toLowerCase();
+            return scriptName.indexOf(target) !== -1 || scriptTitle.indexOf(target) !== -1;
+          });
+          if (matches.length === 0) return { error: 'Script "' + target + '" not found. Use pine_list_scripts to see available scripts.' };
+          if (matches.length > 1 && exact.length === 0) {
+            return { error: 'Script name "' + target + '" is ambiguous. Pass the full exact name.' };
+          }
+          var match = matches[0];
+          var id = match.scriptIdPart;
+          var version = match.version || 1;
+          if (!id) return { error: 'Matched script has no scriptIdPart' };
+          return fetch('https://pine-facade.tradingview.com/pine-facade/get/' + encodeURIComponent(id) + '/' + encodeURIComponent(version), { credentials: 'include' })
+            .then(function(r2) { return responseJson(r2, 'Script source'); })
+            .then(function(data) {
+              var source = typeof data.source === 'string' ? data.source : '';
+              if (!source) return { error: 'Script source is empty', name: match.scriptName || match.scriptTitle };
+              return {
+                success: true,
+                name: match.scriptName || match.scriptTitle || 'Untitled',
+                title: match.scriptTitle || null,
+                id: id,
+                version: version,
+                modified: match.modified || null,
+                source: source
+              };
+            });
+        })
+        .catch(function(error) { return { error: error.message }; });
+    })()
+  `);
+
+  if (result?.error) throw new Error(result.error);
+  if (!result?.success || typeof result.source !== 'string') throw new Error('pine-facade returned an invalid saved-source response.');
+  return {
+    success: true,
+    name: result.name,
+    title: result.title,
+    script_id: result.id,
+    version: result.version,
+    modified: result.modified,
+    source: result.source,
+    line_count: result.source.split('\n').length,
+    char_count: result.source.length,
+    origin: 'pine_facade',
+  };
 }
 
 export async function getConsole() {
@@ -505,87 +821,269 @@ export async function smartCompile() {
   };
 }
 
+async function dismissOpenMenu() {
+  const c = await getClient();
+  await c.Input.dispatchKeyEvent({ type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+}
+
+async function ensureSidePineEditorForCreate() {
+  const initial = await evaluate(`
+    (function() {
+      function visible(el) {
+        if (!el || !el.isConnected) return false;
+        var rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      }
+      var title = Array.from(document.querySelectorAll('[data-qa-id="pine-script-title-button"]')).find(visible);
+      return { side_open: !!title };
+    })()
+  `);
+  if (initial?.side_open) return { moved: false };
+
+  await openCurrentScriptMenu();
+  await new Promise(r => setTimeout(r, 200));
+  const moved = await evaluate(`
+    (function() {
+      function visible(el) {
+        if (!el || !el.isConnected) return false;
+        var rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      }
+      var item = Array.from(document.querySelectorAll('[role="menuitem"]')).find(function(el) {
+        return visible(el) && /^move script to right$/i.test((el.getAttribute('aria-label') || el.textContent || '').trim());
+      });
+      if (!item) return { success: false, error: 'Move script to right menu item was not found' };
+      item.click();
+      return { success: true };
+    })()
+  `);
+  if (!moved?.success) throw new Error(moved?.error || 'Could not move Pine Editor to the side panel.');
+
+  let pineButtonClicked = false;
+  for (let attempt = 0; attempt < 30; attempt++) {
+    await new Promise(r => setTimeout(r, 100));
+    const state = await evaluate(`
+      (function() {
+        function visible(el) {
+          if (!el || !el.isConnected) return false;
+          var rect = el.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0;
+        }
+        var title = Array.from(document.querySelectorAll('[data-qa-id="pine-script-title-button"]')).find(visible);
+        if (title) return { ready: true };
+        var pineButton = Array.from(document.querySelectorAll('button[data-name="pine-dialog-button"], button[aria-label="Pine"]')).find(visible);
+        return { ready: false, can_open: !!pineButton };
+      })()
+    `);
+    if (state?.ready) return { moved: true };
+    if (!pineButtonClicked && state?.can_open) {
+      await evaluate(`
+        (function() {
+          function visible(el) {
+            if (!el || !el.isConnected) return false;
+            var rect = el.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0;
+          }
+          var button = Array.from(document.querySelectorAll('button[data-name="pine-dialog-button"], button[aria-label="Pine"]')).find(visible);
+          if (button) button.click();
+        })()
+      `);
+      pineButtonClicked = true;
+    }
+  }
+  throw new Error('Pine Editor side panel did not become available.');
+}
+
+async function restorePineEditorToBottom() {
+  const opened = await evaluate(`
+    (function() {
+      function visible(el) {
+        if (!el || !el.isConnected) return false;
+        var rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      }
+      var title = Array.from(document.querySelectorAll('[data-qa-id="pine-script-title-button"]')).find(visible);
+      if (!title) return { success: false };
+      if (title.getAttribute('aria-expanded') !== 'true') title.click();
+      return { success: true };
+    })()
+  `);
+  if (!opened?.success) return false;
+
+  for (let attempt = 0; attempt < 15; attempt++) {
+    await new Promise(r => setTimeout(r, 100));
+    const result = await evaluate(`
+      (function() {
+        function visible(el) {
+          if (!el || !el.isConnected) return false;
+          var rect = el.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0;
+        }
+        var item = Array.from(document.querySelectorAll('[role="menuitem"]')).find(function(el) {
+          return visible(el) && /^move script to bottom$/i.test((el.getAttribute('aria-label') || el.textContent || '').trim());
+        });
+        if (!item) return { found: false };
+        item.click();
+        return { found: true };
+      })()
+    `);
+    if (result?.found) {
+      // A synthetic click only proves that the menu item received the event. Wait
+      // for TradingView to remount the editor in the bottom panel before claiming
+      // success; some layouts currently ignore the move command.
+      for (let verifyAttempt = 0; verifyAttempt < 30; verifyAttempt++) {
+        await new Promise(r => setTimeout(r, 100));
+        const state = await evaluate(`
+          (function() {
+            function visible(el) {
+              if (!el || !el.isConnected) return false;
+              var rect = el.getBoundingClientRect();
+              return rect.width > 0 && rect.height > 0;
+            }
+            var sideTitle = Array.from(document.querySelectorAll('[data-qa-id="pine-script-title-button"]')).find(visible);
+            var bottomTab = Array.from(document.querySelectorAll('button[data-qa-id="scripteditor"]')).find(visible);
+            return {
+              restored: !!bottomTab || !sideTitle,
+              bottom_tab_visible: !!bottomTab,
+              side_title_visible: !!sideTitle
+            };
+          })()
+        `);
+        if (state?.restored) return true;
+      }
+      return false;
+    }
+  }
+  return false;
+}
+
 export async function newScript({ type }) {
   const editorReady = await ensurePineEditorOpen();
   if (!editorReady) throw new Error('Could not open Pine Editor.');
 
-  const typeMap = { indicator: 'indicator', strategy: 'strategy', library: 'library' };
-  const templates = {
-    indicator: '//@version=6\nindicator("My script")\nplot(close)',
-    strategy: '//@version=6\nstrategy("My strategy", overlay=true)\n',
-    library: '//@version=6\n// @description TODO: add library description here\nlibrary("MyLibrary")\n',
-  };
+  const labels = { indicator: 'Indicator', strategy: 'Strategy', library: 'Library' };
+  const declarations = { indicator: /\bindicator\s*\(/, strategy: /\bstrategy\s*\(/, library: /\blibrary\s*\(/ };
+  const label = labels[type];
+  if (!label) throw new Error(`Unsupported Pine script type: ${type}`);
 
-  const template = templates[type] || templates.indicator;
-
-  // Simply set the source to a new template — this is the most reliable approach
-  const escaped = JSON.stringify(template);
-  const set = await evaluate(`
+  // Never destroy an unsaved editor buffer while establishing a new script identity.
+  await openCurrentScriptMenu();
+  await new Promise(r => setTimeout(r, 200));
+  const dirtyState = await evaluate(`
     (function() {
-      var m = ${FIND_MONACO};
-      if (!m) return false;
-      m.editor.setValue(${escaped});
-      return true;
+      function visible(el) {
+        if (!el || !el.isConnected) return false;
+        var rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      }
+      var saveItem = Array.from(document.querySelectorAll('[role="menuitem"][aria-label="Save script"]')).find(visible);
+      if (!saveItem) return { known: false };
+      var disabled = saveItem.getAttribute('aria-disabled') === 'true'
+        || saveItem.hasAttribute('disabled')
+        || saveItem.getAttribute('data-disabled') === 'true';
+      return { known: true, dirty: !disabled };
     })()
   `);
+  await dismissOpenMenu();
+  if (dirtyState?.known && dirtyState.dirty) {
+    throw new Error('The current Pine editor has unsaved changes. Save them before creating a new script.');
+  }
 
-  if (!set) throw new Error('Monaco editor not found. Ensure Pine Editor is open.');
+  const previousName = await getCurrentScriptName();
+  const placement = await ensureSidePineEditorForCreate();
 
-  return { success: true, type, action: 'new_script_created', template: typeMap[type] };
+  const titleOpened = await evaluate(`
+    (function() {
+      function visible(el) {
+        if (!el || !el.isConnected) return false;
+        var rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      }
+      var title = Array.from(document.querySelectorAll('[data-qa-id="pine-script-title-button"]')).find(visible);
+      if (!title) return { success: false, error: 'Pine script title button was not found' };
+      if (title.getAttribute('aria-expanded') !== 'true') title.click();
+      return { success: true };
+    })()
+  `);
+  if (!titleOpened?.success) throw new Error(titleOpened?.error || 'Could not open the Pine script menu.');
+
+  let typeClicked = false;
+  for (let attempt = 0; attempt < 25 && !typeClicked; attempt++) {
+    await new Promise(r => setTimeout(r, 100));
+    const result = await evaluate(`
+      (function() {
+        function visible(el) {
+          if (!el || !el.isConnected) return false;
+          var rect = el.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0;
+        }
+        var createItem = Array.from(document.querySelectorAll('[role="menuitem"]')).find(function(el) {
+          return visible(el) && /^create new$/i.test((el.textContent || '').trim());
+        });
+        if (!createItem) return { ready: false, stage: 'create_new_missing' };
+        ['pointerenter', 'mouseenter', 'mouseover'].forEach(function(eventName) {
+          createItem.dispatchEvent(new MouseEvent(eventName, { bubbles: true, view: window }));
+        });
+        var typeItem = Array.from(document.querySelectorAll('[role="menuitem"]')).find(function(el) {
+          return visible(el) && (el.getAttribute('aria-label') || '').trim() === ${JSON.stringify(label)};
+        });
+        if (!typeItem) return { ready: false, stage: 'type_submenu_missing' };
+        typeItem.click();
+        return { ready: true };
+      })()
+    `);
+    typeClicked = !!result?.ready;
+  }
+  if (!typeClicked) throw new Error(`Could not activate Create new → ${label}.`);
+
+  let source = null;
+  let currentName = null;
+  for (let attempt = 0; attempt < 40; attempt++) {
+    await new Promise(r => setTimeout(r, 100));
+    try {
+      const current = await getSource();
+      if (declarations[type].test(current.source)) {
+        source = current;
+        currentName = await getCurrentScriptName();
+        break;
+      }
+    } catch { /* editor is remounting */ }
+  }
+  if (!source) throw new Error(`TradingView did not create a new ${type} editor.`);
+
+  let restoredToBottom = null;
+  if (placement.moved) restoredToBottom = await restorePineEditorToBottom();
+
+  return {
+    success: true,
+    type,
+    action: 'new_tradingview_script_created',
+    identity_created: true,
+    previous_name: previousName,
+    name: currentName,
+    line_count: source.line_count,
+    changed: true,
+    restored_to_bottom: restoredToBottom,
+    warning: 'The new script is not persisted until pine_save is called with a name.',
+  };
 }
 
 export async function openScript({ name }) {
-  const editorReady = await ensurePineEditorOpen();
-  if (!editorReady) throw new Error('Could not open Pine Editor.');
-
-  const escapedName = JSON.stringify(name.toLowerCase());
-
-  const result = await evaluateAsync(`
-    (function() {
-      var target = ${escapedName};
-      return fetch('https://pine-facade.tradingview.com/pine-facade/list/?filter=saved', { credentials: 'include' })
-        .then(function(r) { return r.json(); })
-        .then(function(scripts) {
-          if (!Array.isArray(scripts)) return {error: 'pine-facade returned unexpected data'};
-          var match = null;
-          for (var i = 0; i < scripts.length; i++) {
-            var sn = (scripts[i].scriptName || '').toLowerCase();
-            var st = (scripts[i].scriptTitle || '').toLowerCase();
-            if (sn === target || st === target) { match = scripts[i]; break; }
-          }
-          if (!match) {
-            for (var j = 0; j < scripts.length; j++) {
-              var sn2 = (scripts[j].scriptName || '').toLowerCase();
-              var st2 = (scripts[j].scriptTitle || '').toLowerCase();
-              if (sn2.indexOf(target) !== -1 || st2.indexOf(target) !== -1) { match = scripts[j]; break; }
-            }
-          }
-          if (!match) return {error: 'Script "' + target + '" not found. Use pine_list_scripts to see available scripts.'};
-
-          var id = match.scriptIdPart;
-          var ver = match.version || 1;
-          return fetch('https://pine-facade.tradingview.com/pine-facade/get/' + id + '/' + ver, { credentials: 'include' })
-            .then(function(r2) { return r2.json(); })
-            .then(function(data) {
-              var source = data.source || '';
-              if (!source) return {error: 'Script source is empty', name: match.scriptName || match.scriptTitle};
-              var m = ${FIND_MONACO};
-              if (m) {
-                m.editor.setValue(source);
-                return {success: true, name: match.scriptName || match.scriptTitle, id: id, lines: source.split('\\n').length};
-              }
-              return {error: 'Monaco editor not found to inject source', name: match.scriptName || match.scriptTitle};
-            });
-        })
-        .catch(function(e) { return {error: e.message}; });
-    })()
-  `);
-
-  if (result?.error) {
-    throw new Error(result.error);
-  }
-
-  return { success: true, name: result.name, script_id: result.id, lines: result.lines, source: 'internal_api', opened: true };
+  const saved = await getSavedSource({ name });
+  const set = await setSource({ source: saved.source });
+  return {
+    success: true,
+    name: saved.name,
+    script_id: saved.script_id,
+    version: saved.version,
+    lines: saved.line_count,
+    origin: saved.origin,
+    injected: true,
+    destructive: true,
+    changed: set.changed,
+    warning: 'pine_open injects saved source into the current editor; it does not switch script identity. Do not use it to verify a save.',
+  };
 }
 
 export async function listScripts() {
