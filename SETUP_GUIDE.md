@@ -118,6 +118,7 @@ Then `tv status`, `tv quote`, `tv pine compile`, etc. work from anywhere.
 | Windows: "Access is denied" launching from `WindowsApps` | Use `tv_launch` (auto copy-fallback) or the manual copy snippet in Step 3 — never `icacls` on WindowsApps |
 | `ECONNREFUSED` | TradingView isn't running or port 9222 is blocked |
 | MCP server not showing in Claude Code | Check `~/.claude/.mcp.json` syntax, restart Claude Code |
+| Windows: config edited via PowerShell, no MCP tools load, `mcpServers` block disappeared | `Set-Content -Encoding UTF8` (PS 5.1) writes a UTF-8 BOM that Claude Desktop rejects, silently reverting the config. Write BOM-free with `[System.IO.File]::WriteAllText($cfg, $json, (New-Object System.Text.UTF8Encoding($false)))`. Back up the config first. |
 | `tv` command not found | Run `npm link` from the project directory |
 | Tools return stale data | TradingView may still be loading — wait a few seconds |
 | Pine Editor tools fail | Open the Pine Editor panel first (`ui_open_panel pine-editor open`) |
