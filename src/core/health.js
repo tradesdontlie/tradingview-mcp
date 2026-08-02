@@ -317,8 +317,11 @@ export async function launch({ port, kill_existing, _deps } = {}) {
   if (!tvPath && platform === 'win32') {
     // MSIX/Windows Store install — InstallLocation is in WindowsApps, which is ACL-restricted
     // for normal `dir` enumeration but readable via Get-AppxPackage without elevation.
+    // The package Name is publisher-prefixed (e.g. `31178TradingViewInc.TradingView`),
+    // not the bare `TradingView.Desktop`, so match on a `*TradingView*` wildcard and pick
+    // the first install whose folder actually contains TradingView.exe.
     try {
-      const ps = 'powershell -NoProfile -Command "(Get-AppxPackage -Name \'TradingView.Desktop\' -ErrorAction SilentlyContinue).InstallLocation"';
+      const ps = 'powershell -NoProfile -Command "Get-AppxPackage *TradingView* | ForEach-Object { $_.InstallLocation } | Where-Object { $_ -and (Test-Path (Join-Path $_ \'TradingView.exe\')) } | Select-Object -First 1"';
       const installDir = deps.execSync(ps, { timeout: 5000 }).toString().trim();
       if (installDir) {
         const candidate = `${installDir}\\TradingView.exe`;
