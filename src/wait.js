@@ -17,19 +17,33 @@ export async function waitForChartReady(expectedSymbol = null, expectedTf = null
           || document.querySelector('[data-name="loading"]');
         var isLoading = spinner && spinner.offsetParent !== null;
 
-        // Try to get bar count from data window or chart
+        // Series load state + real bar count. The old '[class*="bar"]' DOM query matched
+        // toolbars/scrollbars, so it never reflected data loading at all.
+        // seriesLoading is the authoritative signal: chart.symbol() flips to the new symbol
+        // up to ~700ms BEFORE its data lands (measured), so the symbol alone cannot gate
+        // readiness — reading in that window returns the PREVIOUS symbol's bars.
+        var seriesLoading = false;
         var barCount = -1;
         try {
-          var bars = document.querySelectorAll('[class*="bar"]');
-          barCount = bars.length;
-        } catch {}
+          var ms = window.TradingViewApi._activeChartWidgetWV.value()
+            ._chartWidget.model().mainSeries();
+          var l = ms.isLoading;
+          seriesLoading = !!(typeof l === 'function' ? ms.isLoading() : l);
+          barCount = ms.bars().size();
+        } catch(e) {}
 
-        // Get current symbol from header
-        var symbolEl = document.querySelector('[data-name="legend-source-title"]')
-          || document.querySelector('[class*="title"] [class*="apply-common-tooltip"]');
-        var currentSymbol = symbolEl ? symbolEl.textContent.trim() : '';
+        // Get current symbol from the chart API (the header selectors are gone in TV 3.3.0
+        // and the fallback scrapes a description, so the match below could never pass)
+        var currentSymbol = '';
+        try {
+          currentSymbol = window.TradingViewApi._activeChartWidgetWV.value().symbol() || '';
+        } catch(e) {}
 
-        return { isLoading: !!isLoading, barCount: barCount, currentSymbol: currentSymbol };
+        return {
+          isLoading: !!isLoading || seriesLoading,
+          barCount: barCount,
+          currentSymbol: currentSymbol
+        };
       })()
     `);
 
@@ -67,7 +81,8 @@ export async function waitForChartReady(expectedSymbol = null, expectedTf = null
     await new Promise(r => setTimeout(r, POLL_INTERVAL));
   }
 
-  // Timeout — return true anyway, caller should verify
+  // Timeout — report NOT ready. Callers currently only echo this as `chart_ready`
+  // and proceed regardless, so a timeout does not abort the operation.
   return false;
 }
 
