@@ -3,12 +3,13 @@ import { jsonResult } from './_format.js';
 import * as core from '../core/alerts.js';
 
 export function registerAlertTools(server) {
-  server.tool('alert_create', 'Create a price alert on the active chart symbol via TradingView\'s internal REST API (pricealerts.tradingview.com/create_alert). No UI dialog involved — fires and forgets. Returns alert_id on success.', {
+  server.tool('alert_create', 'Create a price alert via TradingView\'s internal REST API (pricealerts.tradingview.com/create_alert). No UI dialog involved. Pass `symbol` to arm on any instrument — it does NOT have to be the active chart symbol. The response reports `symbol` as the instrument TradingView ACTUALLY armed (read back from its own reply), plus `symbol_source` and `currency_source`; a mis-target is rolled back and returns success:false. Returns alert_id on success.', {
     condition: z.string().describe('Alert condition: "crossing" (default, any direction), "greater_than"/"above"/"cross_up", or "less_than"/"below"/"cross_down"'),
     price: z.coerce.number().describe('Price level for the alert'),
     message: z.string().optional().describe('Alert message (auto-generated from symbol + condition + price if omitted)'),
-  }, async ({ condition, price, message }) => {
-    try { return jsonResult(await core.create({ condition, price, message })); }
+    symbol: z.string().optional().describe('Instrument to arm on, e.g. "NYSE:SW" or "SW". Defaults to the active chart symbol. TradingView normalizes the venue to its consolidated feed (NYSE:SW arms as BATS:SW) — that is expected; the ticker is what matters.'),
+  }, async ({ condition, price, message, symbol }) => {
+    try { return jsonResult(await core.create({ condition, price, message, symbol })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 

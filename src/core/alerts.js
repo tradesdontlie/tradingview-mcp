@@ -57,7 +57,58 @@ function validateMessageConditionParity(message, numericPrice) {
   };
 }
 
-export async function create({ condition, price, message }) {
+/** Bare ticker from `EXCHANGE:TICKER`. Venue-insensitive comparison helper. */
+export function bareSymbol(sym) {
+  return String(sym || '').trim().toUpperCase().split(':').pop();
+}
+
+/** Parse TV's `symbol` marker (`={"symbol":"BATS:SW",...}`) back to a symbol string. */
+export function symbolFromMarker(marker) {
+  try { return JSON.parse(String(marker).replace(/^=/, '')).symbol || null; }
+  catch { return null; }
+}
+
+/**
+ * Best-effort currency lookup for a symbol we are NOT charting.
+ *
+ * Measured 2026-08-02 while building this: a bare ticker is genuinely ambiguous
+ * across venues — `SW` resolves to NYSE/USD, EURONEXT/EUR and BX/CHF, and TWO of
+ * those carry `is_primary_listing: true`. So an exchange-qualified request is
+ * matched on its venue; a bare one only resolves when the primary listing is
+ * unique. Returns null rather than guessing.
+ *
+ * NOTE `BATS` (TV's consolidated US feed, and what every chart symbol here uses)
+ * is NOT in symbol-search at all — measured, 0 results for `BATS:MSFT`. That is
+ * fine: the caller falls back to the chart currency and REPORTS having done so.
+ */
+async function lookupCurrency(symbol) {
+  const bare = bareSymbol(symbol);
+  const venue = String(symbol || '').includes(':')
+    ? String(symbol).trim().toUpperCase().split(':')[0] : null;
+  if (!bare) return null;
+  try {
+    const params = new URLSearchParams({
+      text: bare, hl: '0', exchange: '', lang: 'en', search_type: '', domain: 'production',
+    });
+    const resp = await fetch(`https://symbol-search.tradingview.com/symbol_search/v3/?${params}`, {
+      headers: { 'Origin': 'https://www.tradingview.com', 'Referer': 'https://www.tradingview.com/' },
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const arr = Array.isArray(data) ? data : (Array.isArray(data?.symbols) ? data.symbols : []);
+    const strip = s => (s || '').replace(/<\/?em>/g, '').toUpperCase();
+    const exact = arr.filter(r => strip(r.symbol) === bare);
+    if (!exact.length) return null;
+    if (venue) {
+      const hit = exact.find(r => String(r.prefix || r.exchange).toUpperCase() === venue);
+      return hit?.currency_code || null;
+    }
+    const primary = exact.filter(r => r.is_primary_listing === true);
+    return primary.length === 1 ? (primary[0].currency_code || null) : null;
+  } catch { return null; }
+}
+
+export async function create({ condition, price, message, symbol }) {
   if (price == null || isNaN(Number(price))) {
     return { success: false, error: 'price is required and must be a number', source: 'rest_api' };
   }
@@ -85,15 +136,45 @@ export async function create({ condition, price, message }) {
     return { success: false, error: 'Could not read active chart symbol: ' + (symbolInfo?.error || 'unknown'), source: 'rest_api' };
   }
 
+  // ── Target symbol resolution (T195) ────────────────────────────────────────
+  // Before this, `create` ALWAYS armed on the active chart symbol and there was
+  // no `symbol` parameter at all — a caller passing one had it dropped by the
+  // MCP layer. That bit twice in field use (2026-07-30 an O alert armed on CDE
+  // at a price CDE can never reach; 2026-07-31 two alerts armed on the leftover
+  // TJX chart). It is the worst kind of failure: the alert reports success,
+  // lists correctly, and simply never fires.
+  //
+  // MEASURED 2026-08-02, and it refutes the "arms on whatever the chart shows"
+  // framing: the endpoint was NEVER tied to the chart. Requesting `NYSE:SW`
+  // while charting `BATS:MSFT` returned `s:ok` and armed on **BATS:SW** — the
+  // correct instrument, with TV normalizing the venue to its consolidated US
+  // feed server-side. The chart coupling was entirely self-inflicted: this
+  // function read the chart symbol and put it in the payload.
+  const requested = symbol ? String(symbol).trim() : null;
+  const sameAsChart = requested && bareSymbol(requested) === bareSymbol(symbolInfo.symbol);
+  const targetSymbol = (!requested || sameAsChart) ? symbolInfo.symbol : requested;
+
+  // Currency only needs resolving when we're arming off-chart. TV normalizes the
+  // venue anyway, so this is belt-and-braces for non-USD instruments — and when
+  // it can't be resolved we fall back to the chart's and SAY SO rather than
+  // silently assuming USD.
+  let currency = symbolInfo.currency;
+  let currencySource = 'active_chart';
+  if (requested && !sameAsChart) {
+    const looked = await lookupCurrency(targetSymbol);
+    if (looked) { currency = looked; currencySource = 'symbol_search'; }
+    else { currencySource = 'active_chart_fallback'; }
+  }
+
   // TV's create_alert endpoint wants `symbol` as a custom marker string:
   //   "=" + JSON.stringify({ symbol, adjustment, currency-id })
   const symbolMarker = '=' + JSON.stringify({
-    symbol: symbolInfo.symbol,
+    symbol: targetSymbol,
     adjustment: 'dividends',
-    'currency-id': symbolInfo.currency
+    'currency-id': currency
   });
 
-  const defaultMessage = message || `${symbolInfo.symbol.split(':').pop()} ${condition ? String(condition).toLowerCase() : 'crossing'} ${numericPrice}`;
+  const defaultMessage = message || `${targetSymbol.split(':').pop()} ${condition ? String(condition).toLowerCase() : 'crossing'} ${numericPrice}`;
   const condType = normalizeCondition(condition);
 
   // T31 — refuse the create if the message cites a price that disagrees with the condition value.
@@ -161,10 +242,45 @@ export async function create({ condition, price, message }) {
 
   if (parsed?.s === 'ok' && parsed?.r) {
     const created = parsed.r;
+    const alertId = created.alert_id || null;
+
+    // T195 — report what TV ACTUALLY armed, read back from its own response
+    // marker, not what we asked for. The old code returned `symbolInfo.symbol`
+    // (the chart's) unconditionally, which is why a mis-targeted alert looked
+    // perfectly correct in the response. TV echoes the normalized marker in
+    // `r.symbol`; that is the authoritative answer and it costs nothing.
+    const armedSymbol = symbolFromMarker(created.symbol) || targetSymbol;
+
+    // A venue rewrite is expected and fine (NYSE:SW -> BATS:SW). A different
+    // INSTRUMENT is the failure this task exists to kill, so don't leave it
+    // armed — roll it back and fail loudly rather than return a success the
+    // caller has no way to distinguish from a real one.
+    if (bareSymbol(armedSymbol) !== bareSymbol(targetSymbol)) {
+      let rolledBack = false;
+      if (alertId != null) {
+        try { rolledBack = !!(await deleteAlerts({ alert_id: alertId }))?.success; }
+        catch { rolledBack = false; }
+      }
+      return {
+        success: false,
+        error: `alert armed on ${armedSymbol} but ${targetSymbol} was requested — mis-targeted alert `
+             + (rolledBack ? 'was deleted.' : 'could NOT be deleted; remove it manually.'),
+        requested_symbol: targetSymbol,
+        armed_symbol: armedSymbol,
+        alert_id: alertId,
+        rolled_back: rolledBack,
+        source: 'rest_api',
+      };
+    }
+
     return {
       success: true,
-      alert_id: created.alert_id || null,
-      symbol: symbolInfo.symbol,
+      alert_id: alertId,
+      symbol: armedSymbol,
+      requested_symbol: requested || symbolInfo.symbol,
+      chart_symbol: symbolInfo.symbol,
+      symbol_source: (!requested || sameAsChart) ? 'active_chart' : 'requested',
+      currency_source: currencySource,
       price: numericPrice,
       condition: condType,
       message: defaultMessage,

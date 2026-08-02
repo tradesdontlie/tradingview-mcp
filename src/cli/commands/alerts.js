@@ -14,11 +14,13 @@ register('alert', {
         price: { type: 'string', short: 'p', description: 'Price level' },
         condition: { type: 'string', short: 'c', description: 'Condition: crossing, greater_than, less_than' },
         message: { type: 'string', short: 'm', description: 'Alert message' },
+        symbol: { type: 'string', short: 's', description: 'Instrument to arm on (default: active chart symbol)' },
       },
       handler: (opts) => core.create({
         price: Number(opts.price),
         condition: opts.condition || 'crossing',
         message: opts.message,
+        symbol: opts.symbol,
       }),
     }],
     ['delete', {

@@ -1006,3 +1006,75 @@ matched → **2 tuned inputs restored, diff empty** → `layout_save`
 and relaunched by its supervisor; the chart came back on the **new** version under
 the **same entity id** with both tuned inputs intact. `node --check` + eslint
 clean (0 errors).
+
+---
+
+## §27 — `alert_create` gains a `symbol` parameter, and reports what was actually armed (2026-08-02)
+
+**The bug.** `alert_create` had **no `symbol` parameter at all**. `create()` read
+the active chart symbol via CDP, put it in the payload, and returned it verbatim
+in the response. A caller wanting an alert on a different instrument had no way
+to say so — and if it passed one anyway, the MCP layer dropped it silently.
+
+This is the worst shape a wrong answer can take: the call returns `success:true`,
+the alert appears correctly in `alert_list`, and it **never fires**. Nothing
+downstream can detect it. A downstream consumer hit it twice in two days — once
+arming an alert at a price the (wrong) instrument could never reach, once arming
+two alerts on a leftover chart symbol. The only mitigation available was "always
+call `chart_set_symbol` first", i.e. discipline, and discipline is what failed.
+
+**Measured before fixing, and it refutes the obvious diagnosis.** The endpoint was
+**never tied to the chart**. Posting a `create_alert` whose marker names
+`NYSE:SW` while the chart sat on `BATS:MSFT` returned `s:ok` and armed on
+**`BATS:SW`** — the correct instrument, with TradingView normalizing the venue to
+its consolidated US feed server-side. The chart coupling was entirely
+self-inflicted by this module reading `mainSeries().symbol()`. So this is
+parameter plumbing, not a redesign, and no server-side constraint had to be
+worked around.
+
+**What changed:**
+
+1. **`create({ symbol })`** — optional. Omitted, behaviour is byte-identical to
+   before (active chart). Provided, it is honoured. A request naming the same
+   ticker as the chart short-circuits to the chart's own metadata.
+
+2. **The response reports the instrument TradingView ACTUALLY armed**, parsed back
+   out of the marker in its own reply (`r.symbol`), not the one we asked for. The
+   old code returned the chart symbol unconditionally, which is precisely why a
+   mis-targeted alert looked perfectly correct in the response. New fields:
+   `symbol` (armed, authoritative), `requested_symbol`, `chart_symbol`,
+   `symbol_source`, `currency_source`.
+
+3. **A mis-target is rolled back, not returned as a success.** A *venue* rewrite
+   (`NYSE:SW` → `BATS:SW`) is expected and passes. A different *ticker* means the
+   alert is on the wrong instrument, so it is deleted and the call returns
+   `success:false` with `armed_symbol` and `rolled_back`. Leaving it armed is the
+   exact harm this section exists to remove.
+
+4. **Currency resolution for off-chart symbols** via TradingView's public
+   symbol-search, falling back to the chart's currency and **saying so** through
+   `currency_source` rather than silently assuming USD.
+
+**Two things worth knowing if you touch this** (both measured 2026-08-02):
+
+- **A bare ticker is genuinely ambiguous, and `is_primary_listing` does not
+  disambiguate it.** `SW` resolves across NYSE/USD, EURONEXT/EUR and BX/CHF —
+  and **two** of those carry `is_primary_listing: true`. `lookupCurrency`
+  therefore returns `null` rather than guessing when a bare symbol has more than
+  one primary listing.
+- **`BATS` is not in symbol-search at all** — 0 exact results for `BATS:MSFT`,
+  though it is what TradingView normalizes US equities to and therefore what
+  chart symbols look like. That is why the currency fallback exists and is
+  reported instead of being treated as an error.
+
+The T31 message/condition price-parity validator is unchanged and still runs
+before the POST.
+
+**Validated live** on TradingView Desktop 3.3.0 with the chart on `BATS:MSFT`:
+`alert create --symbol NYSE:SW` → `success:true`, `symbol: BATS:SW`,
+`symbol_source: requested`, `currency_source: symbol_search`; confirmed on the
+requested instrument via `alert_list`; the no-`symbol` path still armed on
+`BATS:MSFT` with `symbol_source: active_chart`. Both test alerts deleted after.
+`node --check` + eslint clean (0 errors, only pre-existing warnings), and
+`tests/alerts.test.js` covers the venue-rewrite-vs-wrong-ticker distinction that
+decides whether an alert is rolled back (10 assertions).
