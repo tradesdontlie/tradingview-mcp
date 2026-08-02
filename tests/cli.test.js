@@ -78,6 +78,24 @@ describe('CLI — help and routing', () => {
     assert.ok(stdout.includes('--count'));
     assert.ok(stdout.includes('--summary'));
   });
+  it('alert create --help documents exact symbol/timeframe and Pine options', () => {
+    const { stdout, exitCode } = run(['alert', 'create', '--help']);
+    assert.equal(exitCode, 0);
+    assert.ok(stdout.includes('--symbol'));
+    assert.ok(stdout.includes('--timeframe'));
+    assert.ok(stdout.includes('--kind'));
+    assert.ok(stdout.includes('--indicator'));
+    assert.ok(stdout.includes('--frequency'));
+    assert.ok(stdout.includes('--expiration'));
+    assert.ok(stdout.includes('--dry-run'));
+  });
+
+  it('alert sync --help documents file-based idempotent dry-run', () => {
+    const { stdout, exitCode } = run(['alert', 'sync', '--help']);
+    assert.equal(exitCode, 0);
+    assert.ok(stdout.includes('--file'));
+    assert.ok(stdout.includes('--dry-run'));
+  });
 });
 
 describe('CLI — pine analyze (offline)', () => {

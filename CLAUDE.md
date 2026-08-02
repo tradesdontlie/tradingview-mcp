@@ -69,9 +69,14 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 - `draw_clear` → remove all
 
 ### "Manage alerts"
-- `alert_create` → set price alert (condition: "crossing", "greater_than", "less_than")
-- `alert_list` → view active alerts
+- `alert_create` → create an exact symbol/timeframe price or named live Pine alert; pass every field and use `dry_run` first
+- `alerts_sync` → idempotently diff/apply a complete approved plan; preserves unrelated alerts and replaces only approved IDs
+- `alert_list` → view normalized definitions for existing alerts
 - `alert_delete` → remove alerts
+
+Indicator alerts require an already-open pane with the exact canonical symbol,
+timeframe, live indicator title, and named `alertcondition()`. Alert tools do not
+switch or focus panes and never substitute a price condition.
 
 ### "Navigate the UI"
 - `ui_open_panel` → open/close pine-editor, strategy-tester, watchlist, alerts, trading

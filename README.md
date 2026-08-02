@@ -62,7 +62,7 @@ Gives your AI assistant eyes and hands on your own chart:
 - **Chart navigation** — change symbols, timeframes, zoom to dates, add/remove indicators
 - **Visual analysis** — read your chart's indicator values, price levels, and annotations
 - **Draw on charts** — trend lines, horizontal lines, rectangles, text annotations
-- **Manage alerts** — create, list, and delete price alerts
+- **Manage alerts** — create and idempotently sync exact price or named Pine-indicator alerts
 - **Replay practice** — step through historical bars, practice entries/exits
 - **Screenshots** — capture chart state for AI visual analysis
 - **Multi-pane layouts** — set up 2x2, 3x1, etc. grids with different symbols per pane
@@ -170,7 +170,7 @@ tv quote / ohlcv / values
 tv data lines/labels/tables/boxes/strategy/trades/equity/depth/indicator
 tv pine get/set/compile/analyze/check/save/new/open/list/errors/console
 tv draw shape/list/get/remove/clear
-tv alert list/create/delete
+tv alert list/create/delete/sync
 tv watchlist get/add
 tv indicator add/remove/toggle/set/get
 tv layout list/switch
@@ -181,6 +181,26 @@ tv stream quote/bars/values/lines/labels/tables/all
 tv ui click/keyboard/hover/scroll/find/eval/type/panel/fullscreen/mouse
 tv screenshot / discover / ui-state / range / scroll
 ```
+
+### Deterministic Alert Sync
+
+Validate a complete approved alert plan without changing TradingView:
+
+```bash
+tv alert sync --file ./daily_alerts/2030-01-02.alerts.json --dry-run
+```
+
+Each alert requires an exchange-qualified `symbol`, explicit `timeframe`,
+`kind`, exact condition, frequency, offset-bearing ISO-8601 expiration, and
+deterministic message. Price alerts also require a positive `price`. Indicator
+alerts require the exact title of a live indicator and one of its named Pine
+`alertcondition()` conditions.
+
+`alerts_sync` lists existing alerts once, preserves unrelated alerts, avoids
+duplicates, and replaces only conflicting IDs named in `replace_alert_ids`.
+Pine metadata is read from an already-open pane with the exact canonical symbol
+and timeframe; the alert resolver never focuses or changes a chart pane. Run a
+dry-run before applying a plan.
 
 ## Streaming
 
@@ -303,7 +323,8 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 |------|-------------|
 | `draw_shape` | Draw horizontal_line, trend_line, rectangle, text |
 | `draw_list` / `draw_remove_one` / `draw_clear` | Manage drawings |
-| `alert_create` / `alert_list` / `alert_delete` | Manage price alerts |
+| `alert_create` / `alert_list` / `alert_delete` | Create/list/delete exact price or named Pine alerts |
+| `alerts_sync` | Idempotently diff/apply a complete alert plan while preserving unrelated alerts |
 | `capture_screenshot` | Screenshot (regions: full, chart, strategy_tester) |
 | `batch_run` | Run action across multiple symbols/timeframes |
 | `watchlist_get` / `watchlist_add` | Read/modify watchlist |
