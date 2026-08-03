@@ -5,6 +5,10 @@ import { getClient, getTargetInfo, evaluate, CDP_HOST, CDP_PORT } from '../conne
 import { existsSync, cpSync, rmSync, readdirSync } from 'fs';
 import { execSync, spawn } from 'child_process';
 import { dirname, basename, join } from 'path';
+import { fileURLToPath } from 'url';
+
+// src/core/health.js -> repo root, independent of process.cwd()
+const REPO_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 
 // Best-effort git-pull update check: compare local HEAD to origin's default
 // branch on GitHub. Never throws — returns null on any failure (offline,
@@ -14,8 +18,8 @@ async function checkForUpdate() {
   if (_updateCache && (Date.now() - _updateCache.at) < 3600_000) return _updateCache.value;
   let value = null;
   try {
-    const localSha = execSync('git rev-parse HEAD', { timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
-    const remoteUrl = execSync('git config --get remote.origin.url', { timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    const localSha = execSync('git rev-parse HEAD', { cwd: REPO_ROOT, timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    const remoteUrl = execSync('git config --get remote.origin.url', { cwd: REPO_ROOT, timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
     const m = remoteUrl.match(/github\.com[:/](.+?)(?:\.git)?$/);
     if (localSha && m) {
       const repo = m[1];
