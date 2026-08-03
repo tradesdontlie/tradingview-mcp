@@ -3,7 +3,7 @@ import { jsonResult } from './_format.js';
 import * as core from '../core/watchlist.js';
 
 export function registerWatchlistTools(server) {
-  server.tool('watchlist_get', 'Get all symbols from the current TradingView watchlist with last price, change, and change%', {}, async () => {
+  server.tool('watchlist_get', 'Get every symbol from the exact active TradingView watchlist. Quote fields are null when the authoritative active-list API is used.', {}, async () => {
     try { return jsonResult(await core.get()); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
