@@ -14,7 +14,27 @@ If the user specifies a different install path, use that instead of `~/tradingvi
 
 ## Step 2: Add to MCP Config
 
-Add the server to the user's Claude Code MCP configuration. The config file is at `~/.claude/.mcp.json` (global) or `.mcp.json` (project-level).
+**Preferred: use the `claude mcp add` CLI.** It writes to the correct config file and scope for you, so there is no path to get wrong:
+
+```bash
+claude mcp add tradingview --scope user -- node <INSTALL_PATH>/src/server.js
+```
+
+Replace `<INSTALL_PATH>` with the actual path where the repo was cloned (e.g., `/Users/username/tradingview-mcp`). Use `--scope user` to make the server available from every directory; use `--scope project` instead to write a shared `.mcp.json` in the repo root.
+
+Verify with `claude mcp list` — it should report `tradingview: ... - ✔ Connected`.
+
+**Manual alternative.** If you edit config by hand, the file Claude Code actually reads is one of:
+
+| Scope | File | Where the entry goes |
+|-------|------|----------------------|
+| User (global) | `~/.claude.json` | top-level `mcpServers` |
+| Project (shared, committed) | `<repo>/.mcp.json` | top-level `mcpServers` |
+| Project (local, private) | `~/.claude.json` | `projects["<repo path>"].mcpServers` |
+
+Note: `~/.claude/.mcp.json` is **not** read by Claude Code — a config placed there is silently ignored.
+
+The entry itself, in any of the above:
 
 ```json
 {
@@ -26,8 +46,6 @@ Add the server to the user's Claude Code MCP configuration. The config file is a
   }
 }
 ```
-
-Replace `<INSTALL_PATH>` with the actual path where the repo was cloned (e.g., `/Users/username/tradingview-mcp`).
 
 If the config file already exists and has other servers, merge the `tradingview` entry into the existing `mcpServers` object. Do not overwrite other servers.
 
@@ -117,7 +135,7 @@ Then `tv status`, `tv quote`, `tv pine compile`, etc. work from anywhere.
 | `cdp_connected: false` | Launch TradingView with `--remote-debugging-port=9222` |
 | Windows: "Access is denied" launching from `WindowsApps` | Use `tv_launch` (auto copy-fallback) or the manual copy snippet in Step 3 — never `icacls` on WindowsApps |
 | `ECONNREFUSED` | TradingView isn't running or port 9222 is blocked |
-| MCP server not showing in Claude Code | Check `~/.claude/.mcp.json` syntax, restart Claude Code |
+| MCP server not showing in Claude Code | Run `claude mcp list` to confirm it is registered and connecting. If it is missing, the entry is in a file Claude Code does not read (e.g. `~/.claude/.mcp.json`) — re-add it with `claude mcp add` per Step 2. If it is listed but its tools are absent, restart Claude Code — servers load only at session start |
 | `tv` command not found | Run `npm link` from the project directory |
 | Tools return stale data | TradingView may still be loading — wait a few seconds |
 | Pine Editor tools fail | Open the Pine Editor panel first (`ui_open_panel pine-editor open`) |
@@ -125,5 +143,5 @@ Then `tv status`, `tv quote`, `tv pine compile`, etc. work from anywhere.
 ## What to Read Next
 
 - `CLAUDE.md` — Decision tree for which tool to use when (auto-loaded by Claude Code)
-- `README.md` — Full tool reference (78 MCP tools, 30 CLI commands)
+- `README.md` — Full tool reference (84 MCP tools, 30 CLI commands)
 - `RESEARCH.md` — Research context and open questions
