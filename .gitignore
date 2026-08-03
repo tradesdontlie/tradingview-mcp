@@ -5,3 +5,12 @@ temp_*
 *.log
 discovery-log.json
 rules.json
+
+# local runtime/tooling state (not part of the MCP server)
+src/strategy_state.json
+src/tools/*.backup
+.claude/.claude-flow/
+src/.agents/
+src/.claude-flow/
+src/graphify-out/
+src/skills-lock.json

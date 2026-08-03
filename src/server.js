@@ -1,3 +1,6 @@
+import { registerLoginTools } from './tools/login.js';
+import { registerAccountTools } from './tools/account.js';
+import { registerStrategyTool } from './tools/strategy.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { registerHealthTools } from './tools/health.js';
@@ -84,6 +87,9 @@ registerWatchlistTools(server);
 registerUiTools(server);
 registerPaneTools(server);
 registerTabTools(server);
+registerStrategyTool(server);
+registerLoginTools(server);
+registerAccountTools(server);
 
 // Startup notice (stderr so it doesn't interfere with MCP stdio protocol)
 process.stderr.write('⚠  tradingview-mcp  |  Unofficial tool. Not affiliated with TradingView Inc. or Anthropic.\n');
