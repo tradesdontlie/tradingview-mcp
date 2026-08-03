@@ -74,7 +74,7 @@ Gives your AI assistant eyes and hands on your own chart:
 
 Paste this into Claude Code and it will handle the rest:
 
-> Install the TradingView MCP server. Clone https://github.com/tradesdontlie/tradingview-mcp.git, run npm install, add it to my MCP config at ~/.claude/.mcp.json, and launch TradingView with the debug port. Then verify the connection with tv_health_check.
+> Install the TradingView MCP server. Clone https://github.com/tradesdontlie/tradingview-mcp.git, run npm install, register it with `claude mcp add tradingview --scope user`, and launch TradingView with the debug port. Then verify the connection with tv_health_check.
 
 Or follow the manual steps below.
 
@@ -117,7 +117,13 @@ scripts\launch_tv_debug.bat
 
 ### 3. Add to Claude Code
 
-Add to your Claude Code MCP config (`~/.claude/.mcp.json` or project `.mcp.json`):
+Easiest — let the CLI write the config to the right place:
+
+```bash
+claude mcp add tradingview --scope user -- node /absolute/path/to/tradingview-mcp/src/server.js
+```
+
+To edit config by hand instead, add the entry to `~/.claude.json` (user scope, under top-level `mcpServers`) or to a `.mcp.json` in your project root. Note that `~/.claude/.mcp.json` is **not** a path Claude Code reads:
 
 ```json
 {
@@ -217,7 +223,7 @@ Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project
 | "Draw a level at 24500" | `draw_shape` (horizontal_line) |
 | "Take a screenshot" | `capture_screenshot` |
 
-## Tool Reference (78 MCP tools)
+## Tool Reference (84 MCP tools)
 
 ### Chart Reading
 
