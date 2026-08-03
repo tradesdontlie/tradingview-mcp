@@ -216,8 +216,12 @@ Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project
 | "Set up a 4-chart grid" | `pane_set_layout` → `pane_set_symbol` for each pane |
 | "Draw a level at 24500" | `draw_shape` (horizontal_line) |
 | "Take a screenshot" | `capture_screenshot` |
+| "What do analysts think?" | `data_get_forecast` → `data_get_technicals` |
+| "Show me the fundamentals" | `data_get_key_stats` → `data_get_financials` |
+| "Any news on this?" | `data_get_news` |
+| "How does it trade in October?" | `data_get_seasonals` |
 
-## Tool Reference (78 MCP tools)
+## Tool Reference (93 MCP tools)
 
 ### Chart Reading
 
@@ -240,6 +244,28 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 | `data_get_pine_boxes` | Read price zones / ranges as {high, low} pairs | ~1-2KB |
 
 **Always use `study_filter`** to target a specific indicator: `study_filter: "Profiler"`.
+
+### Symbol Data Panels
+
+The sections of TradingView's symbol sidebar — Forecast, Technicals, Financials, Key stats,
+Seasonals, News, Options. All default to the chart's current symbol; pass an exchange-qualified
+`symbol` (e.g. `"NASDAQ:AMZN"`) to read any other instrument without touching the chart.
+
+| Tool | When to use | Output size |
+|------|------------|-------------|
+| `data_get_key_stats` | Market cap, next earnings date, volume, dividend yield, P/E, beta | ~600B |
+| `data_get_technicals` | Consensus gauges (Summary / MAs / Oscillators) + raw indicator values, any timeframe | ~1KB |
+| `data_get_forecast` | Analyst price target low/avg/high, upside %, buy/hold/sell breakdown | ~500B |
+| `data_get_financials` | Revenue, net income, EPS, EBITDA, FCF and margins per period | ~700B per period |
+| `data_get_seasonals` | Average return and win rate per calendar month | ~2KB |
+| `data_get_news` | Recent headlines with source, date and link | ~300B per headline |
+| `data_get_options` | ATM implied-volatility term structure per expiry | ~1KB |
+| `data_get_etf_profile` | AUM, expense ratio, NAV (funds only) | ~300B |
+| `data_get_bond_info` | Yield, coupon, maturity (bonds only) | ~300B |
+
+> These sections render to `<canvas>` in TradingView's UI, so they are read by issuing
+> TradingView's own data requests from page context rather than by scraping the DOM.
+> `data_get_seasonals` briefly switches the chart to the 1M resolution and restores it.
 
 ### Chart Control
 
@@ -353,7 +379,7 @@ npm test
 Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  TradingView Desktop (Electron)
 ```
 
-- **Transport**: MCP over stdio (84 tools) + CLI (`tv` command, 30 commands with 66 subcommands)
+- **Transport**: MCP over stdio (93 tools) + CLI (`tv` command, 30 commands with 75 subcommands)
 - **Connection**: Chrome DevTools Protocol on localhost:9222
 - **Streaming**: Poll-and-diff loop with deduplication, JSONL output to stdout
 - **No dependencies** beyond `@modelcontextprotocol/sdk` and `chrome-remote-interface`

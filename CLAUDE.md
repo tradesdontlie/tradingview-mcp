@@ -1,6 +1,6 @@
 # TradingView MCP — Claude Instructions
 
-84 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
+93 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
 
 ## Decision Tree — Which Tool When
 
@@ -32,6 +32,28 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 5. `data_get_pine_tables` → session stats, analytics tables
 6. `data_get_ohlcv` with `summary: true` → price action summary
 7. `capture_screenshot` → visual confirmation
+
+### "What do analysts / fundamentals / news say?" (symbol data panels)
+These read the sections of TradingView's symbol sidebar. They render to `<canvas>`, so they are
+read via TradingView's own data requests from page context — not DOM scraping. All default to the
+chart symbol; pass `symbol` (exchange-qualified, e.g. `"NASDAQ:AMZN"`) to read another instrument
+without touching the chart.
+
+- `data_get_key_stats` → market cap, next earnings date, volume, avg volume, dividend yield, P/E, EPS, beta
+- `data_get_technicals` → consensus gauges (Summary / Moving Averages / Oscillators) + raw indicator values; `timeframe` accepts 1, 5, 15, 30, 60, 120, 240, 1D, 1W, 1M
+- `data_get_forecast` → analyst price target low/average/high, upside %, consensus rating, buy/hold/sell counts
+- `data_get_financials` → revenue, net income, EPS, EBITDA, FCF, margins; `period: "annual"|"quarterly"`
+- `data_get_seasonals` → average return + win rate per calendar month (chart symbol only)
+- `data_get_news` → recent headlines with source, date, link
+- `data_get_options` → ATM implied-volatility term structure per expiry
+- `data_get_etf_profile` / `data_get_bond_info` → fund and bond specifics; error clearly on the wrong instrument type
+
+**Important:** the chart's display ticker is often the *feed* venue (`BATS:AMZN`), which the data
+service rejects. These tools resolve the listing venue (`NASDAQ:AMZN`) automatically — but if you
+pass `symbol` yourself, pass the listing venue.
+
+**Note:** `data_get_seasonals` briefly switches the chart to the 1M resolution and restores the
+original — it is the only symbol-data tool that touches chart state.
 
 ### "Change the chart"
 - `chart_set_symbol` → switch ticker (e.g., "AAPL", "ES1!", "NYMEX:CL1!")
@@ -109,6 +131,13 @@ These tools can return large payloads. Follow these rules to avoid context bloat
 | `data_get_ohlcv` (summary) | ~500 bytes |
 | `data_get_ohlcv` (100 bars) | ~8 KB |
 | `capture_screenshot` | ~300 bytes (returns file path, not image data) |
+| `data_get_key_stats` | ~600 bytes |
+| `data_get_technicals` | ~1 KB |
+| `data_get_forecast` | ~500 bytes |
+| `data_get_financials` | ~700 bytes per period (default 8) |
+| `data_get_seasonals` | ~2 KB |
+| `data_get_news` | ~300 bytes per headline (default 15) |
+| `data_get_options` | ~1 KB (default 10 expiries) |
 
 ## Tool Conventions
 

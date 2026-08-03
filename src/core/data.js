@@ -630,3 +630,540 @@ export async function getPineBoxes({ study_filter, verbose } = {}) {
   });
   return { success: true, study_count: studies.length, studies };
 }
+
+// ---------------------------------------------------------------------------
+// Symbol data panels — Forecast, Technicals, Financials, Key stats, Seasonals,
+// News, Options, ETF/Bond profiles.
+//
+// The chart's right sidebar renders every one of these sections into <canvas>,
+// so unlike Pine graphics there is nothing in the DOM worth scraping: the
+// panel's innerText yields only axis labels ("'21 '22 '23", "250.00 B") and
+// never a single underlying value. We therefore issue TradingView's own data
+// requests from page context via evaluateAsync() — same origin, same session
+// cookies, no new dependency. DOM scraping is kept only where it genuinely is
+// the better source: the Forecast consensus gauge encodes its rating as a CSS
+// needle angle that no endpoint returns.
+//
+// These endpoints are private to TradingView and unversioned. They can change
+// without notice, so every reader below degrades to an explicit error instead
+// of guessing at a shape it did not get.
+// ---------------------------------------------------------------------------
+
+// The chart's display ticker is the *feed* venue (e.g. "BATS:AMZN"), which
+// TradingView's data service does not recognise — it answers a bare `null`.
+// symbolInfo().pro_name carries the listing venue ("NASDAQ:AMZN"), which does.
+const SYMBOL_INFO_JS = `
+  (function() {
+    try {
+      var si = ${CHART_API}._chartWidget.model().mainSeries().symbolInfo();
+      if (!si) return null;
+      return {
+        pro_name: si.pro_name, name: si.name, full_name: si.full_name,
+        listed_exchange: si.listed_exchange, type: si.type,
+        currency: si.currency_code, description: si.description
+      };
+    } catch (e) { return null; }
+  })()
+`;
+
+async function resolveSymbol(symbol) {
+  if (symbol && String(symbol).trim()) {
+    return { pro_name: String(symbol).trim().toUpperCase(), from_chart: false };
+  }
+  const info = await evaluate(SYMBOL_INFO_JS);
+  if (!info || !info.pro_name) {
+    throw new Error('Could not read the chart symbol. Make sure a chart is loaded, or pass symbol explicitly (e.g. "NASDAQ:AMZN").');
+  }
+  return { ...info, from_chart: true };
+}
+
+/** Run one scanner field request from page context and return the raw record. */
+async function scannerFields(proSymbol, fields) {
+  const data = await evaluateAsync(`
+    (async function() {
+      try {
+        var url = 'https://scanner.tradingview.com/symbol?symbol=' + encodeURIComponent(${safeString(proSymbol)})
+          + '&fields=' + encodeURIComponent(${safeString(fields.join(','))}) + '&no_404=true';
+        var r = await fetch(url, { credentials: 'include' });
+        if (!r.ok) return { __error: 'TradingView data service returned HTTP ' + r.status };
+        var text = (await r.text()).trim();
+        if (!text || text === 'null') return { __error: '__unknown_symbol__' };
+        return JSON.parse(text);
+      } catch (e) { return { __error: String((e && e.message) || e) }; }
+    })()
+  `);
+  if (!data) throw new Error('No response from TradingView data service.');
+  if (data.__error === '__unknown_symbol__') {
+    throw new Error(`TradingView has no data record for "${proSymbol}". Use the exchange-qualified listing symbol (e.g. "NASDAQ:AMZN") — the chart's display ticker (e.g. "BATS:AMZN") is often a different venue and is not accepted.`);
+  }
+  if (data.__error) throw new Error(`TradingView data request failed: ${data.__error}`);
+  return data;
+}
+
+// Recommend.* is a -1..1 score; these are TradingView's own gauge buckets.
+function recommendLabel(v) {
+  if (v == null || !Number.isFinite(v)) return null;
+  if (v >= 0.5) return 'strong_buy';
+  if (v >= 0.1) return 'buy';
+  if (v >= -0.1) return 'neutral';
+  if (v >= -0.5) return 'sell';
+  return 'strong_sell';
+}
+
+// recommendation_mark is the *analyst* consensus on a 1..5 scale — note it
+// runs the opposite direction to Recommend.* (1 = strong buy, 5 = strong sell).
+function analystRatingLabel(mark) {
+  if (mark == null || !Number.isFinite(mark)) return null;
+  if (mark <= 1.5) return 'strong_buy';
+  if (mark <= 2.5) return 'buy';
+  if (mark <= 3.5) return 'neutral';
+  if (mark <= 4.5) return 'sell';
+  return 'strong_sell';
+}
+
+const isoDate = (unixSeconds) =>
+  (unixSeconds == null || !Number.isFinite(unixSeconds) ? null : new Date(unixSeconds * 1000).toISOString().slice(0, 10));
+
+const round2 = (v) => (v == null || !Number.isFinite(v) ? null : Math.round(v * 100) / 100);
+
+export async function getKeyStats({ symbol } = {}) {
+  const sym = await resolveSymbol(symbol);
+  const d = await scannerFields(sym.pro_name, [
+    'description', 'type', 'currency', 'sector', 'industry', 'close', 'change',
+    'market_cap_basic', 'volume', 'average_volume_10d_calc', 'average_volume_30d_calc',
+    'earnings_release_next_date', 'earnings_per_share_forecast_next_fq',
+    'dividends_yield_current', 'price_earnings_ttm', 'earnings_per_share_diluted_ttm',
+    'beta_1_year', 'total_shares_outstanding', 'float_shares_outstanding',
+  ]);
+  return {
+    success: true,
+    symbol: sym.pro_name,
+    description: d.description ?? null,
+    instrument_type: d.type ?? null,
+    currency: d.currency ?? null,
+    sector: d.sector ?? null,
+    industry: d.industry ?? null,
+    price: d.close ?? null,
+    change_pct: round2(d.change),
+    market_cap: d.market_cap_basic ?? null,
+    volume: d.volume ?? null,
+    avg_volume_10d: Math.round(d.average_volume_10d_calc ?? 0) || null,
+    avg_volume_30d: Math.round(d.average_volume_30d_calc ?? 0) || null,
+    next_earnings_date: isoDate(d.earnings_release_next_date),
+    next_earnings_eps_estimate: d.earnings_per_share_forecast_next_fq ?? null,
+    dividend_yield_pct: d.dividends_yield_current ?? null,
+    pe_ratio_ttm: round2(d.price_earnings_ttm),
+    eps_ttm: d.earnings_per_share_diluted_ttm ?? null,
+    beta_1y: round2(d.beta_1_year),
+    shares_outstanding: d.total_shares_outstanding ?? null,
+    float_shares: d.float_shares_outstanding ?? null,
+  };
+}
+
+// Scanner timeframe suffixes. 1D is the unsuffixed default.
+const TECHNICAL_TIMEFRAMES = {
+  '1': '|1', '5': '|5', '15': '|15', '30': '|30', '60': '|60', '120': '|120', '240': '|240',
+  'D': '', '1D': '', 'W': '|1W', '1W': '|1W', 'M': '|1M', '1M': '|1M',
+};
+const OSCILLATOR_FIELDS = ['RSI', 'Stoch.K', 'Stoch.D', 'Stoch.RSI.K', 'Stoch.RSI.D', 'CCI20', 'ADX', 'AO', 'Mom', 'MACD.macd', 'MACD.signal', 'W.R', 'BBPower', 'UO'];
+const MA_FIELDS = ['EMA10', 'SMA10', 'EMA20', 'SMA20', 'EMA30', 'SMA30', 'EMA50', 'SMA50', 'EMA100', 'SMA100', 'EMA200', 'SMA200', 'Ichimoku.BLine', 'VWMA', 'HullMA9'];
+
+export async function getTechnicals({ symbol, timeframe } = {}) {
+  const sym = await resolveSymbol(symbol);
+  const tfKey = String(timeframe || '1D').toUpperCase();
+  const suffix = TECHNICAL_TIMEFRAMES[tfKey];
+  if (suffix === undefined) {
+    throw new Error(`Unsupported timeframe "${timeframe}". Use one of: ${Object.keys(TECHNICAL_TIMEFRAMES).join(', ')}.`);
+  }
+  const scoped = ['Recommend.All', 'Recommend.MA', 'Recommend.Other', ...OSCILLATOR_FIELDS, ...MA_FIELDS];
+  const d = await scannerFields(sym.pro_name, [...scoped.map(f => f + suffix), 'close']);
+  const at = (f) => d[f + suffix] ?? null;
+
+  const gauge = (f) => ({ score: round2(at(f)), rating: recommendLabel(at(f)) });
+  const values = {};
+  for (const f of [...OSCILLATOR_FIELDS, ...MA_FIELDS]) values[f] = round2(at(f));
+
+  return {
+    success: true,
+    symbol: sym.pro_name,
+    timeframe: tfKey,
+    price: d.close ?? null,
+    summary: gauge('Recommend.All'),
+    moving_averages: gauge('Recommend.MA'),
+    oscillators: gauge('Recommend.Other'),
+    indicators: values,
+  };
+}
+
+export async function getForecast({ symbol } = {}) {
+  const sym = await resolveSymbol(symbol);
+  const d = await scannerFields(sym.pro_name, [
+    'close', 'currency', 'price_target_1y', 'price_target_average', 'price_target_high',
+    'price_target_low', 'price_target_estimates_num', 'recommendation_mark',
+    'recommendation_total', 'recommendation_buy', 'recommendation_hold', 'recommendation_sell',
+  ]);
+  const price = d.close ?? null;
+  const target = d.price_target_average ?? d.price_target_1y ?? null;
+  const upside = (price && target) ? ((target - price) / price) * 100 : null;
+
+  // Best-effort DOM enrichment: the sidebar gauge exposes the consensus as a
+  // needle angle, which the data service does not return. Only meaningful when
+  // we are looking at the symbol the chart is actually showing.
+  let gaugeDegrees = null;
+  if (sym.from_chart) {
+    try {
+      gaugeDegrees = await evaluate(`
+        (function() {
+          try {
+            var nodes = document.querySelectorAll('.widgetbar-widget-detail [style*="recommendation-degrees"]');
+            for (var i = 0; i < nodes.length; i++) {
+              var m = (nodes[i].getAttribute('style') || '').match(/recommendation-degrees:\\s*([-\\d.]+)deg/);
+              if (m) return parseFloat(m[1]);
+            }
+            return null;
+          } catch (e) { return null; }
+        })()
+      `);
+    } catch { gaugeDegrees = null; }
+  }
+
+  if (target == null && d.recommendation_mark == null) {
+    throw new Error(`No analyst forecast is published for "${sym.pro_name}". TradingView only covers analyst estimates for stocks with research coverage.`);
+  }
+
+  return {
+    success: true,
+    symbol: sym.pro_name,
+    currency: d.currency ?? null,
+    price,
+    price_target: {
+      low: d.price_target_low ?? null,
+      average: round2(d.price_target_average ?? d.price_target_1y),
+      high: d.price_target_high ?? null,
+      estimates: d.price_target_estimates_num ?? null,
+    },
+    upside_pct: round2(upside),
+    consensus: {
+      rating: analystRatingLabel(d.recommendation_mark),
+      mark: round2(d.recommendation_mark),
+      analysts: d.recommendation_total ?? null,
+      buy: d.recommendation_buy ?? null,
+      hold: d.recommendation_hold ?? null,
+      sell: d.recommendation_sell ?? null,
+      ...(gaugeDegrees != null && { gauge_needle_degrees: gaugeDegrees }),
+    },
+  };
+}
+
+const FINANCIAL_METRICS = ['total_revenue', 'gross_profit', 'net_income', 'earnings_per_share_diluted', 'ebitda', 'free_cash_flow', 'total_debt', 'total_assets'];
+
+export async function getFinancials({ symbol, period, limit } = {}) {
+  const sym = await resolveSymbol(symbol);
+  const p = String(period || 'annual').toLowerCase();
+  if (p !== 'annual' && p !== 'quarterly') throw new Error('period must be "annual" or "quarterly".');
+  const sfx = p === 'annual' ? '_fy_h' : '_fq_h';
+  const max = Math.min(limit || 8, 32);
+
+  const fields = FINANCIAL_METRICS.map(m => m + sfx);
+  fields.push('currency');
+  if (p === 'annual') fields.push('fiscal_period_fy_h');
+  const d = await scannerFields(sym.pro_name, fields);
+
+  const series = (m) => (Array.isArray(d[m + sfx]) ? d[m + sfx] : []);
+  const depth = Math.max(0, ...FINANCIAL_METRICS.map(m => series(m).length));
+  if (!depth) {
+    throw new Error(`No ${p} financial statements are published for "${sym.pro_name}". Indices, forex, crypto and most funds have no income statement.`);
+  }
+  const years = Array.isArray(d.fiscal_period_fy_h) ? d.fiscal_period_fy_h : null;
+
+  // Every series is newest-first, so index 0 is the most recent report.
+  const periods = [];
+  for (let i = 0; i < Math.min(depth, max); i++) {
+    const revenue = series('total_revenue')[i] ?? null;
+    const netIncome = series('net_income')[i] ?? null;
+    const grossProfit = series('gross_profit')[i] ?? null;
+    periods.push({
+      ...(p === 'annual' ? { fiscal_year: years?.[i] ?? null } : {}),
+      periods_ago: i,
+      revenue,
+      gross_profit: grossProfit,
+      net_income: netIncome,
+      eps_diluted: series('earnings_per_share_diluted')[i] ?? null,
+      ebitda: series('ebitda')[i] ?? null,
+      free_cash_flow: series('free_cash_flow')[i] ?? null,
+      total_debt: series('total_debt')[i] ?? null,
+      total_assets: series('total_assets')[i] ?? null,
+      gross_margin_pct: (revenue && grossProfit != null) ? round2((grossProfit / revenue) * 100) : null,
+      net_margin_pct: (revenue && netIncome != null) ? round2((netIncome / revenue) * 100) : null,
+    });
+  }
+
+  return {
+    success: true,
+    symbol: sym.pro_name,
+    period: p,
+    currency: d.currency ?? null,
+    period_count: periods.length,
+    periods,
+    ...(p === 'quarterly' && {
+      note: 'TradingView does not expose fiscal quarter labels through this feed; periods are ordered newest-first and identified by periods_ago (0 = most recently reported quarter).',
+    }),
+  };
+}
+
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+export async function getSeasonals({ years } = {}) {
+  const lookback = Math.min(Math.max(Number(years) || 10, 1), 30);
+  const info = await evaluate(SYMBOL_INFO_JS);
+
+  // TradingView renders seasonality to canvas and publishes no seasonality
+  // endpoint, so we derive it from monthly bars. That means briefly switching
+  // the chart to 1M and restoring the original resolution — the same
+  // switch-and-restore trade-off getQuote() already makes for symbols.
+  const data = await evaluateAsync(`
+    (async function() {
+      var chart = ${CHART_API};
+      var original = null;
+      try {
+        original = chart.resolution();
+        if (original !== '1M') chart.setResolution('1M', {});
+        var series = chart._chartWidget.model().mainSeries();
+        for (var attempt = 0; attempt < 40; attempt++) {
+          await new Promise(function(r) { setTimeout(r, 250); });
+          var bars = series.bars();
+          if (!bars || typeof bars.lastIndex !== 'function' || bars.size() < 3) continue;
+          var first = bars.firstIndex(), last = bars.lastIndex();
+          var prev = bars.valueAt(last - 1), curr = bars.valueAt(last);
+          if (!prev || !curr) continue;
+          // Guard against reading the pre-switch series: consecutive monthly
+          // bars are always more than 20 days apart, intraday/daily are not.
+          if ((curr[0] - prev[0]) < 20 * 86400) continue;
+          var rows = [];
+          for (var i = first; i <= last; i++) {
+            var v = bars.valueAt(i);
+            if (v && v[1] && v[4]) rows.push([v[0], v[1], v[4]]);
+          }
+          return { bars: rows };
+        }
+        return { error: 'Monthly bars did not load within 10s.' };
+      } catch (e) {
+        return { error: String((e && e.message) || e) };
+      } finally {
+        try { if (original && original !== '1M') chart.setResolution(original, {}); } catch (e2) {}
+      }
+    })()
+  `);
+
+  if (!data || data.error) {
+    throw new Error(`Could not build seasonality: ${data?.error || 'no monthly data returned'}.`);
+  }
+  const rows = data.bars || [];
+  if (rows.length < 12) {
+    throw new Error(`Not enough monthly history for "${info?.pro_name || 'this symbol'}" to compute seasonality (got ${rows.length} monthly bars, need at least 12).`);
+  }
+
+  const currentYear = new Date().getUTCFullYear();
+  const buckets = MONTH_NAMES.map(() => []);
+  let earliest = null, latest = null;
+  for (const [time, open, close] of rows) {
+    const dt = new Date(time * 1000);
+    const year = dt.getUTCFullYear();
+    if (currentYear - year >= lookback) continue;
+    const ret = ((close - open) / open) * 100;
+    if (!Number.isFinite(ret)) continue;
+    buckets[dt.getUTCMonth()].push({ year, ret });
+    if (earliest == null || year < earliest) earliest = year;
+    if (latest == null || year > latest) latest = year;
+  }
+
+  const months = buckets.map((samples, idx) => {
+    if (!samples.length) return { month: idx + 1, name: MONTH_NAMES[idx], samples: 0, avg_return_pct: null, win_rate_pct: null };
+    const avg = samples.reduce((a, s) => a + s.ret, 0) / samples.length;
+    const wins = samples.filter(s => s.ret > 0).length;
+    return {
+      month: idx + 1,
+      name: MONTH_NAMES[idx],
+      samples: samples.length,
+      avg_return_pct: round2(avg),
+      win_rate_pct: round2((wins / samples.length) * 100),
+      best_pct: round2(Math.max(...samples.map(s => s.ret))),
+      worst_pct: round2(Math.min(...samples.map(s => s.ret))),
+    };
+  });
+
+  const scored = months.filter(m => m.avg_return_pct != null);
+  const byReturn = [...scored].sort((a, b) => b.avg_return_pct - a.avg_return_pct);
+
+  return {
+    success: true,
+    symbol: info?.pro_name || null,
+    source: 'derived from monthly bars',
+    years_requested: lookback,
+    years_covered: earliest != null ? { from: earliest, to: latest } : null,
+    months,
+    best_month: byReturn[0] ? { name: byReturn[0].name, avg_return_pct: byReturn[0].avg_return_pct } : null,
+    worst_month: byReturn.length ? { name: byReturn[byReturn.length - 1].name, avg_return_pct: byReturn[byReturn.length - 1].avg_return_pct } : null,
+    note: 'Monthly return is measured open-to-close of each monthly bar. The chart resolution is switched to 1M and restored automatically.',
+  };
+}
+
+export async function getNews({ symbol, limit } = {}) {
+  const sym = await resolveSymbol(symbol);
+  const max = Math.min(Number(limit) || 15, 50);
+  const data = await evaluateAsync(`
+    (async function() {
+      try {
+        var url = 'https://news-headlines.tradingview.com/v2/headlines?client=overview&lang=en&symbol='
+          + encodeURIComponent(${safeString(sym.pro_name)});
+        var r = await fetch(url, { credentials: 'include' });
+        if (!r.ok) return { __error: 'news service returned HTTP ' + r.status };
+        var j = await r.json();
+        return { items: (j && j.items) || [] };
+      } catch (e) { return { __error: String((e && e.message) || e) }; }
+    })()
+  `);
+  if (!data) throw new Error('No response from TradingView news service.');
+  if (data.__error) throw new Error(`TradingView news request failed: ${data.__error}`);
+
+  const items = (data.items || []).slice(0, max).map(it => ({
+    title: it.title ?? null,
+    source: it.source ?? it.provider ?? null,
+    published_at: isoDate(it.published),
+    // urgency 1 = breaking, 2 = regular story.
+    breaking: it.urgency === 1,
+    link: it.link || (it.storyPath ? `https://www.tradingview.com${it.storyPath}` : null),
+    related_symbols: Array.isArray(it.relatedSymbols) ? it.relatedSymbols.map(s => s.symbol).filter(Boolean) : [],
+  }));
+
+  return { success: true, symbol: sym.pro_name, count: items.length, headlines: items };
+}
+
+export async function getOptions({ symbol, max_expirations } = {}) {
+  const sym = await resolveSymbol(symbol);
+  const maxExp = Math.min(Number(max_expirations) || 10, 30);
+
+  const data = await evaluateAsync(`
+    (async function() {
+      try {
+        var body = {
+          columns: ['expiration', 'strike', 'option-type', 'iv', 'delta'],
+          filter: [],
+          index_filters: [{ name: 'underlying_symbol', values: [${safeString(sym.pro_name)}] }],
+          range: [0, 4000],
+          sort: { sortBy: 'expiration', sortOrder: 'asc' }
+        };
+        // content-type text/plain keeps this a CORS "simple request"; the
+        // preflight triggered by application/json is rejected by this host.
+        var r = await fetch('https://scanner.tradingview.com/options/scan', {
+          method: 'POST', credentials: 'include',
+          headers: { 'content-type': 'text/plain' }, body: JSON.stringify(body)
+        });
+        if (!r.ok) return { __error: 'options service returned HTTP ' + r.status };
+        var j = await r.json();
+        var rows = (j && j.data) || [];
+        var byExpiry = {};
+        for (var i = 0; i < rows.length; i++) {
+          var d = rows[i].d;
+          if (!d || d[3] == null || d[4] == null) continue;
+          var key = d[0];
+          if (!byExpiry[key]) byExpiry[key] = [];
+          byExpiry[key].push({ strike: d[1], type: d[2], iv: d[3], delta: d[4] });
+        }
+        // Reduce in page context so we ship a term structure, not 2500 legs.
+        var out = [];
+        for (var expiry in byExpiry) {
+          var legs = byExpiry[expiry], nearest = {};
+          for (var n = 0; n < legs.length; n++) {
+            var leg = legs[n];
+            var offset = Math.abs(Math.abs(leg.delta) - 0.5);
+            if (!nearest[leg.type] || offset < nearest[leg.type].offset) {
+              nearest[leg.type] = { offset: offset, leg: leg };
+            }
+          }
+          var ivs = [], strikes = [];
+          for (var side in nearest) { ivs.push(nearest[side].leg.iv); strikes.push(nearest[side].leg.strike); }
+          if (!ivs.length) continue;
+          var sum = 0; for (var q = 0; q < ivs.length; q++) sum += ivs[q];
+          out.push({
+            expiration: Number(expiry),
+            atm_strike: strikes[0],
+            atm_iv: sum / ivs.length,
+            contracts: legs.length
+          });
+        }
+        out.sort(function(a, b) { return a.expiration - b.expiration; });
+        return { total_contracts: rows.length, expirations: out };
+      } catch (e) { return { __error: String((e && e.message) || e) }; }
+    })()
+  `);
+
+  if (!data) throw new Error('No response from TradingView options service.');
+  if (data.__error) throw new Error(`TradingView options request failed: ${data.__error}`);
+  if (!data.expirations || !data.expirations.length) {
+    throw new Error(`No listed options found for "${sym.pro_name}". Options data only exists for optionable US equities and ETFs.`);
+  }
+
+  const today = new Date();
+  const termStructure = data.expirations.slice(0, maxExp).map(e => {
+    const s = String(e.expiration);
+    const date = `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
+    const dte = Math.round((new Date(`${date}T00:00:00Z`) - today) / 86400000);
+    return { expiration: date, days_to_expiry: dte, atm_strike: e.atm_strike, atm_iv_pct: round2(e.atm_iv * 100), contracts: e.contracts };
+  });
+
+  return {
+    success: true,
+    symbol: sym.pro_name,
+    total_contracts: data.total_contracts,
+    expiration_count: data.expirations.length,
+    term_structure: termStructure,
+    note: 'ATM is the strike whose |delta| is closest to 0.50, averaged across calls and puts. IV spikes on the expiry that straddles an earnings date.',
+  };
+}
+
+export async function getEtfProfile({ symbol } = {}) {
+  const sym = await resolveSymbol(symbol);
+  const d = await scannerFields(sym.pro_name, [
+    'description', 'type', 'typespecs', 'currency', 'close', 'change',
+    'aum', 'expense_ratio', 'nav', 'asset_class', 'focus', 'market_cap_basic', 'volume',
+  ]);
+  if (d.type !== 'fund') {
+    throw new Error(`"${sym.pro_name}" is not a fund/ETF (TradingView reports type "${d.type ?? 'unknown'}"). The ETF section only exists for funds — use data_get_key_stats for this instrument.`);
+  }
+  return {
+    success: true,
+    symbol: sym.pro_name,
+    description: d.description ?? null,
+    fund_type: Array.isArray(d.typespecs) ? d.typespecs.join(', ') : null,
+    currency: d.currency ?? null,
+    price: d.close ?? null,
+    change_pct: round2(d.change),
+    nav: d.nav ?? null,
+    aum: d.aum ?? null,
+    expense_ratio_pct: d.expense_ratio ?? null,
+    volume: d.volume ?? null,
+  };
+}
+
+export async function getBondInfo({ symbol } = {}) {
+  const sym = await resolveSymbol(symbol);
+  const d = await scannerFields(sym.pro_name, [
+    'description', 'type', 'typespecs', 'currency', 'close', 'change', 'coupon', 'maturity_date',
+  ]);
+  if (d.type !== 'bond') {
+    throw new Error(`"${sym.pro_name}" is not a bond (TradingView reports type "${d.type ?? 'unknown'}"). Try a yield symbol such as "TVC:US10Y".`);
+  }
+  const maturity = d.maturity_date != null ? String(d.maturity_date) : null;
+  return {
+    success: true,
+    symbol: sym.pro_name,
+    description: d.description ?? null,
+    bond_type: Array.isArray(d.typespecs) ? d.typespecs.join(', ') : null,
+    currency: d.currency ?? null,
+    yield_pct: d.close ?? null,
+    change_pct: round2(d.change),
+    coupon_pct: d.coupon ?? null,
+    maturity_date: maturity && maturity.length === 8 ? `${maturity.slice(0, 4)}-${maturity.slice(4, 6)}-${maturity.slice(6, 8)}` : null,
+  };
+}

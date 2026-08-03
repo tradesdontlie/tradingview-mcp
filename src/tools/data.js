@@ -83,4 +83,77 @@ export function registerDataTools(server) {
     try { return jsonResult(await core.getStudyValues()); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
+
+  // --- Symbol data panels (Forecast, Technicals, Financials, ...) ------------
+  // Every tool below defaults to the chart's current symbol; pass an
+  // exchange-qualified symbol (e.g. "NASDAQ:AMZN") to read any other one
+  // without touching the chart.
+
+  server.tool('data_get_key_stats', 'Key stats for a symbol: market cap, next earnings date, volume, average volume, dividend yield, P/E, EPS, beta, shares outstanding.', {
+    symbol: z.string().optional().describe('Exchange-qualified symbol (e.g. "NASDAQ:AMZN"). Omit for the current chart symbol.'),
+  }, async ({ symbol }) => {
+    try { return jsonResult(await core.getKeyStats({ symbol })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('data_get_technicals', 'Technicals consensus gauges (Strong buy…Strong sell) for Summary, Moving Averages and Oscillators, plus the underlying indicator values (RSI, Stoch, MACD, ADX, CCI, EMAs, SMAs).', {
+    symbol: z.string().optional().describe('Exchange-qualified symbol. Omit for the current chart symbol.'),
+    timeframe: z.string().optional().describe('Timeframe for the gauges: 1, 5, 15, 30, 60, 120, 240, 1D (default), 1W, 1M'),
+  }, async ({ symbol, timeframe }) => {
+    try { return jsonResult(await core.getTechnicals({ symbol, timeframe })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('data_get_forecast', 'Analyst forecast: price target low/average/high, upside % vs current price, consensus rating and the analyst buy/hold/sell breakdown.', {
+    symbol: z.string().optional().describe('Exchange-qualified symbol. Omit for the current chart symbol.'),
+  }, async ({ symbol }) => {
+    try { return jsonResult(await core.getForecast({ symbol })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('data_get_financials', 'Income statement history: revenue, gross profit, net income, diluted EPS, EBITDA, free cash flow, debt/assets and margins, per annual or quarterly period (newest first).', {
+    symbol: z.string().optional().describe('Exchange-qualified symbol. Omit for the current chart symbol.'),
+    period: z.enum(['annual', 'quarterly']).optional().describe('Reporting period (default annual)'),
+    limit: z.coerce.number().optional().describe('How many periods to return (default 8, max 32)'),
+  }, async ({ symbol, period, limit }) => {
+    try { return jsonResult(await core.getFinancials({ symbol, period, limit })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('data_get_seasonals', 'Seasonality for the current chart symbol: average return, win rate, best and worst outcome per calendar month. Derived from monthly bars — briefly switches the chart to 1M and restores the original resolution.', {
+    years: z.coerce.number().optional().describe('Lookback window in years (default 10, max 30)'),
+  }, async ({ years }) => {
+    try { return jsonResult(await core.getSeasonals({ years })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('data_get_news', 'Recent news headlines for a symbol: title, source, publish date, breaking flag and article link.', {
+    symbol: z.string().optional().describe('Exchange-qualified symbol. Omit for the current chart symbol.'),
+    limit: z.coerce.number().optional().describe('Max headlines to return (default 15, max 50)'),
+  }, async ({ symbol, limit }) => {
+    try { return jsonResult(await core.getNews({ symbol, limit })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('data_get_options', 'Options ATM implied-volatility term structure: per expiry, the ATM strike and ATM IV %. Only available for optionable US equities and ETFs.', {
+    symbol: z.string().optional().describe('Exchange-qualified symbol. Omit for the current chart symbol.'),
+    max_expirations: z.coerce.number().optional().describe('How many expiries to return, nearest first (default 10, max 30)'),
+  }, async ({ symbol, max_expirations }) => {
+    try { return jsonResult(await core.getOptions({ symbol, max_expirations })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('data_get_etf_profile', 'ETF/fund profile: AUM, expense ratio, NAV, fund type. Returns an error for non-fund instruments.', {
+    symbol: z.string().optional().describe('Exchange-qualified symbol (e.g. "AMEX:SPY"). Omit for the current chart symbol.'),
+  }, async ({ symbol }) => {
+    try { return jsonResult(await core.getEtfProfile({ symbol })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('data_get_bond_info', 'Bond/yield instrument info: current yield, coupon, maturity date. Returns an error for non-bond instruments.', {
+    symbol: z.string().optional().describe('Exchange-qualified symbol (e.g. "TVC:US10Y"). Omit for the current chart symbol.'),
+  }, async ({ symbol }) => {
+    try { return jsonResult(await core.getBondInfo({ symbol })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
 }
