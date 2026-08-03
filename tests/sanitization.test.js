@@ -8,7 +8,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { safeString, requireFinite } from '../src/connection.js';
 import { setSymbol, setTimeframe, setType, manageIndicator, setVisibleRange } from '../src/core/chart.js';
-import { drawShape } from '../src/core/drawing.js';
+import { drawShape, listDrawings, getProperties, removeOne, clearAll } from '../src/core/drawing.js';
 
 // ── Mock helpers ─────────────────────────────────────────────────────────
 
@@ -281,6 +281,59 @@ describe('drawing.js — sanitized evaluate calls', () => {
     const call = evaluate.calls.find(c => c.includes('createMultipointShape'));
     assert.ok(call, 'createMultipointShape called');
     assert.ok(call.includes('"trend_line"'), 'shape name via safeString');
+  });
+});
+
+// ── drawing.js — dependency resolution ───────────────────────────────────
+// Regression guard for #413: listDrawings, getProperties, removeOne and
+// clearAll referenced bare getChartApi/evaluate, which only exist under their
+// import aliases (_getChartApi/_evaluate), so every one of them threw
+// ReferenceError at runtime. The suite missed it because only drawShape was
+// exercised — these tests call the other four through _resolve(_deps).
+
+describe('drawing.js — all exports resolve deps via _resolve', () => {
+  it('listDrawings runs with injected deps and returns shapes', async () => {
+    const { _deps } = mockDeps({
+      evaluate: async () => [{ id: 'shape1', name: 'LineToolHorzLine' }],
+    });
+    const result = await listDrawings(_deps);
+    assert.equal(result.success, true);
+    assert.equal(result.count, 1);
+    assert.equal(result.shapes[0].id, 'shape1');
+  });
+
+  it('getProperties runs with injected deps and escapes entity_id', async () => {
+    const calls = [];
+    const { _deps } = mockDeps({
+      evaluate: async (expr) => { calls.push(expr); return { entity_id: 'abc', visible: true }; },
+    });
+    const result = await getProperties({ entity_id: 'abc"; alert(1); "', _deps });
+    assert.equal(result.success, true);
+    const call = calls.find(c => c.includes('getShapeById'));
+    assert.ok(call, 'getShapeById called');
+    assert.ok(call.includes('\\"; alert(1); \\"'), 'entity_id escaped via safeString');
+  });
+
+  it('getProperties throws on shape-not-found error result', async () => {
+    const { _deps } = mockDeps({ evaluate: async () => ({ error: 'Shape not found: xyz' }) });
+    await assert.rejects(() => getProperties({ entity_id: 'xyz', _deps }), /Shape not found/);
+  });
+
+  it('removeOne runs with injected deps and reports removal', async () => {
+    const { _deps } = mockDeps({
+      evaluate: async () => ({ removed: true, entity_id: 'shape1', remaining_shapes: 0 }),
+    });
+    const result = await removeOne({ entity_id: 'shape1', _deps });
+    assert.equal(result.success, true);
+    assert.equal(result.removed, true);
+    assert.equal(result.remaining_shapes, 0);
+  });
+
+  it('clearAll runs with injected deps', async () => {
+    const { _deps, evaluate } = mockDeps();
+    const result = await clearAll(_deps);
+    assert.equal(result.success, true);
+    assert.ok(evaluate.calls.some(c => c.includes('removeAllShapes')), 'removeAllShapes called');
   });
 });
 
