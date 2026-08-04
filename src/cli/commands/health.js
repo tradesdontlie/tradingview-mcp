@@ -20,6 +20,6 @@ register('launch', {
 });
 
 register('update', {
-  description: 'Update to the latest version (git fast-forward + npm ci if deps changed)',
-  handler: () => update({}),
+  description: 'Update to the latest version (disabled by default; git fast-forward + npm ci if deps changed)',
+  handler: (opts, positionals, _deps) => update({ _deps }),
 });

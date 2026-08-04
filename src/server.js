@@ -63,6 +63,7 @@ Tabs: tab_list, tab_new, tab_close, tab_switch
 SECURITY:
 - ui_evaluate executes arbitrary page JavaScript and is disabled by default
 - replay_trade changes simulated Bar Replay positions and is disabled by default
+- tv_update pulls and runs remote code (git + npm ci) and is disabled by default
 - Replay navigation remains available without enabling simulated trades
 - This MCP cannot verify account type or guarantee demo/paper isolation
 
@@ -96,6 +97,7 @@ process.stderr.write('⚠  tradingview-mcp  |  Unofficial tool. Not affiliated w
 process.stderr.write('   Ensure your usage complies with TradingView\'s Terms of Use.\n\n');
 process.stderr.write('   Security: ui_evaluate arbitrary JavaScript is disabled by default.\n');
 process.stderr.write('   Security: replay_trade simulated position changes are disabled by default.\n');
+process.stderr.write('   Security: tv_update (pulls and runs remote code) is disabled by default.\n');
 process.stderr.write('   Replay is not a guarantee of demo/paper isolation; disconnect real brokers before use.\n\n');
 
 // Start stdio transport

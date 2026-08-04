@@ -3,7 +3,7 @@ import { jsonResult } from './_format.js';
 import * as core from '../core/health.js';
 import { update } from '../core/update.js';
 
-export function registerHealthTools(server) {
+export function registerHealthTools(server, { env = process.env } = {}) {
   server.tool('tv_health_check', 'Check CDP connection to TradingView and return current chart state', {}, async () => {
     try { return jsonResult(await core.healthCheck()); }
     catch (err) { return jsonResult({ success: false, error: err.message, hint: 'TradingView is not running with CDP enabled. Use the tv_launch tool to start it automatically.' }, true); }
@@ -27,8 +27,8 @@ export function registerHealthTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('tv_update', 'Update this MCP server to the latest version: git fast-forward of origin/main + npm ci when dependencies changed. Safe by design — refuses on non-git installs, dirty working trees, non-main branches, or diverged history. After a successful update the MCP server must be restarted to load the new code.', {}, async () => {
-    try { return jsonResult(await update({})); }
+  server.tool('tv_update', 'Update this MCP server to the latest version: git fast-forward of origin/main + npm ci when dependencies changed. DISABLED by default because it pulls and runs remote code; requires an explicit startup capability opt-in. Refuses on non-git installs, dirty working trees, non-main branches, or diverged history. After a successful update the MCP server must be restarted to load the new code.', {}, async () => {
+    try { return jsonResult(await update({ _deps: { env } })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 }

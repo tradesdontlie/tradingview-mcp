@@ -44,6 +44,12 @@ TRADINGVIEW_MCP_ALLOW_ARBITRARY_PAGE_JS=I_UNDERSTAND_THIS_EXECUTES_ARBITRARY_JAV
 TRADINGVIEW_MCP_ALLOW_REPLAY_TRADES=I_UNDERSTAND_THIS_CHANGES_SIMULATED_REPLAY_POSITIONS
 ```
 
+`tv_update` fast-forwards the checkout to `origin/main` and runs `npm ci`, executing whatever remote code and dependencies arrive from the repository. It is denied before any git, network, or npm side effect unless the server or CLI is started with:
+
+```text
+TRADINGVIEW_MCP_ALLOW_SELF_UPDATE=I_UNDERSTAND_THIS_PULLS_AND_RUNS_REMOTE_CODE
+```
+
 Replay navigation (`replay_start`, `replay_step`, `replay_autoplay`, `replay_status`, and `replay_stop`) does not require this capability.
 
 Do not enable dangerous capabilities for routine use. Other tools still control the TradingView UI, modify chart or cloud state, create alerts, launch a local process, and self-update this checkout. Treat MCP clients and prompts as trusted code, and review every state-changing request.
