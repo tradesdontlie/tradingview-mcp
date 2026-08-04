@@ -77,6 +77,7 @@ Gives your AI assistant eyes and hands on your own chart:
 | `ui_evaluate` | Disabled | Exact arbitrary-JavaScript acknowledgment required |
 | `replay_trade` | Disabled | Exact simulated-position acknowledgment required |
 | `tv_update` | Disabled | Exact self-update acknowledgment required; pulls and runs remote code |
+| `alert_delete` (`delete_all`) | Enabled | Irreversible bulk delete requires an exact `confirm` token; a bare `delete_all` is refused |
 | Replay navigation | Enabled | `start`, `step`, `autoplay`, `status`, and `stop` do not require the trade capability |
 
 The exact opt-in values are documented in [SECURITY.md](SECURITY.md); generic truthy flags are rejected. `replay_trade` only changes TradingView's internal Bar Replay simulated positions. Replay and paper trading are not the same as enforced isolation: the MCP cannot verify account type or guarantee that a real broker is disconnected. Use replay only with real broker connections removed.

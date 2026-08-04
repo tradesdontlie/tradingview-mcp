@@ -6,7 +6,12 @@
  * Requests are sent as text/plain so the browser does not issue a CORS preflight that
  * the endpoint rejects. The create/delete bodies must be wrapped in a `payload` object.
  */
-import { evaluate, evaluateAsync, safeString, requireFinite } from '../connection.js';
+import { evaluate as _evaluate, evaluateAsync as _evaluateAsync, safeString, requireFinite } from '../connection.js';
+
+// Explicit token required to bulk-delete every alert. A bare delete_all boolean is
+// not enough — this guards against an assistant or injected prompt wiping the whole
+// account of alerts from a single casual flag.
+export const DELETE_ALL_CONFIRMATION = 'DELETE_ALL_ALERTS';
 
 // Map the tool's friendly condition names to TradingView's alert condition types.
 const CONDITION_TYPE_MAP = {
@@ -15,7 +20,15 @@ const CONDITION_TYPE_MAP = {
   less_than: 'less', less: 'less', below: 'less', '<': 'less',
 };
 
-export async function create({ condition, price, message }) {
+function _resolve(deps) {
+  return {
+    evaluate: deps?.evaluate || _evaluate,
+    evaluateAsync: deps?.evaluateAsync || _evaluateAsync,
+  };
+}
+
+export async function create({ condition, price, message, _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
   const p = requireFinite(price, 'price');
   const condType = CONDITION_TYPE_MAP[String(condition || 'crossing').trim().toLowerCase()] || 'cross';
 
@@ -63,7 +76,8 @@ export async function create({ condition, price, message }) {
   `);
 }
 
-export async function list() {
+export async function list({ _deps } = {}) {
+  const { evaluateAsync } = _resolve(_deps);
   // Use pricealerts REST API — returns structured data with alert_id, symbol, price, conditions
   const result = await evaluateAsync(`
     fetch('https://pricealerts.tradingview.com/list_alerts', { credentials: 'include' })
@@ -94,13 +108,22 @@ export async function list() {
   return { success: true, alert_count: result?.alerts?.length || 0, source: 'internal_api', alerts: result?.alerts || [], error: result?.error };
 }
 
-export async function deleteAlerts({ delete_all, alert_ids, alert_id } = {}) {
+export async function deleteAlerts({ delete_all, alert_ids, alert_id, confirm, _deps } = {}) {
+  // Guard bulk deletion before any network request: a bare delete_all is not enough.
+  if (delete_all && confirm !== DELETE_ALL_CONFIRMATION) {
+    return {
+      success: false,
+      source: 'internal_api',
+      error: `Refusing to delete all alerts without explicit confirmation. Pass confirm: "${DELETE_ALL_CONFIRMATION}" to proceed.`,
+    };
+  }
+  const { evaluate } = _resolve(_deps);
   // Resolve the set of alert ids to delete.
   let ids = [];
   if (Array.isArray(alert_ids)) ids = ids.concat(alert_ids);
   if (alert_id != null) ids.push(alert_id);
   if (delete_all) {
-    const listed = await list();
+    const listed = await list({ _deps });
     ids = (listed.alerts || []).map((a) => a.alert_id);
   }
   ids = ids.filter((x) => x != null);
