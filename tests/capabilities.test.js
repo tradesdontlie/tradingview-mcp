@@ -90,16 +90,27 @@ describe('arbitrary page JavaScript capability', () => {
     assert.deepEqual(body, { success: true, result: 5 });
   });
 
-  it('denies the actual CLI ui eval handler before CDP access', async () => {
+  it('denies present and missing CLI ui eval expressions before CDP access', async () => {
+    let evaluated = false;
+    const handler = getRegisteredHandler('ui', 'eval');
+
+    for (const positionals of [['globalThis.compromised', '=', 'true'], []]) {
+      await assert.rejects(
+        () => handler({}, positionals, { env: {}, evaluate: async () => { evaluated = true; } }),
+        new RegExp(ARBITRARY_PAGE_JS_ENV),
+      );
+    }
+
+    assert.equal(evaluated, false);
+  });
+
+  it('validates a missing CLI expression only after exact opt-in', async () => {
     let evaluated = false;
     const handler = getRegisteredHandler('ui', 'eval');
 
     await assert.rejects(
-      () => handler({}, ['globalThis.compromised', '=', 'true'], {
-        env: {},
-        evaluate: async () => { evaluated = true; },
-      }),
-      new RegExp(ARBITRARY_PAGE_JS_ENV),
+      () => handler({}, [], { env: enabledEnv, evaluate: async () => { evaluated = true; } }),
+      /non-empty string/,
     );
 
     assert.equal(evaluated, false);

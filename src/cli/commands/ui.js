@@ -2,7 +2,9 @@ import { register } from '../router.js';
 import * as core from '../../core/ui.js';
 
 function uiEvaluateCommand(opts, positionals, _deps) {
-  if (!positionals[0]) throw new Error('Expression required. Usage: tv ui eval "1+1"');
+  // No pre-check here: the capability gate inside core.uiEvaluate must run before
+  // any argument validation, mirroring replayTradeCommand. A missing expression is
+  // rejected by core AFTER the gate, so a disabled capability never leaks past it.
   return core.uiEvaluate({ expression: positionals.join(' '), _deps });
 }
 
