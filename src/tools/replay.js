@@ -2,7 +2,8 @@ import { z } from 'zod';
 import { jsonResult } from './_format.js';
 import * as core from '../core/replay.js';
 
-export function registerReplayTools(server) {
+export function registerReplayTools(server, { env = process.env, evaluate, getReplayApi } = {}) {
+  const _deps = { env, evaluate, getReplayApi };
   server.tool('replay_start', 'Start bar replay mode, optionally at a specific date', {
     date: z.string().optional().describe('Date to start replay from (YYYY-MM-DD format). If omitted, selects first available date.'),
   }, async ({ date }) => {
@@ -27,10 +28,10 @@ export function registerReplayTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('replay_trade', 'Execute a trade action in replay mode (buy, sell, or close position)', {
-    action: z.string().describe('Trade action: buy, sell, or close'),
+  server.tool('replay_trade', 'SIMULATED: Change TradingView Bar Replay position state. Disabled by default; this does not prove paper/broker isolation.', {
+    action: z.unknown().optional().describe('Simulated Bar Replay action: buy, sell, or close'),
   }, async ({ action }) => {
-    try { return jsonResult(await core.trade({ action })); }
+    try { return jsonResult(await core.trade({ action, _deps })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 

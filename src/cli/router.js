@@ -11,6 +11,11 @@ export function register(name, config) {
   commands.set(name, config);
 }
 
+export function getRegisteredHandler(name, subcommand) {
+  const command = commands.get(name);
+  return subcommand ? command?.subcommands?.get(subcommand)?.handler : command?.handler;
+}
+
 function printHelp() {
   console.log('Usage: tv <command> [options]\n');
   console.log('Commands:');

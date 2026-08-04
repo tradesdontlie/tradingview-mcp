@@ -2,6 +2,7 @@
  * Core replay mode logic.
  */
 import { evaluate as _evaluate, getReplayApi as _getReplayApi } from '../connection.js';
+import { requireReplayTrading } from '../capabilities.js';
 
 export const VALID_AUTOPLAY_DELAYS = [100, 143, 200, 300, 1000, 2000, 3000, 5000, 10000];
 
@@ -104,6 +105,10 @@ export async function stop({ _deps } = {}) {
 }
 
 export async function trade({ action, _deps }) {
+  requireReplayTrading(_deps?.env);
+  if (!['buy', 'sell', 'close'].includes(action)) {
+    throw new Error('Invalid action. Use: buy, sell, or close');
+  }
   const { evaluate, getReplayApi } = _resolve(_deps);
   const rp = await getReplayApi();
   const started = await evaluate(wv(`${rp}.isReplayStarted()`));
@@ -111,8 +116,7 @@ export async function trade({ action, _deps }) {
 
   if (action === 'buy') await evaluate(`${rp}.buy()`);
   else if (action === 'sell') await evaluate(`${rp}.sell()`);
-  else if (action === 'close') await evaluate(`${rp}.closePosition()`);
-  else throw new Error('Invalid action. Use: buy, sell, or close');
+  else await evaluate(`${rp}.closePosition()`);
 
   const position = await evaluate(wv(`${rp}.position()`));
   const pnl = await evaluate(wv(`${rp}.realizedPL()`));

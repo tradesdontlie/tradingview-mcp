@@ -29,3 +29,23 @@ This project connects to a locally running TradingView Desktop instance via Chro
 - Do not expose port 9222 to your network or the internet
 - Do not pipe `tv stream` output to external services without reviewing the data
 - Keep your TradingView Desktop and Node.js installations up to date
+
+## Capability Boundaries
+
+`ui_evaluate` can execute arbitrary JavaScript with the privileges of the active TradingView page. It is denied before any CDP call unless the MCP server or CLI is deliberately started with:
+
+```text
+TRADINGVIEW_MCP_ALLOW_ARBITRARY_PAGE_JS=I_UNDERSTAND_THIS_EXECUTES_ARBITRARY_JAVASCRIPT
+```
+
+`replay_trade` changes only TradingView's internal Bar Replay simulated position. It is independently denied before any CDP call unless the server or CLI is started with:
+
+```text
+TRADINGVIEW_MCP_ALLOW_REPLAY_TRADES=I_UNDERSTAND_THIS_CHANGES_SIMULATED_REPLAY_POSITIONS
+```
+
+Replay navigation (`replay_start`, `replay_step`, `replay_autoplay`, `replay_status`, and `replay_stop`) does not require this capability.
+
+Do not enable dangerous capabilities for routine use. Other tools still control the TradingView UI, modify chart or cloud state, create alerts, launch a local process, and self-update this checkout. Treat MCP clients and prompts as trusted code, and review every state-changing request.
+
+This repository has no broker-order integration. The Replay trade gate does not inspect account type, broker connectivity, or every TradingView UI state, so it cannot prove demo/paper isolation. Keep real brokers disconnected and do not use generic UI automation around order-entry surfaces.

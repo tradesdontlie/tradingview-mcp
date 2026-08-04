@@ -5,7 +5,20 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { start, step, autoplay, stop, trade, status, VALID_AUTOPLAY_DELAYS } from '../src/core/replay.js';
+import {
+  REPLAY_TRADING_ACK,
+  REPLAY_TRADING_ENV,
+  requireReplayTrading,
+} from '../src/capabilities.js';
+import { registerReplayTools } from '../src/tools/replay.js';
+import { getRegisteredHandler } from '../src/cli/router.js';
+import '../src/cli/commands/replay.js';
+
+const replayTradingEnv = { [REPLAY_TRADING_ENV]: REPLAY_TRADING_ACK };
 
 // ── Mock helpers ─────────────────────────────────────────────────────────
 
@@ -37,6 +50,20 @@ function mockGetReplayApi() {
 function mockDeps(responses = {}, sequence) {
   const evaluate = mockEvaluate(responses, sequence);
   return { _deps: { evaluate, getReplayApi: mockGetReplayApi() }, evaluate };
+}
+
+async function callReplayTradeThroughSdk(args, deps) {
+  const server = new McpServer({ name: 'replay-test', version: '1.0.0' });
+  const client = new Client({ name: 'replay-test-client', version: '1.0.0' });
+  registerReplayTools(server, deps);
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+  await Promise.all([client.connect(clientTransport), server.connect(serverTransport)]);
+  try {
+    return await client.callTool({ name: 'replay_trade', arguments: args });
+  } finally {
+    await Promise.all([client.close(), server.close()]);
+  }
 }
 
 // ── start() ──────────────────────────────────────────────────────────────
@@ -286,6 +313,32 @@ describe('stop()', () => {
 // ── trade() ──────────────────────────────────────────────────────────────
 
 describe('trade()', () => {
+  it('is denied by default before resolving the replay API or calling CDP', async () => {
+    let replayApiCalls = 0;
+    let evaluateCalls = 0;
+
+    await assert.rejects(
+      () => trade({
+        action: 'buy',
+        _deps: {
+          env: {},
+          getReplayApi: async () => { replayApiCalls++; },
+          evaluate: async () => { evaluateCalls++; },
+        },
+      }),
+      new RegExp(`${REPLAY_TRADING_ENV}=${REPLAY_TRADING_ACK}`),
+    );
+
+    assert.equal(replayApiCalls, 0);
+    assert.equal(evaluateCalls, 0);
+  });
+
+  it('rejects truthy and near-match capability values', () => {
+    for (const value of ['1', 'true', REPLAY_TRADING_ACK.toLowerCase(), `${REPLAY_TRADING_ACK} `]) {
+      assert.throws(() => requireReplayTrading({ [REPLAY_TRADING_ENV]: value }), /disabled/);
+    }
+  });
+
   for (const action of ['buy', 'sell', 'close']) {
     it(`executes ${action} action`, async () => {
       const { _deps, evaluate } = mockDeps({
@@ -294,6 +347,7 @@ describe('trade()', () => {
         'position': 1,
         'realizedPL': 50.5,
       });
+      _deps.env = replayTradingEnv;
       const result = await trade({ action, _deps });
       assert.equal(result.success, true);
       assert.equal(result.action, action);
@@ -304,6 +358,7 @@ describe('trade()', () => {
 
   it('throws on invalid action', async () => {
     const { _deps } = mockDeps({ 'isReplayStarted': true });
+    _deps.env = replayTradingEnv;
     await assert.rejects(
       () => trade({ action: 'hold', _deps }),
       (err) => err.message.includes('Invalid action'),
@@ -312,17 +367,78 @@ describe('trade()', () => {
 
   it('throws when replay not started', async () => {
     const { _deps } = mockDeps({ 'isReplayStarted': false });
+    _deps.env = replayTradingEnv;
     await assert.rejects(
       () => trade({ action: 'buy', _deps }),
       (err) => err.message.includes('not started'),
     );
+  });
+
+  it('denies present and missing CLI actions before CDP access', async () => {
+    let evaluated = false;
+    const handler = getRegisteredHandler('replay', 'trade');
+    for (const positionals of [['buy'], []]) {
+      await assert.rejects(
+        () => handler({}, positionals, { env: {}, evaluate: async () => { evaluated = true; } }),
+        new RegExp(REPLAY_TRADING_ENV),
+      );
+    }
+    assert.equal(evaluated, false);
+  });
+
+  it('validates missing CLI action only after exact opt-in', async () => {
+    const handler = getRegisteredHandler('replay', 'trade');
+    await assert.rejects(
+      () => handler({}, [], { env: replayTradingEnv }),
+      /Invalid action/,
+    );
+  });
+
+  it('allows the actual registered CLI replay trade handler with exact opt-in', async () => {
+    const { _deps } = mockDeps({
+      'isReplayStarted': true,
+      'buy': undefined,
+      'position': 1,
+      'realizedPL': 0,
+    });
+    _deps.env = replayTradingEnv;
+    const handler = getRegisteredHandler('replay', 'trade');
+
+    const result = await handler({}, ['buy'], _deps);
+    assert.deepEqual(result, { success: true, action: 'buy', position: 1, realized_pnl: 0 });
+  });
+
+  it('denies arbitrary and missing MCP actions at the gate through the SDK boundary', async () => {
+    for (const args of [{ action: 'buy' }, { action: { arbitrary: true } }, {}]) {
+      const response = await callReplayTradeThroughSdk(args, {
+        env: {},
+        evaluate: async () => assert.fail('must not evaluate'),
+        getReplayApi: async () => assert.fail('must not resolve replay API'),
+      });
+      const body = JSON.parse(response.content[0].text);
+
+      assert.equal(response.isError, true);
+      assert.match(body.error, new RegExp(REPLAY_TRADING_ENV));
+      assert.doesNotMatch(body.error, /Invalid action/);
+    }
+  });
+
+  it('validates MCP action only after exact opt-in through the SDK boundary', async () => {
+    for (const args of [{ action: 'hold' }, {}]) {
+      const response = await callReplayTradeThroughSdk(args, { env: replayTradingEnv });
+      const body = JSON.parse(response.content[0].text);
+
+      assert.equal(response.isError, true);
+      assert.match(body.error, /Invalid action/);
+      assert.doesNotMatch(body.error, /disabled/);
+    }
   });
 });
 
 // ── status() ─────────────────────────────────────────────────────────────
 
 describe('status()', () => {
-  it('returns full status object', async () => {
+  it('remains available without enabling simulated Replay trades', async () => {
     let callIdx = 0;
     const evaluate = async (expr) => {
       callIdx++;
@@ -344,7 +460,7 @@ describe('status()', () => {
       return undefined;
     };
     evaluate.calls = [];
-    const result = await status({ _deps: { evaluate, getReplayApi: mockGetReplayApi() } });
+    const result = await status({ _deps: { env: {}, evaluate, getReplayApi: mockGetReplayApi() } });
     assert.equal(result.success, true);
     assert.equal(result.is_replay_started, true);
     assert.equal(result.current_date, 1700000000);
