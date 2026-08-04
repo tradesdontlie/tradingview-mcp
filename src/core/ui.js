@@ -2,6 +2,7 @@
  * Core UI automation logic.
  */
 import { evaluate, evaluateAsync, getClient } from '../connection.js';
+import { requireArbitraryPageJs } from '../capabilities.js';
 
 export async function click({ by, value }) {
   const escaped = JSON.stringify(value);
@@ -296,7 +297,12 @@ export async function findElement({ query, strategy }) {
   return { success: true, query, strategy: strat, count: results?.length || 0, elements: results || [] };
 }
 
-export async function uiEvaluate({ expression }) {
-  const result = await evaluate(expression);
+export async function uiEvaluate({ expression, _deps } = {}) {
+  requireArbitraryPageJs(_deps?.env);
+  if (typeof expression !== 'string' || expression.trim().length === 0) {
+    throw new Error('expression must be a non-empty string');
+  }
+  const runEvaluate = _deps?.evaluate || evaluate;
+  const result = await runEvaluate(expression);
   return { success: true, result };
 }

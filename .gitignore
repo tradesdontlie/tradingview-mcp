@@ -5,3 +5,10 @@ temp_*
 *.log
 discovery-log.json
 rules.json
+.atl/
+.claude/
+
+# Research-SDD investigation artifacts (not product)
+/corpus/
+/retros/
+/tools/

@@ -6,9 +6,13 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { update } from '../src/core/update.js';
+import { SELF_UPDATE_ACK, SELF_UPDATE_ENV, requireSelfUpdate } from '../src/capabilities.js';
+import { getRegisteredHandler } from '../src/cli/router.js';
+import '../src/cli/commands/health.js';
 
 const OLD = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const NEW = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+const selfUpdateEnv = { [SELF_UPDATE_ENV]: SELF_UPDATE_ACK };
 
 /**
  * Build DI deps simulating a git repo.
@@ -17,6 +21,7 @@ const NEW = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 function gitDeps({ branch = 'main', dirty = '', remoteSha = OLD, ahead = 0, behind = 0, lockChanged = false, npmFails = false } = {}) {
   const state = { merged: false, npmCi: 0, cmds: [] };
   const deps = {
+    env: selfUpdateEnv,
     existsSync: () => true,
     repoRoot: 'C:/fake/repo',
     execSync: (cmd) => {
@@ -40,6 +45,45 @@ function gitDeps({ branch = 'main', dirty = '', remoteSha = OLD, ahead = 0, behi
   };
   return { deps, state };
 }
+
+describe('update() — self-update capability gate', () => {
+  it('is denied by default before any git, network, or npm side effect', async () => {
+    const { deps, state } = gitDeps({ remoteSha: NEW, behind: 1, lockChanged: true });
+    deps.env = {};
+    await assert.rejects(
+      () => update({ _deps: deps }),
+      new RegExp(`${SELF_UPDATE_ENV}=${SELF_UPDATE_ACK}`),
+    );
+    assert.equal(state.cmds.length, 0, 'no git/npm command executed');
+    assert.equal(state.npmCi, 0);
+  });
+
+  it('rejects truthy and near-match capability values', () => {
+    for (const value of ['1', 'true', SELF_UPDATE_ACK.toLowerCase(), `${SELF_UPDATE_ACK} `]) {
+      assert.throws(() => requireSelfUpdate({ [SELF_UPDATE_ENV]: value }), /disabled/);
+    }
+  });
+
+  it('denies the actual registered CLI update handler before side effects', async () => {
+    const { deps, state } = gitDeps({ remoteSha: NEW, behind: 1 });
+    deps.env = {};
+    const handler = getRegisteredHandler('update');
+    await assert.rejects(
+      () => handler({}, [], deps),
+      new RegExp(SELF_UPDATE_ENV),
+    );
+    assert.equal(state.cmds.length, 0, 'no git/npm command executed');
+  });
+
+  it('allows the registered CLI update handler after exact opt-in', async () => {
+    const { deps } = gitDeps({ remoteSha: NEW, behind: 2 });
+    const handler = getRegisteredHandler('update');
+    const r = await handler({}, [], deps);
+    assert.equal(r.success, true);
+    assert.equal(r.updated, true);
+    assert.equal(r.commits_pulled, 2);
+  });
+});
 
 describe('update() — guards', () => {
   it('refuses non-git installs with a clone hint', async () => {

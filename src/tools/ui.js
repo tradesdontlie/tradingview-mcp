@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { jsonResult } from './_format.js';
 import * as core from '../core/ui.js';
 
-export function registerUiTools(server) {
+export function registerUiTools(server, { env = process.env, evaluate } = {}) {
   server.tool('ui_click', 'Click a UI element by aria-label, data-name, text content, or class substring', {
     by: z.enum(['aria-label', 'data-name', 'text', 'class-contains']).describe('Selector strategy'),
     value: z.string().describe('Value to match against the chosen selector strategy'),
@@ -85,10 +85,10 @@ export function registerUiTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('ui_evaluate', 'Execute JavaScript code in the TradingView page context for advanced automation', {
-    expression: z.string().describe('JavaScript expression to evaluate in the page context. Wrap in IIFE for complex logic.'),
+  server.tool('ui_evaluate', 'DANGEROUS: Execute arbitrary JavaScript in the TradingView page context. Disabled by default; requires an explicit startup capability opt-in.', {
+    expression: z.string().min(1).describe('JavaScript expression to evaluate in the page context. Wrap in IIFE for complex logic.'),
   }, async ({ expression }) => {
-    try { return jsonResult(await core.uiEvaluate({ expression })); }
+    try { return jsonResult(await core.uiEvaluate({ expression, _deps: { env, evaluate } })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 }

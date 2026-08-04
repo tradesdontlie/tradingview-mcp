@@ -1,6 +1,10 @@
 import { register } from '../router.js';
 import * as core from '../../core/replay.js';
 
+function replayTradeCommand(opts, positionals, _deps) {
+  return core.trade({ action: positionals[0], _deps });
+}
+
 register('replay', {
   description: 'Replay mode controls',
   subcommands: new Map([
@@ -31,11 +35,8 @@ register('replay', {
       handler: (opts) => core.autoplay({ speed: opts.speed ? Number(opts.speed) : undefined }),
     }],
     ['trade', {
-      description: 'Execute a trade in replay mode (buy, sell, close)',
-      handler: (opts, positionals) => {
-        if (!positionals[0]) throw new Error('Action required. Usage: tv replay trade buy');
-        return core.trade({ action: positionals[0] });
-      },
+      description: 'SIMULATED: change a Bar Replay position (disabled by default; buy, sell, close)',
+      handler: replayTradeCommand,
     }],
   ]),
 });

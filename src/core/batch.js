@@ -10,8 +10,24 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCREENSHOT_DIR = join(dirname(dirname(__dirname)), 'screenshots');
 
+export const BATCH_ACTIONS = ['screenshot', 'get_ohlcv', 'get_strategy_results'];
+export const MAX_BATCH_ITERATIONS = 50;
+
 export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_count }) {
+  // Validate before switching a single symbol: fail fast instead of half-running.
+  if (!Array.isArray(symbols) || symbols.length === 0) {
+    throw new Error('symbols must be a non-empty array');
+  }
+  if (!BATCH_ACTIONS.includes(action)) {
+    throw new Error(`action must be one of: ${BATCH_ACTIONS.join(', ')}`);
+  }
   const tfs = timeframes && timeframes.length > 0 ? timeframes : [null];
+  const iterations = symbols.length * tfs.length;
+  if (iterations > MAX_BATCH_ITERATIONS) {
+    throw new Error(
+      `Batch would run ${iterations} iterations (${symbols.length} symbols × ${tfs.length} timeframes), over the ${MAX_BATCH_ITERATIONS} cap. Narrow the symbol or timeframe list.`,
+    );
+  }
   const delay = delay_ms || 2000;
   const results = [];
 
@@ -72,7 +88,7 @@ export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_co
             })()
           `);
         } else {
-          actionResult = { error: 'Unknown action or API not available: ' + action };
+          actionResult = { error: `Chart API not available for action "${action}" on ${symbol}` };
         }
         results.push({ ...combo, success: true, result: actionResult });
       } catch (err) {

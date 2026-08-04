@@ -244,7 +244,19 @@ export async function check({ source }) {
 
 // ── Functions requiring TradingView connection ──
 
-export async function getSource() {
+/**
+ * Optionally truncate source to a character budget. Returns the (possibly
+ * truncated) text plus a flag. max_chars == null (the default) means no cap, so
+ * the historical full-source behavior is preserved for callers that need to edit.
+ */
+export function capSource(source, max_chars) {
+  if (max_chars == null) return { source, truncated: false };
+  const n = Number(max_chars);
+  if (!Number.isFinite(n) || n <= 0 || source.length <= n) return { source, truncated: false };
+  return { source: source.slice(0, n), truncated: true };
+}
+
+export async function getSource({ max_chars } = {}) {
   const editorReady = await ensurePineEditorOpen();
   if (!editorReady) throw new Error('Could not open Pine Editor or Monaco not found in React fiber tree.');
 
@@ -260,7 +272,16 @@ export async function getSource() {
     throw new Error('Monaco editor found but getValue() returned null.');
   }
 
-  return { success: true, source, line_count: source.split('\n').length, char_count: source.length };
+  const { source: returned, truncated } = capSource(source, max_chars);
+  return {
+    success: true,
+    source: returned,
+    // line_count / char_count always describe the FULL source so a caller that
+    // capped the output still learns the real size on the chart.
+    line_count: source.split('\n').length,
+    char_count: source.length,
+    ...(truncated && { truncated: true, returned_chars: returned.length }),
+  };
 }
 
 export async function setSource({ source }) {

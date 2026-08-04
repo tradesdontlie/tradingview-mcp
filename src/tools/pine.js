@@ -3,8 +3,10 @@ import { jsonResult } from './_format.js';
 import * as core from '../core/pine.js';
 
 export function registerPineTools(server) {
-  server.tool('pine_get_source', 'Get current Pine Script source code from the editor', {}, async () => {
-    try { return jsonResult(await core.getSource()); }
+  server.tool('pine_get_source', 'Get current Pine Script source code from the editor. Can return 200KB+ on complex scripts — pass max_chars to cap the returned source (line_count/char_count still report the full size, and truncated:true flags a capped result).', {
+    max_chars: z.coerce.number().int().positive().optional().describe('Cap the returned source to this many characters (default: full source)'),
+  }, async ({ max_chars }) => {
+    try { return jsonResult(await core.getSource({ max_chars })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 

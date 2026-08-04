@@ -8,6 +8,7 @@ import { execSync as _execSync } from 'child_process';
 import { existsSync as _existsSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import { requireSelfUpdate } from '../capabilities.js';
 
 // src/core/update.js -> repo root, independent of process.cwd()
 const REPO_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
@@ -21,6 +22,9 @@ function _resolve(deps) {
 }
 
 export async function update({ _deps } = {}) {
+  // Capability gate first: refuse before any git/network/npm side effect unless
+  // the operator deliberately opted in. tv_update pulls and runs remote code.
+  requireSelfUpdate(_deps?.env);
   const { execSync, existsSync, repoRoot } = _resolve(_deps);
   const git = (args, timeout = 15000) =>
     execSync(`git ${args}`, { cwd: repoRoot, timeout, stdio: ['ignore', 'pipe', 'pipe'] }).toString().trim();

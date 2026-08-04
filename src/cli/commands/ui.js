@@ -1,6 +1,13 @@
 import { register } from '../router.js';
 import * as core from '../../core/ui.js';
 
+function uiEvaluateCommand(opts, positionals, _deps) {
+  // No pre-check here: the capability gate inside core.uiEvaluate must run before
+  // any argument validation, mirroring replayTradeCommand. A missing expression is
+  // rejected by core AFTER the gate, so a disabled capability never leaks past it.
+  return core.uiEvaluate({ expression: positionals.join(' '), _deps });
+}
+
 register('ui', {
   description: 'UI automation tools (click, keyboard, hover, scroll, find, eval, type, panel, fullscreen, mouse)',
   subcommands: new Map([
@@ -59,11 +66,8 @@ register('ui', {
       },
     }],
     ['eval', {
-      description: 'Execute JavaScript in TradingView page context',
-      handler: (opts, positionals) => {
-        if (!positionals[0]) throw new Error('Expression required. Usage: tv ui eval "1+1"');
-        return core.uiEvaluate({ expression: positionals.join(' ') });
-      },
+      description: 'DANGEROUS: execute arbitrary page JavaScript (disabled by default)',
+      handler: uiEvaluateCommand,
     }],
     ['type', {
       description: 'Type text into focused input',

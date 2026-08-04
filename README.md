@@ -11,24 +11,24 @@ Personal AI assistant for your TradingView Desktop charts. Connects Claude Code 
 > **Requires a valid TradingView subscription.** This tool does not bypass or circumvent any TradingView paywall or access control. It reads from and controls the TradingView Desktop app already running on your machine.
 
 > [!NOTE]
-> **All data processing occurs locally on your machine.** No TradingView data is transmitted, stored, or redistributed externally by this tool.
+> MCP control and CDP communication occur locally. The active TradingView application and several tools can still make authenticated requests to TradingView services; this project does not guarantee that all data remains local.
 
 > [!CAUTION]
 > This tool accesses undocumented internal TradingView APIs via the Electron debug interface. These can change or break without notice in any TradingView update. Pin your TradingView Desktop version if stability matters to you.
 
-## How It Works (and why it's safe to run)
+## How It Works
 
-This tool does not connect to TradingView's servers, modify any TradingView files, or intercept any network traffic. It communicates exclusively with your locally running TradingView Desktop instance via Chrome DevTools Protocol (CDP) — a standard debugging interface built into all Chromium/Electron applications by Google, including VS Code, Slack, and Discord.
+This tool communicates with your locally running TradingView Desktop instance via Chrome DevTools Protocol (CDP), a standard Chromium/Electron debugging interface. Code evaluated in the page context can use the active TradingView session and its network access.
 
 The debug port is disabled by default and must be explicitly enabled by you using a standard Chromium flag (`--remote-debugging-port=9222`). Nothing happens without that deliberate step.
 
-## What This Tool Does Not Do
+## What This Tool Does Not Provide
 
-- Connect to TradingView's servers or APIs
-- Store, transmit, or redistribute any market data
+- Standalone or offline TradingView access; the Desktop session and some tools make authenticated service requests
+- Automatic transmission or redistribution of market data to third parties
 - Work without a valid TradingView subscription and installed Desktop app
 - Bypass any TradingView paywall or access restriction
-- Execute real trades (chart interaction only)
+- Provide a broker-order API; replay trades use TradingView's historical replay API
 - Work if TradingView changes their internal Electron structure
 
 ## Research Context
@@ -69,6 +69,20 @@ Gives your AI assistant eyes and hands on your own chart:
 - **Monitor your chart** — stream JSONL from your locally running chart for local monitoring scripts
 - **CLI access** — every MCP tool is also a `tv` CLI command, pipe-friendly with JSON output
 - **Launch TradingView** — auto-detect and launch with debug mode from any platform
+
+## Security Boundaries
+
+| Capability | Default | Boundary |
+|------------|---------|----------|
+| `ui_evaluate` | Disabled | Exact arbitrary-JavaScript acknowledgment required |
+| `replay_trade` | Disabled | Exact simulated-position acknowledgment required |
+| `tv_update` | Disabled | Exact self-update acknowledgment required; pulls and runs remote code |
+| `alert_delete` (`delete_all`) | Enabled | Irreversible bulk delete requires an exact `confirm` token; a bare `delete_all` is refused |
+| Replay navigation | Enabled | `start`, `step`, `autoplay`, `status`, and `stop` do not require the trade capability |
+
+The exact opt-in values are documented in [SECURITY.md](SECURITY.md); generic truthy flags are rejected. `replay_trade` only changes TradingView's internal Bar Replay simulated positions. Replay and paper trading are not the same as enforced isolation: the MCP cannot verify account type or guarantee that a real broker is disconnected. Use replay only with real broker connections removed.
+
+Generic UI controls can click and type into whatever TradingView currently displays. Other state-changing tools can modify charts, alerts, scripts, layouts, watchlists, local files, or this checkout.
 
 ## Install with Claude Code
 
@@ -186,7 +200,7 @@ tv screenshot / discover / ui-state / range / scroll
 
 The `tv stream` commands poll your locally running TradingView Desktop instance at regular intervals via Chrome DevTools Protocol on localhost.
 
-No connection is made to TradingView's servers. All data stays on your machine.
+The MCP-to-Desktop transport is local. The authenticated TradingView Desktop session may still receive data from TradingView services, and stream output is written to local stdout where downstream consumers can store or transmit it.
 
 > [!WARNING]
 > Programmatic consumption of TradingView data may conflict with their Terms of Use regardless of the data source. You are solely responsible for ensuring your usage complies.
@@ -293,7 +307,7 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 | `replay_start` | Enter replay at a date |
 | `replay_step` | Advance one bar |
 | `replay_autoplay` | Auto-advance (set speed in ms) |
-| `replay_trade` | Buy/sell/close positions |
+| `replay_trade` | Change simulated Bar Replay positions (disabled by default) |
 | `replay_status` | Check position, P&L, date |
 | `replay_stop` | Return to realtime |
 
@@ -370,7 +384,7 @@ This tool is an independent MCP server that connects to Claude Code via the stan
 
 This project is provided **for personal, educational, and research purposes only**.
 
-**How this tool works:** This tool uses Chrome DevTools Protocol (CDP), the standard debugging interface built into Chromium-based applications. It does not reverse engineer any proprietary TradingView protocol, connect to TradingView's servers, or bypass any access controls. The debug port must be explicitly enabled by the user via a standard Chromium command-line flag (`--remote-debugging-port=9222`).
+**How this tool works:** This tool uses Chrome DevTools Protocol (CDP), the standard debugging interface built into Chromium-based applications, to control an authenticated TradingView Desktop page. The page and some tools can make requests to TradingView services. The project does not bypass access controls, and the debug port must be explicitly enabled by the user via a standard Chromium command-line flag (`--remote-debugging-port=9222`).
 
 By using this software, you acknowledge and agree that:
 
@@ -382,8 +396,8 @@ By using this software, you acknowledge and agree that:
    - Circumventing TradingView's access controls or subscription restrictions
    - Performing automated trading or algorithmic decision-making using extracted data
    - Violating the intellectual property rights of Pine Script indicator authors
-   - Connecting to TradingView's servers or infrastructure (all access is via the locally running Desktop app)
-5. The streaming functionality monitors your locally running TradingView Desktop instance only. It does not connect to TradingView's servers or extract data from TradingView's infrastructure.
+   - Attempting to bypass the authenticated Desktop session or TradingView access controls
+5. The streaming functionality polls the locally running Desktop page through CDP. The page may receive data from TradingView services, and anything consuming stdout controls where the resulting stream data goes.
 6. Market data accessed through this tool remains subject to exchange and data provider licensing terms. **Do not redistribute, store, or commercially exploit any data obtained through this tool.**
 7. This tool accesses internal, undocumented TradingView application interfaces that may change or break at any time without notice.
 

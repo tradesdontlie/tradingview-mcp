@@ -14,7 +14,10 @@ register('pine', {
   subcommands: new Map([
     ['get', {
       description: 'Get current Pine Script source from editor',
-      handler: () => core.getSource(),
+      options: {
+        'max-chars': { type: 'string', description: 'Cap the returned source to this many characters' },
+      },
+      handler: (opts) => core.getSource({ max_chars: opts['max-chars'] ? Number(opts['max-chars']) : undefined }),
     }],
     ['set', {
       description: 'Set Pine Script source (reads stdin or --file)',
