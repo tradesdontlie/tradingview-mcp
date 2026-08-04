@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "onchain": {
+      "command": "node",
+      "args": ["standalone-agent/mcp-servers/onchain-server.js"]
+    }
+  }
+}
