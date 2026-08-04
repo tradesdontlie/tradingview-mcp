@@ -4,6 +4,16 @@
  */
 import { evaluate, evaluateAsync, getClient, safeString } from '../connection.js';
 
+function requirePaneIndex(index) {
+  // Number(null) and Number('') are 0, which would silently target pane 0 —
+  // reject nullish/blank explicitly so a missing index is an error, not pane 0.
+  const idx = Number(index);
+  if (index === null || index === '' || !Number.isInteger(idx) || idx < 0) {
+    throw new Error(`index must be a non-negative integer, got: ${index}`);
+  }
+  return idx;
+}
+
 const CWC = 'window.TradingViewApi._chartWidgetCollection';
 
 const LAYOUT_NAMES = {
@@ -113,7 +123,7 @@ export async function setLayout({ layout }) {
  * Focus a specific pane by index.
  */
 export async function focus({ index }) {
-  const idx = Number(index);
+  const idx = requirePaneIndex(index);
   const result = await evaluate(`
     (function() {
       var cwc = ${CWC};
@@ -135,7 +145,7 @@ export async function focus({ index }) {
  * Works by focusing the pane, then using the active chart's setSymbol.
  */
 export async function setSymbol({ index, symbol }) {
-  const idx = Number(index);
+  const idx = requirePaneIndex(index);
 
   // Focus the target pane first
   await focus({ index: idx });
