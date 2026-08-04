@@ -333,10 +333,17 @@ Launch scripts and `tv_launch` auto-detect TradingView. If auto-detection fails:
 | Platform | Common Locations |
 |----------|-----------------|
 | **Mac** | `/Applications/TradingView.app/Contents/MacOS/TradingView` |
-| **Windows** | `%LOCALAPPDATA%\TradingView\TradingView.exe`, `%PROGRAMFILES%\WindowsApps\TradingView*\TradingView.exe` |
+| **Windows** | `%LOCALAPPDATA%\TradingView\TradingView.exe` |
 | **Linux** | `/opt/TradingView/tradingview`, `~/.local/share/TradingView/TradingView`, `/snap/tradingview/current/tradingview` |
 
 The key flag: `--remote-debugging-port=9222`
+
+> **Windows / Microsoft Store builds:** TradingView ships on Windows only as an
+> MSIX package, which installs under the ACL-protected
+> `%PROGRAMFILES%\WindowsApps\`. That path **cannot be launched with the debug
+> flag by any method**, so `tv launch` cannot bring up an endpoint from it.
+> [WINDOWS_MSIX.md](WINDOWS_MSIX.md) documents what fails and gives the
+> Chrome-based setup that works.
 
 ## Testing
 
