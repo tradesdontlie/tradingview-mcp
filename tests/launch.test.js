@@ -148,3 +148,57 @@ describe('launch() — classic install path', { skip: !onWindows }, () => {
     await assert.rejects(() => launch({ _deps: deps }), /TradingView not found/);
   });
 });
+
+/**
+ * Build a _deps bundle where the Get-AppxPackage query only succeeds under
+ * specific PowerShell hosts, and record which hosts were attempted.
+ * @param {string[]} workingHosts — hosts whose Get-AppxPackage call resolves
+ */
+function psHostDeps(workingHosts) {
+  const state = { hostsTried: [], spawned: [], cdpUp: false };
+  const deps = {
+    existsSync: (p) => p === MSIX_EXE,
+    execSync: (cmd) => {
+      if (cmd.includes('taskkill')) return '';
+      if (cmd.includes('Get-AppxPackage')) {
+        const host = cmd.split(' ')[0];
+        state.hostsTried.push(host);
+        if (!workingHosts.includes(host)) {
+          throw new Error(`'${host}' is not recognized as the name of a cmdlet`);
+        }
+        return 'C:\\Program Files\\WindowsApps\\TradingView.Desktop_3.1.0.7818_x64__n534cwy3pjxzj\n';
+      }
+      throw new Error(`unexpected execSync: ${cmd}`);
+    },
+    spawn: (exe) => { state.spawned.push(exe); state.cdpUp = true; return mockChild(); },
+    cpSync: () => {}, rmSync: () => {}, readdirSync: () => [],
+    delay: async () => {},
+    probeCdp: async () => (state.cdpUp ? CDP_VERSION : null),
+  };
+  return { deps, state };
+}
+
+describe('launch() — PowerShell host resolution for MSIX detection', { skip: !onWindows }, () => {
+  it('resolves via powershell when present, without invoking pwsh', async () => {
+    const { deps, state } = psHostDeps(['powershell']);
+    const result = await launch({ _deps: deps });
+    assert.equal(result.success, true);
+    assert.equal(result.binary, MSIX_EXE);
+    // Windows PowerShell runs Get-AppxPackage natively, so it must stay first.
+    assert.deepEqual(state.hostsTried, ['powershell']);
+  });
+
+  it('falls back to pwsh when powershell.exe is absent from PATH', async () => {
+    const { deps, state } = psHostDeps(['pwsh']);
+    const result = await launch({ _deps: deps });
+    assert.equal(result.success, true);
+    assert.equal(result.binary, MSIX_EXE);
+    assert.deepEqual(state.hostsTried, ['powershell', 'pwsh']);
+  });
+
+  it('throws when no PowerShell host can resolve the package', async () => {
+    const { deps, state } = psHostDeps([]);
+    await assert.rejects(() => launch({ _deps: deps }), /TradingView not found/);
+    assert.deepEqual(state.hostsTried, ['powershell', 'pwsh']);
+  });
+});

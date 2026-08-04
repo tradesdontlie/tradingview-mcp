@@ -21,8 +21,15 @@ if exist "%PROGRAMFILES(x86)%\TradingView\TradingView.exe" set "TV_EXE=%PROGRAMF
 REM Check MSIX / Windows Store installs.
 REM Get-AppxPackage resolves the install without elevation; enumerating
 REM %PROGRAMFILES%\WindowsApps with dir requires admin rights, so keep it as a fallback.
+REM Windows PowerShell runs Get-AppxPackage natively, so try it first.
 if "%TV_EXE%"=="" (
     for /f "usebackq tokens=*" %%i in (`powershell -NoProfile -Command "(Get-AppxPackage -Name 'TradingView.Desktop' -ErrorAction SilentlyContinue).InstallLocation" 2^>nul`) do (
+        if exist "%%i\TradingView.exe" set "TV_EXE=%%i\TradingView.exe"
+    )
+)
+REM Some machines ship PowerShell 7 only, with powershell.exe absent from PATH.
+if "%TV_EXE%"=="" (
+    for /f "usebackq tokens=*" %%i in (`pwsh -NoProfile -Command "(Get-AppxPackage -Name 'TradingView.Desktop' -ErrorAction SilentlyContinue).InstallLocation" 2^>nul`) do (
         if exist "%%i\TradingView.exe" set "TV_EXE=%%i\TradingView.exe"
     )
 )
