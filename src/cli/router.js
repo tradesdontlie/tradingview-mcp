@@ -3,6 +3,36 @@
  * Zero dependencies — uses only Node.js built-ins.
  */
 import { parseArgs } from 'node:util';
+import { disconnect } from '../connection.js';
+
+/**
+ * End the process without tripping libuv on Windows.
+ *
+ * Calling process.exit() while Node's global fetch (undici) still has a
+ * keep-alive socket unwinding aborts the process:
+ *
+ *   Assertion failed: !(handle->flags & UV_HANDLE_CLOSING),
+ *   file src\win\async.c, line 76
+ *
+ * `tv search` hit this every time: it is the one command that talks to a
+ * remote HTTPS host (symbol-search.tradingview.com) rather than to CDP on
+ * localhost, so it printed a correct, complete result and then died with a
+ * non-zero exit, making a working command look broken to any caller checking
+ * the exit code.
+ *
+ * process.exit() was presumably used because an open CDP websocket keeps the
+ * event loop alive. So: close CDP, set the code, and let the loop drain on its
+ * own — that path is clean and, measured, returns in ~0.3s. The unref'd timer
+ * is a backstop only: it cannot hold the loop open itself, and fires solely if
+ * something else still is, preserving the old hard-exit behaviour.
+ */
+async function finish(code) {
+  process.exitCode = code;
+  try {
+    await disconnect();
+  } catch { /* best effort: we are exiting anyway */ }
+  setTimeout(() => process.exit(code), 250).unref();
+}
 
 /** @type {Map<string, { description: string, options?: object, handler: Function, subcommands?: Map<string, object> }>} */
 const commands = new Map();
@@ -132,19 +162,20 @@ async function execute(handler, values, positionals) {
   try {
     const result = await handler(values, positionals);
     console.log(JSON.stringify(result, null, 2));
-    process.exit(0);
+    await finish(0);
   } catch (err) {
-    handleError(err);
+    await handleError(err);
   }
 }
 
-function handleError(err) {
+async function handleError(err) {
   const message = err.message || String(err);
   // Connection failures get exit code 2
   if (/CDP|connection|ECONNREFUSED|not running/i.test(message)) {
     console.error(JSON.stringify({ success: false, error: message }, null, 2));
-    process.exit(2);
+    await finish(2);
+    return;
   }
   console.error(JSON.stringify({ success: false, error: message }, null, 2));
-  process.exit(1);
+  await finish(1);
 }
