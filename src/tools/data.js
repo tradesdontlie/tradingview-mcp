@@ -83,4 +83,14 @@ export function registerDataTools(server) {
     try { return jsonResult(await core.getStudyValues()); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
+
+  server.tool('data_export_ohlcv', 'Export OHLCV bars to a CSV file on disk (written by the MCP server via node:fs, not into context). Returns the written file path. Optionally switches symbol/timeframe first; omit `path` to auto-name a timestamped file under exports/.', {
+    count: z.coerce.number().optional().describe('Number of bars to export (max 500, default 100)'),
+    symbol: z.string().optional().describe('Switch chart to this symbol before exporting (blank = current chart symbol)'),
+    timeframe: z.string().optional().describe('Switch chart to this resolution before exporting (e.g. "5", "60", "D")'),
+    path: z.string().optional().describe('Explicit output CSV path. Omit to auto-name a timestamped file under exports/.'),
+  }, async ({ count, symbol, timeframe, path }) => {
+    try { return jsonResult(await core.exportOhlcv({ count, symbol, timeframe, path })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
 }

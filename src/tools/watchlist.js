@@ -37,4 +37,31 @@ export function registerWatchlistTools(server) {
     try { return jsonResult(await core.remove({ symbols })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
+
+  server.tool('watchlist_manage', 'Manage entire watchlists (not just their symbols): list all lists, create a new named list, delete a list, or switch the active list', {
+    action: z.enum(['list', 'create', 'delete', 'switch']).describe('list = show all watchlists; create = new named list; delete = remove a list; switch = make a list active'),
+    name: z.string().optional().describe('Watchlist name. Required for create; used for delete/switch when id is not given.'),
+    id: z.string().optional().describe('Watchlist id (from action:"list"). Preferred over name for delete/switch.'),
+    symbols: z.array(z.string()).optional().describe('Initial symbols for create, e.g. ["NASDAQ:AAPL", "ES1!"]'),
+  }, async ({ action, name, id, symbols }) => {
+    try {
+      switch (action) {
+        case 'list':
+          return jsonResult(await core.listLists());
+        case 'create':
+          if (!name) throw new Error('name is required for action "create".');
+          return jsonResult(await core.createList({ name, symbols: symbols || [] }));
+        case 'delete':
+          if (!name && !id) throw new Error('Provide id or name for action "delete".');
+          return jsonResult(await core.deleteList({ id, name }));
+        case 'switch':
+          if (!name && !id) throw new Error('Provide id or name for action "switch".');
+          return jsonResult(await core.switchList({ id, name }));
+        default:
+          throw new Error(`Unknown action: ${action}`);
+      }
+    } catch (err) {
+      return jsonResult({ success: false, error: err.message }, true);
+    }
+  });
 }

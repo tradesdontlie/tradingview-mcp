@@ -24,4 +24,11 @@ export function registerAlertTools(server) {
     try { return jsonResult(await core.deleteAlerts({ alert_id, delete_all })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
+
+  server.tool('alert_get_log', 'Read recently fired/triggered alerts (the Alerts "Log"): time, symbol, message, and trigger price when available. Falls back to list_alerts last-fire times when the fired-events feed is unavailable.', {
+    limit: z.coerce.number().optional().describe('Max fired alerts to return (default 20, max 100)'),
+  }, async ({ limit }) => {
+    try { return jsonResult(await core.getLog({ limit })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
 }

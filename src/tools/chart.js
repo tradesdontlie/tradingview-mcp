@@ -73,4 +73,17 @@ export function registerChartTools(server) {
     try { return jsonResult(await core.symbolSearch({ query, type })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
+
+  server.tool('chart_add_comparison', 'Add or remove a comparison/overlay symbol on the active chart (e.g. overlay SPY on AAPL). Comparisons are TradingView "Compare" studies.', {
+    symbol: z.string().optional().describe('Symbol to compare/overlay (e.g., SPY, QQQ, NASDAQ:AAPL). Required to add; optional for remove.'),
+    remove: z.coerce.boolean().optional().describe('If true, remove the matching comparison instead of adding. With remove:true and no symbol, removes ALL comparison symbols.'),
+    as_series: z.coerce.boolean().optional().describe('true = overlay as a full price series on the main scale; false (default) = separate/percent-scale comparison line.'),
+    source: z.string().optional().describe('Price source for the comparison line (close, open, high, low, hl2, hlc3, ohlc4). Default close.'),
+  }, async ({ symbol, remove, as_series, source }) => {
+    try {
+      if (remove) return jsonResult(await core.removeComparison({ symbol }));
+      if (!symbol) throw new Error('symbol is required to add a comparison.');
+      return jsonResult(await core.addComparison({ symbol, as_series, source }));
+    } catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
 }

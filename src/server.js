@@ -22,7 +22,7 @@ const server = new McpServer(
     description: 'AI-assisted TradingView chart analysis and Pine Script development via Chrome DevTools Protocol',
   },
   {
-    instructions: `TradingView MCP — 84 tools for reading and controlling a live TradingView Desktop chart.
+    instructions: `TradingView MCP — 88 tools for reading and controlling a live TradingView Desktop chart.
 
 TOOL SELECTION GUIDE — use this to pick the right tool:
 
@@ -43,6 +43,7 @@ Reading custom Pine indicator output (line.new/label.new/table.new/box.new drawi
 Changing the chart:
 - chart_set_symbol, chart_set_timeframe, chart_set_type → change ticker/resolution/style
 - chart_manage_indicator → add/remove studies. USE FULL NAMES: "Relative Strength Index" not "RSI"
+- chart_add_comparison → overlay/compare a second symbol (e.g. SPY on AAPL); pass remove=true to remove
 - chart_scroll_to_date → jump to a date (ISO format)
 - indicator_set_inputs → change indicator settings (length, source, etc.)
 
@@ -55,7 +56,9 @@ Screenshots: capture_screenshot → regions: "full", "chart", "strategy_tester"
 Replay: replay_start → replay_step → replay_trade → replay_status → replay_stop
 Batch: batch_run → run action across multiple symbols/timeframes
 Drawing: draw_shape → horizontal_line, trend_line, rectangle, text
-Alerts: alert_create, alert_list, alert_delete
+Alerts: alert_create, alert_list, alert_delete, alert_get_log (recently fired alerts)
+Watchlists: watchlist_get/add/remove symbols; watchlist_manage → list/create/delete/switch whole watchlists
+Export: data_export_ohlcv → write OHLCV bars to a CSV file under exports/
 Launch: tv_launch → auto-detect and start TradingView with CDP on any platform
 Panes: pane_list, pane_set_layout (s, 2h, 2v, 4, 6, 8), pane_focus, pane_set_symbol
 Tabs: tab_list, tab_new, tab_close, tab_switch

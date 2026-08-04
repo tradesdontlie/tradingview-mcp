@@ -23,6 +23,22 @@ register('values', {
   handler: () => core.getStudyValues(),
 });
 
+register('export', {
+  description: 'Export OHLCV bars to a CSV file (exports/ dir or --path)',
+  options: {
+    count: { type: 'string', short: 'n', description: 'Number of bars (default 100, max 500)' },
+    symbol: { type: 'string', short: 's', description: 'Switch to symbol before exporting' },
+    timeframe: { type: 'string', short: 't', description: 'Switch to timeframe before exporting' },
+    path: { type: 'string', short: 'o', description: 'Output CSV path (default exports/<timestamped>.csv)' },
+  },
+  handler: (opts) => core.exportOhlcv({
+    count: opts.count ? Number(opts.count) : undefined,
+    symbol: opts.symbol,
+    timeframe: opts.timeframe,
+    path: opts.path,
+  }),
+});
+
 register('data', {
   description: 'Advanced data tools (lines, labels, tables, boxes, strategy, trades, equity, depth)',
   subcommands: new Map([

@@ -298,3 +298,122 @@ export async function symbolSearch({ query, type }) {
 
   return { success: true, query, source: 'rest_api', results, count: results.length };
 }
+
+// ---- Comparison / overlay symbols ----
+// A "comparison" in TradingView is the built-in 'Compare' study, whose inputs
+// are a symbol + a price source. We reuse the createStudy + input-readback path
+// proven in manageIndicator (#249: createStudy's inputs arg is unreliable across
+// builds, so the symbol/source inputs are (re)applied AFTER creation).
+const COMPARE_STUDY = 'Compare@tv-basicstudies';
+
+export async function addComparison({ symbol, as_series, source, _deps }) {
+  if (!symbol) throw new Error('symbol is required to add a comparison.');
+  const { evaluate } = _resolve(_deps);
+  const src = source || 'close';
+  // as_series=true overlays the compared symbol on the main price scale as a
+  // full series (forceOverlay); false (default) adds it as a separate/percent
+  // scale comparison line.
+  const forceOverlay = as_series === true;
+
+  const before = await evaluate(`${CHART_API}.getAllStudies().map(function(s) { return s.id; })`);
+  await evaluate(`
+    (function() {
+      var chart = ${CHART_API};
+      chart.createStudy(${safeString(COMPARE_STUDY)}, ${forceOverlay}, false, [${safeString(symbol)}, ${safeString(src)}]);
+    })()
+  `);
+  await new Promise(r => setTimeout(r, 1500));
+  const after = await evaluate(`${CHART_API}.getAllStudies().map(function(s) { return s.id; })`);
+  const newIds = (after || []).filter(id => !(before || []).includes(id));
+  const entityId = newIds[0] || null;
+
+  // createStudy's inputs arg is unreliable (#249) — force the symbol/source
+  // inputs via the study's own getInputValues/setInputValues, then read back.
+  let applied = null;
+  if (entityId) {
+    applied = await evaluate(`
+      (function() {
+        var chart = ${CHART_API};
+        var study = chart.getStudyById(${safeString(entityId)});
+        if (!study || typeof study.getInputValues !== 'function') return { error: 'compare study has no input API' };
+        var cur = study.getInputValues();
+        var wantSym = ${safeString(symbol)}, wantSrc = ${safeString(src)};
+        var set = {};
+        for (var i = 0; i < cur.length; i++) {
+          var id = cur[i].id, t = cur[i].type;
+          if (id === 'symbol' || t === 'symbol') { cur[i].value = wantSym; set.symbol = wantSym; }
+          else if (id === 'source' || id === 'source_input') { cur[i].value = wantSrc; set.source = wantSrc; }
+        }
+        study.setInputValues(cur);
+        var readback = study.getInputValues(), confirm = {};
+        for (var j = 0; j < readback.length; j++) { if (set.hasOwnProperty(readback[j].id)) confirm[readback[j].id] = readback[j].value; }
+        return { confirmed: confirm };
+      })()
+    `);
+  }
+
+  return {
+    success: newIds.length > 0,
+    action: 'add_comparison',
+    symbol,
+    source: src,
+    as_series: forceOverlay,
+    entity_id: entityId,
+    ...(applied && (applied.error ? { input_warning: applied.error } : { inputs: applied.confirmed })),
+  };
+}
+
+export async function removeComparison({ symbol, _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
+  // A comparison is specifically the built-in Compare study. Identify it by its
+  // (non-localized) metaInfo script id — NOT merely by "has a symbol input",
+  // which would also match Correlation Coefficient, comparative RS, Spread/Ratio,
+  // etc. and irreversibly remove them (especially in the remove-all path).
+  // Among confirmed Compare studies, match on the symbol input's value
+  // (case-insensitive, exchange prefix optional); with no symbol, remove them all.
+  const removed = await evaluate(`
+    (function() {
+      var chart = ${CHART_API};
+      var want = ${symbol ? safeString(String(symbol).toUpperCase()) : 'null'};
+      function norm(s) { s = String(s || '').toUpperCase(); var c = s.indexOf(':'); return c >= 0 ? s.slice(c + 1) : s; }
+      function isCompareStudy(study) {
+        try {
+          var mi = study.metaInfo ? study.metaInfo() : null;
+          if (!mi) return false;
+          var scriptId = String(mi.id || mi.shortId || mi.fullId || '');
+          if (scriptId) return scriptId.split('@')[0] === 'Compare';
+          // Only if no id field is exposed, fall back to an exact description match.
+          return String(mi.description || mi.shortDescription || '') === 'Compare';
+        } catch (e) { return false; }
+      }
+      var studies = chart.getAllStudies();
+      var hits = [];
+      for (var i = 0; i < studies.length; i++) {
+        var id = studies[i].id;
+        var study = null; try { study = chart.getStudyById(id); } catch (e) {}
+        if (!study || !isCompareStudy(study)) continue; // only genuine Compare studies
+        var val = '';
+        try {
+          if (typeof study.getInputValues === 'function') {
+            var inputs = study.getInputValues();
+            for (var j = 0; j < inputs.length; j++) {
+              if (inputs[j].id === 'symbol' || inputs[j].type === 'symbol') { val = String(inputs[j].value || ''); break; }
+            }
+          }
+        } catch (e) {}
+        if (want === null || (val && (norm(val) === norm(want) || val.toUpperCase() === want))) {
+          hits.push({ entity_id: id, symbol: val, name: studies[i].name });
+        }
+      }
+      for (var k = 0; k < hits.length; k++) { try { chart.removeEntity(hits[k].entity_id); } catch (e) {} }
+      return hits;
+    })()
+  `);
+  return {
+    success: (removed || []).length > 0,
+    action: 'remove_comparison',
+    ...(symbol && { symbol }),
+    removed: removed || [],
+    removed_count: (removed || []).length,
+  };
+}
