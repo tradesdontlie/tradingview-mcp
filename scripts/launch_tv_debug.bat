@@ -13,39 +13,43 @@ ping -n 3 127.0.0.1 >nul
 REM Auto-detect TradingView install location
 set "TV_EXE="
 
-REM Check common install locations
+REM Check classic (pre-MSIX) install locations first
 if exist "%LOCALAPPDATA%\TradingView\TradingView.exe" set "TV_EXE=%LOCALAPPDATA%\TradingView\TradingView.exe"
 if exist "%PROGRAMFILES%\TradingView\TradingView.exe" set "TV_EXE=%PROGRAMFILES%\TradingView\TradingView.exe"
 if exist "%PROGRAMFILES(x86)%\TradingView\TradingView.exe" set "TV_EXE=%PROGRAMFILES(x86)%\TradingView\TradingView.exe"
 
-REM Check MSIX / Windows Store installs.
-REM Get-AppxPackage resolves the install without elevation; enumerating
-REM %PROGRAMFILES%\WindowsApps with dir requires admin rights, so keep it as a fallback.
-if "%TV_EXE%"=="" (
-    for /f "usebackq tokens=*" %%i in (`powershell -NoProfile -Command "(Get-AppxPackage -Name 'TradingView.Desktop' -ErrorAction SilentlyContinue).InstallLocation" 2^>nul`) do (
-        if exist "%%i\TradingView.exe" set "TV_EXE=%%i\TradingView.exe"
-    )
-)
-if "%TV_EXE%"=="" (
-    for /f "tokens=*" %%i in ('dir /s /b "%PROGRAMFILES%\WindowsApps\TradingView*\TradingView.exe" 2^>nul') do set "TV_EXE=%%i"
-)
-if "%TV_EXE%"=="" (
-    for /f "tokens=*" %%i in ('where TradingView.exe 2^>nul') do set "TV_EXE=%%i"
+if not "%TV_EXE%"=="" (
+    echo Found TradingView at: %TV_EXE%
+    echo Starting with --remote-debugging-port=%PORT%...
+    start "" "%TV_EXE%" --remote-debugging-port=%PORT%
+    goto wait
 )
 
+REM MSIX / Microsoft Store installs: the exe under %PROGRAMFILES%\WindowsApps
+REM cannot be started directly ("Access is denied"), and running a copy of the
+REM package outside its MSIX context crashes 3.3.0+ with "bridge-not-loaded".
+REM Launch through COM activation (IApplicationActivationManager) instead —
+REM the debug argument is forwarded and the app runs in its full package context.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0activate_msix.ps1" -Arguments "--remote-debugging-port=%PORT%" >nul 2>&1
+if %errorlevel% equ 0 (
+    echo Launched MSIX package via COM activation.
+    goto wait
+)
+
+for /f "tokens=*" %%i in ('where TradingView.exe 2^>nul') do set "TV_EXE=%%i"
 if "%TV_EXE%"=="" (
     echo Error: TradingView not found.
-    echo Checked: %%LOCALAPPDATA%%\TradingView, %%PROGRAMFILES%%\TradingView, WindowsApps
+    echo Checked: %%LOCALAPPDATA%%\TradingView, %%PROGRAMFILES%%\TradingView, MSIX packages
     echo.
     echo If installed elsewhere, run manually:
     echo   "C:\path\to\TradingView.exe" --remote-debugging-port=%PORT%
     exit /b 1
 )
-
 echo Found TradingView at: %TV_EXE%
 echo Starting with --remote-debugging-port=%PORT%...
 start "" "%TV_EXE%" --remote-debugging-port=%PORT%
 
+:wait
 echo Waiting for CDP to become available...
 ping -n 6 127.0.0.1 >nul
 
@@ -59,8 +63,9 @@ set /a TRIES+=1
 if %TRIES% geq 30 (
     echo.
     echo Error: TradingView is running but CDP never became available on port %PORT%.
-    echo Some Windows MSIX builds block the debug port. Use the tv_launch MCP tool,
-    echo which falls back to launching from a local copy of the package.
+    echo On some MSIX builds even COM activation leaves the debug port unbound.
+    echo Use the tv_launch MCP tool, which falls back to launching from a local
+    echo copy of the package as a last resort.
     exit /b 1
 )
 echo Still waiting...
