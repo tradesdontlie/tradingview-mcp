@@ -381,7 +381,7 @@ async function _getQuoteInternal({ symbol } = {}) {
   let needsRestore = false;
 
   if (requested) {
-    try { originalSymbol = await evaluate(`${CHART_API}.symbol()`); } catch (e) {}
+    try { originalSymbol = await evaluate(`${CHART_API}.symbol()`); } catch {}
     const bare = (s) => (s || '').toString().split(':').pop().toUpperCase();
     if (bare(originalSymbol) !== bare(requested)) {
       needsRestore = true;
@@ -444,7 +444,7 @@ async function _getQuoteInternal({ symbol } = {}) {
           })()
         `);
         await waitForChartReady(originalSymbol);
-      } catch (e) {}
+      } catch {}
     }
   }
 }
