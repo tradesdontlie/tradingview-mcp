@@ -1,0 +1,14 @@
+{
+  "tasks": [
+    {
+      "name": "crypto-news-watch",
+      "schedule": "0 * * * *",
+      "prompt": "Summarize the most important crypto news (BTC & ETH) from the last hour. Cite sources. If nothing notable happened, say so briefly."
+    },
+    {
+      "name": "chart-check",
+      "schedule": "*/15 * * * *",
+      "prompt": "Check the chart currently open in TradingView Desktop. Report only if there's a significant change since a typical check (key level broken, indicator crossing, big volume spike). Otherwise reply 'no significant change'."
+    }
+  ]
+}
