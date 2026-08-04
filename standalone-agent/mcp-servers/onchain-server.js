@@ -72,7 +72,16 @@ server.tool(
   {},
   async () => {
     try {
-      return jsonResult(await fetchJson('https://api.coingecko.com/api/v3/search/trending'));
+      const data = await fetchJson('https://api.coingecko.com/api/v3/search/trending');
+      const coins = (data.coins || []).map(({ item }) => ({
+        id: item.id,
+        symbol: item.symbol,
+        name: item.name,
+        market_cap_rank: item.market_cap_rank,
+        price_usd: item.data?.price,
+        price_change_24h_pct: item.data?.price_change_percentage_24h?.usd,
+      }));
+      return jsonResult({ coins });
     } catch (err) {
       return jsonResult({ success: false, error: err.message }, true);
     }
