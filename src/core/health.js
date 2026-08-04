@@ -317,14 +317,20 @@ export async function launch({ port, kill_existing, _deps } = {}) {
   if (!tvPath && platform === 'win32') {
     // MSIX/Windows Store install — InstallLocation is in WindowsApps, which is ACL-restricted
     // for normal `dir` enumeration but readable via Get-AppxPackage without elevation.
-    try {
-      const ps = 'powershell -NoProfile -Command "(Get-AppxPackage -Name \'TradingView.Desktop\' -ErrorAction SilentlyContinue).InstallLocation"';
-      const installDir = deps.execSync(ps, { timeout: 5000 }).toString().trim();
-      if (installDir) {
-        const candidate = `${installDir}\\TradingView.exe`;
-        if (deps.existsSync(candidate)) tvPath = candidate;
-      }
-    } catch { /* ignore */ }
+    // Try Windows PowerShell first (runs Get-AppxPackage natively, so it is fastest), then
+    // PowerShell 7: some machines ship pwsh only, with powershell.exe absent from PATH.
+    for (const host of ['powershell', 'pwsh']) {
+      try {
+        const ps = `${host} -NoProfile -Command "(Get-AppxPackage -Name 'TradingView.Desktop' -ErrorAction SilentlyContinue).InstallLocation"`;
+        // pwsh reaches Get-AppxPackage through the WinPS compatibility layer, which is
+        // slower to start than 5.1, so allow more headroom than a native call needs.
+        const installDir = deps.execSync(ps, { timeout: 15000, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+        if (installDir) {
+          const candidate = `${installDir}\\TradingView.exe`;
+          if (deps.existsSync(candidate)) { tvPath = candidate; break; }
+        }
+      } catch { /* host missing or query failed — try the next one */ }
+    }
   }
 
   if (!tvPath) {
