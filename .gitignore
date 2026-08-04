@@ -1,5 +1,7 @@
 node_modules/
+.env
 screenshots/
+standalone-agent/logs/
 scripts/current.pine
 temp_*
 *.log
