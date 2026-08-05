@@ -10,7 +10,6 @@ import { computeRS, writeVnindexCache, VNINDEX_SYM } from './rs_util.mjs';
 import { barStatus, sessionInfo } from './bar_status.mjs';
 import { MARKET_ADJ, SCAN_ENGINE_VERSION, assertH6Resolution, confirmSymbol, extractMovingAverages, scoreSignal as policyScoreSignal } from './src/scan_policy.mjs';
 import { compatibilityStructure, computeVnStructure } from './src/core/vn_structure.mjs';
-import { runtimeDataRoot, withChartLock } from './src/core/check_runtime.mjs';
 
 let chart;
 let data;
@@ -35,9 +34,6 @@ const ALLOWED_SCAN_FLAGS = new Set(['--full', '--print-watchlist']);
 if (!SELF_TEST && process.argv.slice(2).some(arg => !ALLOWED_SCAN_FLAGS.has(arg))) {
   throw new Error('Ad-hoc scan symbols are disabled; use the canonical candidate batch');
 }
-const SCAN_DATA_LOCK_ROOT = SELF_TEST ? '' : runtimeDataRoot({
-  dataRoot: requiredEnv('SCAN_DATA_LOCK_ROOT'),
-});
 const SCOUT_SCAN_PATH = requiredEnv('SCOUT_SCAN_PATH');
 const SCAN_LATEST_PATH = requiredEnv('SCAN_LATEST_PATH');
 const SCAN_CANDIDATES_PATH = requiredEnv('SCAN_CANDIDATES_PATH');
@@ -631,7 +627,9 @@ async function main() {
       && clock.phase === 'CONT_AM' && clock.trust_level === 'HIGH' ? 0 : 1);
   }
 
-  return withChartLock(SCAN_DATA_LOCK_ROOT, 'SCAN:VN_H6', '360', 180000, async () => {
+  if (!SELF_TEST) {
+    console.warn('WARNING: canonical /scan has no scan-specific chart lock; concurrent runs may interleave chart state and overwrite shared artifacts.');
+  }
   ({ getClient } = await import('./src/connection.js'));
   chart = await import('./src/core/chart.js');
   data = await import('./src/core/data.js');
@@ -826,7 +824,6 @@ async function main() {
       throw new Error('Chart restore FAILED: ' + error.message);
     }
   }
-  });
 }
 
 if (IS_DIRECT) {

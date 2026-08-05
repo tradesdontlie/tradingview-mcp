@@ -508,3 +508,9 @@ test('scan-live keeps compact mode table-free and full mode opt-in', () => {
     assert.match(source, new RegExp(field.replace(/[=]/g, '\\=')));
   }
 });
+
+test('canonical scan does not acquire a scan-specific chart lock and warns about overlap', () => {
+  const source = readFileSync(new URL('../scan_live.mjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /withChartLock\(/);
+  assert.match(source, /no scan-specific chart lock/);
+});
