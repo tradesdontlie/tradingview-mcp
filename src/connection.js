@@ -2,6 +2,10 @@ import CDP from 'chrome-remote-interface';
 
 let client = null;
 let targetInfo = null;
+// Set when the caller pinned a specific tab via reconnectTo (tab_switch), so
+// recovery from a dead client returns to that tab instead of re-picking the
+// first chart tab findChartTarget() happens to see.
+let pinnedTargetId = null;
 // Overridable via TV_CDP_HOST/TV_CDP_PORT (or CDP_HOST/CDP_PORT) env vars.
 // Default is 127.0.0.1, not localhost: on some Windows machines localhost
 // resolves to ::1 first, and Electron's --remote-debugging-port only listens on IPv4.
@@ -53,15 +57,27 @@ export function requireFinite(value, name) {
 export async function getClient() {
   if (client) {
     try {
-      // Quick liveness check
-      await client.Runtime.evaluate({ expression: '1', returnByValue: true });
-      return client;
-    } catch {
-      client = null;
-      targetInfo = null;
-    }
+      // A pinned tab (tab_switch) only needs to be alive. Both of today's
+      // reconnectTo() callers pin chart tabs, so this is defensive: the
+      // function is exported and takes any target id, and a non-chart pin
+      // would fail the strict probe below and be silently dropped.
+      const expression = pinnedTargetId
+        ? '1'
+        // Strict liveness for auto-picked tabs: must be alive AND expose chart
+        // APIs. Plain `Runtime.evaluate('1')` passes on any TradingView page
+        // (news-flow, watchlist, symbols) and used to lock the picker to
+        // whichever tab was attached first — silently breaking every
+        // chart-API tool when a chart tab opened later.
+        : 'typeof window.TradingViewApi !== "undefined" && window.TradingViewApi._activeChartWidgetWV !== undefined';
+      const probe = await client.Runtime.evaluate({ expression, returnByValue: true });
+      if (pinnedTargetId || probe?.result?.value === true) return client;
+    } catch {}
+    client = null;
+    targetInfo = null;
   }
-  return connect();
+  // Reconnect to the pinned tab if there is one, so a dead-client recovery does
+  // not silently migrate the session back to an auto-picked chart tab.
+  return connect(pinnedTargetId);
 }
 
 export async function connect(targetId = null) {
@@ -69,11 +85,15 @@ export async function connect(targetId = null) {
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
       const target = targetId ? await findTargetById(targetId) : await findChartTarget();
-      if (!target) {
-        throw new Error(targetId
-          ? `CDP target ${targetId} not found — is the tab still open?`
-          : 'No TradingView chart target found. Is TradingView open with a chart?');
+      // findChartTarget now throws explicit errors with actionable hints (no
+      // chart tab vs no TV at all), so only findTargetById can still return null.
+      if (targetId && !target) {
+        // Drop the pin so a closed tab does not wedge every later call on a
+        // target that no longer exists; the next call auto-picks a chart tab.
+        pinnedTargetId = null;
+        throw new Error(`CDP target ${targetId} not found — is the tab still open?`);
       }
+      pinnedTargetId = targetId;
       targetInfo = target;
       client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: target.id });
 
@@ -85,6 +105,11 @@ export async function connect(targetId = null) {
       return client;
     } catch (err) {
       lastError = err;
+      // Don't retry actionable user-facing errors; they won't fix themselves
+      // by waiting (need user to open a chart tab).
+      if (err.message && /No TradingView chart tab found/.test(err.message)) {
+        throw err;
+      }
       const delay = Math.min(BASE_DELAY * Math.pow(2, attempt), 30000);
       await new Promise(r => setTimeout(r, delay));
     }
@@ -110,10 +135,26 @@ export async function reconnectTo(targetId) {
 async function findChartTarget() {
   const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
   const targets = await resp.json();
-  // Prefer targets with tradingview.com/chart in the URL
-  return targets.find(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
-    || targets.find(t => t.type === 'page' && /tradingview/i.test(t.url))
-    || null;
+  // Strict: only attach to actual chart tabs. Previously fell back to any
+  // tradingview tab (news-flow, watchlist, symbols pages) which silently
+  // broke every chart-API tool because _activeChartWidgetWV was undefined.
+  const chart = targets.find(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url));
+  if (chart) return chart;
+  const otherTV = targets.filter(t => t.type === 'page' && /tradingview/i.test(t.url));
+  if (otherTV.length > 0) {
+    const paths = otherTV.slice(0, 3).map(t => {
+      try { return new URL(t.url).pathname; } catch { return t.url; }
+    });
+    throw new Error(
+      `No TradingView chart tab found. Detected ${otherTV.length} non-chart ` +
+      `TradingView tab(s): ${paths.join(', ')}. Open a chart in TV Desktop ` +
+      `(Cmd+T then a ticker, or click a saved layout) and retry.`
+    );
+  }
+  throw new Error(
+    'No TradingView chart target found. Is TradingView open with a chart? ' +
+    'Launch with: /Applications/TradingView.app/Contents/MacOS/TradingView --remote-debugging-port=9222'
+  );
 }
 
 async function findTargetById(id) {
@@ -156,6 +197,8 @@ export async function disconnect() {
     client = null;
     targetInfo = null;
   }
+  // An explicit disconnect ends the session, so the tab_switch pin ends with it.
+  pinnedTargetId = null;
 }
 
 // --- Direct API path helpers ---

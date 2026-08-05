@@ -287,8 +287,15 @@ export async function symbolSearch({ query, type }) {
   if (!resp.ok) throw new Error(`Symbol search API returned ${resp.status}`);
   const data = await resp.json();
 
+  // Defensive array extraction. The previous `data.symbols || data || []`
+  // evaluated `{}` as truthy and let `.slice()` throw if the API ever
+  // returned an object without a `symbols` field (schema drift).
+  const arr = Array.isArray(data) ? data
+    : Array.isArray(data && data.symbols) ? data.symbols
+    : [];
+
   const strip = s => (s || '').replace(/<\/?em>/g, '');
-  const results = (data.symbols || data || []).slice(0, 15).map(r => ({
+  const results = arr.slice(0, 15).map(r => ({
     symbol: strip(r.symbol),
     description: strip(r.description),
     exchange: r.exchange || r.prefix || '',
