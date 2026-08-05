@@ -10,6 +10,7 @@ import { computeRS, writeVnindexCache, VNINDEX_SYM } from './rs_util.mjs';
 import { barStatus, sessionInfo } from './bar_status.mjs';
 import { MARKET_ADJ, SCAN_ENGINE_VERSION, assertH6Resolution, confirmSymbol, extractMovingAverages, scoreSignal as policyScoreSignal } from './src/scan_policy.mjs';
 import { compatibilityStructure, computeVnStructure } from './src/core/vn_structure.mjs';
+import { runtimeDataRoot, withChartLock } from './src/core/check_runtime.mjs';
 
 let chart;
 let data;
@@ -24,6 +25,19 @@ const requiredEnv = name => {
   if (!process.env[name]) throw new Error(`Missing ${name}; run via cos.py scan-live`);
   return process.env[name];
 };
+const CANONICAL_SCAN_CONTEXT = 'cos.py:scan-live:v1';
+const scanContext = SELF_TEST ? '' : requiredEnv('SCAN_CANONICAL_CONTEXT');
+if (!SELF_TEST && scanContext !== CANONICAL_SCAN_CONTEXT) {
+  throw new Error('Invalid SCAN_CANONICAL_CONTEXT; run via cos.py scan-live');
+}
+const FULL_MODE = process.argv.includes('--full');
+const ALLOWED_SCAN_FLAGS = new Set(['--full', '--print-watchlist']);
+if (!SELF_TEST && process.argv.slice(2).some(arg => !ALLOWED_SCAN_FLAGS.has(arg))) {
+  throw new Error('Ad-hoc scan symbols are disabled; use the canonical candidate batch');
+}
+const SCAN_DATA_LOCK_ROOT = SELF_TEST ? '' : runtimeDataRoot({
+  dataRoot: requiredEnv('SCAN_DATA_LOCK_ROOT'),
+});
 const SCOUT_SCAN_PATH = requiredEnv('SCOUT_SCAN_PATH');
 const SCAN_LATEST_PATH = requiredEnv('SCAN_LATEST_PATH');
 const SCAN_CANDIDATES_PATH = requiredEnv('SCAN_CANDIDATES_PATH');
@@ -41,12 +55,32 @@ function exchangePrefix(raw) {
   return 'HOSE';
 }
 
-function localDateKey(now = new Date()) {
+export function localDateKey(now = new Date()) {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit',
   }).formatToParts(now);
   const value = Object.fromEntries(parts.map(part => [part.type, part.value]));
   return `${value.year}-${value.month}-${value.day}`;
+}
+
+export function vnDateTime(now = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  }).formatToParts(now);
+  const value = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return {
+    date: `${value.year}${value.month}${value.day}`,
+    scan_time: `${value.hour}:${value.minute}`,
+    display_time: `${value.hour}:${value.minute}:${value.second}`,
+    display_date: `${value.day}/${value.month}/${value.year}`,
+  };
+}
+
+function calendarDayOrdinal(dateKey) {
+  const match = /^(\d{4})-?(\d{2})-?(\d{2})/.exec(String(dateKey || ''));
+  if (!match) return null;
+  return Math.floor(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])) / 86400000);
 }
 
 function parseForeignSnapshot(payload, now = new Date()) {
@@ -104,11 +138,9 @@ function loadWatchlist() {
 function loadMarketRegime() {
   try {
     const payload = JSON.parse(readFileSync(REGIME_LATEST_PATH, 'utf-8'));
-    const raw = String(payload.date || '');
-    const date = /^\d{8}$/.test(raw)
-      ? new Date(Number(raw.slice(0, 4)), Number(raw.slice(4, 6)) - 1, Number(raw.slice(6, 8)))
-      : new Date(raw);
-    const ageDays = Math.floor((Date.now() - date.getTime()) / 86400000);
+    const regimeDay = calendarDayOrdinal(payload.date);
+    const todayDay = calendarDayOrdinal(localDateKey(new Date()));
+    const ageDays = regimeDay === null || todayDay === null ? NaN : todayDay - regimeDay;
     if (!Number.isFinite(ageDays) || ageDays > 2) return { regime: 'N/A', note: 'regime stale/missing; gate skipped' };
     return { regime: payload.regime || 'N/A', note: null };
   } catch {
@@ -152,13 +184,7 @@ function sectorWarnings(results, sectorMap = null) {
 }
 
 // CLI args: node scan_live.mjs FPT SAB -> scan ad-hoc thay vi WATCHLIST
-const argSymbols = process.argv.slice(2).filter(a => /^[A-Za-z0-9:]+$/.test(a));
-const SCAN_LIST = SELF_TEST ? [] : argSymbols.length > 0
-  ? argSymbols.map(s => {
-      const sym = s.toUpperCase();
-      return { t: sym.includes(':') ? sym : 'HOSE:' + sym, g: 0, name: sym.split(':').pop() };
-    })
-  : loadWatchlist();
+const SCAN_LIST = SELF_TEST ? [] : loadWatchlist();
 
 const GROUP_LABEL = { 0: 'ADHOC', 1: 'PP+SW', 2: 'PP only', 3: 'SW only' };
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -362,9 +388,17 @@ function classifyDiscovery(r) {
     (r.discovery?.primary_discovery_track ?? null) };
 }
 
-export function buildScanStructure({ bars, activeBarClosed, sma20, sma100 }) {
+export function buildScanStructure({ bars, activeBarClosed }) {
   const completed = activeBarClosed ? bars : bars.slice(0, -1);
-  const structureV2 = computeVnStructure(completed, { sma20, sma100 });
+  const closes = completed.map(bar => bar.close);
+  // Extra caller properties remain object-API compatible, but live-study MAs
+  // cannot override the completed OHLCV truth used for channel bounds.
+  const closedSma20 = closes.length >= 20 ? Math.round(sma(closes, 20)) : null;
+  const closedSma100 = closes.length >= 100 ? Math.round(sma(closes, 100)) : null;
+  const structureV2 = computeVnStructure(completed, {
+    sma20: closedSma20,
+    sma100: closedSma100,
+  });
   return {
     structure: compatibilityStructure(structureV2.trend_state),
     structure_v2: structureV2,
@@ -433,6 +467,31 @@ function fmtNum(n, decimals = 0) {
   return n.toFixed(decimals);
 }
 
+function compactRow(r) {
+  const fp = r.fp || {};
+  const score = Number.isFinite(r.scored?.score_pct) ? `${r.scored.score_pct}%` : 'N/A';
+  const price = Number.isFinite(r.price) ? Math.round(r.price).toLocaleString() : 'N/A';
+  const change = Number.isFinite(r.chg_pct) ? `${r.chg_pct}%` : 'N/A';
+  const phase = r.phase || 'N/A';
+  const structure = r.structure || r.structureV2?.trend_state || 'N/A';
+  const discovery = r.discovery?.primary_discovery_track || 'N/A';
+  const rs = Number.isFinite(r.rs?.rs_20)
+    ? `${r.rs.rs_20}%${r.rs.leader ? `/${r.rs.leader}` : ''}`
+    : 'N/A';
+  const quality = r.scored?.signal_quality || 'N/A';
+  const missing = r.error || (!Array.isArray(r.scored?.missing_fields) ? 'N/A'
+    : r.scored.missing_fields.length ? r.scored.missing_fields.join(',') : 'none');
+  const fpSummary = `Conf=${fp.conf ?? 'N/A'},CumD=${fp.cumDelta == null ? 'N/A' : fmtNum(fp.cumDelta)}` +
+    `,Buy%=${fp.buyPct ?? 'N/A'},Div=${fp.divSignal == null ? 'N/A' : fp.divSignal}` +
+    `,BuyStack=${fp.maxBuyStack ?? 'N/A'}`;
+  const criteria = Number.isFinite(r.scored?.passed)
+    ? `${r.scored.passed}/${r.scored.total ?? 7}` : 'N/A';
+  const signal = r.error ? 'N/A' : (r.scored?.sig || 'N/A');
+  return `${r.name} | ${signal} | score_pct=${score} | price=${price} change=${change}` +
+    ` | phase=${phase} | structure=${structure} | discovery=${discovery}` +
+    ` | RS=${rs} | quality=${quality} | FP:${fpSummary} | criteria=${criteria} | missing=${missing}`;
+}
+
 function computeBreadth(results) {
   const scanned = results.filter(r => !r.error && r.price != null);
   const up = scanned.filter(r => (r.chg_pct ?? 0) > 0).length;
@@ -463,9 +522,9 @@ async function scanOne(ticker, name, idxCloses, marketRegime) {
   try {
     [sv, fpTbl, q, ohlcv] = await Promise.all([
       data.getStudyValues().catch(()=>({ studies: [] })),
-      data.getPineTables({ study_filter: 'Footprint' }).catch(()=>({ studies: [] })),
+      FULL_MODE ? data.getPineTables({ study_filter: 'Footprint' }).catch(()=>({ studies: [] })) : Promise.resolve({ studies: [] }),
       data.getQuote({}).catch(()=>({})),
-      data.getOhlcv({ count: 65 }).catch(()=>({ bars: [] })),
+      data.getOhlcv({ count: 130 }).catch(()=>({ bars: [] })),
     ]);
   } catch(e) {
     return { error: 'read data: ' + e.message };
@@ -476,14 +535,15 @@ async function scanOne(ticker, name, idxCloses, marketRegime) {
     ? Math.round((q.close - q.open) / q.open * 1000) / 10
     : null;
   const { fp, ma } = extractFP(sv.studies || []);
-  const tableRows = parseFPTable(fpTbl);
-  const bars = (ohlcv.bars || []).slice(-65);
+  const tableRows = FULL_MODE ? parseFPTable(fpTbl) : [];
+  const allBars = ohlcv.bars || [];
+  const bars = allBars.slice(-65); // preserve legacy wave/display window
   const { phase, vol_ratio, churn, bar_closed, bar_age_pct } = computeWave(bars, price);
   const {
     structure,
     structure_v2: structureV2,
   } = buildScanStructure({
-    bars,
+    bars: allBars,
     activeBarClosed: bar_closed,
     sma20: ma.ma20,
     sma100: ma.ma100,
@@ -561,22 +621,31 @@ async function main() {
       modifier.warnings.length === 2 && staleModifier === null && absentModifier === null &&
       before === after ? 0 : 1);
   }
+  if (process.argv.includes('--self-test-timezone')) {
+    const beforeMidnightUtc = new Date('2026-08-04T17:30:45.000Z');
+    const local = vnDateTime(beforeMidnightUtc);
+    const clock = sessionInfo(new Date('2026-08-05T03:00:00.000Z'), 'VN');
+    console.log(JSON.stringify({ local, clock }));
+    process.exit(local.date === '20260805' && local.scan_time === '00:30'
+      && local.display_time === '00:30:45'
+      && clock.phase === 'CONT_AM' && clock.trust_level === 'HIGH' ? 0 : 1);
+  }
+
+  return withChartLock(SCAN_DATA_LOCK_ROOT, 'SCAN:VN_H6', '360', 180000, async () => {
   ({ getClient } = await import('./src/connection.js'));
   chart = await import('./src/core/chart.js');
   data = await import('./src/core/data.js');
-  // Verify CDP
   try {
     await getClient();
   } catch(e) {
-    console.error('CDP connection FAILED:', e.message);
-    process.exit(1);
+    throw new Error('CDP connection FAILED: ' + e.message);
   }
 
   const initState = await chart.getState();
-  try { assertH6Resolution(initState.resolution); }
-  catch (e) { console.error(e.message); process.exit(1); }
-  console.log('Connected! Chart: ' + initState.symbol + ' | TF: ' + initState.resolution);
-  console.log('Scanning ' + SCAN_LIST.length + ' ma...\n');
+  assertH6Resolution(initState.resolution);
+  try {
+  if (FULL_MODE) console.log('Connected! Chart: ' + initState.symbol + ' | TF: ' + initState.resolution);
+  if (FULL_MODE) console.log('Scanning ' + SCAN_LIST.length + ' ma...\n');
 
   // --- VNINDEX 1 lan dau de tinh RS (Relative Strength) + ghi cache cho check_one ---
   let idxCloses = null;
@@ -590,21 +659,21 @@ async function main() {
     await sleep(1200);
     const idxOhlcv = await data.getOhlcv({ count: 65 }).catch(() => ({ bars: [] }));
     const closes = (idxOhlcv.bars || []).map(b => b.close).filter(c => c != null);
-    if (closes.length >= 25) { idxCloses = closes; writeVnindexCache(closes); console.log('VNINDEX RS baseline OK (' + closes.length + ' bars)\n'); }
-    else console.log('VNINDEX baseline thieu data -> RS=N/A\n');
-  } catch (e) { console.log('VNINDEX fetch loi -> RS=N/A: ' + e.message + '\n'); }
+    if (closes.length >= 25) { idxCloses = closes; writeVnindexCache(closes); if (FULL_MODE) console.log('VNINDEX RS baseline OK (' + closes.length + ' bars)\n'); }
+    else if (FULL_MODE) console.log('VNINDEX baseline thieu data -> RS=N/A\n');
+  } catch (e) { if (FULL_MODE) console.log('VNINDEX fetch loi -> RS=N/A: ' + e.message + '\n'); }
 
   const marketRegime = loadMarketRegime();
-  console.log('Market regime: ' + marketRegime.regime + (marketRegime.note ? ' | ' + marketRegime.note : ''));
+  if (FULL_MODE) console.log('Market regime: ' + marketRegime.regime + (marketRegime.note ? ' | ' + marketRegime.note : ''));
   const results = [];
 
   for (let i = 0; i < SCAN_LIST.length; i++) {
     const { t, g, name, discovery } = SCAN_LIST[i];
-    process.stdout.write('[' + (i+1) + '/' + SCAN_LIST.length + '] ' + name + '... ');
+    if (FULL_MODE) process.stdout.write('[' + (i+1) + '/' + SCAN_LIST.length + '] ' + name + '... ');
     const r = await scanOne(t, name, idxCloses, marketRegime.regime);
     r.discovery = discovery || null;
     if (r.error) {
-      console.log('ERROR: ' + r.error);
+      if (FULL_MODE) console.log('ERROR: ' + r.error);
       results.push({ name, group: g, error: r.error, sig: 'ERR' });
       continue;
     }
@@ -616,16 +685,13 @@ async function main() {
     }
     const sig = r.scored.sig;
     const pct = r.scored.pct;
-    console.log(sig + (pct !== null ? ' (' + pct + '%)' : '') +
+    if (FULL_MODE) console.log(sig + (pct !== null ? ' (' + pct + '%)' : '') +
       ' | Conf:' + (r.fp.conf ?? 'N/A') +
       ' CumD:' + (r.fp.cumDelta !== null ? fmtNum(r.fp.cumDelta) : 'N/A') +
       ' Buy%:' + (r.fp.buyPct ?? 'N/A') +
       (r.fp.divSignal === 1 ? ' DIV!' : ''));
     results.push({ name, group: g, ...r, sig });
   }
-
-  // Restore chart
-  try { await chart.setSymbol({ symbol: initState.symbol }); } catch(e) {}
 
   // ---- OUTPUT ----
   const W = 80;
@@ -642,11 +708,10 @@ async function main() {
   // ---- PERSIST: scout_scan.json cho morning brief (0 token, headless) ----
   let persistOk = false;
   try {
-    const now = new Date();
-    const pad = n => String(n).padStart(2, '0');
+    const persistedAt = vnDateTime(new Date());
     const scoutPayload = {
-      date: `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`,
-      scan_time: `${pad(now.getHours())}:${pad(now.getMinutes())}`,
+      date: persistedAt.date,
+      scan_time: persistedAt.scan_time,
       source: 'scan_live.mjs H6 Footprint',
       engine_version: SCAN_ENGINE_VERSION,
       candidate_batch_id: candidateBatch?.batch_id ?? null,
@@ -673,8 +738,14 @@ async function main() {
     persistOk = true;
   } catch (e) { console.error('scan persist failed; result is not brief/review safe:', e.message); }
 
-  console.log('\n' + '='.repeat(W));
-  console.log('  SCAN REPORT H6 | ' + new Date().toLocaleDateString('vi-VN') + ' | BUY:' + buy.length + ' WATCH:' + watch.length + ' AVOID:' + avoid.length + ' LOAI:' + loai.length);
+  if (!FULL_MODE) {
+    console.log('Criteria: [Conf>=60][CumD>0][Buy%>=55][NoDIV][BuyIMB>=1][P>MA20][MA20>100]');
+    for (const r of results) console.log(compactRow(r));
+    return persistOk ? 0 : 1;
+  }
+
+  console.log('\\n' + '='.repeat(W));
+  console.log('  SCAN REPORT H6 | ' + vnDateTime(new Date()).display_date + ' | BUY:' + buy.length + ' WATCH:' + watch.length + ' AVOID:' + avoid.length + ' LOAI:' + loai.length);
   console.log('  Breadth: up ' + breadth.up + ' | down ' + breadth.down + ' | pct_up ' + (breadth.pct_up ?? 'N/A') + '%');
   console.log('  Regime: ' + marketRegime.regime + ' | Heat: ' + (heat.status || 'N/A') + ' (warning only)');
   console.log('  Clock: ' + marketClock.phase + ' | trust ' + marketClock.trust_level +
@@ -746,9 +817,18 @@ async function main() {
   console.log('\n  Criteria: [Conf>=60][CumD>0][Buy%>=55][NoDIV][BuyIMB>=1][P>MA20][MA20>100]');
   console.log('  Data source: TradingView H6 Footprint Aggressor v2 (CDP real-time)');
   console.log('='.repeat(W));
-  process.exit(persistOk ? 0 : 1);
+  return persistOk ? 0 : 1;
+  } finally {
+    try {
+      if (initState.symbol) await chart.setSymbol({ symbol: initState.symbol });
+      if (initState.resolution) await chart.setTimeframe({ timeframe: initState.resolution });
+    } catch (error) {
+      throw new Error('Chart restore FAILED: ' + error.message);
+    }
+  }
+  });
 }
 
 if (IS_DIRECT) {
-  main().catch(e => { console.error(e); process.exit(1); });
+  main().then(code => { process.exitCode = code; }).catch(e => { console.error(e); process.exitCode = 1; });
 }

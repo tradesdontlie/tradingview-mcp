@@ -483,3 +483,28 @@ test('check and scan production adapters emit identical structure truth', () => 
     assert.ok(!(forbidden in scanResult), `scan result must not grant ${forbidden}`);
   }
 });
+
+test('scan structure cannot be changed by active bar or caller live MAs', () => {
+  const completed = makeTestBars(120, i => 102 + i, i => 99 + i);
+  const activeA = { time: 120, open: 220, high: 221, low: 219, close: 220, volume: 100000 };
+  const activeB = { time: 120, open: 900, high: 999, low: 1, close: 500, volume: 9000000 };
+  const a = buildScanStructure({ bars: [...completed, activeA], activeBarClosed: false, sma20: 1, sma100: 9999 });
+  const b = buildScanStructure({ bars: [...completed, activeB], activeBarClosed: false, sma20: 9999, sma100: 1 });
+  const stable = buildScanStructure({ bars: completed, activeBarClosed: true });
+
+  assert.deepEqual(a, b);
+  assert.deepEqual(a, stable);
+  assert.equal(stable.structure_v2.confirmed, true);
+  assert.equal(stable.structure_v2.trend_state, 'UP');
+});
+
+test('scan-live keeps compact mode table-free and full mode opt-in', () => {
+  const source = readFileSync(new URL('../scan_live.mjs', import.meta.url), 'utf8');
+  assert.match(source, /const FULL_MODE = process\.argv\.includes\('--full'\)/);
+  assert.match(source, /new Set\(\['--full', '--print-watchlist'\]\)/);
+  assert.match(source, /FULL_MODE \? data\.getPineTables\(/);
+  assert.match(source, /const tableRows = FULL_MODE \? parseFPTable\(fpTbl\) : \[\]/);
+  for (const field of ['score_pct=', 'price=', 'phase=', 'structure=', 'discovery=', 'RS=', 'quality=', 'FP:', 'criteria=', 'missing=']) {
+    assert.match(source, new RegExp(field.replace(/[=]/g, '\\=')));
+  }
+});
