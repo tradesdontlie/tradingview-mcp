@@ -6,10 +6,25 @@
 import { evaluate, evaluateAsync, getClient } from '../connection.js';
 
 // ── Monaco finder (injected into TV page) ──
+// TradingView keeps more than one Monaco instance alive at a time (a detached
+// model from a previously-open script tab, diff views, a hidden pane).
+// env.editor.getEditors() returns all of them, so blindly taking editors[0]
+// can bind to an editor that is NOT the one on screen. That made setSource()
+// write into a buffer nobody could see while getSource() read it straight back
+// — the round-trip looked perfect, the visible editor never changed, and the
+// script was never saved. Anchor on a *visible* .pine-editor-monaco container
+// and match the editor by its DOM node instead of by index.
 const FIND_MONACO = `
   (function findMonacoEditor() {
-    var container = document.querySelector('.monaco-editor.pine-editor-monaco');
-    if (!container) return null;
+    var containers = Array.prototype.slice.call(
+      document.querySelectorAll('.monaco-editor.pine-editor-monaco')
+    ).filter(function(c) {
+      var r = c.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    });
+    if (!containers.length) return null;
+    var container = containers[0];
+
     var el = container;
     var fiberKey;
     for (var i = 0; i < 20; i++) {
@@ -26,12 +41,37 @@ const FIND_MONACO = `
         var env = current.memoizedProps.value.monacoEnv;
         if (env.editor && typeof env.editor.getEditors === 'function') {
           var editors = env.editor.getEditors();
-          if (editors.length > 0) return { editor: editors[0], env: env };
+          if (editors.length > 0) {
+            for (var e = 0; e < editors.length; e++) {
+              var node = null;
+              try { node = editors[e].getDomNode(); } catch (err) {}
+              if (node && (node === container || container.contains(node) || node.contains(container))) {
+                return { editor: editors[e], env: env, editor_count: editors.length, bound_to: 'visible-dom' };
+              }
+            }
+            return { editor: editors[0], env: env, editor_count: editors.length, bound_to: 'fallback-index-0' };
+          }
         }
       }
       current = current.return;
     }
     return null;
+  })()
+`;
+
+// The Pine Editor save button carries a `saved-<hash>` class when the buffer is
+// clean, so its absence means unsaved changes. (`saveButton-<hash>` does not
+// match `saved-`, so the token check is unambiguous.)
+const CHECK_SAVED_JS = `
+  (function() {
+    var btns = document.querySelectorAll('button');
+    for (var i = 0; i < btns.length; i++) {
+      var cls = String(btns[i].className || '');
+      if (cls.indexOf('saveButton') === -1) continue;
+      if (btns[i].offsetParent === null) continue;
+      return { found: true, saved: /(^|\\s)saved-/.test(cls) };
+    }
+    return { found: false, saved: null };
   })()
 `;
 
@@ -52,8 +92,15 @@ export async function ensurePineEditorOpen() {
     (function() {
       var bwb = window.TradingView && window.TradingView.bottomWidgetBar;
       if (!bwb) return;
+      // The Pine editor and Strategy Tester are tabs in the SAME bottom bar, and
+      // that bar can be collapsed or hidden. When it is, the Monaco container
+      // still exists in the DOM at 0x0 — which FIND_MONACO rightly refuses to
+      // bind to. Switching tabs is not enough; the bar has to be shown first.
+      try { if (bwb._isHidden && typeof bwb.show === 'function') bwb.show(); } catch (e) {}
+      try { if (typeof bwb.show === 'function') bwb.show(); } catch (e) {}
       if (typeof bwb.activateScriptEditorTab === 'function') bwb.activateScriptEditorTab();
       else if (typeof bwb.showWidget === 'function') bwb.showWidget('pine-editor');
+      try { if (typeof bwb.open === 'function') bwb.open('pine-editor'); } catch (e) {}
     })()
   `);
 
@@ -248,19 +295,28 @@ export async function getSource() {
   const editorReady = await ensurePineEditorOpen();
   if (!editorReady) throw new Error('Could not open Pine Editor or Monaco not found in React fiber tree.');
 
-  const source = await evaluate(`
+  const read = await evaluate(`
     (function() {
       var m = ${FIND_MONACO};
       if (!m) return null;
-      return m.editor.getValue();
+      return { source: m.editor.getValue(), editor_count: m.editor_count, bound_to: m.bound_to };
     })()
   `);
 
-  if (source === null || source === undefined) {
+  if (!read || read.source === null || read.source === undefined) {
     throw new Error('Monaco editor found but getValue() returned null.');
   }
 
-  return { success: true, source, line_count: source.split('\n').length, char_count: source.length };
+  const source = read.source;
+  return {
+    success: true,
+    source,
+    line_count: source.split('\n').length,
+    char_count: source.length,
+    ...(read.bound_to === 'fallback-index-0' && {
+      warning: `Could not match a Monaco instance to the visible editor pane (${read.editor_count} instance(s) on page); read from editors[0]. This may not be the script you see on screen.`,
+    }),
+  };
 }
 
 export async function setSource({ source }) {
@@ -268,17 +324,43 @@ export async function setSource({ source }) {
   if (!editorReady) throw new Error('Could not open Pine Editor.');
 
   const escaped = JSON.stringify(source);
-  const set = await evaluate(`
+  // Write, then read back from the SAME editor instance and compare. Without
+  // this a write into a detached model reported success (see FIND_MONACO).
+  // Line endings are normalised because Monaco rewrites them to the model EOL.
+  const res = await evaluate(`
     (function() {
       var m = ${FIND_MONACO};
-      if (!m) return false;
+      if (!m) return { ok: false, reason: 'monaco-not-found' };
+      function norm(s) { return String(s == null ? '' : s).replace(/\\r\\n/g, '\\n'); }
       m.editor.setValue(${escaped});
-      return true;
+      var readBack = m.editor.getValue();
+      var ok = norm(readBack) === norm(${escaped});
+      return {
+        ok: ok,
+        reason: ok ? null : 'readback-mismatch',
+        chars_written: readBack ? readBack.length : 0,
+        editor_count: m.editor_count,
+        bound_to: m.bound_to
+      };
     })()
   `);
 
-  if (!set) throw new Error('Monaco found but setValue() failed.');
-  return { success: true, lines_set: source.split('\n').length };
+  if (!res || !res.ok) {
+    throw new Error(
+      `Pine setSource failed (${res?.reason || 'unknown'}). ` +
+      `Monaco instances on page: ${res?.editor_count ?? '?'}; bound to: ${res?.bound_to ?? 'none'}. ` +
+      `The editor may be detached from the visible pane — close and reopen the Pine Editor, then retry.`
+    );
+  }
+
+  return {
+    success: true,
+    lines_set: source.split('\n').length,
+    verified: true,
+    ...(res.bound_to === 'fallback-index-0' && {
+      warning: `Could not match a Monaco instance to the visible editor pane (${res.editor_count} instance(s) on page); wrote to editors[0]. Confirm the editor shows your code before saving.`,
+    }),
+  };
 }
 
 export async function compile() {
@@ -316,7 +398,27 @@ export async function compile() {
   }
 
   await new Promise(r => setTimeout(r, 2000));
-  return { success: true, button_clicked: clicked || 'keyboard_shortcut', source: 'dom_fallback' };
+
+  // 'Pine Save' is the fallback when no Add-to-chart button is present (in
+  // current TradingView builds that control is icon-only with no text, so the
+  // text match never hits). Saving is NOT a no-op though: if the script is
+  // already on the chart, TradingView recompiles the attached study and the
+  // Strategy Tester report refreshes — measured 27 -> 117 trades from a save
+  // alone. It only fails to put the script on the chart when it isn't there yet.
+  const addedToChart = !!clicked && /add to chart|update on chart/i.test(clicked);
+  const savedOnly = clicked === 'Pine Save';
+  return {
+    success: true,
+    button_clicked: clicked || 'keyboard_shortcut',
+    added_to_chart: addedToChart,
+    source: 'dom_fallback',
+    ...(savedOnly && {
+      note: 'Saved the script. An already-attached study recompiles automatically, so the chart and Strategy Tester should reflect the new code. If the script was NOT already on the chart, it has not been added — add it manually.',
+    }),
+    ...(!addedToChart && !savedOnly && {
+      warning: 'No "Add to chart" / "Update on chart" button was found and no save occurred — the chart is still running the previous version.',
+    }),
+  };
 }
 
 export async function getErrors() {
@@ -344,10 +446,26 @@ export async function getErrors() {
   };
 }
 
+/** id -> version for every saved script, or null if unavailable. */
+async function scriptVersionMap() {
+  try {
+    const r = await listScripts();
+    const map = {};
+    for (const s of r?.scripts || []) map[s.id || s.name] = s.version;
+    return Object.keys(map).length ? map : null;
+  } catch { return null; }
+}
+
 export async function save() {
   const editorReady = await ensurePineEditorOpen();
   if (!editorReady) throw new Error('Could not open Pine Editor.');
 
+  const versionsBefore = await scriptVersionMap();
+
+  // Ctrl+S is attempted first for builds where it works, but measurement shows
+  // the CDP keystroke does not reach TradingView's handler on macOS Desktop —
+  // focusing the editor first was tried and made no difference. The save button
+  // click below is what actually saves.
   const c = await getClient();
   await c.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: 2, key: 's', code: 'KeyS', windowsVirtualKeyCode: 83 });
   await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 's', code: 'KeyS' });
@@ -373,7 +491,63 @@ export async function save() {
 
   if (dialogHandled) await new Promise(r => setTimeout(r, 500));
 
-  return { success: true, action: dialogHandled ? 'saved_with_dialog' : 'Ctrl+S_dispatched' };
+  let state = await evaluate(CHECK_SAVED_JS);
+  let action = dialogHandled ? 'saved_with_dialog' : 'Ctrl+S_dispatched';
+
+  // The CDP Ctrl+S dispatch does not reliably reach TradingView's handler even
+  // with the editor focused — measured: buffer stayed dirty and the script
+  // version did not increment. Clicking the save button directly does work, so
+  // fall back to it rather than reporting a save that never happened.
+  if (state?.found && state.saved === false) {
+    const clicked = await evaluate(`
+      (function() {
+        var btns = document.querySelectorAll('button');
+        for (var i = 0; i < btns.length; i++) {
+          var cls = String(btns[i].className || '');
+          if (cls.indexOf('saveButton') === -1) continue;
+          if (btns[i].offsetParent === null) continue;
+          btns[i].click();
+          return true;
+        }
+        return false;
+      })()
+    `);
+    if (clicked) {
+      await new Promise(r => setTimeout(r, 1200));
+      state = await evaluate(CHECK_SAVED_JS);
+      action = 'save_button_clicked';
+    }
+  }
+
+  // The button's `saved-` class lags the actual save — measured: the script
+  // version incremented 5.0 -> 6.0 while the button still read dirty, which
+  // produced a false "NOT saved" warning. The stored script version is the
+  // authority, so poll that and only fall back to the button state.
+  let verified = state?.found && state.saved === true ? true : null;
+  if (verified !== true && versionsBefore) {
+    const deadline = Date.now() + 6000;
+    while (Date.now() < deadline) {
+      const now = await scriptVersionMap();
+      if (now && Object.keys(now).some(k => now[k] !== versionsBefore[k])) { verified = true; break; }
+      await new Promise(r => setTimeout(r, 500));
+    }
+  }
+  if (verified !== true) {
+    const late = await evaluate(CHECK_SAVED_JS);
+    verified = late?.found ? late.saved === true : null;
+  }
+
+  return {
+    success: true,
+    action,
+    verified,
+    ...(verified === false && {
+      warning: 'The script does not appear to have been saved — no version increment and the save button still reads unsaved. Check the Pine Editor.',
+    }),
+    ...(verified === null && {
+      note: 'Could not confirm the save; check that pine_list_scripts shows an incremented version.',
+    }),
+  };
 }
 
 export async function getConsole() {

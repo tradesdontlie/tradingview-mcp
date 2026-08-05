@@ -241,8 +241,45 @@ async function ensureStrategyTesterReady(maxWaitMs = 6000) {
   return { status, unhidden: unhidden || [] };
 }
 
+/**
+ * Compare symbols across the forms TradingView uses ("NSE:INFY", "INFY",
+ * "nse:infy"). Exported for testing and reused by batch.js.
+ */
+export function normalizeSymbol(s) {
+  return String(s ?? '').toUpperCase().split(':').pop().trim();
+}
+
+// Last report we handed out, so a subsequent read can tell whether the report
+// belongs to the symbol now on the chart. See getStrategyResults().
+let _lastReport = null;
+
+// How long to wait for the report to catch up with a symbol change.
+const REPORT_RECOMPUTE_TIMEOUT_MS = 12000;
+
 export async function getStrategyResults() {
   const ready = await ensureStrategyTesterReady();
+
+  // After a symbol change TradingView keeps serving the PREVIOUS symbol's
+  // report until the new one finishes computing, and it looks completely
+  // valid — this is what made a symbol-by-symbol sweep silently record the
+  // wrong numbers. If the symbol moved since the last read but the report
+  // fingerprint has not, wait for it to catch up before reporting.
+  let symbol = null;
+  try { symbol = await evaluate(`${CHART_API}.symbol()`); } catch { /* not fatal */ }
+
+  let fingerprint = await getStrategyFingerprint();
+  let staleAfterWait = false;
+  if (_lastReport && symbol && normalizeSymbol(symbol) !== normalizeSymbol(_lastReport.symbol)
+      && fingerprint !== null && fingerprint === _lastReport.fingerprint) {
+    const deadline = Date.now() + REPORT_RECOMPUTE_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 400));
+      fingerprint = await getStrategyFingerprint();
+      if (fingerprint !== null && fingerprint !== _lastReport.fingerprint) break;
+    }
+    staleAfterWait = fingerprint === _lastReport.fingerprint;
+  }
+
   const results = await evaluate(`
     (function() {
       ${FIND_STRATEGY_JS}
@@ -254,6 +291,8 @@ export async function getStrategyResults() {
         var perf = rd.performance;
         var all = perf.all || {};
         // Headline metrics, named to match the Strategy Tester "Key stats".
+        // total_trades prefers TradingView's own field: the win+loss sum
+        // excludes a position still open at the end of the backtest.
         var metrics = {
           net_profit: all.netProfit,
           net_profit_percent: all.netProfitPercent,
@@ -262,13 +301,27 @@ export async function getStrategyResults() {
           profit_factor: all.profitFactor,
           max_drawdown: perf.maxStrategyDrawDown,
           max_drawdown_percent: perf.maxStrategyDrawDownPercent,
-          total_trades: (all.numberOfWiningTrades || 0) + (all.numberOfLosingTrades || 0),
+          max_run_up: perf.maxStrategyRunUp,
+          max_run_up_percent: perf.maxStrategyRunUpPercent,
+          total_trades: all.totalTrades !== undefined && all.totalTrades !== null
+            ? all.totalTrades
+            : (all.numberOfWiningTrades || 0) + (all.numberOfLosingTrades || 0),
+          open_trades: all.totalOpenTrades,
           winning_trades: all.numberOfWiningTrades,
           losing_trades: all.numberOfLosingTrades,
           percent_profitable: all.percentProfitable,
           avg_trade: all.avgTrade,
+          avg_win_trade: all.avgWinTrade,
+          avg_loss_trade: all.avgLosTrade,
+          // Payoff ratio — decides whether a low win rate is still viable.
+          ratio_avg_win_avg_loss: all.ratioAvgWinAvgLoss,
+          avg_bars_in_trade: all.avgBarsInTrade,
+          avg_bars_in_win_trade: all.avgBarsInWinTrade,
+          avg_bars_in_loss_trade: all.avgBarsInLossTrade,
           largest_win: all.largestWinTrade,
           largest_loss: all.largestLosTrade,
+          max_contracts_held: all.maxContractsHeld,
+          margin_calls: all.marginCalls,
           commission_paid: all.commissionPaid,
           sharpe_ratio: perf.sharpeRatio,
           sortino_ratio: perf.sortinoRatio,
@@ -277,19 +330,74 @@ export async function getStrategyResults() {
         };
         var clean = {};
         for (var k in metrics) { if (metrics[k] !== null && metrics[k] !== undefined) clean[k] = metrics[k]; }
+
+        // Compact long/short split. The full 31-metric blocks would triple the
+        // payload, so only the four that answer "which side carries this?".
+        function dirSummary(d) {
+          if (!d) return null;
+          var o = {}, t = d.totalTrades !== undefined && d.totalTrades !== null
+            ? d.totalTrades
+            : (d.numberOfWiningTrades || 0) + (d.numberOfLosingTrades || 0);
+          if (!t) return null;
+          o.total_trades = t;
+          if (d.netProfit !== undefined) o.net_profit = d.netProfit;
+          if (d.percentProfitable !== undefined) o.percent_profitable = d.percentProfitable;
+          if (d.profitFactor !== undefined) o.profit_factor = d.profitFactor;
+          return o;
+        }
+        var byDir = {};
+        var lng = dirSummary(perf.long), sht = dirSummary(perf.short);
+        if (lng) byDir.long = lng;
+        if (sht) byDir.short = sht;
+
         var currency = rd.currency || null;
-        return {metrics: clean, currency: currency, strategy: found.name, source: 'internal_api'};
+        var out = {metrics: clean, currency: currency, strategy: found.name, source: 'internal_api'};
+        if (Object.keys(byDir).length) out.by_direction = byDir;
+        return out;
       } catch(e) { return {metrics: {}, source: 'internal_api', error: e.message}; }
     })()
   `);
+  _lastReport = { symbol, fingerprint };
+
   return {
     success: Object.keys(results?.metrics || {}).length > 0,
     metric_count: Object.keys(results?.metrics || {}).length,
     strategy: results?.strategy, currency: results?.currency, source: results?.source,
     metrics: results?.metrics || {},
+    ...(results?.by_direction && { by_direction: results.by_direction }),
+    // Compare across calls to detect a report that hasn't caught up yet — e.g.
+    // reading straight after a pine_save, where the symbol is unchanged so the
+    // check above cannot help.
+    report_fingerprint: fingerprint,
+    ...(staleAfterWait && {
+      stale_warning: `Chart moved to ${symbol} but the strategy report did not change within `
+        + `${REPORT_RECOMPUTE_TIMEOUT_MS}ms — these numbers may belong to the previous symbol. `
+        + 'Retry, or confirm report_fingerprint changed.',
+    }),
     ...(ready.unhidden.length && { unhidden_strategies: ready.unhidden, note: 'Strategy was hidden on the chart; it was made visible so the report could compute.' }),
     error: results?.error,
   };
+}
+
+// Cheap identity of the currently-computed strategy report. After a symbol
+// change TradingView leaves the PREVIOUS symbol's report in place until the new
+// one finishes computing, so polling for "a report exists" is not enough — a
+// batch sweep would silently record the previous symbol's numbers against the
+// new symbol. buyHoldReturn is symbol- and price-specific, so a change in this
+// fingerprint is a reliable signal that the report actually recomputed.
+// Returns null when no computed report is present.
+export async function getStrategyFingerprint() {
+  return await evaluate(`
+    (function() {
+      ${FIND_STRATEGY_JS}
+      try {
+        var f = findStrategy();
+        if (!f || !f.report || !f.report.performance) return null;
+        var p = f.report.performance, a = p.all || {};
+        return [p.buyHoldReturn, a.netProfit, a.numberOfWiningTrades, a.numberOfLosingTrades, p.maxStrategyDrawDown].join('|');
+      } catch (e) { return null; }
+    })()
+  `);
 }
 
 export async function getTrades({ max_trades } = {}) {

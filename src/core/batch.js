@@ -3,12 +3,49 @@
  */
 import { evaluate, evaluateAsync, getClient, getChartApi, getChartCollection, safeString } from '../connection.js';
 import { waitForChartReady } from '../wait.js';
+import { getStrategyResults, getStrategyFingerprint, normalizeSymbol } from './data.js';
 import { writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCREENSHOT_DIR = join(dirname(dirname(__dirname)), 'screenshots');
+
+// How long to wait for a strategy report to recompute after a symbol change
+// before giving up and flagging the read as possibly stale.
+const STRATEGY_RECOMPUTE_TIMEOUT_MS = 15000;
+const STRATEGY_POLL_INTERVAL_MS = 400;
+
+/**
+ * Build one iteration's result row.
+ * An action can fail WITHOUT throwing — it returns `{ error }`. Deriving
+ * success from "no exception was thrown" made a sweep in which every single
+ * iteration failed report `successful: 15, failed: 0`. Success must come from
+ * the payload. Exported for testing.
+ */
+export function buildIterationResult(combo, actionResult) {
+  const actionError = actionResult && typeof actionResult === 'object' ? actionResult.error : null;
+  return {
+    ...combo,
+    success: !actionError,
+    ...(actionError && { error: actionError }),
+    result: actionResult,
+  };
+}
+
+/** Aggregate iteration rows into the batch envelope. Exported for testing. */
+export function summarizeBatch(results) {
+  const successCount = results.filter(r => r.success).length;
+  const failedCount = results.length - successCount;
+  const staleCount = results.filter(r => r.result?.stale_warning).length;
+  return {
+    success: failedCount === 0,
+    total_iterations: results.length,
+    successful: successCount,
+    failed: failedCount,
+    ...(staleCount > 0 && { stale: staleCount }),
+  };
+}
 
 export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_count }) {
   const tfs = timeframes && timeframes.length > 0 ? timeframes : [null];
@@ -19,10 +56,30 @@ export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_co
   try { colPath = await getChartCollection(); } catch {}
   try { apiPath = await getChartApi(); } catch {}
 
+  // Baseline for staleness detection — the report belonging to whatever symbol
+  // the chart was on before the sweep started.
+  let prevFingerprint;
+  if (action === 'get_strategy_results') {
+    try { prevFingerprint = await getStrategyFingerprint(); } catch { prevFingerprint = null; }
+  }
+
   for (const symbol of symbols) {
     for (const tf of tfs) {
       const combo = { symbol, timeframe: tf };
       try {
+        // Whether we should expect the strategy report to change. If the chart
+        // is already showing this symbol, nothing recomputes and the
+        // fingerprint stays put — without this the very first iteration of a
+        // sweep gets flagged stale purely because the chart happened to
+        // already be there.
+        let symbolChanged = true;
+        if (action === 'get_strategy_results' && apiPath) {
+          try {
+            const cur = await evaluate(`${apiPath}.symbol()`);
+            symbolChanged = normalizeSymbol(cur) !== normalizeSymbol(symbol);
+          } catch { /* assume it changed */ }
+        }
+
         if (colPath) await evaluate(`${colPath}.setSymbol(${safeString(symbol)})`);
         else if (apiPath) await evaluate(`${apiPath}.setSymbol(${safeString(symbol)})`);
 
@@ -56,31 +113,42 @@ export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_co
             })
           `);
         } else if (action === 'get_strategy_results') {
-          await new Promise(r => setTimeout(r, 1000));
-          actionResult = await evaluate(`
-            (function() {
-              var metrics = {};
-              var panel = document.querySelector('[data-name="backtesting"]') || document.querySelector('[class*="strategyReport"]');
-              if (!panel) return { error: 'Strategy Tester not found' };
-              var items = panel.querySelectorAll('[class*="reportItem"], [class*="metric"]');
-              items.forEach(function(item) {
-                var label = item.querySelector('[class*="label"]');
-                var value = item.querySelector('[class*="value"]');
-                if (label && value) metrics[label.textContent.trim()] = value.textContent.trim();
-              });
-              return { metric_count: Object.keys(metrics).length, metrics: metrics };
-            })()
-          `);
+          // Was a DOM scrape of the Strategy Tester panel, which failed with
+          // "Strategy Tester not found" whenever the panel was closed — every
+          // iteration of a sweep. getStrategyResults() reads TradingView's
+          // internal report object and opens/unhides the panel itself.
+          // Nothing to wait for when the chart was already on this symbol.
+          let recomputed = !symbolChanged;
+          if (symbolChanged) {
+            const deadline = Date.now() + STRATEGY_RECOMPUTE_TIMEOUT_MS;
+            while (Date.now() < deadline) {
+              const fp = await getStrategyFingerprint();
+              if (fp !== null && fp !== prevFingerprint) { recomputed = true; break; }
+              await new Promise(r => setTimeout(r, STRATEGY_POLL_INTERVAL_MS));
+            }
+          }
+
+          actionResult = await getStrategyResults();
+          prevFingerprint = await getStrategyFingerprint();
+
+          if (!recomputed && !actionResult.error) {
+            actionResult = {
+              ...actionResult,
+              stale_warning: 'Strategy report did not change after the symbol switch within '
+                + STRATEGY_RECOMPUTE_TIMEOUT_MS + 'ms — these numbers may belong to the previous symbol. '
+                + 'Raise delay_ms, or re-read this symbol individually with data_get_strategy_results.',
+            };
+          }
         } else {
           actionResult = { error: 'Unknown action or API not available: ' + action };
         }
-        results.push({ ...combo, success: true, result: actionResult });
+
+        results.push(buildIterationResult(combo, actionResult));
       } catch (err) {
         results.push({ ...combo, success: false, error: err.message });
       }
     }
   }
 
-  const successCount = results.filter(r => r.success).length;
-  return { success: true, total_iterations: results.length, successful: successCount, failed: results.length - successCount, results };
+  return { ...summarizeBatch(results), results };
 }
