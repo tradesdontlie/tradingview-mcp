@@ -1,6 +1,6 @@
 # TradingView MCP — Claude Instructions
 
-84 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
+88 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
 
 ## Decision Tree — Which Tool When
 
@@ -23,6 +23,7 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 - `data_get_ohlcv` with `summary: true` → compact stats (high, low, range, change%, avg volume, last 5 bars)
 - `data_get_ohlcv` without summary → all bars (use `count` to limit, default 100)
 - `quote_get` → single latest price snapshot
+- `data_export_ohlcv` → write bars to a CSV file on disk (exports/ dir) instead of into context — use for large exports or downstream analysis
 
 ### "Analyze my chart" (full report workflow)
 1. `quote_get` → current price
@@ -38,6 +39,7 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 - `chart_set_timeframe` → switch resolution (e.g., "1", "5", "15", "60", "D", "W")
 - `chart_set_type` → switch chart style (Candles, HeikinAshi, Line, Area, Renko, etc.)
 - `chart_manage_indicator` → add or remove studies (use full name: "Relative Strength Index", not "RSI")
+- `chart_add_comparison` → overlay/compare a second symbol (e.g. SPY on AAPL); pass `remove: true` to remove it (no symbol removes all)
 - `chart_scroll_to_date` → jump to a date (ISO format: "2025-01-15")
 - `chart_set_visible_range` → zoom to exact date range (unix timestamps)
 
@@ -72,6 +74,12 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 - `alert_create` → set price alert (condition: "crossing", "greater_than", "less_than")
 - `alert_list` → view active alerts
 - `alert_delete` → remove alerts
+- `alert_get_log` → read recently fired/triggered alerts (time, symbol, message, trigger price)
+
+### "Manage watchlists"
+- `watchlist_get` → symbols in the active watchlist (with price/change)
+- `watchlist_add` / `watchlist_add_bulk` / `watchlist_remove` → edit symbols in the active list
+- `watchlist_manage` → work with whole lists: `action: "list"` (all watchlists), `"create"` (new named list), `"delete"`, `"switch"` (make a list active)
 
 ### "Navigate the UI"
 - `ui_open_panel` → open/close pine-editor, strategy-tester, watchlist, alerts, trading

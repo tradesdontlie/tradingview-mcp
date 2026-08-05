@@ -236,3 +236,196 @@ export async function remove({ symbols }) {
     list_id: listInfo.id, list_name: listInfo.name, api: 'rest',
   };
 }
+
+// ---- Whole-watchlist management (list / create / delete / switch) ----
+// Extends the proven symbols_list REST pattern from remove(). The base path and
+// the /custom/ segment are proven; the list-level verbs are the natural
+// extension of that same API and surface HTTP status/body on failure so a
+// wrong guess is diagnosable rather than silent.
+const SYMBOLS_LIST_BASE = 'https://www.tradingview.com/api/v1/symbols_list';
+
+// After any REST mutation the desktop widget does not live-sync — toggle the
+// right-rail panel closed+open to force it to refetch. Extracted from remove(),
+// which opens the panel first; without that precondition the bare toggle would
+// leave a panel that started closed still closed (open->close->open only holds
+// when it started open), so a later getActiveListInfo() DOM read finds no rows.
+async function remountWatchlist() {
+  await ensureWatchlistOpen();
+  await evaluate(`(function() { var btn = ${WL_BUTTON_JS}; if (btn) btn.click(); })()`);
+  await new Promise(r => setTimeout(r, 400));
+  await evaluate(`(function() { var btn = ${WL_BUTTON_JS}; if (btn) btn.click(); })()`);
+  await new Promise(r => setTimeout(r, 400));
+}
+
+// Resolve a caller-supplied {id|name} to a concrete list id via listLists().
+async function resolveListId({ id, name, _deps } = {}) {
+  if (id) return String(id);
+  if (!name) throw new Error('Provide a watchlist id or name.');
+  const { lists } = await listLists({ _deps });
+  const match = lists.find(l => l.name === name)
+    || lists.find(l => (l.name || '').toLowerCase() === String(name).toLowerCase());
+  if (!match) {
+    throw new Error(`No watchlist named "${name}". Available: ${lists.map(l => l.name).join(', ') || '(none)'}`);
+  }
+  return String(match.id);
+}
+
+// List every custom watchlist (id, name, symbol count, active flag).
+export async function listLists({ _deps } = {}) {
+  const evalAsync = _deps?.evaluateAsync || evaluateAsync;
+  const activeInfo = _deps?.getActiveListInfo || getActiveListInfo;
+  const result = await evalAsync(`
+    fetch('${SYMBOLS_LIST_BASE}/custom/', {
+      credentials: 'include',
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+    })
+      .then(function(r) { return r.text().then(function(t) {
+        var d = null; try { d = JSON.parse(t); } catch (e) {}
+        return { status: r.status, ok: r.ok, data: d, body: t.substring(0, 300) };
+      }); })
+      .catch(function(e) { return { status: 0, ok: false, data: null, body: String(e) }; })
+  `);
+  // Some builds return a bare array; others wrap as { lists: [...] } or { r: [...] }.
+  const raw = Array.isArray(result?.data) ? result.data
+    : (result?.data?.lists || result?.data?.r || null);
+  if (!result?.ok || !Array.isArray(raw)) {
+    throw new Error(`Could not list watchlists (HTTP ${result?.status ?? '?'}): ${result?.body || 'unexpected response'}`);
+  }
+
+  // Best-effort: mark which list is active using the proven fiber probe.
+  let activeId = null;
+  try { const info = await activeInfo(); activeId = info?.id ?? null; } catch {}
+
+  const lists = raw.map(l => ({
+    id: l.id,
+    name: l.name,
+    symbol_count: Array.isArray(l.symbols) ? l.symbols.length : (l.symbols_count ?? null),
+    type: l.type || 'custom',
+    color: l.color ?? null,
+    active: activeId != null ? (String(l.id) === String(activeId)) : (l.active ?? null),
+  }));
+  return { success: true, source: 'rest', count: lists.length, active_id: activeId, lists };
+}
+
+// Create a new named list, optionally seeded with symbols (EXCHANGE:SYMBOL preferred).
+export async function createList({ name, symbols = [], _deps } = {}) {
+  if (!name) throw new Error('name is required to create a watchlist.');
+  const evalAsync = _deps?.evaluateAsync || evaluateAsync;
+  const resp = await evalAsync(`
+    fetch('${SYMBOLS_LIST_BASE}/custom/', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+      body: JSON.stringify({ name: ${JSON.stringify(name)}, symbols: ${JSON.stringify(symbols)} }),
+    })
+      .then(function(r) { return r.text().then(function(t) {
+        var d = null; try { d = JSON.parse(t); } catch (e) {}
+        return { status: r.status, ok: r.ok, data: d, body: t.substring(0, 300) };
+      }); })
+      .catch(function(e) { return { status: 0, ok: false, data: null, body: String(e) }; })
+  `);
+  if (!resp?.ok) {
+    throw new Error(`Create watchlist failed (HTTP ${resp?.status}): ${resp?.body}`);
+  }
+  if (!_deps) await remountWatchlist();
+  return {
+    success: true, source: 'rest',
+    list_id: resp.data?.id ?? null,
+    name: resp.data?.name ?? name,
+    symbols,
+  };
+}
+
+// Delete a list by id or name.
+export async function deleteList({ id, name, _deps } = {}) {
+  const listId = await resolveListId({ id, name, _deps });
+  const evalAsync = _deps?.evaluateAsync || evaluateAsync;
+  const resp = await evalAsync(`
+    fetch('${SYMBOLS_LIST_BASE}/custom/' + ${JSON.stringify(listId)} + '/', {
+      method: 'DELETE',
+      credentials: 'include',
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+    })
+      .then(function(r) { return r.text().then(function(t) {
+        return { status: r.status, ok: r.ok, body: t.substring(0, 300) };
+      }); })
+      .catch(function(e) { return { status: 0, ok: false, body: String(e) }; })
+  `);
+  if (!resp?.ok) {
+    throw new Error(`Delete watchlist failed (HTTP ${resp?.status}): ${resp?.body}`);
+  }
+  if (!_deps) await remountWatchlist();
+  return { success: true, source: 'rest', deleted_id: listId };
+}
+
+// Switch the active list. Tries the REST set-active verb first, then falls back
+// to clicking the watchlist name dropdown in the widget (DOM). Verifies via the
+// fiber probe that the active list actually changed.
+export async function switchList({ id, name, _deps } = {}) {
+  const listId = await resolveListId({ id, name, _deps });
+  const evalAsync = _deps?.evaluateAsync || evaluateAsync;
+
+  // Attempt 1: REST set-active (best-effort — the endpoint is inferred).
+  const rest = await evalAsync(`
+    fetch('${SYMBOLS_LIST_BASE}/custom/' + ${JSON.stringify(listId)} + '/set_active/', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+      body: '{}',
+    })
+      .then(function(r) { return { status: r.status, ok: r.ok }; })
+      .catch(function(e) { return { status: 0, ok: false, error: String(e) }; })
+  `);
+
+  let method = 'rest';
+  if (!rest?.ok) {
+    // Attempt 2: DOM fallback — open panel, open the list dropdown, click target.
+    // The dropdown exposes only visible text (no list-id handle), so resolve a
+    // display name to match on. The caller may have passed only an id, in which
+    // case look the name up from listLists() rather than matching on an empty
+    // string (which would never match anything).
+    method = 'dom';
+    let targetName = name;
+    if (!targetName) {
+      try {
+        const { lists } = await listLists({ _deps });
+        targetName = (lists || []).find(l => String(l.id) === String(listId))?.name || '';
+      } catch {}
+    }
+    if (!targetName) {
+      throw new Error(`Cannot switch watchlist ${listId} via the DOM fallback: no list name available to match (REST set-active returned HTTP ${rest?.status}). Retry passing the watchlist name.`);
+    }
+    await ensureWatchlistOpen();
+    await evaluate(`
+      (function() {
+        var btn = document.querySelector('[data-name="watchlists-button"]')
+          || document.querySelector('[data-name="watchlist-select-dialog-button"]')
+          || document.querySelector('[class*="layout__area--right"] [data-name*="watchlist"][aria-haspopup]');
+        if (btn) btn.click();
+      })()
+    `);
+    await new Promise(r => setTimeout(r, 400));
+    const clicked = await evaluate(`
+      (function() {
+        var target = ${JSON.stringify(String(targetName))}.toLowerCase();
+        var items = document.querySelectorAll('[role="menuitem"], [class*="item"] [class*="title"], [data-name="watchlists-dialog"] [class*="row"]');
+        for (var i = 0; i < items.length; i++) {
+          var t = (items[i].textContent || '').trim().toLowerCase();
+          if (t && target && t.indexOf(target) !== -1) { items[i].click(); return true; }
+        }
+        return false;
+      })()
+    `);
+    if (!clicked) {
+      throw new Error(`Could not switch watchlist via REST (HTTP ${rest?.status}) or DOM (name "${targetName}" not found in list dropdown).`);
+    }
+    await new Promise(r => setTimeout(r, 400));
+  } else {
+    await remountWatchlist();
+  }
+
+  // Verify the active list is now the requested one.
+  let verified = false;
+  try { const info = await getActiveListInfo(); verified = String(info?.id) === String(listId); } catch {}
+  return { success: true, source: method, active_id: listId, verified };
+}

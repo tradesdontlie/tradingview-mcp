@@ -126,3 +126,95 @@ export async function deleteAlerts({ delete_all, alert_ids, alert_id } = {}) {
   }
   return { success: false, source: 'internal_api', alert_ids: ids, error: (result && (result.error || result.response)) || 'delete failed' };
 }
+
+/**
+ * Read recently fired / triggered alerts (the Alerts panel "Log").
+ *
+ * Two layers, both authenticated via the desktop app's session cookies:
+ *   1. Best-effort: the pricealerts fired-events endpoint (richer per-fire
+ *      history). Its exact path is not officially documented, so this is
+ *      opportunistic — a failure never breaks the tool.
+ *   2. Reliable fallback: derive the log from list_alerts (a proven endpoint) —
+ *      every alert carrying a last_fire_time is a fired alert, most-recent first.
+ * The `source` field reports which layer produced the result.
+ */
+export async function getLog({ limit, _deps } = {}) {
+  const evalAsync = _deps?.evaluateAsync || evaluateAsync;
+  const cap = Math.max(1, Math.min(Number(limit) || 20, 100));
+
+  const result = await evalAsync(`
+    (async function() {
+      var out = { fires: null, derived: [], error: null };
+
+      function unwrapSym(s) {
+        try { if (s && String(s).charAt(0) === '=') return JSON.parse(String(s).replace(/^=/, '')).symbol || s; } catch (e) {}
+        return s;
+      }
+
+      // Proven endpoint: current alerts (used for the derived log + a symbol map).
+      var alerts = [];
+      try {
+        var la = await fetch('https://pricealerts.tradingview.com/list_alerts', { credentials: 'include' }).then(function(r){ return r.json(); });
+        if (la && la.s === 'ok' && Array.isArray(la.r)) alerts = la.r;
+      } catch (e) {}
+      var symById = {};
+      alerts.forEach(function(a){ symById[a.alert_id] = unwrapSym(a.symbol); });
+
+      out.derived = alerts
+        .filter(function(a){ return a.last_fire_time != null; })
+        .map(function(a){
+          var t = a.last_fire_time;
+          return {
+            alert_id: a.alert_id,
+            time: (t != null) ? t : null,
+            time_iso: (t != null) ? new Date(t * 1000).toISOString() : null,
+            symbol: unwrapSym(a.symbol),
+            message: a.message || '',
+            active: a.active,
+          };
+        })
+        .sort(function(x, y){ return (y.time || 0) - (x.time || 0); });
+
+      // Best-effort: the fired-events endpoint (full per-fire history).
+      try {
+        var resp = await fetch('https://pricealerts.tradingview.com/list_fires?limit=' + ${JSON.stringify(cap)}, { credentials: 'include' });
+        var data = await resp.json();
+        if (data && data.s === 'ok' && Array.isArray(data.r)) {
+          out.fires = data.r.map(function(f){
+            var sym = unwrapSym(f.symbol || symById[f.alert_id] || '');
+            var t = (f.fire_time != null) ? f.fire_time : (f.time != null ? f.time : f.bar_time);
+            return {
+              fire_id: (f.fire_id != null) ? f.fire_id : null,
+              alert_id: (f.alert_id != null) ? f.alert_id : null,
+              time: (t != null) ? t : null,
+              time_iso: (t != null) ? new Date(t * 1000).toISOString() : null,
+              symbol: sym,
+              message: f.desc || f.message || f.name || '',
+            };
+          });
+        } else {
+          out.error = (data && data.errmsg) || ('HTTP ' + resp.status);
+        }
+      } catch (e) { out.error = e.message; }
+
+      return out;
+    })()
+  `);
+
+  // The in-page code leaves fires === null when the feed genuinely failed and
+  // sets it to an array (possibly empty) when it responded. An empty array is a
+  // valid "zero fires" answer, so accept it here rather than falling through to
+  // the derived log and falsely reporting the feed as unavailable.
+  if (result && Array.isArray(result.fires)) {
+    const fires = result.fires.slice(0, cap);
+    return { success: true, source: 'internal_api_fires', fired_count: fires.length, fires };
+  }
+  const derived = (result && result.derived) || [];
+  return {
+    success: true,
+    source: 'internal_api_list',
+    note: 'Derived from list_alerts last-fire times (fired-events endpoint unavailable' + (result && result.error ? ': ' + result.error : '') + ').',
+    fired_count: Math.min(derived.length, cap),
+    fires: derived.slice(0, cap),
+  };
+}

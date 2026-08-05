@@ -71,6 +71,21 @@ register('scroll', {
   },
 });
 
+register('compare', {
+  description: 'Add/remove a comparison symbol (tv compare SPY | tv compare SPY --remove | tv compare --remove)',
+  options: {
+    remove: { type: 'boolean', description: 'Remove the comparison instead of adding (no symbol = remove all)' },
+    series: { type: 'boolean', description: 'Overlay as a full price series on the main scale' },
+    source: { type: 'string', description: 'Price source (close, open, high, low, hl2, hlc3, ohlc4)' },
+  },
+  handler: (opts, positionals) => {
+    const sym = positionals[0];
+    if (opts.remove) return core.removeComparison({ symbol: sym });
+    if (!sym) throw new Error('Symbol required. Usage: tv compare SPY  (or: tv compare SPY --remove)');
+    return core.addComparison({ symbol: sym, as_series: !!opts.series, source: opts.source });
+  },
+});
+
 register('discover', {
   description: 'Report which TradingView API paths are available',
   handler: () => healthCore.discover(),

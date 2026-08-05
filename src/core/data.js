@@ -3,6 +3,29 @@
  */
 import { evaluate, evaluateAsync, KNOWN_PATHS, safeString } from '../connection.js';
 import { waitForChartReady } from '../wait.js';
+import { writeFileSync, mkdirSync } from 'node:fs';
+import { join, dirname, isAbsolute, resolve as pathResolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { getState, setSymbol, setTimeframe } from './chart.js';
+
+// CSV export destination mirrors capture.js's screenshots/ convention:
+// this file is src/core/data.js, so two dirnames up is the repo root.
+const EXPORT_DIR = join(dirname(dirname(dirname(fileURLToPath(import.meta.url)))), 'exports');
+// Columns follow the bar objects returned by getOhlcv(): { time, open, high,
+// low, close, volume }. `time` is UNIX SECONDS, so the human-readable `date`
+// column multiplies by 1000 for the JS Date.
+const CSV_HEADER = 'time,date,open,high,low,close,volume';
+
+function _csvRow(bar) {
+  const iso = bar.time != null ? new Date(bar.time * 1000).toISOString() : '';
+  // All fields are numbers or a comma-free ISO string — safe to join directly.
+  return [bar.time, iso, bar.open, bar.high, bar.low, bar.close, bar.volume].join(',');
+}
+
+function _defaultWrite(filePath, contents) {
+  mkdirSync(dirname(filePath), { recursive: true });
+  writeFileSync(filePath, contents, 'utf8');
+}
 
 const MAX_OHLCV_BARS = 500;
 const MAX_TRADES = 20;
@@ -179,6 +202,59 @@ export async function getOhlcv({ count, summary } = {}) {
   }
 
   return { success: true, bar_count: data.bars.length, total_available: data.total_bars, source: data.source, bars: data.bars };
+}
+
+/**
+ * Export OHLCV bars to a CSV file on disk. Reuses getOhlcv() (identical bars to
+ * data_get_ohlcv), then writes the file from the Node MCP process via node:fs —
+ * NOT in-page. Optionally switches the chart's symbol/timeframe first. Omit
+ * `path` to auto-name a timestamped file under exports/. `_deps` lets tests
+ * inject getOhlcv/getState/setSymbol/setTimeframe/writeFile without CDP or disk.
+ */
+export async function exportOhlcv({ count, symbol, timeframe, path, _deps } = {}) {
+  const fetchBars = _deps?.getOhlcv || getOhlcv;
+  const readState = _deps?.getState || getState;
+  const switchSymbol = _deps?.setSymbol || setSymbol;
+  const switchTimeframe = _deps?.setTimeframe || setTimeframe;
+  const write = _deps?.writeFile || _defaultWrite;
+
+  // Switch the chart first so the CSV reflects the requested symbol/timeframe.
+  // Like chart_set_symbol, this mutates chart state (no restore afterward).
+  const wantSymbol = (symbol || '').toString().trim();
+  const wantTf = (timeframe || '').toString().trim();
+  if (wantSymbol) await switchSymbol({ symbol: wantSymbol });
+  if (wantTf) await switchTimeframe({ timeframe: wantTf });
+
+  // REUSE the existing extraction — throws 'Could not extract OHLCV data...'
+  // if the chart has none.
+  const { bars } = await fetchBars({ count });
+  if (!bars || !bars.length) throw new Error('No OHLCV bars to export. The chart may still be loading.');
+
+  // Read back what the chart is actually on (for labeling + default filename).
+  const { symbol: actualSymbol, resolution } = await readState();
+
+  const csv = [CSV_HEADER, ...bars.map(_csvRow)].join('\n') + '\n';
+
+  let filePath;
+  if (path) {
+    // Explicit path wins; relative paths resolve against the server cwd.
+    filePath = isAbsolute(path) ? path : pathResolve(process.cwd(), path);
+  } else {
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const safe = (s) => String(s || '').replace(/[^A-Za-z0-9._-]/g, '_');
+    filePath = join(EXPORT_DIR, `tv_ohlcv_${safe(actualSymbol)}_${safe(resolution)}_${ts}.csv`);
+  }
+
+  write(filePath, csv);
+
+  return {
+    success: true,
+    file_path: filePath,
+    bar_count: bars.length,
+    symbol: actualSymbol,
+    timeframe: resolution,
+    columns: CSV_HEADER.split(','),
+  };
 }
 
 export async function getIndicator({ entity_id }) {

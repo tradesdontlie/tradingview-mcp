@@ -2,11 +2,18 @@ import { register } from '../router.js';
 import * as core from '../../core/alerts.js';
 
 register('alert', {
-  description: 'Alert tools (list, create, delete)',
+  description: 'Alert tools (list, create, delete, log)',
   subcommands: new Map([
     ['list', {
       description: 'List active alerts',
       handler: () => core.list(),
+    }],
+    ['log', {
+      description: 'List recently fired/triggered alerts (alert log)',
+      options: {
+        limit: { type: 'string', short: 'n', description: 'Max fired alerts to return (default 20, max 100)' },
+      },
+      handler: (opts) => core.getLog({ limit: opts.limit ? Number(opts.limit) : undefined }),
     }],
     ['create', {
       description: 'Create a price alert',
