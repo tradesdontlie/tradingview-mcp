@@ -118,7 +118,7 @@ registerDrawingTools(server);
 // Các nhóm khác vẫn khóa để AI đỡ loạn:
 // registerPineTools(server);     (Chỉ mở khi muốn AI viết script Pine)
 registerAlertTools(server);    // (Cài đặt cảnh báo) — mở theo plan merge upstream
-// registerWatchlistTools(server); (Quản lý danh mục theo dõi)
+registerWatchlistTools(server); // (Quản lý danh mục theo dõi) — mở theo plan merge upstream
 // registerUITools(server);       (Thay đổi giao diện sáng/tối)
 // registerTabTools(server);      (Chuyển đổi các tab biểu đồ)
 registerCaptureTools(server);  // (Chụp ảnh màn hình) — mở theo plan merge upstream
