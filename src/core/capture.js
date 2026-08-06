@@ -2,6 +2,7 @@
  * Core screenshot/capture logic.
  */
 import { getClient, evaluate, getChartCollection } from '../connection.js';
+import { waitForChartRender } from '../wait.js';
 import { writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -9,11 +10,13 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCREENSHOT_DIR = join(dirname(dirname(__dirname)), 'screenshots');
 
-export async function captureScreenshot({ region, filename, method } = {}) {
+export async function captureScreenshot({ region, filename, method, waitForRender = false } = {}) {
   mkdirSync(SCREENSHOT_DIR, { recursive: true });
 
+  if (waitForRender) await waitForChartRender();
+
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
-  const fname = (filename || `tv_${region}_${ts}`).replace(/[\/\\]/g, '_');
+  const fname = (filename || `tv_${region || 'full'}_${ts}`).replace(/[\/\\]/g, '_').replace(/\.\./g, '_');
   const filePath = join(SCREENSHOT_DIR, `${fname}.png`);
 
   if (method === 'api') {
@@ -21,7 +24,7 @@ export async function captureScreenshot({ region, filename, method } = {}) {
       const colPath = await getChartCollection();
       await evaluate(`${colPath}.takeScreenshot()`);
       return {
-        success: true, method: 'api',
+        success: true, method: 'api', waited_for_render: !!waitForRender,
         note: 'takeScreenshot() triggered — TradingView will save/show the screenshot via its own UI',
       };
     } catch {
@@ -65,6 +68,7 @@ export async function captureScreenshot({ region, filename, method } = {}) {
 
   return {
     success: true, method: 'cdp', file_path: filePath, region,
+    waited_for_render: !!waitForRender,
     size_bytes: Buffer.from(data, 'base64').length,
   };
 }

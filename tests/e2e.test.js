@@ -49,6 +49,12 @@ async function apiExists(path) {
 const CHART_API = 'window.TradingViewApi._activeChartWidgetWV.value()';
 const BARS_PATH = `${CHART_API}._chartWidget.model().mainSeries().bars()`;
 const BOTTOM_BAR = 'window.TradingView.bottomWidgetBar';
+// Resilient close: hideWidget(name) was removed in newer TradingView builds;
+// fall back to close() (minimize) and then hide().
+const CLOSE_BOTTOM = (name) => `(function(){var b=${BOTTOM_BAR};if(!b)return;` +
+  `if(typeof b.hideWidget==='function')b.hideWidget(${JSON.stringify(name)});` +
+  `else if(typeof b.close==='function')b.close();` +
+  `else if(typeof b.hide==='function')b.hide();})()`;
 const REPLAY_API = 'window.TradingViewApi._replayApi';
 
 /** Unwrap TradingView WatchedValue objects */
@@ -628,7 +634,7 @@ describe('TradingView MCP — Full E2E (70 tools)', () => {
       assert.ok(typeof data.panel_found === 'boolean', 'Strategy panel detection works');
 
       // Close it
-      await evaluate(`try { ${BOTTOM_BAR}.hideWidget('backtesting'); } catch(e) {}`);
+      await evaluate(`try { ${CLOSE_BOTTOM('backtesting')} } catch(e) {}`);
     });
 
     it('data_get_trades — trade list (panel-dependent)', async () => {
@@ -639,7 +645,7 @@ describe('TradingView MCP — Full E2E (70 tools)', () => {
         !!(document.querySelector('[data-name="backtesting"]') || document.querySelector('[class*="strategyReport"]'))
       `);
       assert.ok(typeof panelExists === 'boolean', 'Panel detection works');
-      await evaluate(`try { ${BOTTOM_BAR}.hideWidget('backtesting'); } catch(e) {}`);
+      await evaluate(`try { ${CLOSE_BOTTOM('backtesting')} } catch(e) {}`);
     });
 
     it('data_get_equity — equity curve (panel-dependent)', async () => {
@@ -650,7 +656,7 @@ describe('TradingView MCP — Full E2E (70 tools)', () => {
         !!(document.querySelector('[data-name="backtesting"]') || document.querySelector('[class*="strategyReport"]'))
       `);
       assert.ok(typeof panelExists === 'boolean', 'Panel detection works');
-      await evaluate(`try { ${BOTTOM_BAR}.hideWidget('backtesting'); } catch(e) {}`);
+      await evaluate(`try { ${CLOSE_BOTTOM('backtesting')} } catch(e) {}`);
     });
   });
 
@@ -667,7 +673,7 @@ describe('TradingView MCP — Full E2E (70 tools)', () => {
     after(async () => {
       // Restore editor state
       if (!editorWasOpen) {
-        await evaluate(`try { ${BOTTOM_BAR}.hideWidget('pine-editor'); } catch(e) {}`);
+        await evaluate(`try { ${CLOSE_BOTTOM('pine-editor')} } catch(e) {}`);
         await sleep(300);
       }
     });
@@ -1039,7 +1045,7 @@ val = array.get(a, 5)`;
       const isOpen = await evaluate(`!!document.querySelector('.monaco-editor.pine-editor-monaco')`);
 
       // Close
-      await evaluate(`${BOTTOM_BAR}.hideWidget('pine-editor')`);
+      await evaluate(CLOSE_BOTTOM('pine-editor'));
       await sleep(300);
 
       assert.ok(typeof isOpen === 'boolean', 'Panel toggle works');

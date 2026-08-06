@@ -45,8 +45,8 @@ export async function drawShape({ shape, point, point2, overrides: overridesRaw,
 }
 
 export async function listDrawings() {
-  const apiPath = await getChartApi();
-  const shapes = await evaluate(`
+  const apiPath = await _getChartApi();
+  const shapes = await _evaluate(`
     (function() {
       var api = ${apiPath};
       var all = api.getAllShapes();
@@ -57,8 +57,8 @@ export async function listDrawings() {
 }
 
 export async function getProperties({ entity_id }) {
-  const apiPath = await getChartApi();
-  const result = await evaluate(`
+  const apiPath = await _getChartApi();
+  const result = await _evaluate(`
     (function() {
       var api = ${apiPath};
       var eid = ${safeString(entity_id)};
@@ -86,8 +86,8 @@ export async function getProperties({ entity_id }) {
 }
 
 export async function removeOne({ entity_id }) {
-  const apiPath = await getChartApi();
-  const result = await evaluate(`
+  const apiPath = await _getChartApi();
+  const result = await _evaluate(`
     (function() {
       var api = ${apiPath};
       var eid = ${safeString(entity_id)};
@@ -107,7 +107,7 @@ export async function removeOne({ entity_id }) {
 }
 
 export async function clearAll() {
-  const apiPath = await getChartApi();
-  await evaluate(`${apiPath}.removeAllShapes()`);
+  const apiPath = await _getChartApi();
+  await _evaluate(`${apiPath}.removeAllShapes()`);
   return { success: true, action: 'all_shapes_removed' };
 }

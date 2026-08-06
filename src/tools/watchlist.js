@@ -23,4 +23,18 @@ export function registerWatchlistTools(server) {
       return jsonResult({ success: false, error: err.message }, true);
     }
   });
+
+  server.tool('watchlist_add_bulk', 'Add multiple symbols to the TradingView watchlist', {
+    symbols: z.array(z.string()).describe('Symbols to add (e.g., ["AAPL", "ES1!", "NYMEX:CL1!"])'),
+  }, async ({ symbols }) => {
+    try { return jsonResult(await core.addBulk({ symbols })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('watchlist_remove', 'Remove one or more symbols from the active TradingView watchlist', {
+    symbols: z.array(z.string()).describe('Symbols to remove — bare (AAPL) or full (NASDAQ:AAPL)'),
+  }, async ({ symbols }) => {
+    try { return jsonResult(await core.remove({ symbols })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
 }

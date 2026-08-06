@@ -89,18 +89,57 @@ export async function manageIndicator({ action, indicator, entity_id, inputs: in
   const inputs = inputsRaw ? (typeof inputsRaw === 'string' ? JSON.parse(inputsRaw) : inputsRaw) : undefined;
 
   if (action === 'add') {
-    const inputArr = inputs ? Object.entries(inputs).map(([k, v]) => ({ id: k, value: v })) : [];
     const before = await evaluate(`${CHART_API}.getAllStudies().map(function(s) { return s.id; })`);
     await evaluate(`
       (function() {
         var chart = ${CHART_API};
-        chart.createStudy(${safeString(indicator)}, false, false, ${JSON.stringify(inputArr)});
+        chart.createStudy(${safeString(indicator)}, false, false, []);
       })()
     `);
     await new Promise(r => setTimeout(r, 1500));
     const after = await evaluate(`${CHART_API}.getAllStudies().map(function(s) { return s.id; })`);
     const newIds = (after || []).filter(id => !(before || []).includes(id));
-    return { success: newIds.length > 0, action: 'add', indicator, entity_id: newIds[0] || null, new_study_count: newIds.length };
+    const entityId = newIds[0] || null;
+
+    // createStudy's inputs argument is unreliable across builds (#249): the
+    // study is created with defaults regardless. Apply overrides afterward
+    // via the study's own getInputValues/setInputValues, then read back to
+    // report what actually took.
+    let appliedInputs;
+    if (entityId && inputs && Object.keys(inputs).length) {
+      const result = await evaluate(`
+        (function() {
+          var chart = ${CHART_API};
+          var study = chart.getStudyById(${safeString(entityId)});
+          if (!study || typeof study.getInputValues !== 'function') return { error: 'inputs unsupported for this study' };
+          var current = study.getInputValues();
+          var overrides = ${JSON.stringify(inputs)};
+          var applied = {}, unknown = [];
+          var byId = {};
+          for (var i = 0; i < current.length; i++) byId[current[i].id] = true;
+          for (var k in overrides) {
+            if (byId[k]) { for (var j = 0; j < current.length; j++) { if (current[j].id === k) current[j].value = overrides[k]; } applied[k] = overrides[k]; }
+            else unknown.push(k);
+          }
+          study.setInputValues(current);
+          var after = study.getInputValues();
+          var confirmed = {};
+          for (var m = 0; m < after.length; m++) { if (applied.hasOwnProperty(after[m].id)) confirmed[after[m].id] = after[m].value; }
+          return { confirmed: confirmed, unknown: unknown };
+        })()
+      `);
+      if (result?.error) appliedInputs = { error: result.error };
+      else appliedInputs = { applied: result?.confirmed || {}, ...(result?.unknown?.length && { unknown_inputs: result.unknown }) };
+    }
+
+    return {
+      success: newIds.length > 0,
+      action: 'add',
+      indicator,
+      entity_id: entityId,
+      new_study_count: newIds.length,
+      ...(appliedInputs && { inputs: appliedInputs }),
+    };
   } else if (action === 'remove') {
     if (!entity_id) throw new Error('entity_id required for remove action. Use chart_get_state to find study IDs.');
     await evaluate(`
@@ -115,7 +154,8 @@ export async function manageIndicator({ action, indicator, entity_id, inputs: in
   }
 }
 
-export async function getVisibleRange() {
+export async function getVisibleRange({ _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
   const result = await evaluate(`
     (function() {
       var chart = ${CHART_API};
@@ -129,6 +169,23 @@ export async function setVisibleRange({ from, to, _deps }) {
   const { evaluate } = _resolve(_deps);
   const f = requireFinite(from, 'from');
   const t = requireFinite(to, 'to');
+
+  // Ensure enough history is loaded to cover `from`. The chart lazy-loads bars
+  // (~300 initially), so without this a multi-year range clamps to whatever is
+  // already loaded. Page back via requestMoreData until the earliest loaded bar
+  // reaches `from`, the feed runs out, or a guard trips.
+  for (let i = 0; i < 25; i++) {
+    const state = await evaluate(`(function() {
+      var ms = ${CHART_API}._chartWidget.model().mainSeries();
+      var b = ms.bars(); var fv = b.valueAt(b.firstIndex());
+      var more = true; try { more = ms.requestMoreDataAvailable(); } catch (e) {}
+      return { firstTime: fv && fv[0], more: more };
+    })()`);
+    if (!state || state.firstTime == null || state.firstTime <= f || !state.more) break;
+    await evaluate(`(function() { try { ${CHART_API}._chartWidget.model().mainSeries().requestMoreData(1000); } catch (e) {} })()`);
+    await new Promise(r => setTimeout(r, 1800));
+  }
+
   await evaluate(`
     (function() {
       var chart = ${CHART_API};
@@ -157,7 +214,8 @@ export async function setVisibleRange({ from, to, _deps }) {
   return { success: true, requested: { from, to }, actual: actual || { from: 0, to: 0 } };
 }
 
-export async function scrollToDate({ date }) {
+export async function scrollToDate({ date, _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
   let timestamp;
   if (/^\d+$/.test(date)) timestamp = Number(date);
   else timestamp = Math.floor(new Date(date).getTime() / 1000);
@@ -196,7 +254,8 @@ export async function scrollToDate({ date }) {
   return { success: true, date, centered_on: timestamp, resolution, window: { from, to } };
 }
 
-export async function symbolInfo() {
+export async function symbolInfo({ _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
   const result = await evaluate(`
     (function() {
       var chart = ${CHART_API};

@@ -2,8 +2,11 @@ import CDP from 'chrome-remote-interface';
 
 let client = null;
 let targetInfo = null;
-const CDP_HOST = 'localhost';
-const CDP_PORT = 9222;
+// Overridable via TV_CDP_HOST/TV_CDP_PORT (or CDP_HOST/CDP_PORT) env vars.
+// Default is 127.0.0.1, not localhost: on some Windows machines localhost
+// resolves to ::1 first, and Electron's --remote-debugging-port only listens on IPv4.
+export const CDP_HOST = process.env.TV_CDP_HOST || process.env.CDP_HOST || '127.0.0.1';
+export const CDP_PORT = Number(process.env.TV_CDP_PORT || process.env.CDP_PORT) || 9222;
 const MAX_RETRIES = 5;
 const BASE_DELAY = 500;
 const EVAL_TIMEOUT_MS = 15000;
@@ -76,13 +79,15 @@ export async function getClient() {
   return connect();
 }
 
-export async function connect() {
+export async function connect(targetId = null) {
   let lastError;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
-      const target = await findChartTarget();
+      const target = targetId ? await findTargetById(targetId) : await findChartTarget();
       if (!target) {
-        throw new Error('No TradingView chart target found. Is TradingView open with a chart?');
+        throw new Error(targetId
+          ? `CDP target ${targetId} not found — is the tab still open?`
+          : 'No TradingView chart target found. Is TradingView open with a chart?');
       }
       targetInfo = target;
       client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: target.id });
@@ -102,6 +107,21 @@ export async function connect() {
   throw new Error(`CDP connection failed after ${MAX_RETRIES} attempts: ${lastError?.message}`);
 }
 
+/**
+ * Re-attach the cached CDP client to a specific target id.
+ * Used by tab_switch so subsequent reads (chart_get_state, data_get_*,
+ * quote_get, screenshots) follow the activated tab instead of staying
+ * glued to the target picked at first connect.
+ */
+export async function reconnectTo(targetId) {
+  if (client) {
+    try { await client.close(); } catch { /* already gone */ }
+    client = null;
+    targetInfo = null;
+  }
+  return connect(targetId);
+}
+
 async function findChartTarget() {
   const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
   const targets = await resp.json();
@@ -109,6 +129,12 @@ async function findChartTarget() {
   return targets.find(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
     || targets.find(t => t.type === 'page' && /tradingview/i.test(t.url))
     || null;
+}
+
+async function findTargetById(id) {
+  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
+  const targets = await resp.json();
+  return targets.find(t => t.id === id) || null;
 }
 
 export async function getTargetInfo() {

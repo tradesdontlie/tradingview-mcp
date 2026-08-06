@@ -8,8 +8,18 @@ export function registerTabTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('tab_new', 'Open a new chart tab', {}, async () => {
-    try { return jsonResult(await core.newTab()); }
+  server.tool('tab_new', 'Open a new chart tab. Optionally pick what to load in it: layout "new" creates a named blank layout, or pass a saved layout name to open it.', {
+    layout: z.string().optional().describe('"new" for a blank new layout, or a saved layout name (substring match). Omit to leave the tab on the layout picker.'),
+    name: z.string().optional().describe('Name for the new layout (used with layout: "new"; default "New layout")'),
+  }, async ({ layout, name }) => {
+    try { return jsonResult(await core.newTab({ layout, name })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('layout_new', 'Create a new named blank chart layout (opens in a new tab)', {
+    name: z.string().optional().describe('Layout name (default "New layout")'),
+  }, async ({ name }) => {
+    try { return jsonResult(await core.newTab({ layout: 'new', name })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 

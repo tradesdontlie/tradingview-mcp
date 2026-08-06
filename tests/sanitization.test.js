@@ -298,8 +298,10 @@ describe('source audit — no unsafe interpolation patterns', () => {
     });
   }
 
+  // Allowlist: compile-time constants that are safe to interpolate (API path
+  // strings and hardcoded DOM selectors — never user input).
   const VULNERABLE_PATTERNS = [
-    /evaluate\([^)]*'\$\{(?!CHART_API|CWC|rp|apiPath|colPath|CHART_COLLECTION)/,
+    /evaluate\([^)]*'\$\{(?!CHART_API|CWC|rp|apiPath|colPath|CHART_COLLECTION|DIALOG)/,
   ];
 
   for (const file of coreFiles) {

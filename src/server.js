@@ -22,7 +22,7 @@ const server = new McpServer(
     description: 'AI-assisted TradingView chart analysis and Pine Script development via Chrome DevTools Protocol',
   },
   {
-    instructions: `TradingView MCP — 78 tools for reading and controlling a live TradingView Desktop chart.
+    instructions: `TradingView MCP — 84 tools for reading and controlling a live TradingView Desktop chart.
 
 TOOL SELECTION GUIDE — use this to pick the right tool:
 
@@ -117,11 +117,11 @@ registerPaneTools(server);
 registerDrawingTools(server);
 // Các nhóm khác vẫn khóa để AI đỡ loạn:
 // registerPineTools(server);     (Chỉ mở khi muốn AI viết script Pine)
-// registerAlertTools(server);    (Cài đặt cảnh báo)
+registerAlertTools(server);    // (Cài đặt cảnh báo) — mở theo plan merge upstream
 // registerWatchlistTools(server); (Quản lý danh mục theo dõi)
 // registerUITools(server);       (Thay đổi giao diện sáng/tối)
 // registerTabTools(server);      (Chuyển đổi các tab biểu đồ)
-// registerCaptureTools(server);  (Chụp ảnh màn hình)
+registerCaptureTools(server);  // (Chụp ảnh màn hình) — mở theo plan merge upstream
 // registerBatchTools(server);    (Xử lý hàng loạt)
 // registerReplayTools(server);   (Chế độ phát lại biểu đồ)
 
