@@ -540,6 +540,20 @@ export async function newScript({ type }) {
 
   const template = templates[type] || templates.indicator;
 
+  // CLOBBER HAZARD: TradingView's editor stays bound to whatever saved script
+  // was open. Replacing the buffer text here does NOT allocate a new script id,
+  // so a subsequent Save (pine_smart_compile clicks "Save") OVERWRITES that
+  // open script — silent data loss. There is no reliable headless hook for the
+  // editor's "New script" menu action, so instead of pretending we created a
+  // new script we (a) capture which saved script is currently open and
+  // (b) return a loud warning so the caller can avoid clobbering it.
+  const openTitle = await evaluate(`
+    (function() {
+      var el = document.querySelector('[data-name="scriptTitle"], [class*="scriptTitle"], [class*="scriptName"]');
+      return el ? (el.textContent || '').trim() : null;
+    })()
+  `).catch(() => null);
+
   // Set the template into the editor and confirm the write actually applied.
   const escaped = JSON.stringify(template);
   const result = await evaluate(`
@@ -560,7 +574,21 @@ export async function newScript({ type }) {
     throw new Error('pine_new failed: ' + why + ' Open and dock the Pine Editor, then retry.');
   }
 
-  return { success: true, type, action: 'new_script_created', template: typeMap[type], verified: true };
+  return {
+    success: true,
+    type,
+    action: 'template_loaded_in_editor',
+    template: typeMap[type],
+    verified: true,
+    open_script_at_risk: openTitle || null,
+    warning:
+      'Loaded a blank ' + (typeMap[type] || 'indicator') + ' template into the editor, ' +
+      'but this does NOT create a new saved script — the editor is still bound to the ' +
+      'script that was open' + (openTitle ? ' ("' + openTitle + '")' : '') + '. ' +
+      'Saving now (e.g. pine_smart_compile) will OVERWRITE that script. To create a ' +
+      'genuinely new script, use the Pine editor menu -> New, or inject into a dedicated ' +
+      'throwaway slot.',
+  };
 }
 
 export async function openScript({ name }) {
