@@ -7,15 +7,36 @@
 const MKT_OPEN_H = 9;    // VN phien sang mo 09:00
 const MKT_CLOSE_H = 15;  // H6/daily dong ~15:00
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
+const VN_TZ = 'Asia/Ho_Chi_Minh';
+
+function vnParts(value = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: VN_TZ,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', weekday: 'short', hourCycle: 'h23',
+  }).formatToParts(value instanceof Date ? value : new Date(value));
+  const out = Object.fromEntries(parts.filter(p => p.type !== 'literal').map(p => [p.type, p.value]));
+  return {
+    year: Number(out.year), month: Number(out.month), day: Number(out.day),
+    hour: Number(out.hour), minute: Number(out.minute),
+    weekday: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(out.weekday),
+  };
+}
+
+function vnDateKey(value) {
+  const p = vnParts(value);
+  return `${p.year}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')}`;
+}
 
 export function barStatus(barOpenSec, tfMin, now = new Date()) {
   const nowSec = now.getTime() / 1000;
   if (tfMin >= 360) {
-    // VN H6/daily: 1 nen = 1 phien. Dung ngay + gio dong cua (robust voi barOpen 00:00 hay 09:00).
-    const sameDay = new Date(barOpenSec * 1000).toDateString() === now.toDateString();
-    const afterClose = now.getHours() >= MKT_CLOSE_H;
+    // VN H6/daily: 1 nen = 1 phien, always evaluated in Asia/Ho_Chi_Minh.
+    const current = vnParts(now);
+    const sameDay = vnDateKey(new Date(barOpenSec * 1000)) === vnDateKey(now);
+    const afterClose = current.hour >= MKT_CLOSE_H;
     const closed = !sameDay || afterClose;
-    const minsIn = (now.getHours() * 60 + now.getMinutes()) - MKT_OPEN_H * 60;
+    const minsIn = (current.hour * 60 + current.minute) - MKT_OPEN_H * 60;
     const age_pct = closed ? 100 : clamp(Math.round(minsIn / 360 * 100), 0, 99);
     return { closed, age_pct };
   }
@@ -38,10 +59,11 @@ const PHASE_BOUNDARIES = [
 
 export function sessionInfo(now = new Date(), market = 'VN') {
   if (market !== 'VN') return { phase: 'N/A', trust_level: 'HIGH', warnings: [], next_phase: null, minutes_remaining: null, phase_warning: null };
-  const wd = now.getDay(); // 0=Sun..6=Sat
+  const local = vnParts(now);
+  const wd = local.weekday;
   const weekendOrClosed = { next_phase: null, minutes_remaining: null, phase_warning: null };
   if (wd === 0 || wd === 6) return { phase: 'CLOSED', trust_level: 'LOW', warnings: ['weekend'], ...weekendOrClosed };
-  const t = now.getHours() * 60 + now.getMinutes();
+  const t = local.hour * 60 + local.minute;
   const nextB = PHASE_BOUNDARIES.find(([m]) => m > t);
   const next_phase = nextB ? nextB[1] : null;
   const minutes_remaining = nextB ? nextB[0] - t : null;
@@ -67,20 +89,15 @@ export function sessionInfo(now = new Date(), market = 'VN') {
  */
 export function entryWindow(now = new Date(), market = 'VN') {
   if (market !== 'VN') return { window: 'N/A', priority: false, reason: 'non_vn' };
-  // Convert to Vietnam time (UTC+7) regardless of host timezone
-  const utcMin = now.getUTCHours() * 60 + now.getUTCMinutes();
-  const vnMin = (utcMin + 7 * 60) % (24 * 60); // UTC+7
-  const vnHour = Math.floor(vnMin / 60);
-  const vnDay = now.getUTCDay(); // 0=Sun..6=Sat in UTC
-  // Vietnam weekday: if UTC time crosses midnight differently, adjust
-  // VN = UTC+7, so VN day = UTC day if UTC time +7h < 24, else next day
-  const vnDayOfWeek = (utcMin + 420 >= 1440) ? (vnDay + 1) % 7 : vnDay;
+  const local = vnParts(now);
+  const vnHour = local.hour;
+  const vnDayOfWeek = local.weekday;
 
   const isPriority = vnDayOfWeek === 2 || vnDayOfWeek === 3; // Tue/Wed
   if (vnDayOfWeek === 0 || vnDayOfWeek === 6) {
     return { window: 'BLOCKED', priority: isPriority, reason: 'weekend' };
   }
-  const t = vnHour * 60 + (vnMin % 60);
+  const t = vnHour * 60 + local.minute;
   let window, reason;
 
   if (t < 540 || t >= 885)            { window = 'BLOCKED'; reason = 'market_closed'; }
@@ -242,7 +259,8 @@ export function lockedLtf({ bars = [], timeframe, expectedSymbol, maxAgeMs, now,
 
 // ponytail: self-check chay khi goi truc tiep `node bar_status.mjs`
 if (process.argv[1] && process.argv[1].endsWith('bar_status.mjs')) {
-  const mk = (h, m) => new Date(2026, 5, 23, h, m); // 23/06/2026
+  const mk = (h, m) => new Date(Date.UTC(2026, 5, 23, h - 7, m)); // VN 23/06/2026
+  const vn = (month, day, h, m) => new Date(Date.UTC(2026, month, day, h - 7, m));
   const sec = (d) => d.getTime() / 1000;
   const open9 = sec(mk(9, 0));
   // VN: nen mo 09:00 hom nay, xem luc 09:36 -> chua dong
@@ -257,22 +275,22 @@ if (process.argv[1] && process.argv[1].endsWith('bar_status.mjs')) {
   // M5: nen mo cach day 6 phut -> da dong
   console.assert(barStatus(sec(nowI) - 360, 5, nowI).closed === true, 'M5 -6p phai dong');
   // sessionInfo self-check
-  const sun = new Date(2026, 6, 5, 11, 0); // Chu nhat 05/07/2026
+  const sun = vn(6, 5, 11, 0); // Chu nhat 05/07/2026
   console.assert(sessionInfo(sun).phase === 'CLOSED', 'Sunday phai CLOSED');
-  console.assert(sessionInfo(new Date(2026, 6, 9, 9, 10)).phase === 'ATO', '09:10 phai ATO');
-  console.assert(sessionInfo(new Date(2026, 6, 9, 10, 0)).phase === 'CONT_AM', '10:00 phai CONT_AM');
-  console.assert(sessionInfo(new Date(2026, 6, 9, 14, 40)).phase === 'ATC', '14:40 phai ATC');
-  console.assert(sessionInfo(new Date(2026, 6, 9, 12, 0)).phase === 'LUNCH', '12:00 phai LUNCH');
-  console.assert(sessionInfo(new Date(2026, 6, 9, 9, 20)).phase === 'EARLY', '09:20 phai EARLY');
-  console.assert(sessionInfo(new Date(2026, 6, 9, 13, 30)).phase === 'CONT_PM', '13:30 phai CONT_PM');
-  console.assert(sessionInfo(new Date(2026, 6, 9, 15, 0)).trust_level === 'HIGH', '15:00 trust=HIGH (post-close)');
+  console.assert(sessionInfo(vn(6, 9, 9, 10)).phase === 'ATO', '09:10 phai ATO');
+  console.assert(sessionInfo(vn(6, 9, 10, 0)).phase === 'CONT_AM', '10:00 phai CONT_AM');
+  console.assert(sessionInfo(vn(6, 9, 14, 40)).phase === 'ATC', '14:40 phai ATC');
+  console.assert(sessionInfo(vn(6, 9, 12, 0)).phase === 'LUNCH', '12:00 phai LUNCH');
+  console.assert(sessionInfo(vn(6, 9, 9, 20)).phase === 'EARLY', '09:20 phai EARLY');
+  console.assert(sessionInfo(vn(6, 9, 13, 30)).phase === 'CONT_PM', '13:30 phai CONT_PM');
+  console.assert(sessionInfo(vn(6, 9, 15, 0)).trust_level === 'HIGH', '15:00 trust=HIGH (post-close)');
   console.assert(sessionInfo(new Date(2026, 6, 9, 10, 0), 'FX').phase === 'N/A', 'FX market=N/A');
   // clock countdown self-check (Khoi A1)
-  const s1420 = sessionInfo(new Date(2026, 6, 9, 14, 20));
+  const s1420 = sessionInfo(vn(6, 9, 14, 20));
   console.assert(s1420.next_phase === 'ATC' && s1420.minutes_remaining === 10 && s1420.phase_warning === 'atc_approaching', '14:20 phai con 10ph toi ATC + canh bao');
-  const s1000 = sessionInfo(new Date(2026, 6, 9, 10, 0));
+  const s1000 = sessionInfo(vn(6, 9, 10, 0));
   console.assert(s1000.next_phase === 'LUNCH' && s1000.minutes_remaining === 90 && s1000.phase_warning === null, '10:00 phai con 90ph toi LUNCH, khong canh bao');
-  const sClosed = sessionInfo(new Date(2026, 6, 9, 15, 0));
+  const sClosed = sessionInfo(vn(6, 9, 15, 0));
   console.assert(sClosed.next_phase === null && sClosed.minutes_remaining === null, 'CLOSED phai next_phase=null');
   console.log('sessionInfo self-check OK');
   console.log('bar_status self-check OK');

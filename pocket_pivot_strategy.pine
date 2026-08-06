@@ -1,0 +1,268 @@
+//@version=6
+strategy(
+     title       = 'Pocket Pivot PRO — Banks & Brokers Strategy',
+     shorttitle  = 'PP-PRO',
+     overlay     = true,
+     default_qty_type  = strategy.percent_of_equity,
+     default_qty_value = 10,
+     commission_type   = strategy.commission.percent,
+     commission_value  = 0.15,
+     slippage          = 3,
+     initial_capital   = 100000000,
+     currency          = currency.VND
+)
+
+// ═══════════════════════════════════════════════════════════════
+// INPUTS
+// ═══════════════════════════════════════════════════════════════
+
+grp1 = 'Core Signal'
+volLength  = input.int  (10,   '📊 Số phiên quét Volume giảm',  minval=5,   group=grp1)
+volMult    = input.float(1.5,  '📊 Hệ số Volume (Vol > X × MaxDownVol)', step=0.1, group=grp1)
+maFastLen  = input.int  (20,   '📈 Chu kỳ MA Nhanh',            minval=5,   group=grp1)
+maSlowLen  = input.int  (100,  '📈 Chu kỳ MA Chậm',             minval=20,  group=grp1)
+slopePct   = input.float(0.5,  '📈 MA Nhanh slope tối thiểu (%/5 ngày)', step=0.1, group=grp1)
+
+grp2 = 'Filters (Bật/Tắt)'
+usePrevRed = input.bool (true,  '🔴 Lọc nhịp nghỉ (≥1 nến đỏ trong N nến trước)', group=grp2)
+prevRedN   = input.int  (3,     '   → Số nến quét nhịp nghỉ (N)', minval=1, maxval=10, group=grp2)
+useATR     = input.bool (false, '📏 Lọc khoảng cách ATR (Close ≤ MA20 + n×ATR)', group=grp2)
+atrLen     = input.int  (21,   '   → ATR period', minval=5, group=grp2)
+atrMult    = input.float(3.5,  '   → Hệ số ATR', step=0.5, group=grp2)
+useFOMO    = input.bool (true,  '🚫 Lọc FOMO (Open ≤ MA20 × (1+n%))', group=grp2)
+fomoMaxPct = input.float(10.0, '   → % tối đa Open so với MA20', step=0.5, group=grp2)
+useSlowSlope = input.bool(true, '📈 MA Chậm tăng (MA100 > MA100 phiên trước)', group=grp2)
+
+grp3 = 'Exit'
+holdBars   = input.int  (20,    '⏱ Hold bao nhiêu bars', minval=1, maxval=60, group=grp3)
+useStopLoss= input.bool (false, '🛡 Dùng Stop Loss (ATR-based)', group=grp3)
+slAtrMult  = input.float(1.5,  '   → SL = Entry - n×ATR', step=0.1, group=grp3)
+useTakeProfit = input.bool(false,'🎯 Dùng Take Profit (%)', group=grp3)
+tpPct      = input.float(15.0, '   → TP = Entry × (1 + n%)', step=0.5, group=grp3)
+
+grp4 = 'Hiển thị'
+showMA     = input.bool (true,  '👁 Hiển thị MA20 / MA100', group=grp4)
+showSignal = input.bool (true,  '👁 Hiển thị tín hiệu', group=grp4)
+showInfo   = input.bool (true,  '👁 Hiển thị bảng thông tin', group=grp4)
+
+// ═══════════════════════════════════════════════════════════════
+// INDICATORS
+// ═══════════════════════════════════════════════════════════════
+
+maFast   = ta.sma(close, maFastLen)
+maSlow   = ta.sma(close, maSlowLen)
+atrVal   = ta.atr(atrLen)
+
+// MA20 slope % / 5 ngày
+maFastSlope = maFast[5] != 0 ? (maFast - maFast[5]) / maFast[5] * 100 : 0.0
+
+// Volume analysis
+isDownDay   = close < close[1]
+downVol     = isDownDay ? volume : 0
+maxDownVol  = ta.highest(downVol[1], volLength)
+
+// ═══════════════════════════════════════════════════════════════
+// SIGNAL CONDITIONS
+// ═══════════════════════════════════════════════════════════════
+
+// 1. Up day
+c1_upDay = close > close[1]
+
+// 2. Volume breakout
+c2_volBreak = maxDownVol > 0 and volume > maxDownVol * volMult
+
+// 3. Trend: Close > MA20 AND Close > MA100
+c3_trend = close > maFast and close > maSlow
+
+// 4. MA20 slope > 0.5%/5 days
+c4_slope = maFastSlope > slopePct
+
+// 5. Prev red candle (optional)
+redCount   = math.sum(close < open ? 1 : 0, prevRedN)
+c5_prevRed = usePrevRed ? redCount[1] > 0 : true
+
+// 6. ATR distance (optional)
+c6_atr = useATR ? close <= maFast + atrMult * atrVal : true
+
+// 7. FOMO filter (optional)
+c7_fomo = useFOMO ? open <= maFast * (1 + fomoMaxPct / 100) : true
+
+// 8. MA Slow slope: MA100 > MA100[1]
+c8_slowSlope = useSlowSlope ? maSlow > maSlow[1] : true
+
+// ═══════════════════════════════════════════════════════════════
+// COMBINED SIGNAL
+// ═══════════════════════════════════════════════════════════════
+
+signal = c1_upDay and c2_volBreak and c3_trend and c4_slope
+         and c5_prevRed and c6_atr and c7_fomo and c8_slowSlope
+
+// ═══════════════════════════════════════════════════════════════
+// STRATEGY EXECUTION
+// ═══════════════════════════════════════════════════════════════
+
+// Entry
+if signal and strategy.position_size == 0
+    strategy.entry('Long', strategy.long)
+
+// Exit conditions
+barsInTrade = bar_index - strategy.opentrades.entry_bar_index(0)
+
+// 1. Time-based exit (Hold N bars)
+if strategy.position_size > 0 and barsInTrade >= holdBars
+    strategy.close('Long', comment='Hold ' + str.tostring(holdBars) + 'b')
+
+// 2. Stop Loss
+if useStopLoss and strategy.position_size > 0
+    entryPrice  = strategy.opentrades.entry_price(0)
+    entryATR    = atrVal[barsInTrade]
+    slPrice     = entryPrice - slAtrMult * math.max(atrVal, entryATR)
+    strategy.exit('SL', 'Long', stop=slPrice, comment='SL')
+
+// 3. Take Profit
+if useTakeProfit and strategy.position_size > 0
+    entryPrice = strategy.opentrades.entry_price(0)
+    tpPrice    = entryPrice * (1 + tpPct / 100)
+    strategy.exit('TP', 'Long', limit=tpPrice, comment='TP')
+
+// ═══════════════════════════════════════════════════════════════
+// VISUALS
+// ═══════════════════════════════════════════════════════════════
+
+// MA lines
+plot(showMA ? maFast : na, 'MA20', color=color.new(color.purple, 0), linewidth=2)
+plot(showMA ? maSlow : na, 'MA100', color=color.new(color.red, 50), linewidth=2)
+
+// Signal markers
+plotshape(
+     showSignal and signal,
+     title    = 'Pocket Pivot Signal',
+     style    = shape.triangleup,
+     location = location.belowbar,
+     color    = color.new(color.lime, 0),
+     size     = size.normal,
+     text     = 'PP'
+)
+
+// Entry marker (next bar open)
+plotshape(
+     showSignal and signal[1] and strategy.position_size > 0 and strategy.position_size[1] == 0,
+     title    = 'Entry',
+     style    = shape.circle,
+     location = location.belowbar,
+     color    = color.new(color.blue, 0),
+     size     = size.small
+)
+
+// Volume bar color
+volColor = volume > maxDownVol * volMult and close > close[1] ? color.new(color.lime, 30) : close < close[1] ? color.new(color.red, 50) : color.new(color.gray, 60)
+
+barcolor(signal ? color.new(color.yellow, 50) : na)
+
+// Hold bar countdown
+var int entryBar = na
+if strategy.position_size > 0 and strategy.position_size[1] == 0
+    entryBar := bar_index
+barsHeld = strategy.position_size > 0 ? bar_index - entryBar : 0
+
+// ═══════════════════════════════════════════════════════════════
+// INFO TABLE
+// ═══════════════════════════════════════════════════════════════
+
+if showInfo and barstate.islast
+    var table t = table.new(
+         position.top_right, 2, 13,
+         bgcolor        = color.new(color.black, 20),
+         border_width   = 1,
+         border_color   = color.new(color.gray, 50),
+         frame_width    = 2,
+         frame_color    = color.new(color.blue, 30)
+    )
+
+    hdr = color.new(color.navy, 30)
+    row = color.new(color.black, 40)
+    val = color.new(color.black, 50)
+
+    // Header
+    table.cell(t, 0, 0, '⚡ PP-PRO Strategy', text_color=color.white,
+               bgcolor=hdr, text_size=size.normal)
+    table.cell(t, 1, 0, str.tostring(syminfo.ticker), text_color=color.yellow,
+               bgcolor=hdr, text_size=size.normal)
+
+    // Signal conditions
+    c_ok   = color.new(color.lime, 30)
+    c_fail = color.new(color.red, 30)
+    c_off  = color.new(color.gray, 50)
+
+    table.cell(t, 0, 1, '↑ Up day',          bgcolor=row, text_color=color.silver)
+    table.cell(t, 1, 1, c1_upDay ? '✅' : '❌', bgcolor=c1_upDay ? c_ok : c_fail)
+
+    table.cell(t, 0, 2, '📊 Vol breakout',    bgcolor=row, text_color=color.silver)
+    table.cell(t, 1, 2, c2_volBreak ? '✅' : '❌', bgcolor=c2_volBreak ? c_ok : c_fail)
+
+    table.cell(t, 0, 3, '📈 Trend (>MA20&100)',bgcolor=row, text_color=color.silver)
+    table.cell(t, 1, 3, c3_trend ? '✅' : '❌', bgcolor=c3_trend ? c_ok : c_fail)
+
+    table.cell(t, 0, 4, '📐 Slope >0.5%',     bgcolor=row, text_color=color.silver)
+    slopeStr = str.tostring(maFastSlope, '#.##') + '%'
+    table.cell(t, 1, 4, c4_slope ? '✅ ' + slopeStr : '❌ ' + slopeStr,
+               bgcolor=c4_slope ? c_ok : c_fail)
+
+    table.cell(t, 0, 5, '🔴 Prev red',        bgcolor=row, text_color=color.silver)
+    table.cell(t, 1, 5, not usePrevRed ? '— OFF' : c5_prevRed ? '✅' : '❌',
+               bgcolor=not usePrevRed ? c_off : c5_prevRed ? c_ok : c_fail)
+
+    table.cell(t, 0, 6, '📏 ATR dist',        bgcolor=row, text_color=color.silver)
+    table.cell(t, 1, 6, not useATR ? '— OFF' : c6_atr ? '✅' : '❌',
+               bgcolor=not useATR ? c_off : c6_atr ? c_ok : c_fail)
+
+    table.cell(t, 0, 7, '🚫 FOMO',           bgcolor=row, text_color=color.silver)
+    table.cell(t, 1, 7, not useFOMO ? '— OFF' : c7_fomo ? '✅' : '❌',
+               bgcolor=not useFOMO ? c_off : c7_fomo ? c_ok : c_fail)
+
+    table.cell(t, 0, 8, '📈 MA100 slope',    bgcolor=row, text_color=color.silver)
+    table.cell(t, 1, 8, not useSlowSlope ? '— OFF' : c8_slowSlope ? '✅' : '❌',
+               bgcolor=not useSlowSlope ? c_off : c8_slowSlope ? c_ok : c_fail)
+
+    // Final signal
+    sigColor = signal ? color.new(color.lime, 0) : color.new(color.red, 20)
+    table.cell(t, 0, 9, '🎯 SIGNAL',         bgcolor=sigColor, text_color=color.white)
+    table.cell(t, 1, 9, signal ? '✅ BUY' : '—', bgcolor=sigColor, text_color=color.white)
+
+    // Position info
+    posColor = strategy.position_size > 0 ? color.new(color.blue, 30) : color.new(color.gray, 60)
+    table.cell(t, 0, 10, '📦 Position',       bgcolor=posColor, text_color=color.silver)
+    posStr = strategy.position_size > 0 ? 'HOLDING (' + str.tostring(barsHeld) + '/' + str.tostring(holdBars) + 'b)' : 'FLAT'
+    table.cell(t, 1, 10, posStr,              bgcolor=posColor, text_color=color.white)
+
+    // P&L
+    pnlColor = strategy.openprofit >= 0 ? color.new(color.green, 30) : color.new(color.red, 30)
+    table.cell(t, 0, 11, '💰 Open P&L',      bgcolor=pnlColor, text_color=color.silver)
+    pnlStr = strategy.position_size > 0 ? str.tostring(strategy.openprofit / strategy.opentrades.entry_price(0) * 100, '#.##') + '%' : '—'
+    table.cell(t, 1, 11, pnlStr,             bgcolor=pnlColor, text_color=color.white)
+
+    // Volume ratio
+    volRatio = maxDownVol > 0 ? volume / maxDownVol : 0.0
+    volRatioColor = volRatio >= volMult ? color.new(color.lime, 30) : color.new(color.gray, 60)
+    table.cell(t, 0, 12, '📊 Vol ratio',     bgcolor=row, text_color=color.silver)
+    table.cell(t, 1, 12, str.tostring(volRatio, '#.##') + '×',
+               bgcolor=volRatioColor, text_color=color.white)
+
+// ═══════════════════════════════════════════════════════════════
+// ALERTS
+// ═══════════════════════════════════════════════════════════════
+
+alertcondition(
+     signal,
+     title   = 'PP-PRO: Tín hiệu mua',
+     message = '🚀 {{ticker}} — Pocket Pivot PRO signal!\n'
+               + 'Close: {{close}} | Vol ratio: {{volume}}\n'
+               + 'MA20: {{plot_0}} | MA100: {{plot_1}}\n'
+               + 'Timeframe: {{interval}}'
+)
+
+alertcondition(
+     strategy.position_size > 0 and barsHeld >= holdBars - 1,
+     title   = 'PP-PRO: Sắp đến hạn thoát',
+     message = '⏰ {{ticker}} — Còn 1 bar nữa đến hạn thoát lệnh (Hold {{interval}})'
+)

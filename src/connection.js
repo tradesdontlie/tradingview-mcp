@@ -6,6 +6,17 @@ const CDP_HOST = 'localhost';
 const CDP_PORT = 9222;
 const MAX_RETRIES = 5;
 const BASE_DELAY = 500;
+const EVAL_TIMEOUT_MS = 15000;
+
+function withTimeout(promise, ms, label) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
 
 // Known direct API paths discovered via live probing (see PROBE_RESULTS.md)
 const KNOWN_PATHS = {
@@ -51,7 +62,11 @@ export async function getClient() {
   if (client) {
     try {
       // Quick liveness check
-      await client.Runtime.evaluate({ expression: '1', returnByValue: true });
+      await withTimeout(
+        client.Runtime.evaluate({ expression: '1', returnByValue: true }),
+        EVAL_TIMEOUT_MS,
+        'CDP liveness'
+      );
       return client;
     } catch {
       client = null;
@@ -104,20 +119,30 @@ export async function getTargetInfo() {
 }
 
 export async function evaluate(expression, opts = {}) {
-  const c = await getClient();
-  const result = await c.Runtime.evaluate({
-    expression,
-    returnByValue: true,
-    awaitPromise: opts.awaitPromise ?? false,
-    ...opts,
-  });
-  if (result.exceptionDetails) {
-    const msg = result.exceptionDetails.exception?.description
-      || result.exceptionDetails.text
-      || 'Unknown evaluation error';
-    throw new Error(`JS evaluation error: ${msg}`);
+  const { timeout = EVAL_TIMEOUT_MS, ...cdpOpts } = opts; // timeout NOT forwarded to CDP
+  const attempt = async () => {
+    const c = await getClient();
+    const result = await c.Runtime.evaluate({
+      expression,
+      returnByValue: true,
+      awaitPromise: cdpOpts.awaitPromise ?? false,
+      ...cdpOpts,
+    });
+    if (result.exceptionDetails) {
+      const msg = result.exceptionDetails.exception?.description
+        || result.exceptionDetails.text
+        || 'Unknown evaluation error';
+      throw new Error(`JS evaluation error: ${msg}`);
+    }
+    return result.result?.value;
+  };
+  try {
+    return await withTimeout(attempt(), timeout, 'CDP evaluate');
+  } catch (err) {
+    if (!err.message.includes('timed out after')) throw err;
+    await disconnect().catch(() => {}); // reset client — disconnect() exists below
+    return await withTimeout(attempt(), timeout, 'CDP evaluate retry'); // 2nd timeout -> throw
   }
-  return result.result?.value;
 }
 
 export async function evaluateAsync(expression) {

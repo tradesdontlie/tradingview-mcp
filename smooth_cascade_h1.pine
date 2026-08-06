@@ -1,0 +1,320 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0
+// @version=6
+// Smooth Cascade H1 — Pre-London VSA Bias + Mode A/B Entry
+// Mode B (priority): False breakout (Upthrust/Spring) → reversal
+// Mode A (fallback): Asian range breakout + retest
+// Pure Price Action + Range + VSA — no EMA/RSI/MACD
+// Pair: EURUSD, CADJPY H1 chart | Times in chart timezone
+
+indicator("Smooth Cascade H1", overlay=true, max_labels_count=500, max_lines_count=200, max_boxes_count=100)
+
+// ── INPUTS ────────────────────────────────────────────────────────────────────
+i_atr_period      = input.int(14,    "ATR Period",         group="Core")
+i_vol_avg_period  = input.int(20,    "Volume MA Period",   group="Core")
+i_vol_high        = input.float(1.20,"VolRatio High",      group="VSA Thresholds")
+i_vol_low         = input.float(0.80,"VolRatio Low",       group="VSA Thresholds")
+i_spread_wide     = input.float(1.00,"SpreadATR Wide",     group="VSA Thresholds")
+i_spread_narrow   = input.float(0.50,"SpreadATR Narrow",   group="VSA Thresholds")
+i_cp_high         = input.int(60,    "ClosePos Bull",      group="VSA Thresholds")
+i_cp_low          = input.int(40,    "ClosePos Bear",      group="VSA Thresholds")
+i_upthrust_cp_max = input.int(25,    "Upthrust CP Max",   group="VSA Thresholds")
+i_spring_cp_min   = input.int(75,    "Spring CP Min",     group="VSA Thresholds")
+i_bias_lookback   = input.int(5,     "Bias Lookback Bars",group="Bias Engine")
+i_bias_pct        = input.float(0.60,"Bias Majority %",   group="Bias Engine")
+i_min_range_atr   = input.float(0.30,"Min Range × ATR",   group="Range Filter")
+i_max_range_atr   = input.float(1.80,"Max Range × ATR",   group="Range Filter")
+i_sl_buf_a        = input.float(0.10,"SL Buffer Mode A",  group="Risk")
+i_sl_buf_b        = input.float(0.15,"SL Buffer Mode B",  group="Risk")
+i_tp_a            = input.float(1.50,"TP R-mult Mode A",  group="Risk")
+i_tp_b            = input.float(2.00,"TP R-mult Mode B",  group="Risk")
+i_retest_near     = input.float(0.30,"Retest Zone Near",  group="Mode A")
+i_retest_far      = input.float(0.50,"Retest Zone Far",   group="Mode A")
+
+// ── SESSION UTC OFFSETS ───────────────────────────────────────────────────────
+// Chart in GMT+7 (Vietnam). Asian 09-13, London 14-17 VN.
+// In Pine v6 we use session strings in chart timezone.
+asian_session  = "0900-1400"   // VN 09:00-14:00
+london_session = "1400-1700"   // VN 14:00-17:00
+
+in_asian  = not na(time("60", asian_session))
+in_london = not na(time("60", london_session))
+
+// ── VSA CALCULATIONS ─────────────────────────────────────────────────────────
+close_pos  = (high - low) > 0 ? (close - low) / (high - low) * 100 : 50.0
+spread     = high - low
+atr14      = ta.atr(i_atr_period)
+spread_atr = atr14 > 0 ? spread / atr14 : 1.0
+
+// Volume rolling average (ignore zero-volume bars via na substitution)
+vol_clean  = volume == 0 ? na : volume
+vol_avg    = ta.sma(vol_clean, i_vol_avg_period)
+vol_ratio  = not na(vol_avg) and vol_avg > 0 ? volume / vol_avg : 1.0
+
+// VSA bar type
+is_wide    = spread_atr > i_spread_wide
+is_narrow  = spread_atr < i_spread_narrow
+high_vol   = vol_ratio  > i_vol_high
+low_vol    = vol_ratio  < i_vol_low
+
+vsa_upthrust     = is_wide  and high_vol and close_pos < i_upthrust_cp_max
+vsa_spring       = is_wide  and high_vol and close_pos > i_spring_cp_min
+vsa_no_supply    = is_narrow and low_vol  and close_pos > i_cp_high
+vsa_no_demand    = is_narrow and low_vol  and close_pos < i_cp_low
+
+// ── ASIAN RANGE (reset each day) ─────────────────────────────────────────────
+var float asian_high = na
+var float asian_low  = na
+var bool  range_set  = false
+var int   asian_bar_count = 0
+
+// Reset at start of each day (detect new day)
+is_new_day = ta.change(time("D")) != 0
+if is_new_day
+    asian_high      := na
+    asian_low       := na
+    range_set       := false
+    asian_bar_count := 0
+
+// Accumulate Asian range
+if in_asian
+    asian_high      := na(asian_high) ? high : math.max(asian_high, high)
+    asian_low       := na(asian_low)  ? low  : math.min(asian_low,  low)
+    asian_bar_count := asian_bar_count + 1
+
+// Mark range as set at first London bar
+if in_london and not range_set and not na(asian_high)
+    range_set := true
+
+// ── BIAS ENGINE ───────────────────────────────────────────────────────────────
+// Track last N Asian H1 bars for voting.
+// We collect ClosePos and VSA type flags during Asian session.
+
+var array<float> bias_cp  = array.new_float(0)
+var array<bool>  bias_ns  = array.new_bool(0)   // No Supply
+var array<bool>  bias_nd  = array.new_bool(0)   // No Demand
+var string       daily_bias = "NEUTRAL"
+var bool         bias_computed = false
+
+if is_new_day
+    array.clear(bias_cp)
+    array.clear(bias_ns)
+    array.clear(bias_nd)
+    daily_bias      := "NEUTRAL"
+    bias_computed   := false
+
+if in_asian
+    array.push(bias_cp, close_pos)
+    array.push(bias_ns, vsa_no_supply)
+    array.push(bias_nd, vsa_no_demand)
+
+// Compute bias at the moment we enter London (once per day)
+if in_london and not bias_computed and range_set
+    bias_computed := true
+    n = array.size(bias_cp)
+    if n > 0
+        // Upthrust/Spring override: check last Asian bar
+        last_cp = array.get(bias_cp, n - 1)
+        last_ns = array.get(bias_ns, n - 1)
+        last_nd = array.get(bias_nd, n - 1)
+        // Note: Pine doesn't carry vsa_spring/upthrust into array easily;
+        // use ClosePos extremes as proxy for Spring/Upthrust on last bar
+        if last_cp >= i_spring_cp_min and vol_ratio[1] > i_vol_high and spread_atr[1] > i_spread_wide
+            daily_bias := "BULL"
+        else if last_cp <= i_upthrust_cp_max and vol_ratio[1] > i_vol_high and spread_atr[1] > i_spread_wide
+            daily_bias := "BEAR"
+        else
+            // Vote over lookback bars
+            lb      = math.min(n, i_bias_lookback)
+            start_i = n - lb
+            bull_votes = 0
+            bear_votes = 0
+            for j = start_i to n - 1
+                cp_j = array.get(bias_cp, j)
+                ns_j = array.get(bias_ns, j)
+                nd_j = array.get(bias_nd, j)
+                if cp_j > i_cp_high
+                    bull_votes += 1
+                if ns_j
+                    bull_votes += 1
+                if cp_j < i_cp_low
+                    bear_votes += 1
+                if nd_j
+                    bear_votes += 1
+            threshold = math.ceil(lb * i_bias_pct)
+            if bull_votes >= threshold
+                daily_bias := "BULL"
+            else if bear_votes >= threshold
+                daily_bias := "BEAR"
+            else
+                daily_bias := "NEUTRAL"
+
+// ── RANGE QUALITY FILTER ──────────────────────────────────────────────────────
+range_ok = range_set
+         and not na(atr14) and atr14 > 0
+         and (asian_high - asian_low) >= i_min_range_atr * atr14
+         and (asian_high - asian_low) <= i_max_range_atr * atr14
+
+// ── MODE B: FALSE BREAKOUT ────────────────────────────────────────────────────
+var bool mode_b_taken = false
+if is_new_day
+    mode_b_taken := false
+
+mode_b_long  = in_london and range_ok and not mode_b_taken
+             and daily_bias == "BULL"
+             and low  < asian_low
+             and close > asian_low
+             and close_pos > 70
+             and vol_ratio  > i_vol_high
+
+mode_b_short = in_london and range_ok and not mode_b_taken
+             and daily_bias == "BEAR"
+             and high  > asian_high
+             and close < asian_high
+             and close_pos < 30
+             and vol_ratio  > i_vol_high
+
+if mode_b_long or mode_b_short
+    mode_b_taken := true
+
+// ── MODE A: BREAKOUT + RETEST ─────────────────────────────────────────────────
+var bool  bo_confirmed  = false
+var bool  bo_direction_bull = false  // true=BULL, false=BEAR
+var bool  mode_a_taken  = false
+
+if is_new_day
+    bo_confirmed      := false
+    bo_direction_bull := false
+    mode_a_taken      := false
+
+// Step 1: detect breakout (only if Mode B didn't fire today)
+if in_london and range_ok and not mode_b_taken and not bo_confirmed
+    if daily_bias == "BULL" and close > asian_high
+        bo_confirmed      := true
+        bo_direction_bull := true
+    if daily_bias == "BEAR" and close < asian_low
+        bo_confirmed      := true
+        bo_direction_bull := false
+
+// Step 2: detect retest on subsequent bar
+retest_near = i_retest_near * atr14
+retest_far  = i_retest_far  * atr14
+
+mode_a_long  = in_london and bo_confirmed and bo_direction_bull
+             and not mode_a_taken and not mode_b_taken
+             and low  <= asian_high + retest_near
+             and low  >= asian_high - retest_far
+             and close > asian_high
+             and close_pos > i_cp_high
+             and not vsa_upthrust and not vsa_no_demand
+
+mode_a_short = in_london and bo_confirmed and not bo_direction_bull
+             and not mode_a_taken and not mode_b_taken
+             and high >= asian_low - retest_near
+             and high <= asian_low + retest_far
+             and close < asian_low
+             and close_pos < i_cp_low
+             and not vsa_spring and not vsa_no_supply
+
+if mode_a_long or mode_a_short
+    mode_a_taken := true
+
+// ── SL / TP CALCULATION ───────────────────────────────────────────────────────
+sl_b_long  = mode_b_long  ? low  - i_sl_buf_b * atr14 : na
+sl_b_short = mode_b_short ? high + i_sl_buf_b * atr14 : na
+tp_b_long  = mode_b_long  ? close + i_tp_b * (close - sl_b_long)  : na
+tp_b_short = mode_b_short ? close - i_tp_b * (sl_b_short - close) : na
+
+sl_a_long  = mode_a_long  ? low  - i_sl_buf_a * atr14 : na
+sl_a_short = mode_a_short ? high + i_sl_buf_a * atr14 : na
+tp_a_long  = mode_a_long  ? close + i_tp_a * (close - sl_a_long)  : na
+tp_a_short = mode_a_short ? close - i_tp_a * (sl_a_short - close) : na
+
+// ── VISUALS ────────────────────────────────────────────────────────────────────
+// Asian range box
+var box asian_box = na
+if in_asian and asian_bar_count == 1
+    asian_box := box.new(bar_index, high, bar_index, low,
+                         border_color=color.new(color.orange, 40),
+                         bgcolor=color.new(color.orange, 85),
+                         extend=extend.right)
+if in_asian and not na(asian_box)
+    box.set_right(asian_box, bar_index + 1)
+    box.set_top(asian_box, asian_high)
+    box.set_bottom(asian_box, asian_low)
+
+// Stop extending Asian box once London starts
+if in_london and range_set
+    if not na(asian_box)
+        box.set_right(asian_box, bar_index)
+
+// Bias label (first London bar)
+if in_london and bias_computed and not mode_b_taken and not bo_confirmed and not mode_a_taken
+    bias_col = daily_bias == "BULL"    ? color.new(color.lime, 20)
+             : daily_bias == "BEAR"    ? color.new(color.red,  20)
+             :                           color.new(color.gray, 20)
+    label.new(bar_index, asian_high + atr14 * 0.3,
+              "Bias: " + daily_bias,
+              style=label.style_label_down,
+              color=bias_col,
+              textcolor=color.white,
+              size=size.small)
+
+// VSA dots on Asian bars
+plotshape(in_asian and vsa_spring,    "Spring",    shape.circle, location.belowbar, color.lime,  size=size.small)
+plotshape(in_asian and vsa_upthrust,  "Upthrust",  shape.circle, location.abovebar, color.red,   size=size.small)
+plotshape(in_asian and vsa_no_supply, "No Supply", shape.diamond,location.belowbar, color.aqua,  size=size.tiny)
+plotshape(in_asian and vsa_no_demand, "No Demand", shape.diamond,location.abovebar, color.fuchsia,size=size.tiny)
+
+// ── ENTRY LABELS ─────────────────────────────────────────────────────────────
+if mode_b_long
+    label.new(bar_index, low,
+              "MB ▲ SL " + str.tostring(math.round(sl_b_long, 5)) + "\nTP " + str.tostring(math.round(tp_b_long, 5)),
+              style=label.style_label_up, color=color.lime, textcolor=color.black, size=size.normal)
+    line.new(bar_index, sl_b_long, bar_index + 8, sl_b_long, color=color.red,   width=1, style=line.style_dashed)
+    line.new(bar_index, tp_b_long, bar_index + 8, tp_b_long, color=color.green, width=1, style=line.style_dashed)
+
+if mode_b_short
+    label.new(bar_index, high,
+              "MB ▼ SL " + str.tostring(math.round(sl_b_short, 5)) + "\nTP " + str.tostring(math.round(tp_b_short, 5)),
+              style=label.style_label_down, color=color.red, textcolor=color.white, size=size.normal)
+    line.new(bar_index, sl_b_short, bar_index + 8, sl_b_short, color=color.red,   width=1, style=line.style_dashed)
+    line.new(bar_index, tp_b_short, bar_index + 8, tp_b_short, color=color.green, width=1, style=line.style_dashed)
+
+if mode_a_long
+    label.new(bar_index, low,
+              "MA ▲ SL " + str.tostring(math.round(sl_a_long, 5)) + "\nTP " + str.tostring(math.round(tp_a_long, 5)),
+              style=label.style_label_up, color=color.new(color.lime, 40), textcolor=color.black, size=size.normal)
+    line.new(bar_index, sl_a_long, bar_index + 8, sl_a_long, color=color.red,   width=1, style=line.style_dotted)
+    line.new(bar_index, tp_a_long, bar_index + 8, tp_a_long, color=color.green, width=1, style=line.style_dotted)
+
+if mode_a_short
+    label.new(bar_index, high,
+              "MA ▼ SL " + str.tostring(math.round(sl_a_short, 5)) + "\nTP " + str.tostring(math.round(tp_a_short, 5)),
+              style=label.style_label_down, color=color.new(color.red, 40), textcolor=color.white, size=size.normal)
+    line.new(bar_index, sl_a_short, bar_index + 8, sl_a_short, color=color.red,   width=1, style=line.style_dotted)
+    line.new(bar_index, tp_a_short, bar_index + 8, tp_a_short, color=color.green, width=1, style=line.style_dotted)
+
+// ── INFO TABLE ───────────────────────────────────────────────────────────────
+var table info = table.new(position.top_right, 2, 5,
+                           bgcolor=color.new(color.black, 70),
+                           border_color=color.gray, border_width=1)
+if barstate.islast
+    table.cell(info, 0, 0, "Bias",        text_color=color.gray,  text_size=size.small)
+    table.cell(info, 1, 0, daily_bias,
+               text_color=daily_bias=="BULL" ? color.lime : daily_bias=="BEAR" ? color.red : color.gray,
+               text_size=size.small)
+    table.cell(info, 0, 1, "Range/ATR",   text_color=color.gray,  text_size=size.small)
+    table.cell(info, 1, 1, not na(atr14) and atr14>0 ? str.tostring(math.round((asian_high-asian_low)/atr14,2)) : "n/a",
+               text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 2, "VolRatio",    text_color=color.gray,  text_size=size.small)
+    table.cell(info, 1, 2, str.tostring(math.round(vol_ratio, 2)), text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 3, "ClosePos",    text_color=color.gray,  text_size=size.small)
+    table.cell(info, 1, 3, str.tostring(math.round(close_pos, 1)) + "%", text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 4, "SpreadATR",   text_color=color.gray,  text_size=size.small)
+    table.cell(info, 1, 4, str.tostring(math.round(spread_atr, 2)), text_color=color.white, text_size=size.small)
+
+// ── ALERTS ───────────────────────────────────────────────────────────────────
+alertcondition(mode_b_long,  "Mode B LONG",  "Smooth Cascade — Mode B LONG (Spring)\nEntry: {{close}}")
+alertcondition(mode_b_short, "Mode B SHORT", "Smooth Cascade — Mode B SHORT (Upthrust)\nEntry: {{close}}")
+alertcondition(mode_a_long,  "Mode A LONG",  "Smooth Cascade — Mode A LONG (Retest)\nEntry: {{close}}")
+alertcondition(mode_a_short, "Mode A SHORT", "Smooth Cascade — Mode A SHORT (Retest)\nEntry: {{close}}")

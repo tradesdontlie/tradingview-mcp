@@ -10,6 +10,8 @@ const v2_CONFIRMED_RANGE = { trend_state: 'RANGE', confirmed: true };
 const v2_CONFIRMED_DOWN = { trend_state: 'DOWN', confirmed: true };
 const v2_PROVISIONAL = { trend_state: 'UP', confirmed: false };
 
+const productionSource = readFileSync(new URL('./check_one.mjs', import.meta.url), 'utf-8');
+
 // ===== buildClosedH6History tests =====
 
 // Helper: create a bar
@@ -24,6 +26,7 @@ function bar(close, open, high, low, volume) {
     completed.push(bar(100 + i * 0.1, 99 + i * 0.1, 101 + i * 0.1, 98 + i * 0.1));
   }
   const active = bar(500, 490, 510, 485, 5000000); // 10x volume, extreme price
+  const allBars = [...completed, active];
 
   const history = buildClosedH6History({ bars: completed, activeBarClosed: true });
   assert.ok(history.sma20 > 0, 'history SMA20 computed');
@@ -31,7 +34,7 @@ function bar(close, open, high, low, volume) {
   assert.ok(history.avg_vol_20 > 0, 'history Avg20 computed');
 
   // Active bar mutation must NOT change history (active bar excluded when not closed)
-  const history2 = buildClosedH6History({ bars: completed, activeBarClosed: false });
+  const history2 = buildClosedH6History({ bars: allBars, activeBarClosed: false });
   assert.equal(history.sma20, history2.sma20, 'mutating active close must not change SMA20');
   assert.equal(history.sma100, history2.sma100, 'mutating active close must not change SMA100');
   assert.equal(history.avg_vol_20, history2.avg_vol_20, 'mutating active volume must not change Avg20');
@@ -206,10 +209,18 @@ assert.ok(makeCoreWithSetup({ price: 100, sma20: 100, sma100: 95, volRatio: 1.01
   'null setup must produce NO_SETUP blocker');
 
 // Malformed history
-assert.ok(buildVnAutoCore({
+{
+  const malformedHistory = buildVnAutoCore({
   price: 103, h6History: {}, h6Live: { vol_ratio: 1.01 },
   entryWindow: { window: 'HIGH' }, setup: sma20Setup,
-}).blockers.includes('H6_HISTORY_INSUFFICIENT'), 'empty history must produce H6_HISTORY_INSUFFICIENT');
+  });
+  assert.ok(malformedHistory.blockers.includes('H6_HISTORY_INSUFFICIENT'),
+    'empty history must produce H6_HISTORY_INSUFFICIENT');
+  assert.ok(malformedHistory.blockers.includes('MA_DATA_MISSING'),
+    'empty history must produce MA_DATA_MISSING');
+  assert.ok(!malformedHistory.blockers.includes('BELOW_SMA100'),
+    'missing SMA100 must not be misreported as price below SMA100');
+}
 
 // ===== Zone-consistency tests (Step 1) =====
 
@@ -288,11 +299,12 @@ assert.equal(classifyVnSetup({ price: 105, sma20: 110, sma100: 100, structure: '
 
 // Main and the fixture emitter must consume the same production assembly seam.
 {
-  const productionSource = readFileSync(new URL('./check_one.mjs', import.meta.url), 'utf-8');
   assert.match(productionSource, /vnAssembly\s*=\s*buildVnCoreAssembly\(\{/,
     'production main must use buildVnCoreAssembly');
   assert.match(productionSource, /buildVnAutoCore\(\{ price, h6History, h6Live, entryWindow, setup \}\)/,
     'production assembly must pass classifyVnSetup result into buildVnAutoCore');
+  assert.match(productionSource, /buildClosedH6History\(\{ bars: allBars, activeBarClosed: barClosed \}\)/,
+    'H6 history must use the full requested OHLCV history, not the 65-bar legacy analysis window');
 }
 
 const validVn = {

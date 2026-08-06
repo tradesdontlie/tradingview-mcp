@@ -51,14 +51,45 @@ export function assertH6Resolution(resolution) {
 }
 
 export async function confirmSymbol(expected, getState, { attempts = 12, wait = async () => {} } = {}) {
-  const wanted = String(expected || '').split(':').pop().toUpperCase();
+  const parseSymbol = raw => {
+    const parts = String(raw || '').trim().toUpperCase().split(':');
+    if (parts.length < 2) return { ticker: parts[0] || '', exchange: null };
+    const exchange = parts.shift();
+    return { ticker: parts.join(':'), exchange: exchange === 'HSX' ? 'HOSE' : exchange };
+  };
+  const wanted = parseSymbol(expected);
   for (let attempt = 0; attempt < attempts; attempt++) {
     const state = await getState().catch(() => ({}));
-    const actual = String(state?.symbol || '').split(':').pop().toUpperCase();
-    if (wanted && actual === wanted) return state;
+    const actual = parseSymbol(state?.symbol);
+    if (wanted.ticker && actual.ticker === wanted.ticker &&
+      (wanted.exchange === null || actual.exchange === null || wanted.exchange === actual.exchange)) return state;
     if (attempt + 1 < attempts) await wait();
   }
   throw new Error(`symbol confirmation failed for ${expected}`);
+}
+
+function studyMatches(values, match) {
+  if (values == null) return false;
+  if (typeof match === 'function') {
+    return Array.isArray(values) ? values.some((value, index) => match(value, index, values)) : Boolean(match(values));
+  }
+  if (typeof match !== 'string') return false;
+  const items = Array.isArray(values) ? values : [values];
+  return items.some(value => String(value?.name ?? value ?? '').includes(match));
+}
+
+export async function waitForStudy(getStudyValues, { match, attempts = 12, wait = async () => {} } = {}) {
+  let result;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      result = await getStudyValues();
+    } catch {
+      result = null; // transient CDP/read failures must not crash the scan/check; callers fail closed
+    }
+    if (studyMatches(result, match)) return result;
+    if (attempt + 1 < attempts) await wait();
+  }
+  return result;
 }
 
 export function scoreSignal(fp = {}, ma = {}, price, phase = 'UNKNOWN', volRatio = null, churn, context = {}) {

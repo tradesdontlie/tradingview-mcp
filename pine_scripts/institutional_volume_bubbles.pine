@@ -1,0 +1,172 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0
+//@version=6
+indicator("Institutional Volume Bubbles [Footprint]", overlay = true, max_labels_count = 500)
+
+// ════════════════════════════════════════════════════════════════════
+//  DESIGN:
+//  • plotshape(location.absolute) → bubble LUÔN đúng giá (học QuantAlgo)
+//  • Giá Y lấy từ footprint row có buy/sell volume LỚN NHẤT trong nến
+//    → đây là nơi institutions thực sự aggressive
+//  • Safety: nếu row price nằm ngoài [low,high] → fallback về lower/upper quarter
+//  • Extend S/R line từ vùng đó về phía phải để canh retest
+// ════════════════════════════════════════════════════════════════════
+
+// ─── INPUTS ──────────────────────────────────────────────────────────────────
+var string G1 = "📊 Footprint"
+i_ticks = input.int  (1,    "Ticks Per Row",   minval = 1, group = G1,
+  tooltip = "VN Stocks: 1–5 | EURUSD: 5–20 | BTCUSDT: 500–2000")
+i_va    = input.int  (70,   "Value Area %",    minval = 1, maxval = 100, group = G1)
+i_imb   = input.bool (true, "Imbalance only",  group = G1,
+  tooltip = "Chỉ lấy row mà tổ chức áp đảo hoàn toàn 1 phía (chính xác nhất)")
+
+var string G2 = "📏 Cluster Size"
+smallPct = input.float(75,  "Small %",         minval = 50, maxval = 99, step = 1, group = G2)
+medPct   = input.float(90,  "Medium %",        minval = 50, maxval = 99, step = 1, group = G2)
+bigPct   = input.float(97,  "Big %",           minval = 50, maxval = 99, step = 1, group = G2)
+shortLen = input.int  (20,  "Short Window",    minval = 5,  group = G2)
+midLen   = input.int  (50,  "Medium Window",   minval = 10, group = G2)
+longLen  = input.int  (100, "Long Window",     minval = 20, group = G2)
+
+var string G3 = "🎨 Display"
+buyColor   = input.color(color.new(#00ffaa, 15), "Buy Color",           group = G3)
+sellColor  = input.color(color.new(#ff3333,  5), "Sell Color",          group = G3)
+showSmall  = input.bool (true,  "Show Small",                           group = G3)
+showMed    = input.bool (true,  "Show Medium",                          group = G3)
+showBig    = input.bool (true,  "Show Big",                             group = G3)
+showText   = input.bool (true,  "Show Volume Text",                     group = G3)
+showLine   = input.bool (true,  "Show S/R Extension Line →",            group = G3,
+  tooltip = "Kéo đường ngang từ vùng aggressive ra phải để canh retest")
+lineLen    = input.int  (30,    "Line Length (bars)",  minval = 5, maxval = 200, group = G3)
+
+// ─── FOOTPRINT ────────────────────────────────────────────────────────────────
+footprint fp    = request.footprint(i_ticks, i_va)
+float     fp_tv = not na(fp) ? fp.total_volume() : na
+float     vol_src = nz(fp_tv, volume)
+
+// ─── CLUSTER DETECTION (Percentile consensus 2/3 windows) ────────────────────
+// Pre-compute toàn bộ percentile thresholds dưới dạng global variables
+// (CW10002: ta.percentile_linear_interpolation phải gọi ở global scope)
+float pBigS   = ta.percentile_linear_interpolation(vol_src, shortLen, bigPct)
+float pBigM   = ta.percentile_linear_interpolation(vol_src, midLen,   bigPct)
+float pBigL   = ta.percentile_linear_interpolation(vol_src, longLen,  bigPct)
+float pMedS   = ta.percentile_linear_interpolation(vol_src, shortLen, medPct)
+float pMedM   = ta.percentile_linear_interpolation(vol_src, midLen,   medPct)
+float pMedL   = ta.percentile_linear_interpolation(vol_src, longLen,  medPct)
+float pSmlS   = ta.percentile_linear_interpolation(vol_src, shortLen, smallPct)
+float pSmlM   = ta.percentile_linear_interpolation(vol_src, midLen,   smallPct)
+float pSmlL   = ta.percentile_linear_interpolation(vol_src, longLen,  smallPct)
+
+f_cons(bool s, bool m, bool l) => (s ? 1 : 0) + (m ? 1 : 0) + (l ? 1 : 0) >= 2
+
+bool isBig   = f_cons(vol_src >= pBigS, vol_src >= pBigM, vol_src >= pBigL)
+bool isMed   = not isBig   and f_cons(vol_src >= pMedS, vol_src >= pMedM, vol_src >= pMedL)
+bool isSmall = not isBig and not isMed and f_cons(vol_src >= pSmlS, vol_src >= pSmlM, vol_src >= pSmlL)
+
+bool isAny = isBig or isMed or isSmall
+
+// ─── TÌM GIÁ AGGRESSIVE TỪ FOOTPRINT ROWS ────────────────────────────────────
+// Duyệt tất cả rows → tìm row có buy_vol lớn nhất (+ imbalance nếu bật)
+// → đây là giá nơi tổ chức mua mạnh nhất trong cây nến
+
+float agg_buy_price  = na   // giá của row buy aggressive nhất
+float agg_sell_price = na   // giá của row sell aggressive nhất
+bool  has_buy        = false
+bool  has_sell       = false
+
+if not na(fp) and isAny
+    volume_row[] rows = fp.rows()
+    int   n     = array.size(rows)
+    float max_bv = 0.0
+    float max_sv = 0.0
+
+    for i = 0 to n - 1
+        volume_row r   = array.get(rows, i)
+        float bv       = r.buy_volume()
+        float sv       = r.sell_volume()
+        float row_mid  = (r.up_price() + r.down_price()) / 2.0
+        bool  buy_ok   = i_imb ? r.has_buy_imbalance()  : true
+        bool  sell_ok  = i_imb ? r.has_sell_imbalance() : true
+
+        if buy_ok and bv > max_bv
+            max_bv          := bv
+            agg_buy_price   := row_mid
+            has_buy         := true
+
+        if sell_ok and sv > max_sv
+            max_sv          := sv
+            agg_sell_price  := row_mid
+            has_sell        := true
+
+// Safety: nếu row price nằm ngoài range cây nến (scale mismatch)
+// → fallback về lower/upper quarter của nến
+// CE10013: ternary multiline phải viết trên 1 dòng hoặc dùng if/else
+float safe_buy_y = na
+if has_buy and not na(agg_buy_price) and agg_buy_price >= low and agg_buy_price <= high
+    safe_buy_y := agg_buy_price
+else
+    safe_buy_y := low + (high - low) * 0.25
+
+float safe_sell_y = na
+if has_sell and not na(agg_sell_price) and agg_sell_price >= low and agg_sell_price <= high
+    safe_sell_y := agg_sell_price
+else
+    safe_sell_y := high - (high - low) * 0.25
+
+bool buyVisible  = isAny and has_buy  and (isBig and showBig or isMed and showMed or isSmall and showSmall)
+bool sellVisible = isAny and has_sell and (isBig and showBig or isMed and showMed or isSmall and showSmall)
+
+// ─── DISPLAY: plotshape tại ĐÚNG GIÁ AGGRESSIVE ───────────────────────────────
+// Buy bubbles (tại giá aggressive buy row)
+plotshape(isBig   and buyVisible ? safe_buy_y  : na, "", shape.circle, location.absolute, buyColor,  size = size.huge)
+plotshape(isMed   and buyVisible ? safe_buy_y  : na, "", shape.circle, location.absolute, buyColor,  size = size.large)
+plotshape(isSmall and buyVisible ? safe_buy_y  : na, "", shape.circle, location.absolute, buyColor,  size = size.normal)
+
+// Sell bubbles (tại giá aggressive sell row)
+plotshape(isBig   and sellVisible ? safe_sell_y : na, "", shape.circle, location.absolute, sellColor, size = size.huge)
+plotshape(isMed   and sellVisible ? safe_sell_y : na, "", shape.circle, location.absolute, sellColor, size = size.large)
+plotshape(isSmall and sellVisible ? safe_sell_y : na, "", shape.circle, location.absolute, sellColor, size = size.normal)
+
+// ─── S/R EXTENSION LINE (canh retest) ────────────────────────────────────────
+if (buyVisible or sellVisible) and barstate.isconfirmed and showLine
+    if buyVisible
+        line.new(bar_index, safe_buy_y,  bar_index + lineLen, safe_buy_y,
+          color = color.new(buyColor,  50),
+          style = line.style_dotted, width = 1, xloc = xloc.bar_index)
+    if sellVisible
+        line.new(bar_index, safe_sell_y, bar_index + lineLen, safe_sell_y,
+          color = color.new(sellColor, 50),
+          style = line.style_dotted, width = 1, xloc = xloc.bar_index)
+
+// ─── TEXT LABEL ───────────────────────────────────────────────────────────────
+f_fmt(float v) =>
+    string r = str.tostring(v, "#")
+    if v >= 1e9
+        r := str.tostring(v / 1e9, "#.#") + "B"
+    else if v >= 1e6
+        r := str.tostring(v / 1e6, "#.#") + "M"
+    else if v >= 1e3
+        r := str.tostring(v / 1e3, "#.#") + "K"
+    r
+
+if (buyVisible or sellVisible) and showText
+    float avg   = ta.sma(vol_src, midLen)
+    float ratio = avg > 0 ? vol_src / avg : 0.0
+    string sz   = isBig ? "● BIG" : isMed ? "◉ MED" : "○ SML"
+
+    if buyVisible
+        string tip_b = sz + " BUY\nVol: " + f_fmt(vol_src) +
+          "\nRatio: " + str.tostring(ratio, "#.##") + "x" +
+          (not na(fp_tv) ? "\nBuy zone: " + str.tostring(safe_buy_y, "#.##") : "")
+        label.new(bar_index, safe_buy_y, f_fmt(vol_src),
+          style = label.style_label_center,
+          color = color.new(chart.fg_color, 100),
+          textcolor = chart.fg_color, size = size.tiny, tooltip = tip_b)
+
+    if sellVisible
+        string tip_s = sz + " SELL\nVol: " + f_fmt(vol_src) +
+          "\nRatio: " + str.tostring(ratio, "#.##") + "x" +
+          (not na(fp_tv) ? "\nSell zone: " + str.tostring(safe_sell_y, "#.##") : "")
+        label.new(bar_index, safe_sell_y, f_fmt(vol_src),
+          style = label.style_label_center,
+          color = color.new(chart.fg_color, 100),
+          textcolor = chart.fg_color, size = size.tiny, tooltip = tip_s)

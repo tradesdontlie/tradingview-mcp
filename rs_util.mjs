@@ -5,7 +5,7 @@ import path from 'node:path';
 const DEFAULT_CACHE = process.env.CHECK_DATA_ROOT
   ? path.join(process.env.CHECK_DATA_ROOT, 'vnindex_h6.json')
   : null;
-const FRESH_MS = 36 * 3600 * 1000;
+export const FRESH_MS = 36 * 3600 * 1000;
 export const VNINDEX_SYM = 'HOSE:VNINDEX';
 
 function cachePath(cache = DEFAULT_CACHE) {
@@ -19,10 +19,10 @@ export function writeVnindexCache(closes, cache) {
   fs.writeFileSync(target, JSON.stringify({ ts: Date.now(), closes }), 'utf8');
 }
 
-export function readVnindexCache(cache) {
+export function readVnindexCache(cache, maxAgeMs = FRESH_MS) {
   try {
     const d = JSON.parse(fs.readFileSync(cachePath(cache), 'utf8'));
-    return { ...d, fresh: (Date.now() - (d.ts || 0)) < FRESH_MS };
+    return { ...d, fresh: (Date.now() - (d.ts || 0)) < maxAgeMs };
   } catch (error) {
     if (error.code === 'ENOENT' || error instanceof SyntaxError) return null;
     throw error;

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
-import { assertH6Resolution, confirmSymbol, extractMovingAverages, extractPreviousMonthProfile, classifyMaAnchor, scoreSignal } from '../src/scan_policy.mjs';
+import { assertH6Resolution, confirmSymbol, extractMovingAverages, extractPreviousMonthProfile, classifyMaAnchor, scoreSignal, waitForStudy } from '../src/scan_policy.mjs';
 import { VN_STRUCTURE_VERSION } from '../src/core/vn_structure.mjs';
 import { buildClosedH6History } from '../check_one.mjs';
 import { buildScanStructure, buildScoutResult } from '../scan_live.mjs';
@@ -104,6 +104,43 @@ test('timeframe and symbol guards fail before acquisition', async () => {
   let acquisitions = 0;
   await assert.rejects(confirmSymbol('HOSE:ACB', async () => ({ symbol: 'HOSE:VND' }), { attempts: 2 }), /confirmation failed/);
   assert.equal(acquisitions, 0);
+});
+
+test('confirmSymbol matches full exchange+ticker with HSX alias and ticker fallback', async () => {
+  await assert.doesNotReject(confirmSymbol('HOSE:ACB', async () => ({ symbol: 'HSX:ACB' }), { attempts: 1 }));
+  await assert.doesNotReject(confirmSymbol('ACB', async () => ({ symbol: 'HOSE:ACB' }), { attempts: 1 }));
+  await assert.doesNotReject(confirmSymbol('HOSE:ACB', async () => ({ symbol: 'ACB' }), { attempts: 1 }));
+  await assert.rejects(confirmSymbol('HOSE:VN30', async () => ({ symbol: 'HNX:VN30' }), { attempts: 2 }), /confirmation failed/);
+  await assert.rejects(confirmSymbol('HOSE:ACB', async () => ({ symbol: 'HOSE:VND' }), { attempts: 2 }), /confirmation failed/);
+});
+
+test('waitForStudy polls until match and returns the final values without throwing', async () => {
+  let calls = 0;
+  const immediate = await waitForStudy(async () => [{ name: 'Footprint Aggressor' }], { match: 'Footprint', attempts: 5 });
+  assert.equal(immediate[0].name, 'Footprint Aggressor');
+
+  const third = await waitForStudy(async () => {
+    calls += 1;
+    return calls < 3 ? [] : [{ name: 'Footprint Aggressor' }];
+  }, { match: study => study.name.includes('Footprint'), attempts: 5 });
+  assert.equal(calls, 3);
+  assert.equal(third[0].name, 'Footprint Aggressor');
+
+  let absentCalls = 0;
+  const absent = await waitForStudy(async () => {
+    absentCalls += 1;
+    return [{ name: `Other ${absentCalls}` }];
+  }, { match: 'Footprint', attempts: 3 });
+  assert.equal(absentCalls, 3);
+  assert.equal(absent[0].name, 'Other 3');
+
+  let rejectedCalls = 0;
+  const tolerant = await waitForStudy(async () => {
+    rejectedCalls += 1;
+    throw new Error('transient read failure');
+  }, { match: 'Footprint', attempts: 3, wait: async () => {} });
+  assert.equal(rejectedCalls, 3);
+  assert.equal(tolerant, null);
 });
 
 test('extracts live Unicode moving-average labels without null overwrite', () => {
@@ -509,8 +546,11 @@ test('scan-live keeps compact mode table-free and full mode opt-in', () => {
   }
 });
 
-test('canonical scan does not acquire a scan-specific chart lock and warns about overlap', () => {
+test('canonical scan acquires the shared chart lock and does not warn about missing lock', () => {
   const source = readFileSync(new URL('../scan_live.mjs', import.meta.url), 'utf8');
-  assert.doesNotMatch(source, /withChartLock\(/);
-  assert.match(source, /no scan-specific chart lock/);
+  assert.match(source, /acquireLock\(SCAN_DATA_LOCK_ROOT, 'SCAN:VN_H6', '360', 180000\)/);
+  assert.match(source, /LOCK_CONTENDED/);
+  assert.doesNotMatch(source, /no scan-specific chart lock/);
+  assert.doesNotMatch(source, /Chart restore FAILED/);
+  assert.match(source, /process\.exit\(code\)/);
 });

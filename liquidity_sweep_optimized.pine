@@ -1,0 +1,209 @@
+//@version=6
+// ═══════════════════════════════════════════════════════════════════════════
+// Custom TF Liquidity Sweep + Delta + Trend [Optimized]
+// Backtest: SMA100 + slope 0.8% + close>prevL+3% + hold 20b → PF=3.21
+// Tốt nhất với: FTS, SHB, VIX, PDR (HOSE Daily)
+// ═══════════════════════════════════════════════════════════════════════════
+indicator('Liquidity Sweep + Delta + Trend [Optimized]', overlay = true, max_lines_count = 500)
+
+// ─── NHÓM 1: Khung thời gian tham chiếu ────────────────────────────────────
+grp1 = '📅 Khung thời gian tham chiếu'
+htf  = input.timeframe('W', title = 'HTF (Weekly/Monthly)', group = grp1)
+
+// ─── NHÓM 2: Bộ lọc xu hướng MA ────────────────────────────────────────────
+grp2         = '📈 Bộ lọc xu hướng MA'
+ma_type      = input.string('SMA',  title = 'Loại MA',       options = ['SMA', 'EMA'], group = grp2)
+ma_length    = input.int(100,       title = 'Chu kỳ MA',     minval = 1,               group = grp2)
+use_ma       = input.bool(true,     title = 'Bật bộ lọc MA (Close > MA)',             group = grp2)
+use_ma_slope = input.bool(true,     title = 'Bật bộ lọc độ dốc MA',                  group = grp2)
+slope_pct    = input.float(0.8,     title = 'Slope tối thiểu (% / 5 phiên)',
+                            minval = 0.0, maxval = 5.0, step = 0.1,                   group = grp2)
+
+// ─── NHÓM 3: Điều kiện Sweep ────────────────────────────────────────────────
+grp3             = '🎯 Điều kiện Sweep'
+close_above_pct  = input.float(2.0,  title = 'Close > prevL tối thiểu (%)',
+                                minval = 0.0, maxval = 10.0, step = 0.5,              group = grp3)
+delta_min        = input.float(0.0,  title = 'Delta% tối thiểu (>0 = lực mua chủ động)',
+                                minval = -100.0, maxval = 100.0, step = 5.0,           group = grp3)
+
+// ─── NHÓM 4: Hiển thị ───────────────────────────────────────────────────────
+grp4          = '🎨 Hiển thị'
+show_htf_lines = input.bool(true,  title = 'Hiện đường HTF High/Low',  group = grp4)
+show_ma        = input.bool(true,  title = 'Hiện đường MA',            group = grp4)
+show_info      = input.bool(true,  title = 'Hiện bảng thông tin',      group = grp4)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DATA
+// ═══════════════════════════════════════════════════════════════════════════
+
+// HTF High/Low (phiên trước)
+[prevH, prevL] = request.security(syminfo.tickerid, htf,
+                  [high[1], low[1]], lookahead = barmerge.lookahead_on)
+
+// Footprint delta
+footprint reqFP  = request.footprint(100, 70)
+float deltaPct   = 0.0
+if not na(reqFP)
+    float dVol   = reqFP.delta()
+    float tVol   = reqFP.total_volume()
+    deltaPct    := tVol > 0 ? (dVol / tVol) * 100 : 0
+
+// MA
+ma_val = ma_type == 'EMA' ? ta.ema(close, ma_length) : ta.sma(close, ma_length)
+
+// MA slope: tăng ≥ slope_pct% so với 5 phiên trước
+slope_mult_bull = 1 + slope_pct / 100
+slope_mult_bear = 1 - slope_pct / 100
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LOGIC TÍN HIỆU
+// ═══════════════════════════════════════════════════════════════════════════
+
+valid_tf = timeframe.in_seconds(timeframe.period) <= timeframe.in_seconds(htf)
+
+// Bộ lọc MA
+ma_bull_filter = use_ma       ? close > ma_val                          : true
+ma_bear_filter = use_ma       ? close < ma_val                          : true
+ma_bull_slope  = use_ma_slope ? ma_val > nz(ma_val[5]) * slope_mult_bull : true
+ma_bear_slope  = use_ma_slope ? ma_val < nz(ma_val[5]) * slope_mult_bear : true
+
+// Ngưỡng đóng cửa (close > prevL + X%)
+close_thr_bull = prevL * (1 + close_above_pct / 100)
+close_thr_bear = prevH * (1 - close_above_pct / 100)
+
+// ✅ BULLISH SWEEP
+// 1. Giá quét đáy HTF trước (low < prevL)
+// 2. Đóng cửa rút chân mạnh (close > prevL + 3%)
+// 3. Lực mua chủ động (delta > 0)
+// 4. Đang trong uptrend (close > SMA100)
+// 5. SMA100 đang dốc lên (slope > 0.8%/5b)
+bullish_sweep = valid_tf
+     and low   < prevL
+     and close > close_thr_bull
+     and deltaPct > delta_min
+     and ma_bull_filter
+     and ma_bull_slope
+
+// ❌ BEARISH SWEEP (ngược lại — giữ để tham khảo, không trade)
+bearish_sweep = valid_tf
+     and high  > prevH
+     and close < close_thr_bear
+     and deltaPct < -delta_min
+     and ma_bear_filter
+     and ma_bear_slope
+
+// ═══════════════════════════════════════════════════════════════════════════
+// VẼ
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Đường HTF
+var line htfH_line = na
+var line htfL_line = na
+
+if show_htf_lines
+    if bool(ta.change(time(htf)))
+        htfH_line := line.new(bar_index, prevH, bar_index + 1, prevH,
+                               color = color.new(color.red,   20),
+                               style = line.style_dashed, width = 1)
+        htfL_line := line.new(bar_index, prevL, bar_index + 1, prevL,
+                               color = color.new(color.green, 20),
+                               style = line.style_dashed, width = 1)
+    else
+        if not na(htfH_line)
+            line.set_x2(htfH_line, bar_index)
+            line.set_x2(htfL_line, bar_index)
+
+// MA
+plot(show_ma ? ma_val : na,
+     title     = 'Trend MA',
+     color     = ma_bull_slope ? color.new(color.teal, 0) : color.new(color.gray, 40),
+     linewidth = 2)
+
+// Tín hiệu
+plotshape(bullish_sweep,
+     title    = 'Bullish Sweep ✓',
+     style    = shape.triangleup,
+     location = location.belowbar,
+     color    = color.new(color.lime,  0),
+     size     = size.small)
+
+plotshape(bearish_sweep,
+     title    = 'Bearish Sweep',
+     style    = shape.triangledown,
+     location = location.abovebar,
+     color    = color.new(color.red,   0),
+     size     = size.small)
+
+// ─── BẢNG THÔNG TIN ─────────────────────────────────────────────────────────
+if show_info and barstate.islast
+    var table t = table.new(position.top_right, 2, 10,
+                             bgcolor     = color.new(color.black, 75),
+                             border_color = color.new(color.gray, 50),
+                             border_width = 1,
+                             frame_color  = color.new(color.gray, 30),
+                             frame_width  = 1)
+
+    // Header
+    table.cell(t, 0, 0, 'Liquidity Sweep', text_color = color.white,
+               text_size = size.normal, bgcolor = color.new(color.navy, 30), text_halign = text.align_center)
+    table.cell(t, 1, 0, '[Optimized]',     text_color = color.new(color.lime, 0),
+               text_size = size.normal, bgcolor = color.new(color.navy, 30), text_halign = text.align_center)
+
+    // HTF levels
+    table.cell(t, 0, 1, 'prevH (' + htf + ')', text_color = color.new(color.gray, 20), text_size = size.small)
+    table.cell(t, 1, 1, str.tostring(prevH, '#,###.##'),
+               text_color = color.red, text_size = size.small)
+
+    table.cell(t, 0, 2, 'prevL (' + htf + ')', text_color = color.new(color.gray, 20), text_size = size.small)
+    table.cell(t, 1, 2, str.tostring(prevL, '#,###.##'),
+               text_color = color.green, text_size = size.small)
+
+    // MA
+    maLabel = ma_type + '(' + str.tostring(ma_length) + ')'
+    maColor = close > ma_val ? color.new(color.lime, 0) : color.new(color.red, 0)
+    table.cell(t, 0, 3, maLabel,                      text_color = color.new(color.gray, 20), text_size = size.small)
+    table.cell(t, 1, 3, str.tostring(ma_val, '#,###.##'), text_color = maColor, text_size = size.small)
+
+    // Delta
+    deltaColor = deltaPct > 0 ? color.new(color.lime, 0) : color.new(color.red, 0)
+    table.cell(t, 0, 4, 'Delta%', text_color = color.new(color.gray, 20), text_size = size.small)
+    table.cell(t, 1, 4, str.tostring(deltaPct, '+#.##') + '%', text_color = deltaColor, text_size = size.small)
+
+    // Slope
+    actualSlope = ma_val > 0 and not na(ma_val[5]) ? (ma_val / ma_val[5] - 1) * 100 : 0.0
+    slopeColor  = actualSlope >= slope_pct ? color.new(color.lime, 0) : color.new(color.red, 0)
+    table.cell(t, 0, 5, 'MA Slope/5b', text_color = color.new(color.gray, 20), text_size = size.small)
+    table.cell(t, 1, 5, str.tostring(actualSlope, '+#.##') + '%', text_color = slopeColor, text_size = size.small)
+
+    // Close vs prevL
+    distPct     = prevL > 0 ? (close / prevL - 1) * 100 : 0.0
+    distColor   = distPct >= close_above_pct ? color.new(color.lime, 0) : color.new(color.orange, 0)
+    table.cell(t, 0, 6, 'Close vs prevL', text_color = color.new(color.gray, 20), text_size = size.small)
+    table.cell(t, 1, 6, str.tostring(distPct, '+#.##') + '%', text_color = distColor, text_size = size.small)
+
+    // Sweep status
+    sweepStatus = low < prevL ? '✓ Đã quét' : '— Chưa quét'
+    sweepColor  = low < prevL ? color.new(color.lime, 0) : color.new(color.gray, 40)
+    table.cell(t, 0, 7, 'Sweep today', text_color = color.new(color.gray, 20), text_size = size.small)
+    table.cell(t, 1, 7, sweepStatus, text_color = sweepColor, text_size = size.small)
+
+    // Signal
+    sigStr   = bullish_sweep ? '🚀 BULLISH SWEEP' : (bearish_sweep ? '🔻 BEARISH SWEEP' : '— Không có tín hiệu')
+    sigColor = bullish_sweep ? color.new(color.lime, 0) : (bearish_sweep ? color.new(color.red, 0) : color.new(color.gray, 40))
+    table.cell(t, 0, 8, 'Tín hiệu',  text_color = color.new(color.gray, 20), text_size = size.small)
+    table.cell(t, 1, 8, sigStr,       text_color = sigColor, text_size = size.small, bgcolor = bullish_sweep ? color.new(color.lime, 80) : color.new(color.black, 0))
+
+    // Backtest note
+    table.cell(t, 0, 9, 'Backtest (hold 20b)', text_color = color.new(color.gray, 50), text_size = size.tiny)
+    table.cell(t, 1, 9, 'PF=2.71 | WR=57%',   text_color = color.new(color.gray, 50), text_size = size.tiny)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ALERTS
+// ═══════════════════════════════════════════════════════════════════════════
+alertcondition(bullish_sweep,
+     title   = 'Bullish HTF Sweep [Optimized]',
+     message = '{{ticker}} — BULLISH SWEEP xac nhan! Gia quet day HTF truoc, rut chan manh tren prevL, SMA100 doc len, Delta duong. Khung {{interval}} | {{time}}')
+
+alertcondition(bearish_sweep,
+     title   = 'Bearish HTF Sweep [Optimized]',
+     message = '{{ticker}} — BEARISH SWEEP xac nhan! Gia quet dinh HTF truoc, bi ban manh duoi prevH, SMA100 doc xuong, Delta am. Khung {{interval}} | {{time}}')

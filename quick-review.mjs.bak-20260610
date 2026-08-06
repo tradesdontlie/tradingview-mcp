@@ -1,0 +1,142 @@
+import { spawnSync } from 'child_process';
+import { dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+function mcp(...args) {
+    const r = spawnSync('node', ['src/cli/index.js', ...args],
+        { cwd: __dirname, encoding: 'utf8', timeout: 10000, windowsHide: true });
+    try { return JSON.parse(r.stdout); } catch { return null; }
+}
+
+const parseNum  = s => parseInt(String(s||0).replace(/\D/g,''),10)||0;
+const parseLong = s => { const str=String(s||0); const neg=/^-/.test(str); const d=str.replace(/\D/g,''); return d?(neg?-parseInt(d,10):parseInt(d,10)):0; };
+const fmtP      = n => Number(n).toLocaleString('en-US');
+
+async function setAndWait(sym) {
+    const js = `var c=window._exposed_chartWidgetCollection;var w=c?c.activeChartWidget.value():null;if(w&&w.setSymbol){w.setSymbol('${sym}',null);'ok';}else 'no_api';`;
+    mcp('ui', 'eval', js);
+    await sleep(2200);
+}
+
+const SCAN = [
+    'HOSE:VCB','HOSE:BID','HOSE:TCB','HOSE:MBB','HOSE:ACB','HOSE:STB','HOSE:LPB','HOSE:HDB',
+    'HOSE:FPT','HOSE:MWG','HOSE:VNM','HOSE:MSN','HOSE:PNJ',
+    'HOSE:VHM','HOSE:NLG',
+    'HOSE:HPG','HOSE:HSG','HOSE:NKG',
+    'HOSE:GAS','HOSE:GEX','HOSE:REE','HOSE:GMD',
+    'HOSE:DPM','HOSE:PHR','HOSE:POW',
+    'HOSE:SSI','HOSE:HCM','HOSE:VND','HOSE:VCI','HOSE:VIX',
+];
+
+// VNINDEX
+await setAndWait('HOSE:VNINDEX');
+const vnq = mcp('quote');
+const vnChg = vnq?.open > 0 ? +((vnq.close - vnq.open)*100/vnq.open).toFixed(2) : 0;
+
+const results = [];
+
+for (let i = 0; i < SCAN.length; i++) {
+    const sym    = SCAN[i];
+    const ticker = sym.split(':')[1];
+    process.stderr.write(`[${i+1}/${SCAN.length}] ${ticker}...\r`);
+    await setAndWait(sym);
+
+    const q    = mcp('quote');
+    if (!q?.success || q.symbol !== sym) continue;
+
+    const vals = mcp('values');
+    const fp   = vals?.success ? (vals.studies||[]).find(s => s.name?.includes('Footprint')) : null;
+    if (!fp) continue;
+
+    const ohlcv = mcp('ohlcv','--count','10');
+    const bars  = ohlcv?.bars || [];
+    const avgVol = bars.length >= 5 ? bars.slice(0,-1).reduce((s,b)=>s+b.volume,0)/(bars.length-1) : 0;
+    const volR   = avgVol > 0 ? +(q.volume/avgVol).toFixed(1) : 0;
+
+    const conf     = parseNum(fp.values['Confluence']);
+    const div      = parseNum(fp.values['Div Signal']);
+    const cumDelta = parseLong(fp.values['Cum Delta']);
+    const buyVol   = parseLong(fp.values['FP Buy Vol']);
+    const totVol   = parseLong(fp.values['FP Total Vol']);
+    const buyPct   = totVol > 0 ? Math.round(buyVol*100/totVol) : 0;
+    const chgPct   = q.open > 0 ? +((q.close-q.open)*100/q.open).toFixed(1) : 0;
+    const spread   = q.high - q.low;
+    const closePos = spread > 0 ? Math.round((q.close-q.low)*100/spread) : 50;
+
+    // VSA
+    let phase = '', wProg = 50, pattern = '';
+    if (bars.length >= 5) {
+        const last = bars[bars.length-1], prev = bars[bars.length-2];
+        const hiH = Math.max(...bars.map(b=>b.high)), loL = Math.min(...bars.map(b=>b.low));
+        wProg  = (hiH-loL)>0 ? Math.round((last.close-loL)/(hiH-loL)*100) : 50;
+        phase  = wProg>=80?'TOP':wProg>=55?'MKP':wProg>=30?'ACC':'BTM';
+        const isBull = last.close > last.open;
+        pattern = volR>=1.5&&isBull&&wProg<70 ? 'PocketPivot'
+                : volR<0.7&&last.close>prev.close ? 'NoSupply'
+                : volR>=1.5&&!isBull&&wProg>=70 ? 'Distrib' : '';
+    }
+
+    const signal = div && cumDelta < 0  ? 'DIV'
+                 : conf>=60&&!div&&cumDelta>0 ? 'BUY'
+                 : conf>=40&&!div&&cumDelta>0 ? 'WATCH'
+                 : volR>=1.5&&closePos>=60&&!div ? 'WATCH' : 'skip';
+
+    if (signal === 'skip') continue;
+
+    results.push({ ticker, signal, conf, div, cumDelta, buyPct, volR, chgPct, closePos, phase, pattern, close: q.close, wProg });
+}
+
+process.stderr.write('\n');
+
+// ── REPORT ──────────────────────────────────────────────────────────────────
+const LINE = '─'.repeat(56);
+const buy   = results.filter(r => r.signal==='BUY').sort((a,b)=>b.conf-a.conf);
+const watch = results.filter(r => r.signal==='WATCH').sort((a,b)=>b.conf-a.conf);
+const divs  = results.filter(r => r.signal==='DIV');
+
+// breadth proxy từ các mã đã scan
+const scanned = results;
+const up   = scanned.filter(r=>r.chgPct>0.5).length;
+const down = scanned.filter(r=>r.chgPct<-0.5).length;
+const flat = scanned.length - up - down;
+
+console.log(`\n${LINE}`);
+console.log(`📊  REVIEW 21/05/2026`);
+console.log(`${LINE}`);
+console.log(`VNINDEX  ${fmtP(vnq?.close)}  ${vnChg>=0?'+':''}${vnChg}%  ${vnChg>=-0.3?'ổn định':'thị trường yếu'}`);
+console.log(`Vol      ${fmtP(vnq?.volume||0)}`);
+console.log(`Breadth  ▲${up}  ─${flat}  ▼${down}  (trong ${scanned.length} mã đã quét)`);
+console.log(`Tín hiệu 🟢BUY ${buy.length}  🔶WATCH ${watch.length}  ⚠️DIV ${divs.length}`);
+
+if (buy.length) {
+    console.log(`\n🟢  CANH MUA NGÀY MAI`);
+    console.log(`  ${'Mã'.padEnd(5)} Conf  Buy%  Vol    Phase  Giá        Chg%`);
+    console.log(`  ${'─'.repeat(53)}`);
+    for (const r of buy) {
+        const chg = (r.chgPct>=0?'+':'')+r.chgPct+'%';
+        const note = r.pattern ? `  [${r.pattern}]` : '';
+        console.log(`  ${r.ticker.padEnd(5)} ${String(r.conf).padStart(3)}   ${String(r.buyPct).padStart(3)}%  ${String(r.volR).padStart(4)}x  ${r.phase}    ${fmtP(r.close).padStart(9)}  ${chg}${note}`);
+    }
+}
+
+if (watch.length) {
+    console.log(`\n🔶  THEO DÕI`);
+    console.log(`  ${'Mã'.padEnd(5)} Conf  Buy%  Vol    Chg%    Ghi chú`);
+    console.log(`  ${'─'.repeat(50)}`);
+    for (const r of watch) {
+        const chg = (r.chgPct>=0?'+':'')+r.chgPct+'%';
+        const note = r.pattern || `closePos=${r.closePos}%`;
+        console.log(`  ${r.ticker.padEnd(5)} ${String(r.conf).padStart(3)}   ${String(r.buyPct).padStart(3)}%  ${String(r.volR).padStart(4)}x  ${chg.padEnd(7)} ${note}`);
+    }
+}
+
+if (divs.length) {
+    console.log(`\n⚠️   TRÁNH — Bear Div`);
+    console.log(`  ${divs.map(r=>r.ticker).join('  ')}`);
+}
+
+console.log(`\n  💡 Ngữ cảnh: VN -0.85% — chờ xác nhận lực cầu trước khi vào lệnh.`);
+console.log(`  Entry: pullback về demand zone → vol co → No Supply → vào.\n${LINE}\n`);

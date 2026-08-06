@@ -6,10 +6,11 @@
 
 import { readFileSync, writeFileSync } from 'fs';
 import { execFileSync } from 'child_process';
-import { computeRS, writeVnindexCache, VNINDEX_SYM } from './rs_util.mjs';
+import { computeRS, readVnindexCache, writeVnindexCache, VNINDEX_SYM } from './rs_util.mjs';
 import { barStatus, sessionInfo } from './bar_status.mjs';
-import { MARKET_ADJ, SCAN_ENGINE_VERSION, assertH6Resolution, confirmSymbol, extractMovingAverages, scoreSignal as policyScoreSignal } from './src/scan_policy.mjs';
+import { MARKET_ADJ, SCAN_ENGINE_VERSION, assertH6Resolution, confirmSymbol, extractMovingAverages, scoreSignal as policyScoreSignal, waitForStudy } from './src/scan_policy.mjs';
 import { compatibilityStructure, computeVnStructure } from './src/core/vn_structure.mjs';
+import { runtimeDataRoot, acquireLock, releaseLock } from './src/core/check_runtime.mjs';
 
 let chart;
 let data;
@@ -42,6 +43,10 @@ const FOREIGN_LATEST_PATH = requiredEnv('FOREIGN_LATEST_PATH');
 const REGIME_LATEST_PATH = requiredEnv('REGIME_LATEST_PATH');
 const SECTOR_MAP_PATH = requiredEnv('SECTOR_MAP_PATH');
 const PYTHON_EXECUTABLE = requiredEnv('PYTHON_EXECUTABLE');
+
+const SCAN_DATA_LOCK_ROOT = SELF_TEST ? '' : runtimeDataRoot();  // CHECK_DATA_ROOT=claude_os/data (wrapper da set)
+const CHART_LOCK_ACQUIRE_TIMEOUT_MS = 120000;
+const CHART_LOCK_RETRY_MS = 5000;
 
 function exchangePrefix(raw) {
   const ex = (raw || '').toUpperCase();
@@ -511,7 +516,10 @@ async function scanOne(ticker, name, idxCloses, marketRegime) {
     return { error: e.message };
   }
   // Extra wait for Footprint indicator to reload data
-  await sleep(1500);
+  await waitForStudy(
+    () => data.getStudyValues().then(sv => sv.studies || []),
+    { match: 'Footprint', attempts: 6, wait: () => sleep(400) },
+  );
 
   // Read data in parallel (OHLCV de tinh wave.phase — port full tu check_one.mjs)
   let sv, fpTbl, q, ohlcv;
@@ -627,8 +635,17 @@ async function main() {
       && clock.phase === 'CONT_AM' && clock.trust_level === 'HIGH' ? 0 : 1);
   }
 
+  let lock = null;
   if (!SELF_TEST) {
-    console.warn('WARNING: canonical /scan has no scan-specific chart lock; concurrent runs may interleave chart state and overwrite shared artifacts.');
+    const lockDeadline = Date.now() + CHART_LOCK_ACQUIRE_TIMEOUT_MS;
+    for (;;) {
+      try { lock = acquireLock(SCAN_DATA_LOCK_ROOT, 'SCAN:VN_H6', '360', 180000); break; }
+      catch (e) {
+        if (!e.message.includes('LOCK_CONTENDED') || Date.now() >= lockDeadline) throw e;
+        console.warn('chart lock contended; waiting ' + (CHART_LOCK_RETRY_MS / 1000) + 's...');
+        await sleep(CHART_LOCK_RETRY_MS);
+      }
+    }
   }
   ({ getClient } = await import('./src/connection.js'));
   chart = await import('./src/core/chart.js');
@@ -648,17 +665,23 @@ async function main() {
   // --- VNINDEX 1 lan dau de tinh RS (Relative Strength) + ghi cache cho check_one ---
   let idxCloses = null;
   try {
-    await chart.setSymbol({ symbol: VNINDEX_SYM });
-    for (let k = 0; k < 12; k++) {
-      await sleep(500);
-      const st = await chart.getState().catch(() => ({}));
-      if ((st.symbol || '').toUpperCase().includes('VNINDEX')) break;
+    const cached = process.env.CHECK_DATA_ROOT ? readVnindexCache(undefined, 2 * 3600 * 1000) : null;
+    if (cached?.fresh && (cached.closes || []).length >= 25) {
+      idxCloses = cached.closes;
+      if (FULL_MODE) console.log('VNINDEX RS baseline cache OK (' + idxCloses.length + ' bars)\n');
+    } else {
+      await chart.setSymbol({ symbol: VNINDEX_SYM });
+      for (let k = 0; k < 12; k++) {
+        await sleep(500);
+        const st = await chart.getState().catch(() => ({}));
+        if ((st.symbol || '').toUpperCase().includes('VNINDEX')) break;
+      }
+      await sleep(1200);
+      const idxOhlcv = await data.getOhlcv({ count: 65 }).catch(() => ({ bars: [] }));
+      const closes = (idxOhlcv.bars || []).map(b => b.close).filter(c => c != null);
+      if (closes.length >= 25) { idxCloses = closes; writeVnindexCache(closes); if (FULL_MODE) console.log('VNINDEX RS baseline OK (' + closes.length + ' bars)\n'); }
+      else if (FULL_MODE) console.log('VNINDEX baseline thieu data -> RS=N/A\n');
     }
-    await sleep(1200);
-    const idxOhlcv = await data.getOhlcv({ count: 65 }).catch(() => ({ bars: [] }));
-    const closes = (idxOhlcv.bars || []).map(b => b.close).filter(c => c != null);
-    if (closes.length >= 25) { idxCloses = closes; writeVnindexCache(closes); if (FULL_MODE) console.log('VNINDEX RS baseline OK (' + closes.length + ' bars)\n'); }
-    else if (FULL_MODE) console.log('VNINDEX baseline thieu data -> RS=N/A\n');
   } catch (e) { if (FULL_MODE) console.log('VNINDEX fetch loi -> RS=N/A: ' + e.message + '\n'); }
 
   const marketRegime = loadMarketRegime();
@@ -817,15 +840,28 @@ async function main() {
   console.log('='.repeat(W));
   return persistOk ? 0 : 1;
   } finally {
+    const restoreCapMs = 30000;
+    const restore = (async () => {
+      try {
+        const currentState = await chart.getState();
+        if (initState.symbol && currentState.symbol !== initState.symbol)
+          await chart.setSymbol({ symbol: initState.symbol });
+        if (initState.resolution && currentState.resolution !== initState.resolution)
+          await chart.setTimeframe({ timeframe: initState.resolution });
+      } catch {
+        if (initState.symbol) await chart.setSymbol({ symbol: initState.symbol });
+        if (initState.resolution) await chart.setTimeframe({ timeframe: initState.resolution });
+      }
+    })();
     try {
-      if (initState.symbol) await chart.setSymbol({ symbol: initState.symbol });
-      if (initState.resolution) await chart.setTimeframe({ timeframe: initState.resolution });
-    } catch (error) {
-      throw new Error('Chart restore FAILED: ' + error.message);
+      await Promise.race([restore, new Promise(r => setTimeout(r, restoreCapMs))]);
+    } catch (e) {
+      console.warn('WARN: chart restore failed (non-fatal): ' + e.message);   // khong throw, best-effort
     }
+    if (lock) { try { releaseLock(lock); } catch (e) { console.warn('WARN: lock release failed: ' + e.message); } }
   }
 }
 
 if (IS_DIRECT) {
-  main().then(code => { process.exitCode = code; }).catch(e => { console.error(e); process.exitCode = 1; });
+  main().then(code => { process.exit(code); }).catch(e => { console.error(e); process.exit(1); });
 }

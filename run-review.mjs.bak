@@ -1,0 +1,159 @@
+import { spawnSync } from 'child_process';
+import { dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const cwd = __dirname;
+
+function mcp(...args) {
+    const r = spawnSync('node', ['src/cli/index.js', ...args], { cwd, encoding: 'utf8', timeout: 12000, windowsHide: true });
+    try { return JSON.parse(r.stdout); } catch { return null; }
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const parseNum  = s => { if (!s) return 0; return parseInt(String(s).replace(/\D/g, ''), 10) || 0; };
+const parseLong = s => { if (!s) return 0; const str = String(s); const neg = /^-/.test(str); const d = str.replace(/\D/g,''); return d ? (neg ? -parseInt(d,10) : parseInt(d,10)) : 0; };
+const fmtPrice  = n => Number(n).toLocaleString('en-US');
+
+async function setSymbol(sym) {
+    const js = `var c=window._exposed_chartWidgetCollection;var w=c?c.activeChartWidget.value():null;if(w&&w.setSymbol){w.setSymbol('${sym}',null);'ok';}else 'no_api';`;
+    mcp('ui', 'eval', js);
+    await sleep(2000);
+}
+const getQuote  = () => mcp('quote');
+const getValues = () => mcp('values');
+const getOHLCV  = n  => mcp('ohlcv', '--count', String(n));
+const getFP     = vals => vals?.success ? (vals.studies || []).find(s => s.name?.includes('Footprint')) || null : null;
+
+function calcVSA(bars) {
+    if (!bars || bars.length < 5) return null;
+    const n = bars.length, last = bars[n-1], prev = bars[n-2];
+    const hiHigh = Math.max(...bars.map(b => b.high));
+    const loLow  = Math.min(...bars.map(b => b.low));
+    const wProg  = (hiHigh - loLow) > 0 ? Math.round((last.close - loLow) / (hiHigh - loLow) * 100) : 50;
+    const avgVol = bars.slice(0,-1).reduce((s,b) => s + b.volume, 0) / (bars.length - 1);
+    const volR   = avgVol > 0 ? +(last.volume / avgVol).toFixed(1) : 1;
+    const isBull = last.close > last.open;
+    const phase   = wProg >= 80 ? 'DINH' : wProg >= 55 ? 'MARKUP' : wProg >= 30 ? 'ACCUM' : 'BOTTOM';
+    const pattern = volR >= 1.5 && isBull && wProg < 70 ? 'Pocket Pivot'
+                  : volR < 0.7 && last.close > prev.close ? 'No Supply'
+                  : volR >= 1.5 && !isBull && wProg >= 70 ? 'Distribution' : 'Normal';
+    const eLabel  = volR >= 1.5 && isBull && wProg < 70 ? 'STRONG BUY'
+                  : volR < 0.7 && last.close > prev.close ? 'CANH MUA' : 'THEO DOI';
+    return { phase, wProg, volR, pattern, eLabel, hiHigh, loLow };
+}
+
+const FULL_SCAN_LIST = [
+    'HOSE:GMD','HOSE:ACB','HOSE:VND','HOSE:OCB','HOSE:HCM',
+];
+const SECTOR_MAP = {
+    VCB:'Bank',BID:'Bank',CTG:'Bank',TCB:'Bank',MBB:'Bank',VPB:'Bank',HDB:'Bank',ACB:'Bank',OCB:'Bank',STB:'Bank',LPB:'Bank',SHB:'Bank',EIB:'Bank',VIB:'Bank',TPB:'Bank',
+    FPT:'Tech',MWG:'Retail',DGW:'Tech',VNM:'FMCG',MSN:'FMCG',SAB:'FMCG',PNJ:'Retail',
+    VHM:'BDS',VIC:'BDS',NLG:'BDS',HAG:'BDS',HBC:'BDS',
+    GAS:'Energy',GEX:'Ind',REE:'Ind',VGC:'Ind',
+    HPG:'Steel',HSG:'Steel',NKG:'Steel',POM:'Steel',TLH:'Steel',SMC:'Steel',VGS:'Steel',NHH:'Steel',TVN:'Steel',DTL:'Steel',
+    DPM:'Chem',DCM:'Chem',PHR:'Agri',POW:'Energy',PPC:'Energy',NT2:'Energy',VSH:'Energy',HHP:'Agri',PAN:'Agri',GMD:'Logistics',
+    SSI:'Sec',VND:'Sec',HCM:'Sec',VCI:'Sec',MBS:'Sec',FTS:'Sec',ORS:'Sec',VIX:'Sec',
+};
+
+// â”€â”€ MAIN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+await setSymbol('HOSE:VNINDEX');
+const vnq  = getQuote();
+const vnChg = vnq?.open > 0 ? +((vnq.close - vnq.open) * 100 / vnq.open).toFixed(2) : 0;
+const vnDir = vnChg >= 0.5 ? 'ðŸ“ˆ TÄ‚NG' : vnChg <= -0.5 ? 'ðŸ“‰ GIáº¢M' : 'âž¡ï¸ ÄI NGANG';
+process.stderr.write(`VNINDEX ${fmtPrice(vnq?.close)}  ${vnChg >= 0 ? '+' : ''}${vnChg}%\n`);
+process.stderr.write(`Scanning ${FULL_SCAN_LIST.length} mÃ£...\n`);
+
+const buyList = [], watchList = [], divList = [];
+
+for (let i = 0; i < FULL_SCAN_LIST.length; i++) {
+    const sym    = FULL_SCAN_LIST[i];
+    const ticker = sym.split(':')[1];
+    process.stderr.write(`  [${String(i+1).padStart(2)}/${FULL_SCAN_LIST.length}] ${ticker.padEnd(5)}...\r`);
+
+    await setSymbol(sym);
+    const q = getQuote();
+    if (!q?.success || q.symbol !== sym) continue;
+
+    const vals = getValues();
+    const fp   = getFP(vals);
+    if (!fp) continue;
+
+    const oRaw = getOHLCV(10);
+    const bars  = oRaw?.bars || [];
+    const vsa   = calcVSA(bars);
+
+    const conf     = parseNum(fp.values.Confluence);
+    const div      = parseNum(fp.values['Div Signal']);
+    const cumDelta = parseLong(fp.values['Cum Delta']);
+    const buyVol   = parseLong(fp.values['FP Buy Vol']);
+    const totVol   = parseLong(fp.values['FP Total Vol']);
+    const buyPct   = totVol > 0 ? Math.round(buyVol * 100 / totVol) : 0;
+    const avgVol   = bars.length >= 5 ? bars.slice(0,-1).reduce((s,b) => s + b.volume, 0) / (bars.length - 1) : 0;
+    const volR     = avgVol > 0 ? +(q.volume / avgVol).toFixed(1) : 0;
+    const spread   = q.high - q.low;
+    const closePos = spread > 0 ? Math.round((q.close - q.low) * 100 / spread) : 50;
+    const chgPct   = q.open > 0 ? +((q.close - q.open) * 100 / q.open).toFixed(1) : 0;
+
+    const entry = { ticker, conf, div, cumDelta, buyPct, volR, closePos, chgPct, close: q.close,
+        phase: vsa?.phase || '', pattern: vsa?.pattern || '', eLabel: vsa?.eLabel || '', wProg: vsa?.wProg || 50 };
+
+    if (div && cumDelta < 0)                                          divList.push(entry);
+    else if (conf >= 60 && !div && cumDelta > 0)                      buyList.push(entry);
+    else if ((volR >= 1.5 && closePos >= 50 && !div) || (conf >= 40 && !div && cumDelta > 0)) watchList.push(entry);
+}
+
+buyList.sort((a,b)  => b.conf - a.conf);
+watchList.sort((a,b) => b.conf - a.conf);
+
+// Breadth + sector
+const allScanned  = [...buyList, ...watchList, ...divList];
+const breadthUp   = allScanned.filter(e => e.chgPct > 0.5).length;
+const breadthDown = allScanned.filter(e => e.chgPct < -0.5).length;
+const breadthFlat = allScanned.length - breadthUp - breadthDown;
+const sectorScore = {};
+for (const e of buyList) { const sec = SECTOR_MAP[e.ticker] || 'Other'; sectorScore[sec] = (sectorScore[sec] || 0) + 1; }
+const topSectors = Object.entries(sectorScore).sort((a,b) => b[1]-a[1]).slice(0,3).map(([s,n]) => `${s}(${n})`).join(' Â· ');
+
+// â”€â”€ PRINT REPORT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+const line = 'â”€'.repeat(54);
+console.log(`\n${line}`);
+console.log(`ðŸ“Š  REVIEW CUá»I PHIÃŠN â€” Thá»© TÆ° 21/05/2026`);
+console.log(line);
+console.log(`VNINDEX  ${fmtPrice(vnq?.close)}  ${vnChg >= 0 ? '+' : ''}${vnChg}%  ${vnDir}`);
+console.log(`Breadth  â–²${breadthUp} mÃ£  â”€${breadthFlat} mÃ£  â–¼${breadthDown} mÃ£`);
+if (topSectors) console.log(`Dáº«n dáº¯t  ${topSectors}`);
+console.log(`Signal   ðŸŸ¢ BUY ${buyList.length}  Â·  ðŸ”¶ WATCH ${watchList.length}  Â·  âš ï¸  DIV ${divList.length}`);
+
+// BUY
+console.log(`\nðŸŸ¢  CANH MUA NGÃ€Y MAI (${buyList.length} mÃ£)`);
+if (buyList.length) {
+    console.log(`  ${'MÃ£'.padEnd(5)} Conf  Buy%  Vol    Phase  ÄÃ³ng cá»­a   Chg%`);
+    console.log(`  ${'â”€'.repeat(52)}`);
+    for (const e of buyList.slice(0, 15)) {
+        const ph = e.phase.includes('MARKUP') ? 'MKP' : e.phase.includes('RE-ACCUM') ? 'REA'
+                 : e.phase.includes('ACCUM')  ? 'ACC' : e.phase.includes('DINH')     ? 'TOP' : 'â”€â”€â”€';
+        const chg = (e.chgPct >= 0 ? '+' : '') + e.chgPct + '%';
+        console.log(`  ${e.ticker.padEnd(5)} ${String(e.conf).padStart(3)}   ${String(e.buyPct).padStart(3)}%  ${String(e.volR).padStart(4)}x  ${ph}   ${fmtPrice(e.close).padStart(8)}  ${chg}`);
+    }
+} else {
+    console.log(`  KhÃ´ng cÃ³ mÃ£ Ä‘á»§ Ä‘iá»u kiá»‡n hÃ´m nay`);
+}
+
+// WATCH
+console.log(`\nðŸ”¶  THEO DÃ•I (${watchList.length} mÃ£)`);
+if (watchList.length) {
+    for (const e of watchList.slice(0, 10)) {
+        const chg = (e.chgPct >= 0 ? '+' : '') + e.chgPct + '%';
+        console.log(`  ${e.ticker.padEnd(5)} conf=${String(e.conf).padStart(2)}  ${chg.padEnd(7)}  ${e.pattern}`);
+    }
+}
+
+// DIV
+if (divList.length) {
+    console.log(`\nâš ï¸   TRÃNH â€” Bear Divergence (${divList.length} mÃ£)`);
+    console.log(`  ${divList.map(e => e.ticker).join('  ')}`);
+}
+
+console.log(`\n  ðŸ’¡ Entry: chá» pullback â†’ vol co â†’ No Supply â†’ vÃ o Zone A`);
+console.log(`${line}\n`);
+

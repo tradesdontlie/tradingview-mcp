@@ -11,7 +11,7 @@ import { disconnect, getClient } from './src/connection.js';
 import { computeRS, readVnindexCache } from './rs_util.mjs';
 import { barStatus, sessionInfo, entryWindow } from './bar_status.mjs';
 import { atomicWriteCache, cachePaths, evidenceHash, runtimeDataRoot, withChartLock } from './src/core/check_runtime.mjs';
-import { extractPreviousMonthProfile, classifyMaAnchor } from './src/scan_policy.mjs';
+import { confirmSymbol, extractPreviousMonthProfile, classifyMaAnchor, waitForStudy } from './src/scan_policy.mjs';
 import { computeVnStructure, compatibilityStructure } from './src/core/vn_structure.mjs';
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -291,6 +291,13 @@ export function buildClosedH6History({ bars, activeBarClosed }) {
   };
 }
 
+/** Compatibility MA derived from complete bars only (pure; no CDP dependency). */
+export function computeClosedSma({ bars, activeBarClosed, period }) {
+  const completed = activeBarClosed ? bars : bars.slice(0, -1);
+  const closes = completed.map(bar => bar.close);
+  return closes.length >= period ? sma(closes, period) : null;
+}
+
 function classifyVnSetup({ price, sma20, sma100, structure, structureV2, aboveSma100 }) {
   // No setup if price below SMA100
   if (!aboveSma100) return { setup: null, reason: 'price below SMA100', zone_low: null, zone_high: null, anchor: null };
@@ -358,7 +365,7 @@ function buildVnAutoCore({ price, h6History, h6Live, entryWindow, setup }) {
   const aboveSma100 = priceOk && sma100Ok && price >= h6History.sma100;
   if (!priceOk) {
     blockers.push('PRICE_MISSING');
-  } else if (!aboveSma100) {
+  } else if (sma100Ok && !aboveSma100) {
     blockers.push('BELOW_SMA100');
   }
 
@@ -595,31 +602,44 @@ export function buildCacheEnvelope(payload, generatedAt = new Date().toISOString
 
 export async function restoreChartState(chartApi, initialState) {
   if (!initialState) return;
-  if (initialState.symbol) await chartApi.setSymbol({ symbol: initialState.symbol });
-  if (initialState.resolution) await chartApi.setTimeframe({ timeframe: initialState.resolution });
+  try {
+    const currentState = await chartApi.getState();
+    if (initialState.symbol && currentState.symbol !== initialState.symbol)
+      await chartApi.setSymbol({ symbol: initialState.symbol });
+    if (initialState.resolution && currentState.resolution !== initialState.resolution)
+      await chartApi.setTimeframe({ timeframe: initialState.resolution });
+  } catch {
+    if (initialState.symbol) await chartApi.setSymbol({ symbol: initialState.symbol });
+    if (initialState.resolution) await chartApi.setTimeframe({ timeframe: initialState.resolution });
+  }
 }
 
 export async function withChartLifecycle(dataRoot, ticker, timeframe, operation) {
   return withChartLock(dataRoot, ticker, timeframe, 180000, operation);
 }
 
-async function main() {
-  let ticker = process.argv[2] || 'HOSE:OCB';
-  const timeframe = process.argv[3] || defaultTf(ticker);
+export async function runOneCheck({ ticker, timeframe, cacheDir, providedInitState = null, restoreOnExit = true, disconnectOnExit = true }) {
   const shortName = ticker.split(':').pop();
-  const cacheDir = runtimeDataRoot();
-
-  try { await getClient(); } catch(e) { console.error('CDP FAIL:', e.message); process.exit(1); }
-  return withChartLifecycle(cacheDir, ticker, timeframe, async () => {
   let initState;
   try {
-  initState = await chart.getState();
+  initState = providedInitState || await chart.getState();
 
   // VN stock: prefix HOSE co the sai (SHS o HNX) -> resolve dung san qua TradingView symbol search REST,
   // tranh ban symbol invalid len chart (gay ket UI). Non-VN / search khong thay -> giu ticker goc.
   const VN_BOARDS = ['HOSE', 'HSX', 'HNX', 'UPCOM'];
   const givenBoard = ticker.includes(':') ? ticker.split(':')[0].toUpperCase() : null;
-  if (givenBoard && VN_BOARDS.includes(givenBoard)) {
+  const normalizeBoard = board => board === 'HSX' || board === 'HOSE' ? 'HOSE' : board;
+  const symbolParts = raw => {
+    const parts = String(raw || '').toUpperCase().split(':');
+    return parts.length > 1
+      ? { exchange: normalizeBoard(parts.shift()), ticker: parts.join(':') }
+      : { exchange: null, ticker: parts[0] || '' };
+  };
+  const targetParts = symbolParts(ticker);
+  const initParts = symbolParts(initState.symbol);
+  const initMatchesTarget = targetParts.exchange !== null &&
+    targetParts.exchange === initParts.exchange && targetParts.ticker === initParts.ticker;
+  if (givenBoard && VN_BOARDS.includes(givenBoard) && !initMatchesTarget) {
     try {
       const sr = await chart.symbolSearch({ query: shortName });
       const matches = (sr.results || []).filter(x =>
@@ -628,19 +648,18 @@ async function main() {
       // Duplicate tickers exist across VN boards (e.g. HNX:VN30 and HOSE:VN30).
       // Preserve the caller's explicit board before falling back to any match.
       const hit = matches.find(x =>
-        (x.exchange || '').toUpperCase() === givenBoard) || matches[0];
+        normalizeBoard((x.exchange || '').toUpperCase()) === normalizeBoard(givenBoard)) || matches[0];
       if (hit) ticker = hit.full_name;
     } catch (e) {}
   }
 
   await chart.setSymbol({ symbol: ticker });
   let ok = false;
-  for (let i = 0; i < 16; i++) {
-    await sleep(500);
-    try {
-      const st = await chart.getState();
-      if ((st.symbol||'').toUpperCase().includes(shortName.toUpperCase())) { ok = true; break; }
-    } catch(e) {}
+  try {
+    await confirmSymbol(ticker, chart.getState, { attempts: 16, wait: () => sleep(500) });
+    ok = true;
+  } catch (e) {
+    throw new Error(`SYMBOL_UNCONFIRMED:${ticker}`);
   }
   // PIN timeframe — KHONG doc bua TF chart dang mo (vd 6h) gay sai footprint/bars
   await chart.setTimeframe({ timeframe });
@@ -655,15 +674,11 @@ async function main() {
   }
   if (!ok) throw new Error(`SYMBOL_UNCONFIRMED:${ticker}`);
   if (!tfOk) throw new Error(`TIMEFRAME_UNCONFIRMED:${timeframe}`);
-  await sleep(2000);
-
   // Doc study values — retry cho footprint kip tinh sau khi doi symbol/TF (cold layout switch)
-  let sv = { studies: [] };
-  for (let i = 0; i < 8; i++) {
-    sv = await data.getStudyValues().catch(() => ({ studies: [] }));
-    if ((sv.studies||[]).some(s => (s.name||'').includes('Footprint Aggressor'))) break;
-    await sleep(1500);
-  }
+  const sv = { studies: await waitForStudy(
+    () => data.getStudyValues().then(values => values.studies || []),
+    { match: 'Footprint Aggressor', attempts: 28, wait: () => sleep(500) },
+  ) };
   const [fpTbl, ohlcv, quote] = await Promise.all([
     data.getPineTables({}).catch(() => ({ studies: [] })),
     data.getOhlcv({ count: 130 }).catch(() => ({})),  // 130 H6~Daily ~= 26 tuan (du SMA20W)
@@ -726,17 +741,23 @@ async function main() {
   }
 
   const allBars = ohlcv.bars || [];
-  const bars = allBars.slice(-65);   // logic H6 giu nguyen 65 bar; weekly resample tu allBars
+  const liveBar = allBars[allBars.length - 1] || null;
+  // Determine bar state once, then keep every structural path on completed bars.
+  const bar = liveBar ? barStatus(liveBar.time, Number(timeframe) || 360) : { closed: true, age_pct: 100 };
+  const barClosed = bar.closed;
+  const closedBars = (barClosed ? allBars : allBars.slice(0, -1));
+  const analysisBars = closedBars.slice(-65); // legacy H6 window, now closed-only
+  const bars = analysisBars;
+  const todayBar = liveBar;
   const closes = bars.map(b => b.close);
   const n = bars.length;
-  // nen D-0 da dong chua: chua dong -> phase/scenario chot theo nen D-1 (khong nhay trong phien)
-  const bar = barStatus(bars[n-1].time, Number(timeframe) || 360);
-  const barClosed = bar.closed;
 
   // --- Compute SMA20 for every bar (for trail check) ---
   const sma20arr = closes.map((_, i) => i < 19 ? null : sma(closes.slice(0, i+1), 20));
-  const sma20_current = ma.ma20 || sma20arr[n-1];    // prefer indicator value
-  const sma100_current = ma.ma100 || null;
+  const sma20_current = barClosed ? (ma.ma20 || sma20arr[n-1]) : sma20arr[n-1];
+  const sma100_current = barClosed
+    ? (ma.ma100 || null)
+    : computeClosedSma({ bars: allBars, activeBarClosed: false, period: 100 });
 
   // --- Pivot analysis ---
   const { ph, pl } = findPivots(bars, 3);
@@ -746,7 +767,9 @@ async function main() {
   let wave = {};
   const price = quote.last || quote.close || bars[n-1]?.close;
   // gia QUYET DINH phase: nen D-0 chua dong -> dung close D-1 (chot ca phien); dong roi -> gia thuc
-  const decisionPrice = barClosed ? price : (bars[n-2]?.close ?? price);
+  const decisionPrice = barClosed ? price : (bars[n-1]?.close ?? price);
+  const evidenceQuality = barClosed ? 'CONFIRMED' : 'PROVISIONAL';
+  const structuralPrice = barClosed ? price : decisionPrice;
   if (structure === 'UPTREND' && ph.length >= 1 && pl.length >= 2) {
     const ph1 = ph[0].price, ph2 = ph.length >= 2 ? ph[1].price : null;
     const pl1 = pl[0].price, pl2 = pl[1].price;
@@ -783,6 +806,7 @@ async function main() {
     vol: b.volume,
     ratio: avgVol20 ? Math.round(b.volume / avgVol20 * 100) / 100 : null,
   }));
+  const liveBarVolRatio = todayBar && avgVol20 ? round2(todayBar.volume / avgVol20) : null;
 
   // Derived volume state for phase-aware logic
   const lastVolRatio = vol5.length > 0 ? vol5[vol5.length - 1].ratio : null;
@@ -804,7 +828,6 @@ async function main() {
     imb_buy:     fp.buyStack !== null && fp.buyStack >= 1 && (fp.sellStack === null || fp.buyStack > fp.sellStack),
   };
   // ClosePos: (close - low) / (high - low)
-  const todayBar = bars[n-1];
   if (todayBar && todayBar.high > todayBar.low) {
     const cp = (todayBar.close - todayBar.low) / (todayBar.high - todayBar.low) * 100;
     fpChecks.closepos_50 = cp >= 50;
@@ -814,26 +837,26 @@ async function main() {
 
   // --- VSA effort-vs-result (chom cung tai nen no-progress) ---
   // Bo sung cho 'div': bat ca vol cao + dong cua yeu/mid + than nho (gia khong tien len).
-  let vsa_churn = { flag: false, close_pos: fp.closePos ?? null, body_pct: null, vol_ratio: lastVolRatio, note: null };
+  let vsa_churn = { flag: false, close_pos: fp.closePos ?? null, body_pct: null, vol_ratio: liveBarVolRatio, note: null };
   if (todayBar && todayBar.high > todayBar.low) {
     const spread = todayBar.high - todayBar.low;
     const bodyPct = Math.round(Math.abs(todayBar.close - todayBar.open) / spread * 100);
-    const effort    = lastVolRatio !== null && lastVolRatio >= 1.2;  // no luc > TB
+    const effort    = liveBarVolRatio !== null && liveBarVolRatio >= 1.2;  // no luc > TB
     const weakClose = (fp.closePos ?? 50) <= 50;                     // dong <=50% nen
     const noResult  = bodyPct < 35;                                  // than nho -> gia khong tien
     const flag = effort && weakClose && noResult;
     vsa_churn = {
-      flag, close_pos: fp.closePos ?? null, body_pct: bodyPct, vol_ratio: lastVolRatio,
+      flag, close_pos: fp.closePos ?? null, body_pct: bodyPct, vol_ratio: liveBarVolRatio,
       note: flag ? 'no luc cao + ket qua kem -> chom cung/cau yeu, can delta xac nhan' : null,
     };
   }
 
   // --- Overhead resistance gan nhat (room cho RR) ---
-  const aboveHighs = ph.map(p => p.price).filter(p => p > price);
+  const aboveHighs = ph.map(p => p.price).filter(p => p > structuralPrice);
   const overheadPrice = aboveHighs.length ? Math.min(...aboveHighs) : null;
   const overhead = {
     resistance: overheadPrice,
-    headroom_pct: overheadPrice ? Math.round((overheadPrice - price) / price * 1000) / 10 : null,
+    headroom_pct: overheadPrice ? Math.round((overheadPrice - structuralPrice) / structuralPrice * 1000) / 10 : null,
   };
 
   // === TopBot DOAN 2: detector 6 pattern cao trao + nen xac nhan ===
@@ -893,7 +916,7 @@ async function main() {
     const entry = signalBar.close;
     if (det.side === 'SELL') {
       stop = Math.round(signalBar.high * 1.002);
-      const cands = pl.filter(p => p.price < price).map(p => p.price);
+      const cands = pl.filter(p => p.price < structuralPrice).map(p => p.price);
       target = cands.length ? Math.max(...cands) : null;
     } else {
       stop = Math.round(signalBar.low * 0.998);
@@ -942,14 +965,14 @@ async function main() {
   const range_atr = (atr14 && todayBar) ? round2((todayBar.high - todayBar.low) / atr14) : null;
   const spreadOut = { class: cToday.spreadClass, ratio: cToday.spreadRatio, atr14 };
   // doc nen hien tai = 3 so tho, khong phan: range theo boi so ATR + vol ratio + vi tri dong cua
-  const bar_read = { range_atr, vol_ratio: lastVolRatio, close_pos: fp.closePos ?? null };
+  const bar_read = { range_atr, vol_ratio: liveBarVolRatio, close_pos: fp.closePos ?? null, quality: evidenceQuality };
   // nen DA DONG gan nhat (1-3 cay ben trai). bar_read tren la nen real-time chua dong -> doc ket luan o day cho chac
   const closedRead = (b) => b ? {
     range_atr: atr14 ? round2((b.high - b.low) / atr14) : null,
     vol_ratio: avgVol20 ? Math.round(b.volume / avgVol20 * 100) / 100 : null,
     close_pos: b.high > b.low ? Math.round((b.close - b.low) / (b.high - b.low) * 100) : null,
   } : null;
-  const prev_closed = [bars[n-2], bars[n-3], bars[n-4]].map(closedRead);
+  const prev_closed = [bars[n-1], bars[n-2], bars[n-3]].map(closedRead);
   // `bar`/`barClosed` da tinh dau ham (truoc wave) de chot phase theo nen D-1 khi D-0 chua dong
   vol_state.ultra = lastVolRatio != null && lastVolRatio >= VOL_ULTRA;
 
@@ -972,13 +995,13 @@ async function main() {
     price_limit = { board: null };
   } else {
     const limitPct = Math.round(limit * 1000) / 10;
-    const refBar = bars[n - 2];
+      const refBar = bars[n - 1];
     if (refBar != null) {
       const ref = refBar.close;
       const ceiling = Math.round(ref * (1 + limit));
       const floor = Math.round(ref * (1 - limit));
-      const pctFromRef = Math.round((price - ref) / ref * 1000) / 10;
-      const distToCeilingPct = Math.round((ceiling - price) / price * 1000) / 10;
+      const pctFromRef = Math.round((structuralPrice - ref) / ref * 1000) / 10;
+      const distToCeilingPct = Math.round((ceiling - structuralPrice) / structuralPrice * 1000) / 10;
       const ceilingRisk = pctFromRef >= limit * 100 * NEAR_LIMIT;
       const floorRisk = pctFromRef <= -limit * 100 * NEAR_LIMIT;
       price_limit = {
@@ -1000,7 +1023,7 @@ async function main() {
   }
 
   // (C) days_to_vn30f_expiry — thu Nam tuan thu 3 hang thang
-  const today = bars[n - 1] ? new Date(bars[n - 1].time * 1000) : new Date();
+  const today = liveBar ? new Date(liveBar.time * 1000) : new Date();
   const thirdThursday = (year, month) => {
     const first = new Date(year, month, 1);
     const firstThu = 1 + ((4 - first.getDay() + 7) % 7);
@@ -1022,7 +1045,7 @@ async function main() {
     : { rs_20: null, leader: null, note: idxCache ? 'cache VNINDEX cu, chay /scan' : 'chua co cache, chay /scan' };
 
   // --- HTF (khung tuan that, resample tu H6~Daily) ---
-  const htf = weeklyTrend(resampleWeekly(allBars));
+  const htf = weeklyTrend(resampleWeekly(closedBars));
 
   // --- VSA No Demand / No Supply (co tho, KHONG gate) — dung lai cToday da co ---
   // No Demand: nen tang nhung vol thap + spread hep giua uptrend -> cau yeu.
@@ -1053,7 +1076,7 @@ async function main() {
   if (!scenarios.some(s => s.label === 'retest') && db) {
     // retest = plan dung cau truc (shelf + vi tri gia), khong gate theo vol nen dang chay -> on dinh ca phien
     const cr = contRetestScenario({
-      shelf: db.shelf, zoneHi: db.zoneHi, price,
+      shelf: db.shelf, zoneHi: db.zoneHi, price: structuralPrice,
       resistance: overhead.resistance, atr14, dir,
     });
     if (cr) scenarios.push(cr);
@@ -1061,7 +1084,7 @@ async function main() {
   // SIDEWAYS sat overhead: them nhanh breakout (engine buildScenarios chi lam breakout cho UPTREND PULLBACK)
   if (!scenarios.some(s => s.label === 'breakout') && wave.phase === 'SIDEWAYS') {
     const bo = rangeBreakoutScenario({
-      resistance: overhead.resistance, headroomPct: overhead.headroom_pct, price, atr14, dir,
+      resistance: overhead.resistance, headroomPct: overhead.headroom_pct, price: structuralPrice, atr14, dir,
     });
     if (bo) scenarios.push(bo);
   }
@@ -1074,13 +1097,13 @@ async function main() {
     const pmProfile = extractPreviousMonthProfile({
       studies: sv.studies || [],
       expectedSymbol: ticker,
-      marketDate: bars[n-1]?.time ? new Date(bars[n-1].time * 1000).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
+      marketDate: liveBar?.time ? new Date(liveBar.time * 1000).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
       observedAt: new Date().toISOString(),
       maxAgeSeconds: 7200,
     });
 
     // 2. H6 history: SMA, structure, protected low, Avg20 from COMPLETED bars only
-    const h6History = buildClosedH6History({ bars, activeBarClosed: barClosed });
+    const h6History = buildClosedH6History({ bars: allBars, activeBarClosed: barClosed });
     const protectedLow = h6History.protected_low;
 
     // 3. H6 live: ONLY current candle data (observations, never gate READY)
@@ -1112,7 +1135,7 @@ async function main() {
 
     // 4. MA anchor from COMPLETED H6 history
     const maAnchor = classifyMaAnchor({
-      price,
+      price: structuralPrice,
       sma20: h6History.sma20,
       sma100: h6History.sma100,
       preferredAnchor: null,
@@ -1124,7 +1147,7 @@ async function main() {
 
     // 6. Canonical production assembly (also owned by the fixture emitter)
     vnAssembly = buildVnCoreAssembly({
-      price, h6History, h6Live, entryWindow: win, bar,
+      price: structuralPrice, h6History, h6Live, entryWindow: win, bar,
       overheadResistance: overhead.resistance, trail,
     });
     const { setup, autoCore, setupState, planScenario } = vnAssembly;
@@ -1186,7 +1209,7 @@ async function main() {
   const vnGateView = vnAssembly?.gateView ?? null;
 
   // T+2.5: annotate sl_atr/rr_locked/tplus_warn vao scenario + tplus top-level (null neu khong phai VN stock)
-  const tplus = annotateTplus(scenarios, { atr14, price, ticker });
+  const tplus = annotateTplus(scenarios, { atr14, price: structuralPrice, ticker });
 
   // --- Compact output (gate heavy diagnostics behind --full) ---
   const fpOut = { ...fp, score: fpScore, checks: fpChecks };
@@ -1195,8 +1218,20 @@ async function main() {
 
   const out = buildCacheEnvelope({
     ticker, price, timeframe, tf_confirmed: tfOk, dir,
+    signal_quality: evidenceQuality,
+    evidence_quality: {
+      overall: evidenceQuality,
+      closed_derived: 'CONFIRMED',
+      live: evidenceQuality,
+      branches: {
+        pivots: 'CONFIRMED', structure: 'CONFIRMED', wave: 'CONFIRMED', trail: 'CONFIRMED',
+        weekly: 'CONFIRMED', mtf: 'CONFIRMED', overhead: 'CONFIRMED', scenarios: evidenceQuality,
+        topbot: 'CONFIRMED', adtv: 'CONFIRMED', rs: 'CONFIRMED',
+        bar_read: evidenceQuality, vsa: evidenceQuality, footprint: evidenceQuality,
+      },
+    },
     symbol_confirmed: ok,
-    date: bars[n-1]?.time ? new Date(bars[n-1].time * 1000).toISOString().slice(0,10) : new Date().toISOString().slice(0,10),
+    date: liveBar?.time ? new Date(liveBar.time * 1000).toISOString().slice(0,10) : new Date().toISOString().slice(0,10),
     ohlc_today: { o: todayBar?.open, h: todayBar?.high, l: todayBar?.low, c: todayBar?.close, vol: todayBar?.volume },
     ma: { sma20: sma20_current, sma100: sma100_current },
     fp: fpOut,
@@ -1228,13 +1263,13 @@ async function main() {
     days_to_vn30f_expiry,
     overhead,
     scenarios: isVnStock && vnGateView ? vnGateView.scenarios : scenarios,
-    setup_state: isVnStock && vnGateView ? vnGateView.setup_state : computeDecision(scenarios, price).setup_state,
+    setup_state: isVnStock && vnGateView ? vnGateView.setup_state : computeDecision(scenarios, structuralPrice).setup_state,
     decision: isVnStock && vnGateView
       ? { setup_state: vnGateView.setup_state, reason: vnGateView.scenarios.length > 0 ? `canonical ${vnGateView.scenarios[0].label}` : 'no canonical scenario', setup: vnGateView.scenarios[0]?.label ?? null }
-      : computeDecision(scenarios, price),
+      : computeDecision(scenarios, structuralPrice),
     phase_evidence: phaseEvidence({ volRatio: lastVolRatio, closePos: fp.closePos, conf: fp.conf,
       buyPct: fp.buyPct, buyStack: fp.buyStack, churn: vsa_churn.flag,
-      resistance: overhead.resistance ?? bars[n-2]?.high, price,
+      resistance: overhead.resistance ?? bars[n-1]?.high, price,
       wideDownCloseLow: cToday?.isDown && cToday?.spreadClass === 'wide' && (fp.closePos ?? 100) < 50,
       cumDelta: fp.cumD, previousCumDelta: null }),
     tplus,
@@ -1262,9 +1297,49 @@ async function main() {
   console.log('DATA_JSON:' + JSON.stringify(out));
   return out;
   } finally {
+    if (restoreOnExit) { try { await restoreChartState(chart, initState); } catch(e) {} }
+    if (disconnectOnExit) { try { await disconnect(); } catch(e) {} }
+  }
+}
+
+async function main() {
+  const rawArgs = process.argv.slice(2).filter(arg => arg !== '--batch');
+  const batchMode = process.argv.includes('--batch');
+  const tickers = rawArgs.filter(arg => arg.includes(':'));
+  const nonTickers = rawArgs.filter(arg => !arg.includes(':'));
+  const timeframe = nonTickers[0] || defaultTf(tickers[0] || rawArgs[0] || 'HOSE:OCB');
+  const cacheDir = runtimeDataRoot();
+
+  if (batchMode && tickers.length < 2) {
+    throw new Error('BATCH_REQUIRES_2_OR_MORE_TICKERS');
+  }
+  try { await getClient(); } catch(e) { console.error('CDP FAIL:', e.message); process.exit(1); }
+
+  if (!batchMode) {
+    const ticker = rawArgs[0] || 'HOSE:OCB';
+    return withChartLifecycle(cacheDir, ticker, timeframe, () =>
+      runOneCheck({ ticker, timeframe, cacheDir }));
+  }
+
+  // Batch: one process, one CDP connection, one chart lock; restore once at the end.
+  let initState = null;
+  try { initState = await chart.getState(); } catch { initState = null; }
+  return withChartLifecycle(cacheDir, tickers[0], timeframe, async () => {
+    const results = [];
+    for (const ticker of tickers) {
+      try {
+        results.push(await runOneCheck({
+          ticker, timeframe, cacheDir, providedInitState: initState,
+          restoreOnExit: false, disconnectOnExit: false,
+        }));
+      } catch (e) {
+        console.error(`BATCH_ERROR ${ticker}: ${e.message}`);
+      }
+    }
+    if (results.length < tickers.length) process.exitCode = 1;
     try { await restoreChartState(chart, initState); } catch(e) {}
     try { await disconnect(); } catch(e) {}
-  }
+    return results;
   });
 }
 export { buildScenarios, contRetestScenario, findDemandBar, rangeBreakoutScenario, resampleWeekly, weeklyTrend, classifyVnSetup, buildVnAutoCore, buildVnGateView, buildVnPlanScenario, buildVnCoreAssembly, sma };

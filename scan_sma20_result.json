@@ -1,0 +1,292 @@
+[
+  {
+    "ticker": "VND",
+    "price": 18100,
+    "sma20": 16592,
+    "dist_sma20": 9.1,
+    "sma20_slope": 0.99,
+    "price_5d": 6.8,
+    "price_20d": 11.4,
+    "vol_ratio": 1.72,
+    "last_vol": 2.06,
+    "up_days": 3,
+    "close_pos": 67,
+    "patterns": [
+      "BREAKOUT",
+      "TRENDING"
+    ],
+    "score": 55.7
+  },
+  {
+    "ticker": "ACB",
+    "price": 24800,
+    "sma20": 23072,
+    "dist_sma20": 7.5,
+    "sma20_slope": -0.41,
+    "price_5d": 8.8,
+    "price_20d": 5.5,
+    "vol_ratio": 1.39,
+    "last_vol": 2.78,
+    "up_days": 4,
+    "close_pos": 93,
+    "patterns": [
+      "PERSISTENT"
+    ],
+    "score": 49.4
+  },
+  {
+    "ticker": "HSG",
+    "price": 12800,
+    "sma20": 12316,
+    "dist_sma20": 3.9,
+    "sma20_slope": 0.26,
+    "price_5d": 6.2,
+    "price_20d": 6.0,
+    "vol_ratio": 1.37,
+    "last_vol": 2.46,
+    "up_days": 3,
+    "close_pos": 67,
+    "patterns": [],
+    "score": 47.5
+  },
+  {
+    "ticker": "PHR",
+    "price": 68100,
+    "sma20": 65585,
+    "dist_sma20": 3.8,
+    "sma20_slope": 2.56,
+    "price_5d": 4.1,
+    "price_20d": 12.2,
+    "vol_ratio": 1.66,
+    "last_vol": 0.56,
+    "up_days": 2,
+    "close_pos": 90,
+    "patterns": [
+      "BREAKOUT",
+      "TRENDING"
+    ],
+    "score": 44.9
+  },
+  {
+    "ticker": "HHP",
+    "price": 14900,
+    "sma20": 14062,
+    "dist_sma20": 6.0,
+    "sma20_slope": 3.97,
+    "price_5d": 0.0,
+    "price_20d": 18.3,
+    "vol_ratio": 1.11,
+    "last_vol": 1.91,
+    "up_days": 4,
+    "close_pos": 60,
+    "patterns": [
+      "PERSISTENT"
+    ],
+    "score": 41.1
+  },
+  {
+    "ticker": "VCB",
+    "price": 64400,
+    "sma20": 61650,
+    "dist_sma20": 4.5,
+    "sma20_slope": 1.62,
+    "price_5d": 0.0,
+    "price_20d": 2.5,
+    "vol_ratio": 1.1,
+    "last_vol": 0.58,
+    "up_days": 4,
+    "close_pos": 100,
+    "patterns": [
+      "PERSISTENT"
+    ],
+    "score": 39.1
+  },
+  {
+    "ticker": "LPB",
+    "price": 54100,
+    "sma20": 51140,
+    "dist_sma20": 5.8,
+    "sma20_slope": 3.46,
+    "price_5d": 4.8,
+    "price_20d": 16.3,
+    "vol_ratio": 0.88,
+    "last_vol": 0.29,
+    "up_days": 5,
+    "close_pos": 25,
+    "patterns": [
+      "PERSISTENT"
+    ],
+    "score": 38.5
+  },
+  {
+    "ticker": "VPB",
+    "price": 27600,
+    "sma20": 27435,
+    "dist_sma20": 0.6,
+    "sma20_slope": -0.67,
+    "price_5d": 3.2,
+    "price_20d": 0.7,
+    "vol_ratio": 0.96,
+    "last_vol": 0.86,
+    "up_days": 3,
+    "close_pos": 78,
+    "patterns": [],
+    "score": 32.6
+  },
+  {
+    "ticker": "VIB",
+    "price": 16250,
+    "sma20": 16138,
+    "dist_sma20": 0.7,
+    "sma20_slope": -2.15,
+    "price_5d": 2.8,
+    "price_20d": -5.5,
+    "vol_ratio": 1.7,
+    "last_vol": 1.61,
+    "up_days": 3,
+    "close_pos": 89,
+    "patterns": [],
+    "score": 31.9
+  },
+  {
+    "ticker": "NKG",
+    "price": 14050,
+    "sma20": 14005,
+    "dist_sma20": 0.3,
+    "sma20_slope": -1.37,
+    "price_5d": 2.6,
+    "price_20d": -3.1,
+    "vol_ratio": 1.07,
+    "last_vol": 1.17,
+    "up_days": 3,
+    "close_pos": 62,
+    "patterns": [],
+    "score": 29.0
+  },
+  {
+    "ticker": "PAN",
+    "price": 33500,
+    "sma20": 32375,
+    "dist_sma20": 3.5,
+    "sma20_slope": 0.44,
+    "price_5d": 2.4,
+    "price_20d": 5.2,
+    "vol_ratio": 1.1,
+    "last_vol": 1.17,
+    "up_days": 3,
+    "close_pos": 11,
+    "patterns": [],
+    "score": 28.1
+  },
+  {
+    "ticker": "VIX",
+    "price": 18650,
+    "sma20": 18178,
+    "dist_sma20": 2.6,
+    "sma20_slope": 2.19,
+    "price_5d": -3.1,
+    "price_20d": 10.7,
+    "vol_ratio": 0.96,
+    "last_vol": 0.61,
+    "up_days": 3,
+    "close_pos": 40,
+    "patterns": [
+      "PULLBACK_SMA20"
+    ],
+    "score": 23.3
+  },
+  {
+    "ticker": "BID",
+    "price": 43600,
+    "sma20": 42298,
+    "dist_sma20": 3.1,
+    "sma20_slope": 1.71,
+    "price_5d": -1.5,
+    "price_20d": 4.8,
+    "vol_ratio": 0.76,
+    "last_vol": 0.47,
+    "up_days": 2,
+    "close_pos": 81,
+    "patterns": [],
+    "score": 23.2
+  },
+  {
+    "ticker": "FPT",
+    "price": 74500,
+    "sma20": 73715,
+    "dist_sma20": 1.1,
+    "sma20_slope": 0.03,
+    "price_5d": 0.0,
+    "price_20d": 0.3,
+    "vol_ratio": 1.04,
+    "last_vol": 0.42,
+    "up_days": 2,
+    "close_pos": 90,
+    "patterns": [
+      "PULLBACK_SMA20"
+    ],
+    "score": 20.6
+  },
+  {
+    "ticker": "SSI",
+    "price": 28000,
+    "sma20": 27830,
+    "dist_sma20": 0.6,
+    "sma20_slope": -0.81,
+    "price_5d": 0.7,
+    "price_20d": 0.2,
+    "vol_ratio": 1.08,
+    "last_vol": 1.09,
+    "up_days": 2,
+    "close_pos": 86,
+    "patterns": [],
+    "score": 18.1
+  },
+  {
+    "ticker": "FTS",
+    "price": 24100,
+    "sma20": 24061,
+    "dist_sma20": 0.2,
+    "sma20_slope": -0.68,
+    "price_5d": -1.1,
+    "price_20d": 0.0,
+    "vol_ratio": 1.11,
+    "last_vol": 1.19,
+    "up_days": 2,
+    "close_pos": 62,
+    "patterns": [],
+    "score": 15.5
+  },
+  {
+    "ticker": "GAS",
+    "price": 82500,
+    "sma20": 81095,
+    "dist_sma20": 1.7,
+    "sma20_slope": 2.07,
+    "price_5d": -4.6,
+    "price_20d": 6.6,
+    "vol_ratio": 0.84,
+    "last_vol": 0.37,
+    "up_days": 2,
+    "close_pos": 10,
+    "patterns": [
+      "PULLBACK_SMA20"
+    ],
+    "score": 9.1
+  },
+  {
+    "ticker": "GEX",
+    "price": 34100,
+    "sma20": 32336,
+    "dist_sma20": 5.5,
+    "sma20_slope": 5.46,
+    "price_5d": -5.8,
+    "price_20d": 25.0,
+    "vol_ratio": 0.78,
+    "last_vol": 0.41,
+    "up_days": 2,
+    "close_pos": 33,
+    "patterns": [],
+    "score": 6.2
+  }
+]

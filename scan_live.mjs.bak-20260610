@@ -1,0 +1,317 @@
+/**
+ * scan_live.mjs — Scan 22-ma watchlist qua TradingView CDP (H6)
+ * Doc du lieu truc tiep tu Footprint + PP PRO indicators
+ * Run: node scan_live.mjs
+ */
+
+import * as chart from './src/core/chart.js';
+import * as data from './src/core/data.js';
+import { getClient } from './src/connection.js';
+
+// 22-ma watchlist (backtest-validated 2026-05-27)
+const WATCHLIST = [
+  // Nhom 1 - Ca 2 chien luoc (PP PRO + Sweep)
+  { t: 'HOSE:SHB',  g: 1, name: 'SHB'  },
+  { t: 'HOSE:VIX',  g: 1, name: 'VIX'  },
+  { t: 'HOSE:FTS',  g: 1, name: 'FTS'  },
+  { t: 'HOSE:FRT',  g: 1, name: 'FRT'  },
+  { t: 'HOSE:VCI',  g: 1, name: 'VCI'  },
+  { t: 'HOSE:MBB',  g: 1, name: 'MBB'  },
+  { t: 'HOSE:ACB',  g: 1, name: 'ACB'  },
+  // Nhom 2 - PP PRO only
+  { t: 'HOSE:PDR',  g: 2, name: 'PDR'  },
+  { t: 'HOSE:VND',  g: 2, name: 'VND'  },
+  { t: 'HOSE:CII',  g: 2, name: 'CII'  },
+  { t: 'HOSE:SSI',  g: 2, name: 'SSI'  },
+  { t: 'HOSE:DXG',  g: 2, name: 'DXG'  },
+  { t: 'HOSE:BID',  g: 2, name: 'BID'  },
+  { t: 'HOSE:CTG',  g: 2, name: 'CTG'  },
+  { t: 'HOSE:LPB',  g: 2, name: 'LPB'  },
+  { t: 'HOSE:KDH',  g: 2, name: 'KDH'  },
+  // Nhom 3 - Sweep only
+  { t: 'HOSE:PNJ',  g: 3, name: 'PNJ'  },
+  { t: 'HOSE:ORS',  g: 3, name: 'ORS'  },
+  { t: 'HOSE:MWG',  g: 3, name: 'MWG'  },
+  { t: 'HOSE:TCB',  g: 3, name: 'TCB'  },
+  { t: 'HOSE:HDB',  g: 3, name: 'HDB'  },
+  { t: 'HOSE:HCM',  g: 3, name: 'HCM'  },
+];
+
+const GROUP_LABEL = { 1: 'PP+SW', 2: 'PP only', 3: 'SW only' };
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function parseNum(val) {
+  if (val == null || val === '∅' || val === '') return null;
+  const s = val.toString().replace(/[,\s]/g, '').replace('−', '-');
+  const n = parseFloat(s);
+  return isNaN(n) ? null : n;
+}
+
+function extractFP(studies) {
+  const fp = {
+    conf: null, cumDelta: null, buyVol: null, sellVol: null, totalVol: null,
+    buyPct: null, divSignal: null, maxBuyStack: null, maxSellStack: null,
+    pocHigh: null, pocLow: null, vah: null, val: null, verRatio: null,
+    fpDelta: null,
+  };
+  const ma = { ma20: null, ma100: null, ppSignal: null };
+  let price = null;
+
+  for (const s of studies) {
+    const v = s.values;
+    if (s.name.includes('Footprint Aggressor')) {
+      fp.conf         = parseNum(v['Confluence']);
+      fp.cumDelta     = parseNum(v['Cum Delta']);
+      fp.buyVol       = parseNum(v['FP Buy Vol']);
+      fp.sellVol      = parseNum(v['FP Sell Vol']);
+      fp.totalVol     = parseNum(v['FP Total Vol']);
+      fp.divSignal    = parseNum(v['Div Signal']);
+      fp.maxBuyStack  = parseNum(v['Max Buy Stack']);
+      fp.maxSellStack = parseNum(v['Max Sell Stack']);
+      fp.pocHigh      = parseNum(v['FP POC High']);
+      fp.pocLow       = parseNum(v['FP POC Low']);
+      fp.vah          = parseNum(v['FP VAH']);
+      fp.val          = parseNum(v['FP VAL']);
+      fp.verRatio     = parseNum(v['VER Ratio']);
+      fp.fpDelta      = parseNum(v['FP Delta']);
+      if (fp.totalVol > 0 && fp.buyVol !== null)
+        fp.buyPct = Math.round(fp.buyVol / fp.totalVol * 100);
+    }
+    if (s.name.includes('Pocket Pivot PRO')) {
+      ma.ma20     = parseNum(v['MA Nhanh (Tim)'] || v['MA Nhanh (Tím)'] || v['MA Fast'] || v['MA Nhanh']);
+      ma.ma100    = parseNum(v['MA Cham'] || v['MA Chậm'] || v['MA Slow'] || v['MA Macro']);
+      ma.ppSignal = parseNum(v['Pocket Pivot PRO']);
+    }
+    // Fallback: lay gia tu Price Action GEM
+    if (s.name.includes('Price Action GEM') && !ma.ma20) {
+      ma.ma20  = parseNum(v['MA Fast']);
+      ma.ma100 = parseNum(v['MA Slow']);
+    }
+  }
+
+  return { fp, ma };
+}
+
+function parseFPTable(fpTableResult) {
+  // Tra ve cac row tu Footprint table de hien thi
+  if (!fpTableResult || !fpTableResult.studies || fpTableResult.studies.length === 0)
+    return [];
+  const rows = [];
+  for (const s of fpTableResult.studies) {
+    for (const tbl of s.tables || []) {
+      rows.push(...(tbl.rows || []));
+    }
+  }
+  return rows;
+}
+
+function scoreSignal(fp, ma, price) {
+  const c = {};
+
+  // 1. Confluence >= 60
+  c.conf = fp.conf !== null ? fp.conf >= 60 : null;
+  // 2. Cum Delta > 0
+  c.cumD = fp.cumDelta !== null ? fp.cumDelta > 0 : null;
+  // 3. Buy% >= 55%
+  c.buyPct = fp.buyPct !== null ? fp.buyPct >= 55 : null;
+  // 4. No Div Signal
+  c.noDIV = fp.divSignal !== null ? fp.divSignal === 0 : null;
+  // 5. IMB Buy Stack >= 1
+  c.buyIMB = fp.maxBuyStack !== null ? fp.maxBuyStack >= 1 : null;
+  // 6. Price > SMA20
+  c.aboveMA20 = (price && ma.ma20) ? price > ma.ma20 : null;
+  // 7. SMA20 > SMA100
+  c.ma20vsMa100 = (ma.ma20 && ma.ma100) ? ma.ma20 > ma.ma100 : null;
+
+  const known = Object.values(c).filter(v => v !== null);
+  const passed = known.filter(v => v === true).length;
+  const total  = known.length;
+  const pct    = total > 0 ? Math.round(passed / total * 100) : null;
+
+  // Hard reject: Div TRUE + CumDelta < 0
+  let sig = 'N/A';
+  if (pct !== null) {
+    if (fp.divSignal === 1 && fp.cumDelta !== null && fp.cumDelta < 0) sig = 'LOAI';
+    else if (pct >= 71) sig = 'BUY';
+    else if (pct >= 43) sig = 'WATCH';
+    else sig = 'AVOID';
+  }
+  // Require at least 4 known criteria
+  if (total < 4) sig = 'N/A';
+
+  return { sig, pct, passed, total, c };
+}
+
+function fmtNum(n, decimals = 0) {
+  if (n == null) return 'N/A';
+  if (Math.abs(n) >= 1e9) return (n/1e9).toFixed(1) + 'B';
+  if (Math.abs(n) >= 1e6) return (n/1e6).toFixed(1) + 'M';
+  if (Math.abs(n) >= 1e3) return (n/1e3).toFixed(0) + 'K';
+  return n.toFixed(decimals);
+}
+
+async function scanOne(ticker, name) {
+  // Set symbol
+  try {
+    await chart.setSymbol({ symbol: ticker });
+  } catch(e) {
+    return { error: 'setSymbol: ' + e.message };
+  }
+
+  // Poll until chart symbol actually changes (max 6s)
+  const shortTicker = ticker.split(':').pop();
+  let confirmed = false;
+  for (let i = 0; i < 12; i++) {
+    await sleep(500);
+    try {
+      const st = await chart.getState();
+      const curSym = (st.symbol || '').split(':').pop().toUpperCase();
+      if (curSym === shortTicker.toUpperCase()) { confirmed = true; break; }
+    } catch(e) {}
+  }
+  if (!confirmed) {
+    // extra wait
+    await sleep(1500);
+  }
+  // Extra wait for Footprint indicator to reload data
+  await sleep(1500);
+
+  // Read data in parallel
+  let sv, fpTbl, q;
+  try {
+    [sv, fpTbl, q] = await Promise.all([
+      data.getStudyValues().catch(()=>({ studies: [] })),
+      data.getPineTables({ study_filter: 'Footprint' }).catch(()=>({ studies: [] })),
+      data.getQuote({}).catch(()=>({})),
+    ]);
+  } catch(e) {
+    return { error: 'read data: ' + e.message };
+  }
+
+  const price = q.last || q.close || null;
+  const { fp, ma } = extractFP(sv.studies || []);
+  const tableRows = parseFPTable(fpTbl);
+  const scored = scoreSignal(fp, ma, price);
+
+  return { price, fp, ma, scored, tableRows };
+}
+
+async function main() {
+  // Verify CDP
+  try {
+    await getClient();
+  } catch(e) {
+    console.error('CDP connection FAILED:', e.message);
+    process.exit(1);
+  }
+
+  const initState = await chart.getState();
+  console.log('Connected! Chart: ' + initState.symbol + ' | TF: ' + initState.resolution);
+  if (initState.resolution !== '360') {
+    console.log('WARNING: TF is not H6 (360). Scan results may be wrong!');
+    console.log('Per user profile: MUST use H6 for VN stocks volume analysis');
+  }
+  console.log('Scanning ' + WATCHLIST.length + ' ma...\n');
+
+  const results = [];
+
+  for (let i = 0; i < WATCHLIST.length; i++) {
+    const { t, g, name } = WATCHLIST[i];
+    process.stdout.write('[' + (i+1) + '/' + WATCHLIST.length + '] ' + name + '... ');
+    const r = await scanOne(t, name);
+    if (r.error) {
+      console.log('ERROR: ' + r.error);
+      results.push({ name, group: g, error: r.error, sig: 'ERR' });
+      continue;
+    }
+    const sig = r.scored.sig;
+    const pct = r.scored.pct;
+    console.log(sig + (pct !== null ? ' (' + pct + '%)' : '') +
+      ' | Conf:' + (r.fp.conf ?? 'N/A') +
+      ' CumD:' + (r.fp.cumDelta !== null ? fmtNum(r.fp.cumDelta) : 'N/A') +
+      ' Buy%:' + (r.fp.buyPct ?? 'N/A') +
+      (r.fp.divSignal === 1 ? ' DIV!' : ''));
+    results.push({ name, group: g, ...r, sig });
+  }
+
+  // Restore chart
+  try { await chart.setSymbol({ symbol: initState.symbol }); } catch(e) {}
+
+  // ---- OUTPUT ----
+  const W = 80;
+  const buy   = results.filter(r => r.sig === 'BUY').sort((a,b) => (b.scored?.pct||0)-(a.scored?.pct||0));
+  const watch = results.filter(r => r.sig === 'WATCH').sort((a,b) => (b.scored?.pct||0)-(a.scored?.pct||0));
+  const avoid = results.filter(r => r.sig === 'AVOID');
+  const loai  = results.filter(r => r.sig === 'LOAI');
+  const noData= results.filter(r => r.sig === 'N/A' || r.sig === 'ERR');
+
+  console.log('\n' + '='.repeat(W));
+  console.log('  SCAN REPORT H6 | ' + new Date().toLocaleDateString('vi-VN') + ' | BUY:' + buy.length + ' WATCH:' + watch.length + ' AVOID:' + avoid.length + ' LOAI:' + loai.length);
+  console.log('='.repeat(W));
+
+  function printHeader() {
+    console.log('  ' + 'MA'.padEnd(6) + 'GRP'.padEnd(8) +
+      'GIA'.padStart(9) + 'SCORE'.padStart(7) +
+      'CONF'.padStart(6) + 'CUMD'.padStart(10) +
+      'BUY%'.padStart(6) + 'DIV'.padStart(5) + 'BST'.padStart(5));
+    console.log('  ' + '-'.repeat(70));
+  }
+
+  function printRow(r) {
+    const fp = r.fp || {};
+    const sc = r.scored || {};
+    const price = r.price ? Math.round(r.price).toLocaleString() : '---';
+    const conf  = fp.conf !== null && fp.conf !== undefined ? fp.conf.toString() : '---';
+    const cumD  = fp.cumDelta !== null && fp.cumDelta !== undefined ? fmtNum(fp.cumDelta) : '---';
+    const buyP  = fp.buyPct !== null && fp.buyPct !== undefined ? fp.buyPct + '%' : '---';
+    const div   = fp.divSignal !== null && fp.divSignal !== undefined ? (fp.divSignal === 1 ? 'YES' : 'no') : '---';
+    const bst   = fp.maxBuyStack !== null && fp.maxBuyStack !== undefined ? fp.maxBuyStack.toString() : '---';
+    const score = sc.pct !== null && sc.pct !== undefined ? sc.pct + '%' : '---';
+    const grp   = GROUP_LABEL[r.group] || '';
+    console.log('  ' + r.name.padEnd(6) + grp.padEnd(8) +
+      price.padStart(9) + score.padStart(7) +
+      conf.padStart(6) + cumD.padStart(10) +
+      buyP.padStart(6) + div.padStart(5) + bst.padStart(5));
+  }
+
+  function printSection(label, items) {
+    if (items.length === 0) return;
+    console.log('\n' + label + ' (' + items.length + ' ma)');
+    printHeader();
+    for (const r of items) printRow(r);
+    // Show table for BUY signals
+    if (label.includes('BUY')) {
+      console.log('');
+      for (const r of items) {
+        if (!r.tableRows || r.tableRows.length === 0) continue;
+        console.log('  --- ' + r.name + ' Footprint Table ---');
+        for (const row of r.tableRows) console.log('    ' + row);
+      }
+    }
+  }
+
+  printSection('>>> BUY SIGNALS', buy);
+  printSection('>>> WATCH', watch);
+
+  if (avoid.length > 0) {
+    console.log('\n>>> AVOID (' + avoid.length + ' ma)');
+    console.log('  ' + avoid.map(r => r.name + '(' + (r.scored?.pct ?? '?') + '%)').join(', '));
+  }
+  if (loai.length > 0) {
+    console.log('\n>>> LOAI NGAY (' + loai.length + ' ma)');
+    for (const r of loai) {
+      const fp = r.fp || {};
+      console.log('  ' + r.name + ': DIV+CumDelta neg | CumD=' + fmtNum(fp.cumDelta) + ' Conf=' + fp.conf);
+    }
+  }
+  if (noData.length > 0) {
+    console.log('\n>>> KHONG DU DU LIEU (' + noData.length + ' ma): ' + noData.map(r=>r.name).join(', '));
+  }
+
+  console.log('\n  Criteria: [Conf>=60][CumD>0][Buy%>=55][NoDIV][BuyIMB>=1][P>MA20][MA20>100]');
+  console.log('  Data source: TradingView H6 Footprint Aggressor v2 (CDP real-time)');
+  console.log('='.repeat(W));
+  process.exit(0);
+}
+
+main().catch(e => { console.error(e); process.exit(1); });

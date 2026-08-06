@@ -1,0 +1,125 @@
+﻿diff --git a/bar_status.mjs b/bar_status.mjs
+index a7c4ad2..846a95e 100644
+--- a/bar_status.mjs
++++ b/bar_status.mjs
+@@ -30,19 +30,33 @@ export function barStatus(barOpenSec, tfMin, now = new Date()) {
+  * market != 'VN' → { phase:'N/A', trust_level:'HIGH', warnings:[] } (nhuong thị trường khác).
+  * Dong bo logic Python voi tg_alert_watcher.py vn_session_phase().
+  */
++// Moc chuyen phien (phut trong ngay) + ten phien SAU moc do. Dung chung cho next_phase/minutes_remaining.
++const PHASE_BOUNDARIES = [
++  [540, 'ATO'], [555, 'EARLY'], [570, 'CONT_AM'], [690, 'LUNCH'],
++  [780, 'CONT_PM'], [870, 'ATC'], [885, 'CLOSED'],
++];
++
+ export function sessionInfo(now = new Date(), market = 'VN') {
+-  if (market !== 'VN') return { phase: 'N/A', trust_level: 'HIGH', warnings: [] };
++  if (market !== 'VN') return { phase: 'N/A', trust_level: 'HIGH', warnings: [], next_phase: null, minutes_remaining: null, phase_warning: null };
+   const wd = now.getDay(); // 0=Sun..6=Sat
+-  if (wd === 0 || wd === 6) return { phase: 'CLOSED', trust_level: 'LOW', warnings: ['weekend'] };
++  const weekendOrClosed = { next_phase: null, minutes_remaining: null, phase_warning: null };
++  if (wd === 0 || wd === 6) return { phase: 'CLOSED', trust_level: 'LOW', warnings: ['weekend'], ...weekendOrClosed };
+   const t = now.getHours() * 60 + now.getMinutes();
+-  if (t < 540)  return { phase: 'CLOSED',    trust_level: 'LOW',  warnings: ['pre_market'] };
+-  if (t < 555)  return { phase: 'ATO',       trust_level: 'LOW',  warnings: ['ato_noisy_delta'] };
+-  if (t < 570)  return { phase: 'EARLY',     trust_level: 'LOW',  warnings: ['early_vol_unstable'] };
+-  if (t < 690)  return { phase: 'CONT_AM',   trust_level: 'HIGH', warnings: [] };
+-  if (t < 780)  return { phase: 'LUNCH',     trust_level: 'LOW',  warnings: ['lunch_stale_price'] };
+-  if (t < 870)  return { phase: 'CONT_PM',   trust_level: 'HIGH', warnings: [] };
+-  if (t < 885)  return { phase: 'ATC',       trust_level: 'LOW',  warnings: ['atc_frozen_orderbook'] };
+-  return { phase: 'CLOSED', trust_level: 'HIGH', warnings: [] }; // >14:45 gia dong chinh thuc
++  const nextB = PHASE_BOUNDARIES.find(([m]) => m > t);
++  const next_phase = nextB ? nextB[1] : null;
++  const minutes_remaining = nextB ? nextB[0] - t : null;
++  let phase, trust_level, warnings;
++  if (t < 540)      { phase = 'CLOSED';   trust_level = 'LOW';  warnings = ['pre_market']; }
++  else if (t < 555) { phase = 'ATO';      trust_level = 'LOW';  warnings = ['ato_noisy_delta']; }
++  else if (t < 570) { phase = 'EARLY';    trust_level = 'LOW';  warnings = ['early_vol_unstable']; }
++  else if (t < 690) { phase = 'CONT_AM';  trust_level = 'HIGH'; warnings = []; }
++  else if (t < 780) { phase = 'LUNCH';    trust_level = 'LOW';  warnings = ['lunch_stale_price']; }
++  else if (t < 870) { phase = 'CONT_PM';  trust_level = 'HIGH'; warnings = []; }
++  else if (t < 885) { phase = 'ATC';      trust_level = 'LOW';  warnings = ['atc_frozen_orderbook']; }
++  else              { phase = 'CLOSED';   trust_level = 'HIGH'; warnings = []; } // >14:45 gia dong chinh thuc
++  const phase_warning = (phase === 'CONT_PM' && minutes_remaining !== null && minutes_remaining <= 15) ? 'atc_approaching' : null;
++  const outNext = phase === 'CLOSED' ? weekendOrClosed : { next_phase, minutes_remaining, phase_warning };
++  return { phase, trust_level, warnings, ...outNext };
+ }
+ 
+ // ponytail: self-check chay khi goi truc tiep `node bar_status.mjs`
+@@ -72,6 +86,13 @@ if (process.argv[1] && process.argv[1].endsWith('bar_status.mjs')) {
+   console.assert(sessionInfo(new Date(2026, 6, 9, 13, 30)).phase === 'CONT_PM', '13:30 phai CONT_PM');
+   console.assert(sessionInfo(new Date(2026, 6, 9, 15, 0)).trust_level === 'HIGH', '15:00 trust=HIGH (post-close)');
+   console.assert(sessionInfo(new Date(2026, 6, 9, 10, 0), 'FX').phase === 'N/A', 'FX market=N/A');
++  // clock countdown self-check (Khoi A1)
++  const s1420 = sessionInfo(new Date(2026, 6, 9, 14, 20));
++  console.assert(s1420.next_phase === 'ATC' && s1420.minutes_remaining === 10 && s1420.phase_warning === 'atc_approaching', '14:20 phai con 10ph toi ATC + canh bao');
++  const s1000 = sessionInfo(new Date(2026, 6, 9, 10, 0));
++  console.assert(s1000.next_phase === 'LUNCH' && s1000.minutes_remaining === 90 && s1000.phase_warning === null, '10:00 phai con 90ph toi LUNCH, khong canh bao');
++  const sClosed = sessionInfo(new Date(2026, 6, 9, 15, 0));
++  console.assert(sClosed.next_phase === null && sClosed.minutes_remaining === null, 'CLOSED phai next_phase=null');
+   console.log('sessionInfo self-check OK');
+   console.log('bar_status self-check OK');
+ }
+diff --git a/check_one.mjs b/check_one.mjs
+index 5ef801a..09ad785 100644
+--- a/check_one.mjs
++++ b/check_one.mjs
+@@ -234,6 +234,21 @@ function rangeBreakoutScenario({ resistance, headroomPct, price, atr14, dir }) {
+     size_note: '1/2 size, chase' };
+ }
+ 
++// Decision co hoc tu scenarios (engine da gate: scenarios rong = khong co keo long kha thi
++// vi dir SHORT/NEUTRAL chan het scenario builder). READY = gia dang trong entry zone;
++// WATCH = co setup nhung cho trigger; AVOID = khong co setup. KHONG tu phat BUY (do LLM/nguoi quyet).
++export function computeDecision(scenarios, price) {
++  if (!scenarios || scenarios.length === 0) {
++    return { state: 'AVOID', reason: 'khong co kich ban long kha thi', setup: null };
++  }
++  const inZone = scenarios.find(s =>
++    price >= Math.min(s.entry_low, s.entry_high) && price <= Math.max(s.entry_low, s.entry_high));
++  if (inZone) {
++    return { state: 'READY', reason: `gia trong entry zone (${inZone.label})`, setup: inZone.label };
++  }
++  return { state: 'WATCH', reason: `co setup ${scenarios[0].label}, cho trigger`, setup: scenarios[0].label };
++}
++
+ // T+2.5 (chi VN stock): mua xong ~2.5 phien hang chua ve, KHONG ban duoc -> SL gan chi la muc bao dong.
+ // Annotate MAY MOC vao tung scenario (skill/bot khoi tinh tay): sl_atr = khoang SL theo boi ATR,
+ // rr_locked = RR neu phai thoat theo nhieu cua so khoa (1.6 ATR ~ sqrt(2.5) phien), tplus_warn khi SL trong nhieu.
+@@ -701,6 +716,16 @@ async function main() {
+   // --- HTF (khung tuan that, resample tu H6~Daily) ---
+   const htf = weeklyTrend(resampleWeekly(allBars));
+ 
++  // --- VSA No Demand / No Supply (co tho, KHONG gate) — dung lai cToday da co ---
++  // No Demand: nen tang nhung vol thap + spread hep giua uptrend -> cau yeu.
++  // No Supply: nen giam nhung vol thap + spread hep giua pullback/downtrend -> cung can.
++  const trendUp = htf.trend === 'UP' || wave.phase === 'IMPULSE';
++  const trendPullback = wave.phase === 'PULLBACK' || htf.trend === 'DOWN';
++  const vsa_signals = {
++    no_demand: { flag: !!(cToday.isUp && cToday.spreadClass === 'narrow' && lastVolRatio !== null && lastVolRatio < PULLBACK_VOL && trendUp) },
++    no_supply: { flag: !!(cToday.isDown && cToday.spreadClass === 'narrow' && lastVolRatio !== null && lastVolRatio < PULLBACK_VOL && trendPullback) },
++  };
++
+   // --- MTF score: H6 (structure + SMA) + Weekly that ---
+   let mtfScore = 0;
+   const mtfNotes = [];
+@@ -765,14 +790,19 @@ async function main() {
+       age_pct: bar.age_pct,
+       vol_ratio_age_adj,
+       warnings: sess.warnings,
++      next_phase: sess.next_phase,
++      minutes_remaining: sess.minutes_remaining,
++      phase_warning: sess.phase_warning,
+     },
+     vsa_churn,
++    vsa_signals,
+     topbot,
+     price_limit,
+     adtv_20_bn,
+     days_to_vn30f_expiry,
+     overhead,
+     scenarios,
++    decision: computeDecision(scenarios, price),
+     tplus,
+     rs,
+     htf,

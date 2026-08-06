@@ -1,0 +1,36 @@
+{
+  "account": {
+    "size": 60000000,
+    "currency": "VND",
+    "note": "Set bang lenh /setaccount [so tien] trong Telegram"
+  },
+  "lastReview": {
+    "date": "5/6/2026",
+    "buyList": [],
+    "watchList": [],
+    "divList": [
+      "CTG",
+      "VPB",
+      "HDB",
+      "EIB",
+      "FPT",
+      "MWG",
+      "DGW",
+      "MSN",
+      "VHM",
+      "GAS",
+      "HPG",
+      "NKG",
+      "POW",
+      "NT2",
+      "SSI"
+    ],
+    "vnIndex": 1838.9,
+    "vnChg": 0.4
+  },
+  "positions": [],
+  "dailyPnL": {
+    "date": "3/6/2026",
+    "realized": 0
+  }
+}

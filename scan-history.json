@@ -1,0 +1,168 @@
+{
+  "2026-06-05": {
+    "buyList": [],
+    "watchList": [],
+    "divList": [
+      "CTG",
+      "VPB",
+      "HDB",
+      "EIB",
+      "FPT",
+      "MWG",
+      "DGW",
+      "MSN",
+      "VHM",
+      "GAS",
+      "HPG",
+      "NKG",
+      "POW",
+      "NT2",
+      "SSI"
+    ],
+    "vnIndex": 1838.9,
+    "vnChg": 0.4
+  },
+  "2026-06-04": {
+    "buyList": [
+      {
+        "ticker": "VIB",
+        "conf": 92,
+        "phase": "RE-ACCUM 3.8% tu day",
+        "close": 16250,
+        "chgPct": 1.6
+      },
+      {
+        "ticker": "TPB",
+        "conf": 63,
+        "phase": "RE-ACCUM 3.6% tu day",
+        "close": 15950,
+        "chgPct": 1.6
+      }
+    ],
+    "watchList": [],
+    "divList": [
+      "VPB",
+      "HDB",
+      "EIB",
+      "FPT",
+      "MWG",
+      "DGW",
+      "MSN",
+      "PNJ",
+      "HAG",
+      "HPG",
+      "NKG",
+      "TLH",
+      "NT2",
+      "PAN",
+      "VCI"
+    ],
+    "vnIndex": 1831.55,
+    "vnChg": 0.69,
+    "performance": {
+      "VIB": {
+        "D1": -0.62
+      },
+      "TPB": {
+        "D1": 1.57
+      }
+    }
+  },
+  "2026-06-03": {
+    "buyList": [],
+    "watchList": [],
+    "divList": [
+      "TCB",
+      "VPB",
+      "EIB",
+      "DGW",
+      "VNM",
+      "MSN",
+      "SAB",
+      "PNJ",
+      "HAG",
+      "REE",
+      "HPG",
+      "NKG",
+      "POW",
+      "NT2",
+      "SSI",
+      "VCI"
+    ],
+    "vnIndex": 1823.37,
+    "vnChg": -0.17,
+    "performance": {}
+  },
+  "2026-06-02": {
+    "buyList": [],
+    "watchList": [],
+    "divList": [],
+    "vnIndex": 0,
+    "vnChg": 0,
+    "performance": {}
+  },
+  "2026-06-01": {
+    "buyList": [],
+    "watchList": [],
+    "divList": [],
+    "vnIndex": 1844.54,
+    "vnChg": -1.02,
+    "performance": {}
+  },
+  "2026-05-29": {
+    "buyList": [],
+    "watchList": [],
+    "divList": [
+      "EIB",
+      "DGW",
+      "VNM",
+      "SAB",
+      "VHM",
+      "HPG",
+      "NKG",
+      "NT2",
+      "HHP",
+      "SSI",
+      "VCI",
+      "FTS"
+    ],
+    "vnIndex": 25000,
+    "vnChg": 0,
+    "performance": {}
+  },
+  "2026-05-28": {
+    "buyList": [
+      {
+        "ticker": "VHM",
+        "conf": 86,
+        "phase": "MARKUP 8.6% tu day",
+        "close": 157700,
+        "chgPct": 8
+      }
+    ],
+    "watchList": [],
+    "divList": [
+      "VNM",
+      "PHR",
+      "HHP",
+      "PAN",
+      "SSI",
+      "VCI"
+    ],
+    "vnIndex": 1863.67,
+    "vnChg": -0.57,
+    "performance": {
+      "VHM": {
+        "D1": -1.08
+      }
+    }
+  },
+  "2026-05-26": {
+    "buyList": [],
+    "watchList": [],
+    "divList": [],
+    "vnIndex": 1884.18,
+    "vnChg": -0.1,
+    "performance": {}
+  }
+}

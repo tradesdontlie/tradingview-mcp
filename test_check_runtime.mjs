@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { acquireLock, atomicWriteCache, cachePaths, evidenceHash, releaseLock, runtimeDataRoot } from './src/core/check_runtime.mjs';
 import { buildCacheEnvelope, restoreChartState, withChartLifecycle } from './check_one.mjs';
 
@@ -102,4 +104,9 @@ assert.equal(lifecycleOwner.ticker, 'HNX:SHS');
 assert.equal(lifecycleOwner.timeframe, '60');
 assert.ok(!fs.existsSync(lockPath));
 assert.doesNotThrow(() => acquireLock(root, 'OTHER', '60', 1_000));
+
+const checkOnePath = fileURLToPath(new URL('./check_one.mjs', import.meta.url));
+const batchFail = spawnSync(process.execPath, [checkOnePath, '--batch', 'HOSE:AAA'], { encoding: 'utf-8' });
+assert.notEqual(batchFail.status, 0, 'batch with fewer than 2 tickers must fail');
+assert.match(`${batchFail.stderr || ''}${batchFail.stdout || ''}`, /BATCH_REQUIRES_2_OR_MORE_TICKERS/);
 console.log('ALL PASS');

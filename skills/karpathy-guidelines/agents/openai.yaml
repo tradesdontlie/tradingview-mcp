@@ -1,0 +1,4 @@
+interface:
+  display_name: "Karpathy Coding Guidelines"
+  short_description: "Precise, minimal, verified coding workflow"
+  default_prompt: "Use $karpathy-guidelines with $ponytail for a precise, minimal, verified code change."

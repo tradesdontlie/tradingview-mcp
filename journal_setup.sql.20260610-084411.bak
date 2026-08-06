@@ -1,0 +1,254 @@
+-- ============================================================
+-- VN TRADING JOURNAL — SQLite Schema
+-- File: journal_setup.sql
+-- Run: sqlite3 journal.db < journal_setup.sql
+-- ============================================================
+
+PRAGMA journal_mode = WAL;
+PRAGMA foreign_keys = ON;
+
+-- ------------------------------------------------------------
+-- TRADES — Mỗi lệnh giao dịch
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS trades (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  ticker        TEXT    NOT NULL,                  -- VD: ACB, FTS, SHB
+  strategy      TEXT    NOT NULL,                  -- 'PP_PRO' | 'SWEEP' | 'BOTH'
+  direction     TEXT    DEFAULT 'LONG',            -- 'LONG' | 'SHORT'
+  group_num     INTEGER,                           -- 1=PP+SW | 2=PP only | 3=SW only
+
+  -- Entry
+  signal_date   TEXT    NOT NULL,                  -- Ngày xuất hiện tín hiệu (T)
+  entry_date    TEXT,                              -- Ngày vào lệnh (T+1)
+  entry_price   REAL    NOT NULL,
+  qty           INTEGER,                           -- Số cổ phiếu
+
+  -- Risk
+  sl_price      REAL    NOT NULL,                  -- Stop Loss price
+  tp1_price     REAL,                              -- TP1 (50% thoát)
+  tp2_price     REAL,                              -- TP2 / Hold hết kỳ
+  risk_pct      REAL    DEFAULT 1.0,               -- 1.0 hoặc 2.0
+  risk_amount   REAL,                              -- VND risk tính được
+  rr            REAL,                              -- Risk:Reward ratio
+
+  -- Footprint at entry
+  conf_score    INTEGER,                           -- Confluence 0-100
+  cum_delta     REAL,                              -- Cumulative Delta
+  buy_pct       INTEGER,                           -- Buy% at signal
+  div_signal    INTEGER DEFAULT 0,                 -- 0=no div | 1=div
+  wave_pct      REAL,                              -- Wave position %
+
+  -- Exit
+  exit_date     TEXT,
+  exit_price    REAL,
+  exit_reason   TEXT,                              -- 'SL' | 'TP1' | 'TP2' | 'TRAIL' | 'MANUAL' | 'HOLD30' | 'HOLD20'
+  hold_days     INTEGER,                           -- Số phiên giữ thực tế
+
+  -- P&L
+  pnl_vnd       REAL,                              -- Lời/lỗ VND (sau phí)
+  pnl_pct       REAL,                              -- % trên entry
+  pnl_r         REAL,                              -- Lời/lỗ tính bằng R
+
+  -- Meta
+  status        TEXT    DEFAULT 'OPEN',            -- 'OPEN' | 'CLOSED' | 'CANCELLED'
+  score_pct     INTEGER,                           -- Signal score % khi vào
+  notes         TEXT,
+  screenshot    TEXT,                              -- path đến screenshot
+  created_at    TEXT    DEFAULT (datetime('now')),
+  updated_at    TEXT    DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_trades_ticker  ON trades(ticker);
+CREATE INDEX IF NOT EXISTS idx_trades_status  ON trades(status);
+CREATE INDEX IF NOT EXISTS idx_trades_strategy ON trades(strategy);
+CREATE INDEX IF NOT EXISTS idx_trades_entry_date ON trades(entry_date);
+
+-- ------------------------------------------------------------
+-- SCAN_RESULTS — Kết quả scan hàng ngày
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS scan_results (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  scan_date     TEXT    NOT NULL,
+  scan_time     TEXT,
+  ticker        TEXT    NOT NULL,
+  group_num     INTEGER,
+  signal        TEXT    NOT NULL,                  -- 'BUY' | 'WATCH' | 'AVOID' | 'LOAI' | 'N/A'
+  score_pct     INTEGER,
+  conf_score    INTEGER,
+  cum_delta     REAL,
+  buy_pct       INTEGER,
+  div_signal    INTEGER DEFAULT 0,
+  max_buy_stack INTEGER,
+  price         REAL,
+  sma20         REAL,
+  sma100        REAL,
+  above_ma20    INTEGER,                           -- 0/1
+  ma20_slope_ok INTEGER,                           -- 0/1
+  data_source   TEXT    DEFAULT 'TradingView_H6',
+  created_at    TEXT    DEFAULT (datetime('now')),
+  UNIQUE(scan_date, ticker)
+);
+
+CREATE INDEX IF NOT EXISTS idx_scan_date    ON scan_results(scan_date);
+CREATE INDEX IF NOT EXISTS idx_scan_signal  ON scan_results(signal);
+CREATE INDEX IF NOT EXISTS idx_scan_ticker  ON scan_results(ticker);
+
+-- ------------------------------------------------------------
+-- DAILY_REVIEWS — Tổng kết mỗi ngày
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS daily_reviews (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  review_date         TEXT    NOT NULL UNIQUE,
+  vnindex_close       REAL,
+  vnindex_change_pct  REAL,
+  total_volume_bn     REAL,                        -- Tỷ VND
+  foreign_net_bn      REAL,                        -- NN mua/bán ròng
+  market_bias         TEXT,                        -- 'BULLISH' | 'NEUTRAL' | 'BEARISH'
+  buy_signals         INTEGER DEFAULT 0,
+  watch_signals       INTEGER DEFAULT 0,
+  macro_note          TEXT,
+  top_gainers         TEXT,                        -- JSON: ["FTS+3.2%","SHB+2.1%"]
+  top_losers          TEXT,
+  open_positions      INTEGER DEFAULT 0,
+  daily_pnl_vnd       REAL    DEFAULT 0,
+  notes               TEXT,
+  created_at          TEXT    DEFAULT (datetime('now'))
+);
+
+-- ------------------------------------------------------------
+-- WEEKLY_SUMMARY — Tổng kết tuần
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS weekly_summary (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  week_start      TEXT    NOT NULL UNIQUE,         -- YYYY-MM-DD (Thứ 2)
+  week_end        TEXT    NOT NULL,
+  total_trades    INTEGER DEFAULT 0,
+  winning_trades  INTEGER DEFAULT 0,
+  losing_trades   INTEGER DEFAULT 0,
+  win_rate        REAL,
+  gross_pnl_vnd   REAL    DEFAULT 0,
+  commission_vnd  REAL    DEFAULT 0,
+  net_pnl_vnd     REAL    DEFAULT 0,
+  pnl_pp_pro      REAL    DEFAULT 0,               -- P&L từ PP PRO strategy
+  pnl_sweep       REAL    DEFAULT 0,               -- P&L từ Sweep strategy
+  max_drawdown    REAL    DEFAULT 0,               -- Max drawdown tuần (%)
+  best_trade      TEXT,                            -- Ticker lời nhất
+  worst_trade     TEXT,                            -- Ticker lỗ nhất
+  notes           TEXT,
+  created_at      TEXT    DEFAULT (datetime('now'))
+);
+
+-- ------------------------------------------------------------
+-- CAPITAL_LOG — Theo dõi vốn theo thời gian
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS capital_log (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  log_date      TEXT    NOT NULL UNIQUE,
+  capital_vnd   REAL    NOT NULL,                  -- Tổng vốn hiện tại
+  invested_vnd  REAL    DEFAULT 0,                 -- Đang đầu tư
+  cash_vnd      REAL,                              -- Tiền mặt còn lại
+  cumulative_pnl REAL   DEFAULT 0,                 -- Lãi/lỗ lũy kế
+  notes         TEXT,
+  created_at    TEXT    DEFAULT (datetime('now'))
+);
+
+-- ------------------------------------------------------------
+-- WATCHLIST_CHANGES — Lịch sử thay đổi watchlist
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS watchlist_changes (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  change_date TEXT    NOT NULL,
+  action      TEXT    NOT NULL,                    -- 'ADD' | 'REMOVE' | 'UPDATE_GROUP'
+  ticker      TEXT    NOT NULL,
+  old_group   INTEGER,
+  new_group   INTEGER,
+  reason      TEXT,
+  created_at  TEXT    DEFAULT (datetime('now'))
+);
+
+-- ------------------------------------------------------------
+-- SEED DATA — Initial capital
+-- ------------------------------------------------------------
+INSERT OR IGNORE INTO capital_log (log_date, capital_vnd, cash_vnd, notes)
+VALUES (date('now'), 60000000, 60000000, 'Initial capital');
+
+-- ------------------------------------------------------------
+-- VIEWS — Queries hay dùng
+-- ------------------------------------------------------------
+
+-- Open positions với unrealized % (cần update price thủ công)
+CREATE VIEW IF NOT EXISTS v_open_positions AS
+SELECT
+  t.ticker,
+  t.strategy,
+  t.entry_date,
+  t.entry_price,
+  t.sl_price,
+  t.tp1_price,
+  t.tp2_price,
+  t.qty,
+  t.risk_pct,
+  t.rr,
+  t.hold_days,
+  ROUND((t.entry_price - t.sl_price) / t.entry_price * 100, 2) AS sl_pct,
+  t.conf_score,
+  t.notes
+FROM trades t
+WHERE t.status = 'OPEN'
+ORDER BY t.entry_date DESC;
+
+-- Stats tổng hợp theo strategy
+CREATE VIEW IF NOT EXISTS v_strategy_stats AS
+SELECT
+  strategy,
+  COUNT(*)                                           AS total_trades,
+  SUM(CASE WHEN pnl_r > 0 THEN 1 ELSE 0 END)       AS wins,
+  SUM(CASE WHEN pnl_r <= 0 THEN 1 ELSE 0 END)      AS losses,
+  ROUND(SUM(CASE WHEN pnl_r > 0 THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 1) AS win_rate_pct,
+  ROUND(SUM(pnl_r), 2)                              AS total_r,
+  ROUND(AVG(pnl_r), 2)                              AS avg_r,
+  ROUND(SUM(pnl_vnd) / 1000, 0)                    AS net_pnl_k,
+  ROUND(AVG(hold_days), 1)                          AS avg_hold_days,
+  MAX(pnl_r)                                        AS best_r,
+  MIN(pnl_r)                                        AS worst_r
+FROM trades
+WHERE status = 'CLOSED'
+GROUP BY strategy;
+
+-- Stats theo ticker
+CREATE VIEW IF NOT EXISTS v_ticker_stats AS
+SELECT
+  ticker,
+  COUNT(*)                                           AS total_trades,
+  ROUND(SUM(CASE WHEN pnl_r > 0 THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 1) AS win_rate_pct,
+  ROUND(SUM(pnl_r), 2)                              AS total_r,
+  ROUND(SUM(pnl_vnd) / 1000, 0)                    AS net_pnl_k,
+  ROUND(AVG(hold_days), 1)                          AS avg_hold_days
+FROM trades
+WHERE status = 'CLOSED'
+GROUP BY ticker
+ORDER BY total_r DESC;
+
+-- Lệnh gần nhất
+CREATE VIEW IF NOT EXISTS v_recent_trades AS
+SELECT
+  t.id,
+  t.ticker,
+  t.strategy,
+  t.entry_date,
+  t.entry_price,
+  t.exit_date,
+  t.exit_price,
+  t.exit_reason,
+  t.hold_days,
+  t.pnl_r,
+  ROUND(t.pnl_vnd / 1000, 0) AS pnl_k,
+  t.status,
+  t.notes
+FROM trades t
+ORDER BY t.created_at DESC
+LIMIT 20;
+
+-- ============================================================
+-- DONE — Run: sqlite3 journal.db < journal_setup.sql
+-- ============================================================

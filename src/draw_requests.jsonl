@@ -1,0 +1,5 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"draw","version":"1.0"}}}
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"draw_shape","arguments":{"shape":"rectangle","point":{"price":79200,"time":1729728000},"point2":{"price":79000,"time":1784156400},"overrides":"{\"color\":\"#00FF88\",\"fillColor\":\"rgba(0,255,136,0.15)\",\"text\":\"ENTRY 79.0-79.2k\"}"}}}
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"draw_shape","arguments":{"shape":"horizontal_line","point":{"price":77800,"time":1729728000},"overrides":"{\"color\":\"#FF1744\",\"linewidth\":2,\"text\":\"SL 77.8k\"}"}}}
+{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"draw_shape","arguments":{"shape":"horizontal_line","point":{"price":81342,"time":1729728000},"overrides":"{\"color\":\"#00E676\",\"linewidth\":2,\"text\":\"TP1 81.3k\"}"}}}
+{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"draw_shape","arguments":{"shape":"horizontal_line","point":{"price":83175,"time":1729728000},"overrides":"{\"color\":\"#00E676\",\"linewidth\":1,\"style\":2,\"text\":\"TP2 83.2k\"}"}}}

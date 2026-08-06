@@ -1,0 +1,249 @@
+//@version=6
+// XAUUSD Asian Range Breakout-Retest [Tracker]
+// Indicator mo phong chien luoc de XEM TRUOC, khong phai strategy() de khop lenh.
+// Co che: nen phien A (01-08 GMT) -> breakout dau London -> cho retest xac nhan.
+// PnL tinh bang USD theo so lot (1 lot = 100 oz), chua tru spread/commission.
+indicator("XAUUSD Asian Range Breakout-Retest [Tracker]", "ARB-RT", overlay = true,
+     max_boxes_count = 100, max_labels_count = 500)
+
+// ─────────────── INPUTS ───────────────
+grpS = "Sessions"
+tz        = input.string("GMT", "Session timezone", group = grpS,
+     tooltip = "Mua he London mo 07:00 GMT. Co the doi thanh Europe/London va chinh lai session cho khop.")
+asianSess = input.session("0100-0800", "Asian range", group = grpS)
+breakSess = input.session("0800-1100", "Cua so breakout", group = grpS)
+entrySess = input.session("0800-1200", "Cua so entry (retest)", group = grpS)
+exitHour  = input.int(20, "Gio dong cuong buc (theo timezone tren)", minval = 0, maxval = 23, group = grpS)
+
+grpF = "Filters"
+rangeMaxAdr = input.float(0.5, "Asian range toi da (x ADR20)", step = 0.05, group = grpF)
+regimeHi    = input.float(2.0, "Skip neu D1 ATR14 > x median30", step = 0.1, group = grpF)
+regimeLo    = input.float(0.5, "Skip neu D1 ATR14 < x median30", step = 0.1, group = grpF)
+
+grpE = "Entry / Exit"
+atrLen       = input.int(14, "ATR length (chart TF)", group = grpE)
+bufBreakMult = input.float(0.1, "Breakout buffer (x ATR)", step = 0.05, group = grpE)
+bufRetest    = input.float(0.3, "Vung retest (x ATR)", step = 0.05, group = grpE)
+retestBars   = input.int(6, "So nen toi da cho retest", minval = 1, group = grpE)
+slAtrMult    = input.float(1.5, "SL ban dau (x ATR)", step = 0.1, group = grpE)
+trailAtrMult = input.float(2.5, "Chandelier trail (x ATR)", step = 0.1, group = grpE)
+emaLen       = input.int(21, "EMA slope filter", group = grpE)
+
+grpT = "Stats"
+lots    = input.float(1.0, "Lots (1 lot = 100 oz)", step = 0.1, group = grpT)
+showTbl = input.bool(true, "Hien bang thong ke", group = grpT)
+
+// ─────────────── CONTEXT ───────────────
+atrVal = ta.atr(atrLen)
+emaVal = ta.ema(close, emaLen)
+emaUp  = emaVal > emaVal[3]
+emaDn  = emaVal < emaVal[3]
+
+// Gia tri ngay HOM TRUOC da chot (khong repaint)
+adr20   = request.security(syminfo.tickerid, "D", ta.sma(high - low, 20)[1], lookahead = barmerge.lookahead_on)
+dAtr    = request.security(syminfo.tickerid, "D", ta.atr(14)[1], lookahead = barmerge.lookahead_on)
+dAtrMed = request.security(syminfo.tickerid, "D", ta.median(ta.atr(14), 30)[1], lookahead = barmerge.lookahead_on)
+regimeOk = not na(dAtr) and not na(dAtrMed) and dAtr <= regimeHi * dAtrMed and dAtr >= regimeLo * dAtrMed
+
+inAsian = not na(time(timeframe.period, asianSess, tz))
+inBreak = not na(time(timeframe.period, breakSess, tz))
+inEntry = not na(time(timeframe.period, entrySess, tz))
+asianStart = inAsian and not inAsian[1]
+asianEnd   = not inAsian and inAsian[1]
+
+// ─────────────── ASIAN RANGE ───────────────
+var float aHi = na
+var float aLo = na
+var float aHiFinal = na
+var float aLoFinal = na
+var bool  rangeOk = false
+var int   aStartBar = na
+var bool  longDone = false
+var bool  shortDone = false
+var bool  longArm = false
+var bool  shortArm = false
+var int   longArmBar = na
+var int   shortArmBar = na
+
+if asianStart
+    aHi := high
+    aLo := low
+    aStartBar := bar_index
+    aHiFinal := na
+    aLoFinal := na
+    rangeOk := false
+    longDone := false
+    shortDone := false
+    longArm := false
+    shortArm := false
+else if inAsian
+    aHi := math.max(aHi, high)
+    aLo := math.min(aLo, low)
+
+if asianEnd
+    aHiFinal := aHi
+    aLoFinal := aLo
+    rangeOk := not na(adr20) and (aHi - aLo) <= rangeMaxAdr * adr20
+    boxCol = rangeOk and regimeOk ? color.new(color.teal, 85) : color.new(color.gray, 88)
+    box.new(aStartBar, aHi, bar_index - 1, aLo, border_color = color.new(color.gray, 50), bgcolor = boxCol)
+
+// ─────────────── TRADE STATE ───────────────
+var int   pos = 0          // 0 flat, 1 long, -1 short
+var int   entryBar = na
+var float entryPx = na
+var float slPx = na
+var float tp1Px = na
+var float riskPx = na
+var bool  tp1Done = false
+var float trailExt = na
+var float tradePnl = 0.0   // USD/oz, da nhan trong so khoi luong (1.0 = full)
+
+// Stats
+var int   wins = 0
+var int   losses = 0
+var float grossP = 0.0
+var float grossL = 0.0
+var float netPnl = 0.0
+
+canTrade = rangeOk and regimeOk and not na(aHiFinal)
+bool exitJust = false
+
+// ── Quan ly vi the dang mo (chi tu nen sau nen entry) ──
+if pos == 1 and bar_index > entryBar
+    trailExt := math.max(trailExt, high)
+    if not tp1Done
+        if low <= slPx                       // SL truoc TP neu cung nen (bi quan)
+            tradePnl += (slPx - entryPx) * 1.0
+            exitJust := true
+        else if high >= tp1Px                // TP1: chot 50%, doi SL ve hoa von
+            tradePnl += (tp1Px - entryPx) * 0.5
+            tp1Done := true
+            slPx := entryPx
+    if not exitJust and tp1Done
+        slPx := math.max(slPx, trailExt - trailAtrMult * atrVal)
+        if low <= slPx
+            tradePnl += (slPx - entryPx) * 0.5
+            exitJust := true
+    if not exitJust and hour(time, tz) >= exitHour
+        tradePnl += (close - entryPx) * (tp1Done ? 0.5 : 1.0)
+        exitJust := true
+
+if pos == -1 and bar_index > entryBar
+    trailExt := math.min(trailExt, low)
+    if not tp1Done
+        if high >= slPx
+            tradePnl += (entryPx - slPx) * 1.0
+            exitJust := true
+        else if low <= tp1Px
+            tradePnl += (entryPx - tp1Px) * 0.5
+            tp1Done := true
+            slPx := entryPx
+    if not exitJust and tp1Done
+        slPx := math.min(slPx, trailExt + trailAtrMult * atrVal)
+        if high >= slPx
+            tradePnl += (entryPx - slPx) * 0.5
+            exitJust := true
+    if not exitJust and hour(time, tz) >= exitHour
+        tradePnl += (entryPx - close) * (tp1Done ? 0.5 : 1.0)
+        exitJust := true
+
+if exitJust
+    pnlUsd = tradePnl * 100 * lots
+    netPnl += pnlUsd
+    if tradePnl > 0
+        wins += 1
+        grossP += pnlUsd
+    else
+        losses += 1
+        grossL += math.abs(pnlUsd)
+    label.new(bar_index, high, (tradePnl > 0 ? "WIN +" : "LOSS ") + str.tostring(pnlUsd, "#.##") + "$",
+         style = label.style_label_down, size = size.tiny, textcolor = color.white,
+         color = tradePnl > 0 ? color.new(color.green, 20) : color.new(color.red, 20))
+    pos := 0
+    tradePnl := 0.0
+    tp1Done := false
+
+// ── Arm breakout (chi khi flat + filter pass) ──
+if pos == 0 and inBreak and canTrade
+    if not longDone and not longArm and close > aHiFinal + bufBreakMult * atrVal
+        longArm := true
+        longArmBar := bar_index
+    if not shortDone and not shortArm and close < aLoFinal - bufBreakMult * atrVal
+        shortArm := true
+        shortArmBar := bar_index
+
+// ── Retest entry: LONG ──
+if pos == 0 and longArm
+    if bar_index - longArmBar > retestBars
+        longArm := false
+        longDone := true                     // 1 lan thu moi huong moi ngay
+    else if bar_index > longArmBar and inEntry and low <= aHiFinal + bufRetest * atrVal and close > aHiFinal and close > open and emaUp
+        pos := 1
+        entryBar := bar_index
+        entryPx := close
+        slPx := math.min(entryPx - slAtrMult * atrVal, low - 0.1 * atrVal)
+        riskPx := entryPx - slPx
+        tp1Px := entryPx + riskPx
+        tp1Done := false
+        trailExt := high
+        tradePnl := 0.0
+        longArm := false
+        longDone := true
+        label.new(bar_index, low, "LONG", style = label.style_label_up, size = size.tiny,
+             textcolor = color.white, color = color.new(color.teal, 0))
+
+// ── Retest entry: SHORT ──
+if pos == 0 and shortArm
+    if bar_index - shortArmBar > retestBars
+        shortArm := false
+        shortDone := true
+    else if bar_index > shortArmBar and inEntry and high >= aLoFinal - bufRetest * atrVal and close < aLoFinal and close < open and emaDn
+        pos := -1
+        entryBar := bar_index
+        entryPx := close
+        slPx := math.max(entryPx + slAtrMult * atrVal, high + 0.1 * atrVal)
+        riskPx := slPx - entryPx
+        tp1Px := entryPx - riskPx
+        tp1Done := false
+        trailExt := low
+        tradePnl := 0.0
+        shortArm := false
+        shortDone := true
+        label.new(bar_index, high, "SHORT", style = label.style_label_down, size = size.tiny,
+             textcolor = color.white, color = color.new(color.maroon, 0))
+
+// ─────────────── PLOTS ───────────────
+showLvl = not inAsian and not na(aHiFinal) and (inBreak or inEntry)
+plot(showLvl ? aHiFinal : na, "Asian High", color.new(color.orange, 0), 1, plot.style_linebr)
+plot(showLvl ? aLoFinal : na, "Asian Low", color.new(color.orange, 0), 1, plot.style_linebr)
+plot(pos != 0 ? slPx : na, "SL", color.new(color.red, 0), 1, plot.style_linebr)
+plot(pos != 0 and not tp1Done ? tp1Px : na, "TP1", color.new(color.green, 0), 1, plot.style_linebr)
+plot(pos != 0 ? entryPx : na, "Entry", color.new(color.blue, 40), 1, plot.style_linebr)
+
+// ─────────────── STATS TABLE ───────────────
+var table tbl = table.new(position.top_right, 2, 9, bgcolor = color.new(color.black, 15),
+     border_width = 1, border_color = color.new(color.gray, 60))
+
+if barstate.islast and showTbl
+    total = wins + losses
+    wr = total > 0 ? 100.0 * wins / total : na
+    pf = grossL > 0 ? grossP / grossL : na
+    txtCol = color.white
+    table.cell(tbl, 0, 0, "ARB-RT " + syminfo.ticker, text_color = color.orange, text_size = size.small)
+    table.cell(tbl, 1, 0, timeframe.period + " | " + str.tostring(lots, "#.#") + " lot", text_color = color.orange, text_size = size.small)
+    table.cell(tbl, 0, 1, "Trades", text_color = txtCol, text_size = size.small)
+    table.cell(tbl, 1, 1, str.tostring(total), text_color = txtCol, text_size = size.small)
+    table.cell(tbl, 0, 2, "Win", text_color = txtCol, text_size = size.small)
+    table.cell(tbl, 1, 2, str.tostring(wins), text_color = color.green, text_size = size.small)
+    table.cell(tbl, 0, 3, "Loss", text_color = txtCol, text_size = size.small)
+    table.cell(tbl, 1, 3, str.tostring(losses), text_color = color.red, text_size = size.small)
+    table.cell(tbl, 0, 4, "Winrate", text_color = txtCol, text_size = size.small)
+    table.cell(tbl, 1, 4, na(wr) ? "-" : str.tostring(wr, "#.#") + "%", text_color = txtCol, text_size = size.small)
+    table.cell(tbl, 0, 5, "Net PnL", text_color = txtCol, text_size = size.small)
+    table.cell(tbl, 1, 5, str.tostring(netPnl, "#.##") + "$", text_color = netPnl >= 0 ? color.green : color.red, text_size = size.small)
+    table.cell(tbl, 0, 6, "Gross profit", text_color = txtCol, text_size = size.small)
+    table.cell(tbl, 1, 6, str.tostring(grossP, "#.##") + "$", text_color = color.green, text_size = size.small)
+    table.cell(tbl, 0, 7, "Gross loss", text_color = txtCol, text_size = size.small)
+    table.cell(tbl, 1, 7, str.tostring(grossL, "#.##") + "$", text_color = color.red, text_size = size.small)
+    table.cell(tbl, 0, 8, "Profit factor", text_color = txtCol, text_size = size.small)
+    table.cell(tbl, 1, 8, na(pf) ? "-" : str.tostring(pf, "#.##"), text_color = pf >= 1.3 ? color.green : pf >= 1.0 ? color.yellow : color.red, text_size = size.small)

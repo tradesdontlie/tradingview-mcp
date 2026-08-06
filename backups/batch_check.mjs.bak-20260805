@@ -1,0 +1,32 @@
+const { execSync } = require('child_process');
+const fs = require('fs');
+
+const tickers = ['CTS', 'GMD', 'HCM', 'OCB', 'PET', 'POW', 'SAB', 'SHS', 'TPB', 'VCK', 'VND'];
+const results = [];
+const LOG = 'C:/Users/ADMIN/claude_os/data/batch_check_log.json';
+
+for (const t of tickers) {
+  const start = Date.now();
+  try {
+    const cmd = `node "C:\\Users\\ADMIN\\tradingview-mcp\\check_one.mjs" HOSE:${t}`;
+    const out = execSync(cmd, { timeout: 120000, encoding: 'utf-8', shell: 'cmd.exe' });
+    const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+    // Try to parse JSON from output
+    let json;
+    try {
+      const jsonMatch = out.match(/\{[^{}]*"ticker"[^{}]*\}/);
+      json = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+    } catch(e) { json = null; }
+    
+    results.push({ ticker: t, success: true, elapsed, json, raw: out.substring(0, 300) });
+    console.log(`OK ${t} (${elapsed}s)`);
+  } catch (e) {
+    const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+    const errMsg = e.message ? e.message.substring(0, 200) : 'unknown';
+    console.log(`FAIL ${t} (${elapsed}s): ${errMsg}`);
+    results.push({ ticker: t, success: false, elapsed, error: errMsg, stderr: (e.stderr || '').substring(0, 300) });
+  }
+}
+
+fs.writeFileSync(LOG, JSON.stringify(results, null, 2));
+console.log(`\nDone. ${results.filter(r=>r.success).length}/${results.length} OK. Log: ${LOG}`);

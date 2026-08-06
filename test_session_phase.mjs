@@ -1,7 +1,13 @@
 // Session Phase, Entry Window, and Locked LTF tests
 // Run: node test_session_phase.mjs
 import assert from 'node:assert/strict';
-import { entryWindow, lockedLtf } from './bar_status.mjs';
+import { spawnSync } from 'node:child_process';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { barStatus, entryWindow, lockedLtf, sessionInfo } from './bar_status.mjs';
+
+const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
+const BAR_STATUS_URL = pathToFileURL(path.join(TEST_DIR, 'bar_status.mjs')).href;
 
 // Deterministic reference clock
 const NOW = new Date('2026-07-09T10:30:00.000Z'); // Thursday
@@ -74,6 +80,44 @@ assert.equal(entryWindow(thu).priority, false, 'Thu not priority');
 
 // Non-VN
 assert.equal(entryWindow(vnUtc(10, 0), 'FX').window, 'N/A', 'FX = N/A');
+
+// ==================== barStatus/sessionInfo timezone boundaries ====================
+
+const h6Open = vnUtc(9, 0);
+const h6Close = vnUtc(15, 0);
+assert.equal(barStatus(h6Open.getTime() / 1000, 360, h6Open).closed, false, 'VN 09:00 H6 is open');
+assert.equal(barStatus(h6Open.getTime() / 1000, 360, h6Close).closed, true, 'VN 15:00 H6 is closed');
+assert.equal(sessionInfo(vnUtc(9, 0)).phase, 'ATO', 'VN 09:00 session boundary');
+assert.equal(sessionInfo(vnUtc(15, 0)).phase, 'CLOSED', 'VN 15:00 session boundary');
+assert.equal(entryWindow(new Date('2026-07-09T00:00:00.000Z')).window, 'BLOCKED', 'UTC midnight = VN pre-market');
+assert.equal(sessionInfo(new Date('2026-07-09T00:00:00.000Z')).phase, 'CLOSED', 'UTC midnight = VN pre-market session');
+
+// Run the same boundary contract under two host timezones. All results must
+// match because production uses explicit Asia/Ho_Chi_Minh conversion.
+const boundaryCode = `
+  import { barStatus, entryWindow, sessionInfo } from ${JSON.stringify(BAR_STATUS_URL)};
+  const d = value => new Date(value);
+  const open = d('2026-07-09T02:00:00.000Z');
+  const close = d('2026-07-09T08:00:00.000Z');
+  const out = {
+    open: barStatus(open.getTime() / 1000, 360, open),
+    close: barStatus(open.getTime() / 1000, 360, close),
+    at9: sessionInfo(open),
+    at15: sessionInfo(close),
+    midnight: { entry: entryWindow(d('2026-07-09T00:00:00.000Z')), session: sessionInfo(d('2026-07-09T00:00:00.000Z')) },
+  };
+  process.stdout.write(JSON.stringify(out));
+`;
+function boundaryUnderTz(tz) {
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', boundaryCode], {
+    cwd: TEST_DIR,
+    env: { ...process.env, TZ: tz },
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, `boundary self-test should run under ${tz}: ${result.stderr}`);
+  return JSON.parse(result.stdout);
+}
+assert.deepEqual(boundaryUnderTz('UTC'), boundaryUnderTz('America/New_York'), 'host TZ must not alter VN boundaries');
 
 // ==================== lockedLtf ====================
 
