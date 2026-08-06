@@ -16,7 +16,25 @@ function _resolve(deps) {
   };
 }
 
-export async function start({ date, _deps } = {}) {
+function parseReplayStartTime(dateStr, timeStr, timestamp) {
+  if (timestamp) {
+    return timestamp > 1e11 ? timestamp : timestamp * 1000;
+  }
+  if (!dateStr) return null;
+
+  let fullStr = dateStr.trim();
+  if (timeStr && !fullStr.includes('T') && !fullStr.includes(' ')) {
+    fullStr = `${fullStr}T${timeStr.trim()}`;
+  }
+
+  const parsedDate = new Date(fullStr);
+  if (isNaN(parsedDate.getTime())) {
+    throw new Error(`Invalid date/time format: ${dateStr} ${timeStr || ''}`);
+  }
+  return parsedDate.getTime();
+}
+
+export async function start({ date, time, timestamp, _deps } = {}) {
   const { evaluate, getReplayApi } = _resolve(_deps);
   const rp = await getReplayApi();
   const available = await evaluate(wv(`${rp}.isReplayAvailable()`));
@@ -24,13 +42,22 @@ export async function start({ date, _deps } = {}) {
 
   await evaluate(`${rp}.showReplayToolbar()`);
 
-  // selectDate() is async — it calls enableReplayMode() then _onPointSelected()
-  // which initializes the server-side replay session. Must be awaited inside the
-  // page context, otherwise the promise is fire-and-forget and replay state says
-  // "started" but stepping doesn't work (issue #26).
-  if (date) {
-    const ts = new Date(date).getTime();
-    if (isNaN(ts)) throw new Error(`Invalid date: "${date}". Use YYYY-MM-DD format.`);
+  const ts = parseReplayStartTime(date, time, timestamp);
+
+  if (ts !== null) {
+    // Zoom chart to exact timestamp window to ensure data is loaded
+    const windowSec = 1800; // 30 mins
+    await evaluate(`
+      (function() {
+         if (window.matrix && window.matrix.chart) {
+           window.matrix.chart.setVisibleRange({
+             from: ${Math.floor(ts / 1000) - windowSec},
+             to: ${Math.floor(ts / 1000) + windowSec}
+           });
+         }
+      })();
+    `);
+    
     await evaluate(`${rp}.selectDate(${ts}).then(function() { return 'ok'; })`);
   } else {
     await evaluate(`${rp}.selectFirstAvailableDate()`);
