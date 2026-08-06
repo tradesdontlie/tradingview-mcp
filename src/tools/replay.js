@@ -3,10 +3,12 @@ import { jsonResult } from './_format.js';
 import * as core from '../core/replay.js';
 
 export function registerReplayTools(server) {
-  server.tool('replay_start', 'Start bar replay mode, optionally at a specific date', {
-    date: z.string().optional().describe('Date to start replay from (YYYY-MM-DD format). If omitted, selects first available date.'),
-  }, async ({ date }) => {
-    try { return jsonResult(await core.start({ date })); }
+  server.tool('replay_start', 'Start bar replay mode, optionally at a specific date and exact time', {
+    date: z.string().optional().describe('Date to start replay from (YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss format). If omitted, selects first available date.'),
+    time: z.string().optional().describe('Optional exact time string in HH:mm or HH:mm:ss format (e.g. 09:30:00)'),
+    timestamp: z.number().optional().describe('Optional Unix timestamp in seconds or milliseconds')
+  }, async ({ date, time, timestamp }) => {
+    try { return jsonResult(await core.start({ date, time, timestamp })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
