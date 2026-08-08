@@ -328,6 +328,8 @@ export async function switchAccount({ account_id, _deps } = {}) {
     (async function() {
       ${PAGE_HELPERS}
       var ab = tvBroker(tvTrading());
+      var deny = tvRequirePaperBroker(ab);
+      if (deny) return deny;
       var id = ${safeString(String(account_id))};
       var list = await ab.accountsMetainfo();
       var known = (list || []).some(function(a) { return String(a.id) === id; });
@@ -339,7 +341,16 @@ export async function switchAccount({ account_id, _deps } = {}) {
     })()
   `);
   if (result?.error) throw new Error(result.error);
-  return { success: true, action: 'switch_account', account_id: result?.account_id || String(account_id) };
+  const requested = String(account_id);
+  const observed = result?.account_id != null ? String(result.account_id) : null;
+  if (observed !== requested) {
+    throw new Error(
+      observed == null
+        ? `account switch unconfirmed for ${requested}`
+        : `account switch failed: active account is ${observed}, expected ${requested}`,
+    );
+  }
+  return { success: true, action: 'switch_account', account_id: observed };
 }
 
 export async function getAccount({ _deps } = {}) {
@@ -603,6 +614,7 @@ export async function closePosition({ position_id, symbol, qty, _deps } = {}) {
   if (!id) throw new Error('position_id or symbol required');
   const { evaluateAsync } = _resolve(_deps);
   const amount = qty != null ? requireFinite(qty, 'qty') : null;
+  if (amount != null && amount <= 0) throw new Error('qty must be positive');
   const result = await evaluateAsync(`
     (async function() {
       ${PAGE_HELPERS}

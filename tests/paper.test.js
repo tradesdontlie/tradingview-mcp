@@ -588,6 +588,9 @@ describe('paper mutation tools', () => {
   it('closePosition requires id and supports partial qty', async () => {
     await assert.rejects(() => closePosition({ _deps: contextDeps(PAPER_CONNECTED) }), /position_id or symbol required/);
     await assert.rejects(() => closePosition({ symbol: 'X', _deps: foreign }), (e) => e.code === 'NOT_PAPER_PROVIDER');
+    const paperDeps = contextDeps(PAPER_CONNECTED);
+    await assert.rejects(() => closePosition({ symbol: 'X', qty: 0, _deps: paperDeps }), /qty must be positive/);
+    await assert.rejects(() => closePosition({ symbol: 'X', qty: -1, _deps: paperDeps }), /qty must be positive/);
     let expr = '';
     const deps = {
       evaluate: async () => ({ desktop: true, ...PAPER_CONNECTED }),
@@ -643,6 +646,26 @@ describe('paper mutation tools', () => {
     const res = await switchAccount({ account_id: '15372380', _deps: deps });
     assert.equal(res.account_id, '15372380');
     assert.match(expr, /setCurrentAccount/);
+    assert.match(expr, /tvRequirePaperBroker/);
+  });
+
+  it('switchAccount fails when active account does not match request', async () => {
+    const mismatch = {
+      evaluate: async () => ({ desktop: true, ...PAPER_CONNECTED }),
+      evaluateAsync: async () => ({ account_id: '999' }),
+    };
+    await assert.rejects(
+      () => switchAccount({ account_id: '15372380', _deps: mismatch }),
+      /account switch failed: active account is 999, expected 15372380/,
+    );
+    const unconfirmed = {
+      evaluate: async () => ({ desktop: true, ...PAPER_CONNECTED }),
+      evaluateAsync: async () => ({ account_id: null }),
+    };
+    await assert.rejects(
+      () => switchAccount({ account_id: '15372380', _deps: unconfirmed }),
+      /account switch unconfirmed for 15372380/,
+    );
   });
 });
 
