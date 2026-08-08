@@ -1,8 +1,9 @@
 # Paper Trading Discovery
 
-Status: **awaiting runtime evidence** — this document is the procedure and the
-evidence template. No runtime finding below is confirmed until it carries a
-filled-in evidence row captured from a live TradingView Desktop session.
+Status: **authenticated evidence captured** — Capture 1 (Guest/Linux) plus
+Capture 2 (authenticated Paper-connected on Windows Desktop 3.3.0). Native
+broker id is `"Paper"`. Implemented in `src/core/paper.js` with fail-closed
+mutations.
 
 ## Purpose and scope
 
@@ -44,8 +45,10 @@ around it.
 | Replay-mode simulated trades (NOT Paper Trading) | A — internal API: `window.TradingViewApi._replayApi.buy()/sell()/closePosition()` | `src/core/replay.js` |
 | Internal API discovery pattern | method enumeration via `tv_discover` | `src/core/health.js` |
 
-No broker/paper-trading runtime path is currently known to this repository.
-Everything in the evidence tables below starts as **unknown**.
+Runtime path (Capture 2): `bottomWidgetBar._widgetControllers.get('paper_trading')._trading`
+→ `activeBroker()` → `_brokerMetainfo.id === "Paper"`. Mutations go through
+`activeBroker().placeOrder / cancelOrder / modifyOrder / closePosition /
+editPositionBrackets`. Connect via `trading.selectBroker("Paper")`.
 
 ## Mechanism classification
 
@@ -75,6 +78,155 @@ the environment is recorded.
 | Paper Trading account state | _fresh / has history / reset recently_ |
 | Trading Panel state during capture | _closed / open-disconnected / open-connected_ |
 | Probe report file | _e.g. paper-discovery-connected.json_ |
+
+### Capture 1 — 2026-08-07 (unauthenticated baseline)
+
+| Field | Value |
+|-------|-------|
+| TradingView Desktop version | 3.3.0 (Electron 38.2.2, Chrome 140) |
+| Install type | snap package, extracted with unsquashfs and run directly |
+| Operating system + version | Ubuntu Linux (headless VM, Xvfb display :1) |
+| CDP endpoint | 127.0.0.1:9222 |
+| TradingView session state | **unauthenticated** (`window.user.username === 'Guest'`, no user id) |
+| Paper Trading account state | n/a (not logged in) |
+| Trading Panel state during capture | widget registered but disabled; `trading-button` absent from DOM |
+| Probe report file | paper-discovery-unauthenticated.json + targeted follow-up probes |
+
+### Capture 2 — 2026-08-07 (authenticated, Paper connected)
+
+| Field | Value |
+|-------|-------|
+| TradingView Desktop version | 3.3.0 (Electron 38.2.2, Chrome 140) |
+| Install type | Windows MSIX (`TradingView.Desktop`) launched with `--remote-debugging-port=9223` |
+| Operating system + version | Windows 10/11 |
+| CDP endpoint | 127.0.0.1:9223 |
+| TradingView session state | **authenticated** (`window.user` has id; username present) |
+| Paper Trading account state | has open short position; account type `demo` |
+| Trading Panel state during capture | open, `activeWidgetName === 'paper_trading'`, `connectStatus === 1` |
+| Probe report file | local `paper-discovery-*.json` captures (gitignored; not committed) |
+
+#### Capture 2 — key confirmed facts
+
+- Native Paper broker stable id: **`Paper`** (`activeBroker()._brokerMetainfo.id`).
+- `connectStatus` values confirmed live: `1` Connected (Capture 2), `3` Disconnected (Capture 1).
+- Account id via `trading._account` (string) and `activeBroker().currentAccount()`; type `demo` via `currentAccountType()`.
+- Account summary via `accountManagerInfo().summary[i].wValue.value()` aligned with `accountsMetainfo[].summaryRow` ids: `balance`, `equity`, `realizedPL`, `unrealizedPL`, `accountMargin`, `availableFunds`, `ordersMargin`, `marginBuffer`.
+- Positions: `_positionService.positions()` / `activeBroker().positions()` — fields include `id` (symbol), `side` (±1), `qty`, `avgPrice`, `lastPrice`, `pl`, `extra.{pl,plPercent,usedMargin,leverage,accountCurrency}`, bracket flags.
+- Orders: `_ordersService.activeOrders()`; history via `activeBroker().ordersHistory()`.
+- Order type enum (Broker API): Limit=1, Market=2, Stop=3, StopLimit=4; side Buy=1, Sell=-1; status Filled=2 etc.
+- Durations / TIF (Capture 2 `metainfo.durations`): `DAY`, `WEEK` (UI default), `MONTH`, `GTD` (requires `datetime`). Exposed on `paper_place_order` as `tif` + `duration_datetime`.
+- Mutation surface on active broker: `placeOrder`, `modifyOrder`, `cancelOrder`, `closePosition`, `editPositionBrackets`, `selectBroker("Paper")`, `setCurrentAccount`.
+- `supportTrailingStop` was **false** on the observed Paper position (Capture 2) — no trailing-stop tool.
+- Account reset / createAccount exist on the broker object but are **not** exposed as MCP tools (destructive).
+
+## Runtime evidence — confirmed findings (Capture 1)
+
+All findings below were read through property descriptors (no getter or
+mutation-suggesting method was invoked; the only methods called were
+zero-argument queries classified as safe reads: `isWidgetEnabled`,
+`enabledWidgets`, `isAvailable`, `isVisible`, `connectStatus`,
+`activeBroker`). Single version/OS tested — reliability is "one capture"
+until reproduced elsewhere.
+
+### The Trading Panel is a bottom-bar widget named `paper_trading`
+
+`window.TradingView.bottomWidgetBar._widgetControllers` is a `Map` with keys
+`paper_trading`, `backtesting`, `replay_trading`, `scripteditor`. The bottom
+widget bar exposes `showWidget(name)`, `isWidgetEnabled(name)`,
+`getWidgetByName(name)`, `activateWidget(name)`, `enabledWidgets()` (returns
+a WatchedValue), `isVisible()`, `activeWidgetName()`. This means panel
+open/close/state is mechanism **A** (internal structured API), not DOM
+clicks — the existing `ui_open_panel('trading')` DOM approach is the
+fallback, not the primary path.
+
+When unauthenticated: `isWidgetEnabled('paper_trading') === false`,
+`enabledWidgets().value() === []`, and the `trading-button` element does not
+exist in the DOM.
+
+### The trading service (`controller._trading`)
+
+`bottomWidgetBar._widgetControllers.get('paper_trading')._trading` is the
+application-wide trading service. Structural surface (names captured, none
+invoked except where noted):
+
+- Provider management: `brokersList`, `brokersMetainfo`, `brokersPlans`,
+  `activeBroker()` (WatchedValue → `null` when disconnected — confirmed),
+  `selectBroker`, `pickDefaultBroker`, `reconnectCurrentBroker`,
+  `_tryReconnectLastBroker`, `brokersRegistry`, `brokerSelectManager`.
+- Connection: `connectStatus()` (WatchedValue → numeric enum; value `3`
+  confirmed while disconnected), `onConnectionStatusChange`,
+  `onBrokerChange`, `onBrokerLoading`, `onNeedSelectBroker`.
+  The numeric values are consistent with TradingView's public Broker API
+  documentation (`1 = Connected`, `2 = Connecting`, `3 = Disconnected`,
+  `4 = Error`) — values 1/2/4 still need live confirmation.
+- Account: `accountType`, `_account` (`null` when disconnected — confirmed),
+  `verifyBrokerLiveAccount` (live-account distinction exists in the model),
+  `_onCurrentAccountUpdate`.
+- Orders: `_ordersService`, `orderViewController`, `_checkAndPlaceOrder`,
+  `_checkAndOpenOrderDialog`, `toggleOrderDialog`, `_isMarketOrderSupported`,
+  `getQtySuggester`.
+- Panel/UI: `toggleTradingPanelVisibility`, `toggleTradingWidget`,
+  `tradingPanel`, `getAccountManagerVisibilityMode`,
+  `setAccountManagerVisibilityMode`, `setDOMPanelVisibility`,
+  `setOrderPanelVisibility`.
+- Auth: `_subscribeNativeLogin`, `loginDialogVisibility`,
+  `_brokerLoginManager`, `brokerLoginEventsBus`, `_logOut`.
+- Paper-specific: `_getPaperCompetitions`,
+  `_getActivePaperCompetitionsSinceTimestamp`.
+
+### Broker registry
+
+`trading.brokersRegistry` exposes `getBrokers`, `getBrokersMetaInfos`,
+`getBrokerMetaInfoById`, `getBrokerPlanByIntegrationId`, `isBrokerFavorite`.
+**`getBrokerMetaInfoById` is the expected path for positive identification
+of the native Paper Trading provider by a stable internal id** — the actual
+id value must be captured from an authenticated session before any mutation
+guard is coded.
+
+### Positions service
+
+`trading._positionService` (`_serviceName=PositionsService`): `positions()`,
+`find`, `positionUpdate`, `positionsRemoved`, `getCurrency`,
+`supportBrackets`, `supportReverse`, `isDisplayModeIndividualPositions`,
+`realIdFromBroker`. Data shape pending an authenticated session with an open
+position.
+
+### Orders service
+
+`trading._ordersService` (`_serviceName=OrdersService`): `orders()`,
+`activeOrders()`, `find`, `activeOrdersUpdated`, `activeOrdersRemoved`,
+`orderRejected`, `getCurrency`, and **`getExitLevelOrderId`** — exit levels
+(brackets) are modeled with their own order ids, which supports the
+multi-level SL/TP requirement. Exact states and shapes pending.
+
+### Session detection (unauthenticated state)
+
+- `window.user` exists with `username === 'Guest'` and no meaningful id →
+  reliable anonymous marker (structural check, no secrets).
+- `window.TradingView.changeLoginState` / `signOut` functions exist.
+- `window.TradingView.isFeatureEnabled('trading_terminal') === false` while
+  anonymous.
+- The Trading Panel button (`data-name="trading-button"`) is **absent** from
+  the DOM when unauthenticated — DOM-based availability checks must not
+  confuse "logged out" with "panel closed".
+
+### Trading backend globals
+
+- `window.TRADING_REST_SERVER_URL === 'https://rest-demo.tradingview.com/tradingview/v1'`
+  (public endpoint URL, not a secret) — the Paper backend is served from a
+  `rest-demo` host, consistent with TradingView's REST broker integration
+  model.
+- `window.TRADING_SERVER_LOGGER_URL === 'https://trdlg.tradingview.com'`.
+- `window.TradingViewApi._getTradingFeatureFlagsService` resolves a service
+  from an internal registry (`serviceOrNull(TRADING_FEATURE_FLAGS_SERVICE)`).
+
+### Linux note (how this capture was made)
+
+TradingView for Linux ships as a snap. For discovery in an environment
+without snapd: download via the snapcraft API, `unsquashfs` the package, and
+run `<extracted>/tradingview --remote-debugging-port=9222 --no-sandbox`
+under an X display. Login is a human step; this capture deliberately stayed
+anonymous.
 
 ## Discovery procedure
 
@@ -156,50 +308,51 @@ directly observed session, and cite the capture file.
 
 | Capability | Available | Source | API/DOM path | Reliability | Notes |
 |------------|-----------|--------|--------------|-------------|-------|
-| Detect authenticated session | unknown | — | — | — | must not read secrets |
-| Detect login-required state | unknown | — | — | — | maps to `TRADINGVIEW_AUTH_REQUIRED` |
+| Detect authenticated session | **yes** | Capture 2 | B — `window.user` has id + non-Guest username | 1 capture (3.3.0/Win) | must not read secrets |
+| Detect login-required state | **yes** | Capture 1 | B — `window.user.username === 'Guest'` / missing id; corroborated by `isFeatureEnabled('trading_terminal') === false` and absent `trading-button` | 1 capture (3.3.0/Linux) | maps to `TRADINGVIEW_AUTH_REQUIRED` |
 | Detect expired session | unknown | — | — | — | |
 
 ### B. Trading Panel
 
 | Capability | Available | Source | API/DOM path | Reliability | Notes |
 |------------|-----------|--------|--------------|-------------|-------|
-| Panel availability | unknown | — | — | — | |
-| Panel open/closed state | partially | static | `data-name="trading-button"` + layout area size (`src/core/ui.js`) | untested for content | button click only; no content verification today |
-| Active provider name | unknown | — | — | — | |
-| Provider list | unknown | — | — | — | |
-| Connection state | unknown | — | — | — | |
-| Account selector | unknown | — | — | — | |
+| Panel availability | **yes** | Capture 1 | A — `bottomWidgetBar.isWidgetEnabled('paper_trading')` | 1 capture | `false` while anonymous |
+| Panel open/closed state | **yes** | Capture 1 | A — `bottomWidgetBar.isVisible()` / `activeWidgetName()` (WatchedValues); DOM `trading-button` is fallback (C) | 1 capture | widget name is `paper_trading` |
+| Panel open/close action | **yes** | Capture 2 | A — `bottomWidgetBar.showWidget('paper_trading')` / close/hide | implemented in `paper_open_panel` | same API family as `backtesting` |
+| Active provider name | **yes** | Capture 2 | A — `activeBroker()._brokerMetainfo.id/title` | 1 capture | id is `"Paper"`, title `"Paper Trading"` |
+| Provider list | **yes** | Capture 2 | A — `brokersRegistry.getBrokersMetaInfos()` (async) | 1 capture | first entry id `"Paper"` |
+| Connection state | **yes** | Capture 1+2 | A — `trading.connectStatus()` WatchedValue | `1` connected, `3` disconnected | see section C |
+| Account selector | **yes** | Capture 2 | A — `accountsMetainfo()` / `currentAccount()` / `setCurrentAccount` | 1 capture | |
 
 ### C. Native Paper Trading connection
 
 | Capability | Available | Source | API/DOM path | Reliability | Notes |
 |------------|-----------|--------|--------------|-------------|-------|
-| Positive identification of native Paper Trading (stable id, not display string) | unknown | — | — | — | REQUIRED before any mutation tool ships |
-| disconnected state | unknown | — | — | — | |
-| connecting state | unknown | — | — | — | |
-| connected state | unknown | — | — | — | |
-| reconnecting state | unknown | — | — | — | |
-| failed state | unknown | — | — | — | |
-| authentication-required state | unknown | — | — | — | |
+| Positive identification of native Paper Trading (stable id, not display string) | **yes** | Capture 2 | A — `activeBroker()._brokerMetainfo.id === "Paper"` | 1 capture (3.3.0/Win) | allowlist constant `NATIVE_PAPER_BROKER_ID` in `src/core/paper.js` |
+| disconnected state | **yes** | Capture 1 | A — `connectStatus() === 3` | 1 capture | matches public Broker API enum (Disconnected=3) |
+| connecting state | expected `2` | public Broker API docs | A — `connectStatus()` | unconfirmed live | |
+| connected state | **yes** | Capture 2 | A — `connectStatus() === 1` | 1 capture | |
+| reconnecting state | unknown | — | — | — | possibly Connecting(2) again; confirm |
+| failed state | expected `4` (Error) | public Broker API docs | A — `connectStatus()` | unconfirmed live | |
+| authentication-required state | **yes** (session-level) | Capture 1 | B — anonymous marker (section A) gates everything | 1 capture | broker-level login dialog state: `trading.loginDialogVisibility` (untested) |
 
 ### D. Paper accounts
 
 | Capability | Available | Source | API/DOM path | Reliability | Notes |
 |------------|-----------|--------|--------------|-------------|-------|
-| List accounts | unknown | — | — | — | |
-| Active account id | unknown | — | — | — | |
-| Display name | unknown | — | — | — | |
-| Currency | unknown | — | — | — | |
-| Balance | unknown | — | — | — | |
-| Equity | unknown | — | — | — | |
-| Realized P&L | unknown | — | — | — | |
-| Unrealized P&L | unknown | — | — | — | |
-| Available funds | unknown | — | — | — | record TradingView's exact term |
-| Used funds / margin used | unknown | — | — | — | |
+| List accounts | **yes** | Capture 2 | A — `activeBroker().accountsMetainfo()` | 1 capture | |
+| Active account id | **yes** | Capture 2 | A — `trading._account` string + `currentAccount()` | 1 capture | |
+| Display name | **yes** | Capture 2 | A — `accountsMetainfo[].name` | 1 capture | |
+| Currency | **yes** | Capture 2 | A — position `extra.accountCurrency` | 1 capture | e.g. `USD` |
+| Balance | **yes** | Capture 2 | A — `accountManagerInfo().summary` wValue | 1 capture | UI: "Saldo da conta" |
+| Equity | **yes** | Capture 2 | A — summary wValue | 1 capture | UI: "Valor da conta" |
+| Realized P&L | **yes** | Capture 2 | A — summary id `realizedPL` | 1 capture | |
+| Unrealized P&L | **yes** | Capture 2 | A — summary id `unrealizedPL` | 1 capture | |
+| Available funds | **yes** | Capture 2 | A — summary id `availableFunds` | 1 capture | UI: "Fundos disponíveis" |
+| Used funds / margin used | **yes** | Capture 2 | A — summary id `accountMargin` | 1 capture | UI: "Margem da conta" |
 | Borrowed funds | unknown | — | — | — | |
-| Buying power | unknown | — | — | — | |
-| Leverage | unknown | — | — | — | |
+| Buying power | unknown | — | — | — | not a separate summary row in Capture 2 |
+| Leverage | **yes** (per position) | Capture 2 | A — position `extra.leverage` | 1 capture | e.g. `"10:1"` |
 
 Terminology note: a previously mentioned concept resembling "collective
 funds" is NOT an API name. Record the exact TradingView wording observed in
@@ -222,36 +375,36 @@ the literal term) before any public API field is named after it.
 
 | Capability | Available | Source | API/DOM path | Reliability | Notes |
 |------------|-----------|--------|--------------|-------------|-------|
-| Stable position identity | unknown | — | — | — | |
-| Symbol / side / quantity | unknown | — | — | — | |
-| Average fill price | unknown | — | — | — | |
-| Current price / unrealized P&L | unknown | — | — | — | |
-| Realized P&L | unknown | — | — | — | |
-| Margin per position | unknown | — | — | — | |
-| Attached protective orders | unknown | — | — | — | |
-| Partial positions / multiple positions per symbol | unknown | — | — | — | |
+| Stable position identity | **yes** | Capture 2 | A — position `id` (symbol string for net positions) | 1 capture | e.g. `BINANCE:BTCUSDT` |
+| Symbol / side / quantity | **yes** | Capture 2 | A — `symbol`, `side` (±1), `qty` | 1 capture | |
+| Average fill price | **yes** | Capture 2 | A — `avgPrice` | 1 capture | |
+| Current price / unrealized P&L | **yes** | Capture 2 | A — `lastPrice`, `pl` / `extra.pl` | 1 capture | |
+| Realized P&L | account-level | Capture 2 | A — summary `realizedPL` | 1 capture | |
+| Margin per position | **yes** | Capture 2 | A — `extra.usedMargin` | 1 capture | |
+| Attached protective orders | **yes** (flags) | Capture 2 | A — `supportBrackets` / `supportStopLoss` on position | 1 capture | `editPositionBrackets` for mutation |
+| Partial positions / multiple positions per symbol | display mode exists | Capture 1 | A — `isDisplayModeIndividualPositions` | untested | `closeIndividualPosition` also present |
 
 ### G. Orders
 
 | Capability | Available | Source | API/DOM path | Reliability | Notes |
 |------------|-----------|--------|--------------|-------------|-------|
-| Market orders | unknown | — | — | — | |
-| Limit orders | unknown | — | — | — | |
-| Stop orders | unknown | — | — | — | |
-| Stop-limit orders | unknown | — | — | — | |
-| Order states (pending/working/filled/partial/cancelled/rejected) | unknown | — | — | — | record exact state strings |
+| Market orders | **yes** | Capture 2 | A — `placeOrder` + configFlags.supportMarketOrders; type=2 | 1 capture | |
+| Limit orders | **yes** | Capture 2 | A — type=1; configFlags.supportLimitOrders | 1 capture | filled history sample type=1 |
+| Stop orders | **yes** (flag) | Capture 2 | A — configFlags.supportStopOrders; type=3 | 1 capture | |
+| Stop-limit orders | **yes** (flag) | Capture 2 | A — configFlags.supportStopLimitOrders; type=4 | 1 capture | |
+| Order states (pending/working/filled/partial/cancelled/rejected) | **yes** | Capture 2 | A — status enum 1..6 | 1 capture | canceled=1 filled=2 inactive=3 placing=4 rejected=5 working=6 |
 
 ### H. Stop Loss / Take Profit (first-class requirement)
 
 | Capability | Available | Source | API/DOM path | Reliability | Notes |
 |------------|-----------|--------|--------------|-------------|-------|
-| SL attached at order creation | unknown | — | — | — | |
-| TP attached at order creation | unknown | — | — | — | |
+| SL attached at order creation | bracket model exists | Capture 1 | A — `supportBrackets` (PositionsService) | untested | |
+| TP attached at order creation | bracket model exists | Capture 1 | A — `supportBrackets` (PositionsService) | untested | |
 | Add/change exits on an open position | unknown | — | — | — | |
 | OCO / bracket semantics | unknown | — | — | — | |
 | Price-based SL/TP | unknown | — | — | — | |
 | Monetary / percentage-based SL/TP | unknown | — | — | — | |
-| Multiple TP levels | unknown | — | — | — | |
+| Multiple TP levels | exit levels have own order ids | Capture 1 | A — `getExitLevelOrderId` (OrdersService) | untested | strong hint that multi-level exits are modeled |
 | Multiple SL levels | unknown | — | — | — | |
 | Per-exit quantity | unknown | — | — | — | |
 
@@ -259,7 +412,7 @@ the literal term) before any public API field is named after it.
 
 | Capability | Available | Source | API/DOM path | Reliability | Notes |
 |------------|-----------|--------|--------------|-------------|-------|
-| Trailing stop supported by native Paper Trading | unknown | — | — | — | verify in Paper specifically, not the generic UI |
+| Trailing stop supported by native Paper Trading | **no** (observed) | Capture 2 | A — position `supportTrailingStop === false` | 1 capture | configFlags.supportModifyTrailingStop present but position flag false |
 | Distance representation (price/percent/ticks) | unknown | — | — | — | |
 | Modification behavior | unknown | — | — | — | |
 
@@ -299,8 +452,13 @@ the literal term) before any public API field is named after it.
 
 ## What happens next
 
-Once evidence is captured, the tables above get filled in, each capability is
-classified A–E, and only then are the `paper_*` MCP tool names and schemas
-frozen for implementation (read-only observability first; mutations in later
-increments, each guarded by positive native-Paper identification that fails
-closed).
+Capture 2 landed the stable id `"Paper"` and the account/position/order
+shapes. Tools are implemented in `src/core/paper.js` with
+`assertPaperContext()` fail-closed on `NATIVE_PAPER_BROKER_ID`.
+
+Remaining follow-ups (optional / later increments):
+
+1. Confirm `connectStatus` values `2` (Connecting) and `4` (Error) live.
+2. Exercise `editPositionBrackets` with multi-level exit quantities.
+3. Document account reset / createAccount carefully before any destructive tool.
+4. Re-verify broker id `"Paper"` on macOS / Linux Desktop builds.

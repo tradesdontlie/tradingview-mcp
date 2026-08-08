@@ -25,7 +25,8 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
-    "chrome-remote-interface": "^0.33.2"
+    "chrome-remote-interface": "^0.33.2",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "eslint": "^9.39.4"

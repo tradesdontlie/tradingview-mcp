@@ -23,7 +23,7 @@ const server = new McpServer(
     description: 'AI-assisted TradingView chart analysis and Pine Script development via Chrome DevTools Protocol',
   },
   {
-    instructions: `TradingView MCP — 85 tools for reading and controlling a live TradingView Desktop chart.
+    instructions: `TradingView MCP — 97 tools for reading and controlling a live TradingView Desktop chart.
 
 TOOL SELECTION GUIDE — use this to pick the right tool:
 
@@ -60,7 +60,7 @@ Alerts: alert_create, alert_list, alert_delete
 Launch: tv_launch → auto-detect and start TradingView with CDP on any platform
 Panes: pane_list, pane_set_layout (s, 2h, 2v, 4, 6, 8), pane_focus, pane_set_symbol
 Tabs: tab_list, tab_new, tab_close, tab_switch
-Paper Trading: paper_get_status → read-only observability status (native Paper Trading support is in discovery; no order execution)
+Paper Trading (native only, broker id "Paper"): paper_get_status → paper_connect → paper_get_account / paper_switch_account / paper_list_positions / paper_list_orders → paper_place_order (tif DAY|WEEK|MONTH|GTD) / paper_cancel_order / paper_modify_order / paper_close_position / paper_set_brackets (mutations fail closed unless active broker is Paper)
 
 CONTEXT MANAGEMENT:
 - ALWAYS use summary=true on data_get_ohlcv

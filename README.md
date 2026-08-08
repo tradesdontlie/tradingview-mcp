@@ -311,13 +311,24 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 | `ui_open_panel` / `ui_click` / `ui_evaluate` | UI automation |
 | `tv_launch` / `tv_health_check` / `tv_discover` | Connection management |
 
-### Paper Trading (discovery phase)
+### Paper Trading (native only)
 
-Support for TradingView's **native Paper Trading** is being built evidence-first — see [docs/PAPER_TRADING_DISCOVERY.md](docs/PAPER_TRADING_DISCOVERY.md). Only read-only observability exists today; there is no order execution.
+Tools talk only to TradingView's **native Paper Trading** provider (stable broker id `Paper`). Mutations fail closed if any other broker is active. Evidence and paths: [docs/PAPER_TRADING_DISCOVERY.md](docs/PAPER_TRADING_DISCOVERY.md).
 
 | Tool | What it does |
 |------|-------------|
-| `paper_get_status` | Read-only status: desktop connection, Trading Panel button state; undiscovered facts reported as unknown, `safe_for_paper_mutation` always false pending provider identification |
+| `paper_get_status` | Session, panel, connection, broker id, `safe_for_paper_mutation` |
+| `paper_open_panel` | Open/close/toggle Trading Panel (`paper_trading` widget) |
+| `paper_connect` | Connect broker id `Paper` |
+| `paper_get_account` / `paper_list_accounts` / `paper_switch_account` | Account summary and switch active Paper account |
+| `paper_list_positions` / `paper_list_orders` | Open positions and active/history orders |
+| `paper_place_order` | Market/limit/stop/stop_limit; optional TIF (`DAY`/`WEEK`/`MONTH`/`GTD`) and SL/TP |
+| `paper_cancel_order` / `paper_modify_order` | Manage working orders |
+| `paper_close_position` / `paper_set_brackets` | Close positions; set or clear SL/TP |
+
+CLI: `tv paper status|panel|connect|account|accounts|switch-account|positions|orders|place|cancel|modify|close|brackets`.
+
+If the MCP/CLI points at the wrong Desktop instance, set `TV_CDP_PORT` (and optionally `TV_CDP_HOST`) to the process launched with `--remote-debugging-port`.
 
 ## Context Management
 
@@ -361,7 +372,7 @@ npm test
 Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  TradingView Desktop (Electron)
 ```
 
-- **Transport**: MCP over stdio (85 tools) + CLI (`tv` command, 31 commands with 67 subcommands)
+- **Transport**: MCP over stdio (97 tools) + CLI (`tv` command, 31 commands with 67 subcommands)
 - **Connection**: Chrome DevTools Protocol on localhost:9222
 - **Streaming**: Poll-and-diff loop with deduplication, JSONL output to stdout
 - **No dependencies** beyond `@modelcontextprotocol/sdk` and `chrome-remote-interface`
