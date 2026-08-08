@@ -3,6 +3,16 @@
  */
 import { evaluate, evaluateAsync, getClient } from '../connection.js';
 
+// Right-rail panel toggle buttons. Newer TV builds renamed some of them
+// (watchlist is now data-name="base", aria "Watchlist, details, and news";
+// alerts is data-name="alerts") — keep legacy selectors as fallbacks.
+// Shared with core/paper.js, which observes the trading button's state.
+export const RIGHT_RAIL_PANEL_SELECTORS = {
+  'watchlist': { dataNames: ['base-watchlist-widget-button', 'base'], ariaLabels: ['Watchlist', 'Watchlist, details, and news'] },
+  'alerts': { dataNames: ['alerts-button', 'alerts'], ariaLabels: ['Alerts'] },
+  'trading': { dataNames: ['trading-button'], ariaLabels: ['Trading Panel'] },
+};
+
 export async function click({ by, value }) {
   const escaped = JSON.stringify(value);
   const result = await evaluate(`
@@ -62,15 +72,7 @@ export async function openPanel({ panel, action }) {
     if (result && result.error) throw new Error(result.error);
     return { success: true, panel, action, was_open: result?.was_open ?? false, performed: result?.performed ?? 'unknown' };
   } else {
-    // Newer TV builds renamed the right-rail buttons (watchlist is now
-    // data-name="base", aria "Watchlist, details, and news"; alerts is
-    // data-name="alerts") — keep legacy selectors as fallbacks.
-    const selectorMap = {
-      'watchlist': { dataNames: ['base-watchlist-widget-button', 'base'], ariaLabels: ['Watchlist', 'Watchlist, details, and news'] },
-      'alerts': { dataNames: ['alerts-button', 'alerts'], ariaLabels: ['Alerts'] },
-      'trading': { dataNames: ['trading-button'], ariaLabels: ['Trading Panel'] },
-    };
-    const sel = selectorMap[panel];
+    const sel = RIGHT_RAIL_PANEL_SELECTORS[panel];
     const result = await evaluate(`
       (function() {
         var dataNames = ${JSON.stringify(sel.dataNames)};
