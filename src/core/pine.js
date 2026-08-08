@@ -5,6 +5,60 @@
  */
 import { evaluate, evaluateAsync, getClient } from '../connection.js';
 
+/**
+ * Compile-button finder (injected into TV page).
+ *
+ * TradingView localises the Pine editor buttons, and the desktop build renders
+ * the label twice inside the button ("Add to chartAdd to chart"), so matching
+ * on visible textContent alone fails outside en-US. Check title and aria-label
+ * too — those carry the un-doubled label — and de-duplicate the text before
+ * comparing. Returns the canonical English action so callers stay locale-free.
+ *
+ * Deliberately never falls back to the plain Save button: saving is not compiling.
+ * "Save and add to chart" is used only when no plain add/update button exists, and
+ * is reported under its own name so callers can tell that a cloud save happened.
+ */
+const FIND_COMPILE_BUTTON = `
+  (function findCompileButton() {
+    var ADD = /(add to chart|dem chart hinzuf|zum chart hinzuf|ajouter au graphique|agregar al gr|aggiungi al grafico|adicionar ao gr|добавить на график|添加到图表|グラフに追加)/i;
+    var UPDATE = /(update on chart|auf dem chart aktualisier|chart aktualisier|mettre . jour sur le graphique|actualizar en el gr|aggiorna sul grafico|atualizar no gr|обновить на графике|更新图表)/i;
+    var SAVE_AND_ADD = /(save and add to chart|speichern und dem chart hinzuf)/i;
+
+    function labelsOf(el) {
+      var txt = (el.textContent || '').trim().replace(/\\s+/g, ' ');
+      // Collapse the doubled label ("FooFoo" -> "Foo").
+      var half = txt.length / 2;
+      if (txt.length > 1 && txt.length % 2 === 0 && txt.slice(0, half) === txt.slice(half)) {
+        txt = txt.slice(0, half);
+      }
+      return [txt, el.getAttribute('title') || '', el.getAttribute('aria-label') || ''];
+    }
+
+    var btns = document.querySelectorAll('button,[role="button"]');
+    var addBtn = null, updateBtn = null, saveAddBtn = null;
+
+    for (var i = 0; i < btns.length; i++) {
+      var el = btns[i];
+      if (el.offsetParent === null) continue;      // only the visible editor
+      if (el.disabled) continue;
+      var ls = labelsOf(el);
+      for (var j = 0; j < ls.length; j++) {
+        var l = ls[j];
+        if (!l) continue;
+        // Check save-and-add first: its label also contains "add to chart".
+        if (!saveAddBtn && SAVE_AND_ADD.test(l)) { saveAddBtn = el; break; }
+        if (!addBtn && ADD.test(l)) { addBtn = el; break; }
+        if (!updateBtn && UPDATE.test(l)) { updateBtn = el; break; }
+      }
+    }
+    // Prefer the buttons that compile without touching the user's saved scripts.
+    if (addBtn) return { el: addBtn, action: 'Add to chart' };
+    if (updateBtn) return { el: updateBtn, action: 'Update on chart' };
+    if (saveAddBtn) return { el: saveAddBtn, action: 'Save and add to chart' };
+    return null;
+  })
+`;
+
 // ── Monaco finder (injected into TV page) ──
 const FIND_MONACO = `
   (function findMonacoEditor() {
@@ -287,25 +341,10 @@ export async function compile() {
 
   const clicked = await evaluate(`
     (function() {
-      var btns = document.querySelectorAll('button');
-      var fallback = null;
-      var saveBtn = null;
-      for (var i = 0; i < btns.length; i++) {
-        var text = btns[i].textContent.trim();
-        if (/save and add to chart/i.test(text)) {
-          btns[i].click();
-          return 'Save and add to chart';
-        }
-        if (!fallback && /^(Add to chart|Update on chart)/i.test(text)) {
-          fallback = btns[i];
-        }
-        if (!saveBtn && btns[i].className.indexOf('saveButton') !== -1 && btns[i].offsetParent !== null) {
-          saveBtn = btns[i];
-        }
-      }
-      if (fallback) { fallback.click(); return fallback.textContent.trim(); }
-      if (saveBtn) { saveBtn.click(); return 'Pine Save'; }
-      return null;
+      var hit = ${FIND_COMPILE_BUTTON}();
+      if (!hit) return null;
+      hit.el.click();
+      return hit.action;
     })()
   `);
 
@@ -442,24 +481,10 @@ export async function smartCompile() {
 
   const buttonClicked = await evaluate(`
     (function() {
-      var btns = document.querySelectorAll('button');
-      var addBtn = null;
-      var updateBtn = null;
-      var saveBtn = null;
-      for (var i = 0; i < btns.length; i++) {
-        var text = btns[i].textContent.trim();
-        if (/save and add to chart/i.test(text)) {
-          btns[i].click();
-          return 'Save and add to chart';
-        }
-        if (!addBtn && /^add to chart$/i.test(text)) addBtn = btns[i];
-        if (!updateBtn && /^update on chart$/i.test(text)) updateBtn = btns[i];
-        if (!saveBtn && btns[i].className.indexOf('saveButton') !== -1 && btns[i].offsetParent !== null) saveBtn = btns[i];
-      }
-      if (addBtn) { addBtn.click(); return 'Add to chart'; }
-      if (updateBtn) { updateBtn.click(); return 'Update on chart'; }
-      if (saveBtn) { saveBtn.click(); return 'Pine Save'; }
-      return null;
+      var hit = ${FIND_COMPILE_BUTTON}();
+      if (!hit) return null;
+      hit.el.click();
+      return hit.action;
     })()
   `);
 
