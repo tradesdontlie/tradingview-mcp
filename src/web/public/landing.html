@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Free stock market analysis & technical analysis education tool. Learn trading safely with paper trading (no real money risk). Analyze stocks, volume profiles, indicators.">
+  <meta name="keywords" content="stock analysis, technical analysis, paper trading, free trading education, NSE BSE, INFY TCS, trading for beginners">
+  <meta name="author" content="TradingView MCP">
+  <meta property="og:title" content="Free Trading Education - Technical Analysis Tool">
+  <meta property="og:description" content="Learn trading safely. Analyze stocks, understand volume profiles, get trading signals. Completely free. No real money risk.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://tradingview-mcp.railway.app">
+
+  <title>Free Trading Education - Stock Analysis Tool | Learn Technical Analysis</title>
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }
+
+    /* Hero */
+    .hero { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 80px 20px; text-align: center; }
+    .hero h1 { font-size: 3em; margin-bottom: 20px; }
+    .hero p { font-size: 1.3em; margin-bottom: 30px; opacity: 0.95; }
+    .cta-button { display: inline-block; background: white; color: #667eea; padding: 15px 40px; border-radius: 50px; font-weight: 600; text-decoration: none; transition: transform 0.3s; }
+    .cta-button:hover { transform: translateY(-2px); }
+
+    /* Features */
+    .container { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
+    .section { padding: 60px 20px; }
+    .section h2 { font-size: 2em; margin-bottom: 40px; text-align: center; }
+
+    .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 30px; margin-top: 40px; }
+    .feature { background: #f8f9fa; padding: 30px; border-radius: 10px; text-align: center; }
+    .feature h3 { margin: 15px 0; color: #667eea; }
+    .feature p { color: #666; }
+
+    /* Why */
+    .why { background: #f8f9fa; }
+    .why-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: center; margin-top: 40px; }
+    .why-item { padding: 20px 0; }
+    .why-item h3 { color: #667eea; margin-bottom: 10px; font-size: 1.2em; }
+
+    /* Stats */
+    .stats { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 60px 20px; }
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 40px; margin-top: 40px; text-align: center; }
+    .stat h3 { font-size: 2.5em; margin-bottom: 10px; }
+    .stat p { opacity: 0.9; }
+
+    /* CTA Section */
+    .cta-section { background: white; padding: 60px 20px; text-align: center; }
+    .cta-section h2 { margin-bottom: 20px; }
+    .cta-section p { font-size: 1.1em; color: #666; margin-bottom: 30px; }
+
+    /* Disclaimer */
+    .disclaimer { background: #fff3cd; border-left: 4px solid #ffc107; padding: 20px; margin: 40px 0; border-radius: 4px; }
+    .disclaimer h3 { color: #856404; margin-bottom: 10px; }
+    .disclaimer p { color: #856404; font-size: 0.95em; }
+
+    /* Footer */
+    footer { background: #2c3e50; color: white; padding: 40px 20px; text-align: center; }
+    footer a { color: #667eea; text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+
+    /* Mobile */
+    @media (max-width: 768px) {
+      .hero h1 { font-size: 2em; }
+      .hero p { font-size: 1.1em; }
+      .why-grid { grid-template-columns: 1fr; }
+      .stats-grid { grid-template-columns: 1fr; }
+    }
+
+    .badge { display: inline-block; background: #667eea; color: white; padding: 5px 15px; border-radius: 20px; font-size: 0.9em; margin: 0 5px; }
+  </style>
+</head>
+<body>
+  <!-- Navigation -->
+  <nav style="background: #2c3e50; color: white; padding: 15px 20px; position: sticky; top: 0; z-index: 100;">
+    <div class="container" style="display: flex; justify-content: space-between; align-items: center;">
+      <h2 style="margin: 0;">📊 TradingView Analysis</h2>
+      <div>
+        <a href="#" style="color: white; text-decoration: none; margin: 0 15px;">Learn</a>
+        <a href="#" style="color: white; text-decoration: none; margin: 0 15px;">GitHub</a>
+        <a href="#" style="color: white; text-decoration: none; margin: 0 15px;">Support</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="container">
+      <h1>🚀 Learn Trading. Safely. Free.</h1>
+      <p>Analyze stocks, understand technical indicators, paper trade without real money risk</p>
+      <a href="/analysis" class="cta-button">Start Analyzing Now →</a>
+      <p style="margin-top: 20px; font-size: 0.9em;">
+        <span class="badge">📊 Free</span>
+        <span class="badge">🔒 Secure</span>
+        <span class="badge">🎓 Educational</span>
+      </p>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section class="section">
+    <div class="container">
+      <h2>What You Get</h2>
+      <div class="features">
+        <div class="feature">
+          <div style="font-size: 2.5em;">📈</div>
+          <h3>Instant Analysis</h3>
+          <p>Analyze ANY stock symbol instantly. Get trends, signals, technical levels.</p>
+        </div>
+        <div class="feature">
+          <div style="font-size: 2.5em;">📊</div>
+          <h3>Volume Profile</h3>
+          <p>Understand where buyers/sellers are concentrated. Find support & resistance.</p>
+        </div>
+        <div class="feature">
+          <div style="font-size: 2.5em;">🎯</div>
+          <h3>Trading Signals</h3>
+          <p>See what ALL indicators say at once. BUY/SELL/HOLD with confidence %.</p>
+        </div>
+        <div class="feature">
+          <div style="font-size: 2.5em;">💬</div>
+          <h3>Ask Questions</h3>
+          <p>Natural language support. Ask "Is INFY bullish?" Get instant answers.</p>
+        </div>
+        <div class="feature">
+          <div style="font-size: 2.5em;">📚</div>
+          <h3>Educational Content</h3>
+          <p>Learn trading concepts safely. No paid courses. No BS.</p>
+        </div>
+        <div class="feature">
+          <div style="font-size: 2.5em;">🎮</div>
+          <h3>Paper Trading</h3>
+          <p>Practice with ZERO real money at risk. Learn from mistakes safely.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Why Free -->
+  <section class="section why">
+    <div class="container">
+      <h2>Why This Exists</h2>
+      <div class="why-grid">
+        <div>
+          <h3>❌ The Problem</h3>
+          <p>Most beginners lose money trading because:</p>
+          <ul style="text-align: left; display: inline-block; margin-top: 15px;">
+            <li>❌ Don't understand volume & structure</li>
+            <li>❌ Risk too much per trade (gambling)</li>
+            <li>❌ Trade without a plan</li>
+            <li>❌ Chase losses emotionally</li>
+            <li>❌ Paid courses are $500+ with hype</li>
+          </ul>
+        </div>
+        <div>
+          <h3>✅ Our Solution</h3>
+          <p>Learn trading RIGHT before risking real money:</p>
+          <ul style="text-align: left; display: inline-block; margin-top: 15px;">
+            <li>✅ Understand technical analysis</li>
+            <li>✅ Paper trade risk-free</li>
+            <li>✅ Learn risk management</li>
+            <li>✅ Build consistent strategies</li>
+            <li>✅ Get honest education (free)</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- For Whom -->
+  <section class="section">
+    <div class="container">
+      <h2>Perfect For</h2>
+      <div class="features">
+        <div class="feature">
+          <h3>Beginners 🆕</h3>
+          <p>Never traded before? Start here. Learn concepts safely with zero real money risk.</p>
+        </div>
+        <div class="feature">
+          <h3>Students 🎓</h3>
+          <p>Learning investing early? Free tool to practice & understand markets.</p>
+        </div>
+        <div class="feature">
+          <h3>NSE/BSE Traders 🇮🇳</h3>
+          <p>Analyze INFY, TCS, RELIANCE, Nifty directly. Understand Indian markets.</p>
+        </div>
+        <div class="feature">
+          <h3>Risk-Averse People 🛡️</h3>
+          <p>Want to learn without real money? Paper trade first, decide later.</p>
+        </div>
+        <div class="feature">
+          <h3>Global Traders 🌍</h3>
+          <p>Analyze any stock globally. Stocks, indices, all supported.</p>
+        </div>
+        <div class="feature">
+          <h3>Experienced Traders 📈</h3>
+          <p>Great for teaching others. Open source. Customize for your needs.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Stats -->
+  <section class="stats">
+    <div class="container">
+      <h2 style="text-align: center;">By The Numbers</h2>
+      <div class="stats-grid">
+        <div class="stat">
+          <h3>100%</h3>
+          <p>Free forever</p>
+        </div>
+        <div class="stat">
+          <h3>$0</h3>
+          <p>Cost to start</p>
+        </div>
+        <div class="stat">
+          <h3>80+</h3>
+          <p>Analysis tools</p>
+        </div>
+        <div class="stat">
+          <h3>0 Risk</h3>
+          <p>Paper trading</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Disclaimer -->
+  <section class="section">
+    <div class="container">
+      <div class="disclaimer">
+        <h3>⚠️ Important Disclaimer</h3>
+        <p><strong>This is EDUCATIONAL content only. NOT investment advice.</strong></p>
+        <p>We are NOT SEBI registered. We provide NO buy/sell recommendations. Trading carries risk of loss. Always consult SEBI-registered financial advisors before investing real money. Paper trade for 3-6 months FIRST.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="cta-section">
+    <div class="container">
+      <h2>Ready to Learn Trading?</h2>
+      <p>No signup. No credit card. No real money at risk. Just pure learning.</p>
+      <a href="/analysis" style="display: inline-block; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px 40px; border-radius: 50px; font-weight: 600; text-decoration: none; font-size: 1.1em;">Start Free Analysis →</a>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container">
+      <p style="margin-bottom: 20px;">
+        <strong>TradingView MCP — Free Trading Education for Everyone</strong>
+      </p>
+      <p style="margin-bottom: 15px;">
+        <a href="https://github.com/tradesdontlie/tradingview-mcp">GitHub</a> •
+        <a href="#">Learn</a> •
+        <a href="#">Support</a> •
+        <a href="#">Community</a>
+      </p>
+      <p style="opacity: 0.8; font-size: 0.9em;">
+        Not affiliated with TradingView Inc. Open source. Community driven. Always free.
+      </p>
+    </div>
+  </footer>
+</body>
+</html>

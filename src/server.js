@@ -14,6 +14,15 @@ import { registerWatchlistTools } from './tools/watchlist.js';
 import { registerUiTools } from './tools/ui.js';
 import { registerPaneTools } from './tools/pane.js';
 import { registerTabTools } from './tools/tab.js';
+import { registerWidgetTools } from './tools/widgets.js';
+import { registerBacktestTools } from './tools/backtest.js';
+import { registerTradeAnalyticsTools } from './tools/trade-analytics.js';
+import { registerAgentSystemTools } from './tools/agent-system.js';
+import { registerIndiaInstitutionToolsTools } from './tools/india-institutions.js';
+import { registerComplianceTools } from './tools/compliance.js';
+import { registerChartAnalysisTools } from './tools/chart-analysis.js';
+import { registerUserDecisionTools } from './tools/user-decision.js';
+import { registerAutoAnalysisTools } from './tools/auto-analysis.js';
 
 const server = new McpServer(
   {
@@ -84,6 +93,15 @@ registerWatchlistTools(server);
 registerUiTools(server);
 registerPaneTools(server);
 registerTabTools(server);
+registerWidgetTools(server);
+registerBacktestTools(server);
+registerTradeAnalyticsTools(server);
+registerAgentSystemTools(server);
+registerIndiaInstitutionToolsTools(server);
+registerComplianceTools(server);
+registerChartAnalysisTools(server);
+registerUserDecisionTools(server);
+registerAutoAnalysisTools(server);
 
 // Startup notice (stderr so it doesn't interfere with MCP stdio protocol)
 process.stderr.write('⚠  tradingview-mcp  |  Unofficial tool. Not affiliated with TradingView Inc. or Anthropic.\n');

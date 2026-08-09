@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TradingView Analysis - Free Trading Education</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; padding: 20px; }
+
+    .container { max-width: 1200px; margin: 0 auto; }
+
+    header { text-align: center; color: white; margin-bottom: 40px; }
+    header h1 { font-size: 2.5em; margin-bottom: 10px; }
+    header p { font-size: 1.1em; opacity: 0.9; }
+
+    .hero { background: rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 40px; backdrop-filter: blur(10px); color: white; margin-bottom: 40px; border: 1px solid rgba(255, 255, 255, 0.2); }
+    .hero h2 { margin-bottom: 15px; }
+    .hero ul { margin-left: 20px; line-height: 1.8; }
+
+    .input-section { background: white; border-radius: 12px; padding: 30px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2); margin-bottom: 30px; }
+    .input-section h2 { margin-bottom: 20px; color: #333; }
+
+    .input-group { display: flex; gap: 10px; margin-bottom: 15px; }
+    input { flex: 1; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 1em; transition: border-color 0.3s; }
+    input:focus { outline: none; border-color: #667eea; }
+
+    button { padding: 12px 30px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 1em; font-weight: 600; transition: transform 0.2s; }
+    button:hover { transform: translateY(-2px); }
+    button:active { transform: translateY(0); }
+
+    .results { background: white; border-radius: 12px; padding: 30px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2); }
+    .results.hidden { display: none; }
+    .results h3 { color: #333; margin-bottom: 20px; border-bottom: 2px solid #667eea; padding-bottom: 10px; }
+
+    .result-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin: 20px 0; }
+    .result-card { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 8px; text-align: center; }
+    .result-card .label { font-size: 0.9em; opacity: 0.8; text-transform: uppercase; letter-spacing: 0.5px; }
+    .result-card .value { font-size: 1.8em; font-weight: 700; margin-top: 10px; }
+
+    .analysis-text { background: #f5f5f5; padding: 20px; border-radius: 8px; margin: 20px 0; line-height: 1.8; color: #555; }
+
+    .loading { display: none; text-align: center; padding: 40px; }
+    .spinner { display: inline-block; width: 40px; height: 40px; border: 4px solid #f3f3f3; border-top: 4px solid #667eea; border-radius: 50%; animation: spin 1s linear infinite; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+    .error { background: #fee; border-left: 4px solid #f44; padding: 15px; border-radius: 4px; color: #c33; margin: 15px 0; }
+
+    .tabs { display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid #e0e0e0; }
+    .tab-btn { padding: 10px 20px; background: none; border: none; cursor: pointer; border-bottom: 3px solid transparent; transition: all 0.3s; }
+    .tab-btn.active { border-bottom-color: #667eea; color: #667eea; font-weight: 600; }
+
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    footer { text-align: center; color: white; margin-top: 60px; padding: 20px; }
+    footer a { color: #fff; text-decoration: none; border-bottom: 1px solid white; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>📊 TradingView Analysis</h1>
+      <p>Free Educational Trading Analysis Tools</p>
+    </header>
+
+    <div class="hero">
+      <h2>🎓 What You Can Do:</h2>
+      <ul>
+        <li>Analyze any stock symbol (INFY, TCS, SPY, etc.)</li>
+        <li>View volume profiles & point of control</li>
+        <li>Get automated technical signals</li>
+        <li>Ask market questions in plain English</li>
+        <li>Paper trade without real money risk</li>
+        <li>Learn trading concepts safely</li>
+      </ul>
+    </div>
+
+    <div class="input-section">
+      <div class="tabs">
+        <button class="tab-btn active" onclick="switchTab('analyze')">Quick Analyze</button>
+        <button class="tab-btn" onclick="switchTab('volume')">Volume Profile</button>
+        <button class="tab-btn" onclick="switchTab('signals')">All Signals</button>
+        <button class="tab-btn" onclick="switchTab('natural')">Ask Question</button>
+      </div>
+
+      <!-- Analyze Tab -->
+      <div id="analyze" class="tab-content active">
+        <h2>🔍 Analyze Any Symbol</h2>
+        <div class="input-group">
+          <input id="symbol-input" type="text" placeholder="Enter symbol (e.g., INFY, TCS, SPY)" />
+          <select id="depth-select">
+            <option value="quick">Quick</option>
+            <option value="detailed" selected>Detailed</option>
+            <option value="comprehensive">Comprehensive</option>
+          </select>
+          <button onclick="analyzeSymbol()">Analyze</button>
+        </div>
+      </div>
+
+      <!-- Volume Profile Tab -->
+      <div id="volume" class="tab-content">
+        <h2>📊 Volume Profile Analysis</h2>
+        <div class="input-group">
+          <input id="vp-symbol" type="text" placeholder="Symbol" />
+          <input id="vp-high" type="number" placeholder="Price High" />
+          <input id="vp-low" type="number" placeholder="Price Low" />
+          <button onclick="analyzeVolume()">Calculate</button>
+        </div>
+      </div>
+
+      <!-- Signals Tab -->
+      <div id="signals" class="tab-content">
+        <h2>📈 All Indicators Signal</h2>
+        <div class="input-group">
+          <input id="sig-symbol" type="text" placeholder="Symbol" />
+          <input id="sig-price" type="number" placeholder="Current Price" />
+          <input id="sig-volume" type="number" placeholder="Volume (optional)" />
+          <button onclick="getSignals()">Get Signals</button>
+        </div>
+      </div>
+
+      <!-- Natural Language Tab -->
+      <div id="natural" class="tab-content">
+        <h2>💬 Ask a Market Question</h2>
+        <div class="input-group">
+          <input id="question-input" type="text" placeholder="e.g., What is the trend in SPY? Is INFY bullish?" />
+          <button onclick="askQuestion()">Ask</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="loading" id="loading">
+      <div class="spinner"></div>
+      <p style="color: white; margin-top: 20px;">Analyzing...</p>
+    </div>
+
+    <div class="results hidden" id="results"></div>
+
+    <footer>
+      <p><strong>⚠️ Disclaimer:</strong> This is educational content only. NOT investment advice. Always consult SEBI-registered advisors.</p>
+      <p style="margin-top: 15px;">Paper trade first • Risk management matters • Never risk more than 1-2% per trade</p>
+      <p style="margin-top: 15px;"><a href="https://github.com/tradesdontlie/tradingview-mcp">GitHub</a> • <a href="#">Learn More</a> • <a href="#">Support</a></p>
+    </footer>
+  </div>
+
+  <script>
+    function switchTab(tabName) {
+      document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById(tabName).classList.add('active');
+      event.target.classList.add('active');
+    }
+
+    function showLoading() {
+      document.getElementById('loading').style.display = 'block';
+      document.getElementById('results').classList.add('hidden');
+    }
+
+    function hideLoading() {
+      document.getElementById('loading').style.display = 'none';
+    }
+
+    function showResults(html) {
+      document.getElementById('results').innerHTML = html;
+      document.getElementById('results').classList.remove('hidden');
+    }
+
+    async function analyzeSymbol() {
+      const input = document.getElementById('symbol-input').value;
+      const depth = document.getElementById('depth-select').value;
+      if (!input) { alert('Enter a symbol'); return; }
+
+      showLoading();
+      try {
+        const res = await fetch('/api/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ input, depth })
+        });
+        const data = await res.json();
+        hideLoading();
+        renderAnalysis(data);
+      } catch (err) {
+        hideLoading();
+        showResults(`<div class="error">Error: ${err.message}</div>`);
+      }
+    }
+
+    async function analyzeVolume() {
+      const symbol = document.getElementById('vp-symbol').value;
+      const high = parseFloat(document.getElementById('vp-high').value);
+      const low = parseFloat(document.getElementById('vp-low').value);
+      if (!symbol || !high || !low) { alert('Fill all fields'); return; }
+
+      showLoading();
+      try {
+        const res = await fetch('/api/volume-profile', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol, price_high: high, price_low: low })
+        });
+        const data = await res.json();
+        hideLoading();
+        renderVolume(data);
+      } catch (err) {
+        hideLoading();
+        showResults(`<div class="error">Error: ${err.message}</div>`);
+      }
+    }
+
+    async function getSignals() {
+      const symbol = document.getElementById('sig-symbol').value;
+      const price = parseFloat(document.getElementById('sig-price').value);
+      const volume = parseFloat(document.getElementById('sig-volume').value) || 1500000;
+      if (!symbol || !price) { alert('Enter symbol and price'); return; }
+
+      showLoading();
+      try {
+        const res = await fetch('/api/signals', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol, price, volume })
+        });
+        const data = await res.json();
+        hideLoading();
+        renderSignals(data);
+      } catch (err) {
+        hideLoading();
+        showResults(`<div class="error">Error: ${err.message}</div>`);
+      }
+    }
+
+    async function askQuestion() {
+      const request = document.getElementById('question-input').value;
+      if (!request) { alert('Ask a question'); return; }
+
+      showLoading();
+      try {
+        const res = await fetch('/api/natural', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ request })
+        });
+        const data = await res.json();
+        hideLoading();
+        renderNatural(data);
+      } catch (err) {
+        hideLoading();
+        showResults(`<div class="error">Error: ${err.message}</div>`);
+      }
+    }
+
+    function renderAnalysis(data) {
+      let html = `<h3>${data.user_input} - ${data.input_type}</h3>`;
+      const a = data.analysis;
+
+      if (a.symbol) {
+        html += `
+          <div class="result-grid">
+            <div class="result-card">
+              <div class="label">Price</div>
+              <div class="value">${a.current_analysis?.price || '-'}</div>
+            </div>
+            <div class="result-card">
+              <div class="label">Trend</div>
+              <div class="value">${a.quick_view?.trend || '-'}</div>
+            </div>
+            <div class="result-card">
+              <div class="label">Signal</div>
+              <div class="value">${a.recommendation?.split('-')[0] || '-'}</div>
+            </div>
+          </div>
+          <div class="analysis-text">
+            <strong>Technical Levels:</strong><br/>
+            Support: ${a.technical_levels?.support} | Resistance: ${a.technical_levels?.resistance}<br/>
+            <strong>Volume Signal:</strong> ${a.volume_profile?.volume_imbalance}<br/>
+            <strong>Confidence:</strong> ${a.confidence}
+          </div>
+        `;
+      } else {
+        html += `<div class="analysis-text">${JSON.stringify(a, null, 2)}</div>`;
+      }
+
+      showResults(html);
+    }
+
+    function renderVolume(data) {
+      const html = `
+        <h3>${data.symbol} - Volume Profile</h3>
+        <div class="result-grid">
+          <div class="result-card">
+            <div class="label">Point of Control</div>
+            <div class="value">${data.point_of_control}</div>
+          </div>
+          <div class="result-card">
+            <div class="label">Value Area High</div>
+            <div class="value">${data.value_area?.high}</div>
+          </div>
+          <div class="result-card">
+            <div class="label">Value Area Low</div>
+            <div class="value">${data.value_area?.low}</div>
+          </div>
+        </div>
+        <div class="analysis-text">
+          <strong>Interpretation:</strong> ${data.trading_implications?.signal}<br/>
+          Support: ${data.trading_implications?.support} | Resistance: ${data.trading_implications?.resistance}
+        </div>
+      `;
+      showResults(html);
+    }
+
+    function renderSignals(data) {
+      const bullish = data.bullish_votes || 0;
+      const bearish = data.bearish_votes || 0;
+      const html = `
+        <h3>${data.symbol} - All Indicators</h3>
+        <div class="result-grid">
+          <div class="result-card">
+            <div class="label">Signal</div>
+            <div class="value">${data.final_signal}</div>
+          </div>
+          <div class="result-card">
+            <div class="label">Confidence</div>
+            <div class="value">${data.confidence}%</div>
+          </div>
+          <div class="result-card">
+            <div class="label">Vote Count</div>
+            <div class="value">📈 ${bullish} / 📉 ${bearish}</div>
+          </div>
+        </div>
+        <div class="analysis-text">
+          <strong>All Indicators:</strong><br/>
+          ${Object.entries(data.all_indicators || {}).map(([k, v]) => `${k}: ${v}`).join('<br/>')}
+        </div>
+      `;
+      showResults(html);
+    }
+
+    function renderNatural(data) {
+      const html = `
+        <h3>Natural Language Analysis</h3>
+        <div class="analysis-text">
+          <strong>Question:</strong> ${data.request}<br/>
+          <strong>Type:</strong> ${data.analysis_type}<br/>
+          <strong>Response:</strong> ${data.response || JSON.stringify(data, null, 2)}
+        </div>
+      `;
+      showResults(html);
+    }
+  </script>
+</body>
+</html>

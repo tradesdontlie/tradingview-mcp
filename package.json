@@ -13,6 +13,7 @@
   },
   "scripts": {
     "start": "node src/server.js",
+    "web": "node src/web/server.js",
     "tv": "node src/cli/index.js",
     "lint": "eslint src/",
     "test": "node --test tests/e2e.test.js tests/pine_analyze.test.js",
@@ -25,7 +26,10 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
-    "chrome-remote-interface": "^0.33.2"
+    "chrome-remote-interface": "^0.33.2",
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1"
   },
   "devDependencies": {
     "eslint": "^9.39.4"
