@@ -2,6 +2,7 @@
 // Pull current Pine Script source from TradingView editor → scripts/current.pine
 import CDP from 'chrome-remote-interface';
 import { writeFileSync } from 'fs';
+import { fileURLToPath } from 'node:url';
 
 const targets = await (await fetch('http://localhost:9222/json/list')).json();
 const t = targets.find(t => t.url?.includes('tradingview.com'));
@@ -16,7 +17,7 @@ const src = (await c.Runtime.evaluate({
 
 if (!src) { console.error('Could not read Pine editor'); await c.close(); process.exit(1); }
 
-const outPath = new URL('../scripts/current.pine', import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1');
+const outPath = fileURLToPath(new URL('../scripts/current.pine', import.meta.url));
 writeFileSync(outPath, src);
 console.log(`Pulled ${src.split('\n').length} lines → scripts/current.pine`);
 await c.close();
