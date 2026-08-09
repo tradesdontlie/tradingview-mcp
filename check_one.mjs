@@ -1302,45 +1302,71 @@ export async function runOneCheck({ ticker, timeframe, cacheDir, providedInitSta
   }
 }
 
+export function parseCheckArgs(argv) {
+  const raw = argv.slice(2).filter(arg => arg !== '--batch');
+  const batchMode = argv.includes('--batch');
+  if (!batchMode) {
+    // Single mode: exact legacy CLI — argv[0] = ticker, argv[1] = optional timeframe.
+    const ticker = raw[0] || 'HOSE:OCB';
+    return { batchMode: false, ticker, timeframe: raw[1] || defaultTf(ticker), tickers: null };
+  }
+  // Batch mode: tickers must carry an exchange prefix (e.g. HOSE:ACB); a bare
+  // trailing numeric arg is the shared timeframe.
+  const tickers = raw.filter(arg => arg.includes(':'));
+  const nonTickers = raw.filter(arg => !arg.includes(':'));
+  const timeframe = nonTickers[0] || defaultTf(tickers[0] || 'HOSE:OCB');
+  return { batchMode: true, ticker: null, timeframe, tickers };
+}
+
+export async function runBatchLoop({ tickers, runOne, captureState, restoreState, disconnect, onError = console.error }) {
+  // Caller must hold the chart lock (withChartLifecycle) so the snapshot below is
+  // consistent with the lock owner and the final restore restores the true owner state.
+  // A capture failure fails closed before any chart mutation.
+  const initState = await captureState();
+  const results = [];
+  try {
+    for (const ticker of tickers) {
+      try {
+        results.push(await runOne(ticker));
+      } catch (e) {
+        onError(`BATCH_ERROR ${ticker}: ${e.message}`);
+      }
+    }
+  } finally {
+    try { await restoreState(initState); } catch (e) {}
+    try { await disconnect(); } catch (e) {}
+  }
+  if (results.length < tickers.length) process.exitCode = 1;
+  return results;
+}
+
 async function main() {
-  const rawArgs = process.argv.slice(2).filter(arg => arg !== '--batch');
-  const batchMode = process.argv.includes('--batch');
-  const tickers = rawArgs.filter(arg => arg.includes(':'));
-  const nonTickers = rawArgs.filter(arg => !arg.includes(':'));
-  const timeframe = nonTickers[0] || defaultTf(tickers[0] || rawArgs[0] || 'HOSE:OCB');
+  const parsed = parseCheckArgs(process.argv);
   const cacheDir = runtimeDataRoot();
 
-  if (batchMode && tickers.length < 2) {
+  if (parsed.batchMode && parsed.tickers.length < 2) {
     throw new Error('BATCH_REQUIRES_2_OR_MORE_TICKERS');
   }
   try { await getClient(); } catch(e) { console.error('CDP FAIL:', e.message); process.exit(1); }
 
-  if (!batchMode) {
-    const ticker = rawArgs[0] || 'HOSE:OCB';
-    return withChartLifecycle(cacheDir, ticker, timeframe, () =>
-      runOneCheck({ ticker, timeframe, cacheDir }));
+  if (!parsed.batchMode) {
+    return withChartLifecycle(cacheDir, parsed.ticker, parsed.timeframe, () =>
+      runOneCheck({ ticker: parsed.ticker, timeframe: parsed.timeframe, cacheDir }));
   }
 
-  // Batch: one process, one CDP connection, one chart lock; restore once at the end.
-  let initState = null;
-  try { initState = await chart.getState(); } catch { initState = null; }
-  return withChartLifecycle(cacheDir, tickers[0], timeframe, async () => {
-    const results = [];
-    for (const ticker of tickers) {
-      try {
-        results.push(await runOneCheck({
-          ticker, timeframe, cacheDir, providedInitState: initState,
-          restoreOnExit: false, disconnectOnExit: false,
-        }));
-      } catch (e) {
-        console.error(`BATCH_ERROR ${ticker}: ${e.message}`);
-      }
-    }
-    if (results.length < tickers.length) process.exitCode = 1;
-    try { await restoreChartState(chart, initState); } catch(e) {}
-    try { await disconnect(); } catch(e) {}
-    return results;
-  });
+  // Batch: one process, one CDP connection, one chart lock. The initState snapshot
+  // and the single final restore both happen inside the lock.
+  return withChartLifecycle(cacheDir, parsed.tickers[0], parsed.timeframe, () =>
+    runBatchLoop({
+      tickers: parsed.tickers,
+      captureState: () => chart.getState(),
+      runOne: ticker => runOneCheck({
+        ticker, timeframe: parsed.timeframe, cacheDir,
+        restoreOnExit: false, disconnectOnExit: false,
+      }),
+      restoreState: initialState => restoreChartState(chart, initialState),
+      disconnect,
+    }));
 }
 export { buildScenarios, contRetestScenario, findDemandBar, rangeBreakoutScenario, resampleWeekly, weeklyTrend, classifyVnSetup, buildVnAutoCore, buildVnGateView, buildVnPlanScenario, buildVnCoreAssembly, sma };
 

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { acquireLock, atomicWriteCache, cachePaths, evidenceHash, releaseLock, runtimeDataRoot } from './src/core/check_runtime.mjs';
-import { buildCacheEnvelope, restoreChartState, withChartLifecycle } from './check_one.mjs';
+import { buildCacheEnvelope, parseCheckArgs, restoreChartState, runBatchLoop, withChartLifecycle } from './check_one.mjs';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'check-runtime-'));
 const lockPath = path.join(root, 'locks', 'tradingview-chart.lock');
@@ -109,4 +109,67 @@ const checkOnePath = fileURLToPath(new URL('./check_one.mjs', import.meta.url));
 const batchFail = spawnSync(process.execPath, [checkOnePath, '--batch', 'HOSE:AAA'], { encoding: 'utf-8' });
 assert.notEqual(batchFail.status, 0, 'batch with fewer than 2 tickers must fail');
 assert.match(`${batchFail.stderr || ''}${batchFail.stdout || ''}`, /BATCH_REQUIRES_2_OR_MORE_TICKERS/);
+
+// parseCheckArgs: legacy single CLI incl. bare ticker, batch with shared timeframe.
+const single360 = parseCheckArgs(['node', 'check_one.mjs', 'HOSE:ACB', '360']);
+assert.equal(single360.batchMode, false);
+assert.equal(single360.ticker, 'HOSE:ACB');
+assert.equal(single360.timeframe, '360');
+const bare = parseCheckArgs(['node', 'check_one.mjs', 'OCB']);
+assert.equal(bare.batchMode, false);
+assert.equal(bare.ticker, 'OCB', 'bare ticker must be argv[0], not timeframe');
+assert.equal(bare.timeframe, '360', 'bare ticker defaults to H6');
+const gold = parseCheckArgs(['node', 'check_one.mjs', 'ICMARKETS:XAUUSD']);
+assert.equal(gold.ticker, 'ICMARKETS:XAUUSD');
+assert.equal(gold.timeframe, '5', 'XAUUSD defaults to M5');
+const batch = parseCheckArgs(['node', 'check_one.mjs', '--batch', 'HOSE:AAA', 'HOSE:BBB', '360']);
+assert.equal(batch.batchMode, true);
+assert.deepEqual(batch.tickers, ['HOSE:AAA', 'HOSE:BBB']);
+assert.equal(batch.timeframe, '360');
+assert.equal(batch.ticker, null);
+
+// runBatchLoop: snapshot inside lock (capture before any run), restore+disconnect once.
+{
+  const order = [];
+  const results = await runBatchLoop({
+    tickers: ['HOSE:AAA', 'HOSE:BBB'],
+    captureState: async () => { order.push('capture'); return { symbol: 'HOSE:VNM' }; },
+    runOne: async t => { order.push('run:' + t); return { ticker: t }; },
+    restoreState: async s => { order.push('restore:' + s.symbol); },
+    disconnect: async () => { order.push('disconnect'); },
+    onError: () => {},
+  });
+  assert.deepEqual(order, ['capture', 'run:HOSE:AAA', 'run:HOSE:BBB', 'restore:HOSE:VNM', 'disconnect']);
+  assert.equal(results.length, 2);
+}
+// Partial failure: per-ticker error is contained and exitCode signals the failure.
+{
+  const prevExit = process.exitCode;
+  process.exitCode = 0;
+  const order = [];
+  const results = await runBatchLoop({
+    tickers: ['HOSE:AAA', 'HOSE:BBB'],
+    captureState: async () => ({ symbol: 'HOSE:VNM' }),
+    runOne: async t => { if (t === 'HOSE:BBB') throw new Error('boom'); order.push('run:' + t); return { ticker: t }; },
+    restoreState: async () => { order.push('restore'); },
+    disconnect: async () => { order.push('disconnect'); },
+    onError: msg => { order.push('error:' + msg); },
+  });
+  assert.equal(results.length, 1);
+  assert.equal(process.exitCode, 1, 'partial batch failure must set exit code 1');
+  assert.deepEqual(order, ['run:HOSE:AAA', 'error:BATCH_ERROR HOSE:BBB: boom', 'restore', 'disconnect']);
+  process.exitCode = prevExit;
+}
+// Capture failure fails closed before any ticker runs.
+await assert.rejects(
+  runBatchLoop({
+    tickers: ['HOSE:AAA'],
+    captureState: async () => { throw new Error('cdp down'); },
+    runOne: async () => { throw new Error('must not run'); },
+    restoreState: async () => {},
+    disconnect: async () => {},
+    onError: () => {},
+  }),
+  /cdp down/,
+);
 console.log('ALL PASS');

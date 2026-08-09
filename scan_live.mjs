@@ -518,7 +518,7 @@ async function scanOne(ticker, name, idxCloses, marketRegime) {
   // Extra wait for Footprint indicator to reload data
   await waitForStudy(
     () => data.getStudyValues().then(sv => sv.studies || []),
-    { match: 'Footprint', attempts: 6, wait: () => sleep(400) },
+    { match: 'Footprint', attempts: 6, wait: () => sleep(250) },
   );
 
   // Read data in parallel (OHLCV de tinh wave.phase — port full tu check_one.mjs)
