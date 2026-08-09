@@ -56,6 +56,15 @@ function exchangePrefix(raw) {
   return 'HOSE';
 }
 
+const P1_HOSE_EXCHANGES = new Set(['HOSE', 'HSX']);
+
+export function validateP1CandidateExchange(value) {
+  if (typeof value !== 'string' || !P1_HOSE_EXCHANGES.has(value)) {
+    throw new Error('candidate exchange must be exact HOSE or HSX');
+  }
+  return value;
+}
+
 export function localDateKey(now = new Date()) {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit',
@@ -131,8 +140,9 @@ function loadWatchlist() {
   return payload.candidates.map(row => {
     const name = String(row.ticker || '').toUpperCase();
     if (!name || seen.has(name)) throw new Error('empty/duplicate candidate ticker');
+    const exchange = validateP1CandidateExchange(row.exchange);
     seen.add(name);
-    return { t: exchangePrefix(row.exchange) + ':' + name, g: 0, name, discovery: row };
+    return { t: exchangePrefix(exchange) + ':' + name, g: 0, name, exchange, discovery: row };
   });
 }
 
@@ -410,6 +420,7 @@ export function buildScoutResult(r, marketRegime) {
   const discovery = classifyDiscovery(r);
   return {
     ticker: r.name,
+    exchange: r.exchange ?? null,
     signal: r.sig,
     score: r.scored?.pct ?? 0,
     conf: r.fp?.conf ?? null,
@@ -588,14 +599,19 @@ async function main() {
     const scored = policyScoreSignal(fp, ma, 110, 'SIDEWAYS', null, false, context);
     const zeroDelta = policyScoreSignal({ ...fp, cumDelta: 0 }, ma, 110, 'SIDEWAYS', null, false, context);
     const result = buildScoutResult(
-      { name: 'TEST', sig: scored.sig, scored, fp: {}, ma: {}, rs: {}, barClosed: true, barAgePct: 100,
+      { name: 'TEST', exchange: 'HSX', sig: scored.sig, scored, fp: {}, ma: {}, rs: {}, barClosed: true, barAgePct: 100,
         session: { phase: 'CLOSED', trust_level: 'HIGH' } },
       { regime: 'NEUTRAL', note: null },
     );
     console.log(JSON.stringify(result));
     const footprintNull = ['conf', 'cum_delta', 'buy_pct', 'max_buy_stack']
       .every(field => result[field] === null);
-    process.exit(footprintNull && scored.sig === 'N/A' && zeroDelta.sig === 'WATCH' ? 0 : 1);
+    const invalidExchanges = [undefined, null, '', 'hose', 'HNX', 'UPCOM', 'XNAS'];
+    const invalidRejected = invalidExchanges.every(value => {
+      try { validateP1CandidateExchange(value); return false; } catch { return true; }
+    });
+    process.exit(footprintNull && scored.sig === 'N/A' && zeroDelta.sig === 'WATCH' &&
+      result.ticker === 'TEST' && result.exchange === 'HSX' && invalidRejected ? 0 : 1);
   }
   if (process.argv.includes('--self-test-discovery')) {
     const base = { discovery: { discovery_branches: ['ACCUMULATION_CANDIDATE'],
@@ -689,13 +705,14 @@ async function main() {
   const results = [];
 
   for (let i = 0; i < SCAN_LIST.length; i++) {
-    const { t, g, name, discovery } = SCAN_LIST[i];
+    const { t, g, name, exchange, discovery } = SCAN_LIST[i];
     if (FULL_MODE) process.stdout.write('[' + (i+1) + '/' + SCAN_LIST.length + '] ' + name + '... ');
     const r = await scanOne(t, name, idxCloses, marketRegime.regime);
     r.discovery = discovery || null;
+    r.exchange = exchange;
     if (r.error) {
       if (FULL_MODE) console.log('ERROR: ' + r.error);
-      results.push({ name, group: g, error: r.error, sig: 'ERR' });
+      results.push({ name, exchange, group: g, error: r.error, sig: 'ERR' });
       continue;
     }
     applyRegimeGate(r, marketRegime.regime);
