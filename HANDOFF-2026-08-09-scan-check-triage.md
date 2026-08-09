@@ -1,7 +1,7 @@
 # Handoff: Scan→Check triage read-only
 
 Ngày: 2026-08-09  
-Trạng thái: khuyến nghị đã được senior-advisor duyệt; chưa triển khai  
+Trạng thái: tài liệu thiết kế/provenance; triage read-only và quality gate hiện đã được triển khai  
 Mục tiêu: xây một lát cắt nhỏ nhưng có ích thực tế cho việc lọc nhiều mã trước khi kiểm tra tay.
 
 ## Khuyến nghị
