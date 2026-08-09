@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import { normalizeObservation, detect, STATUS } from './src/monitor/index.js';
+const id = { provider: 'tv', exchange: 'HOSE', symbol: 'AAA', full_symbol: 'HOSE:AAA', timeframe: '60', pane: 'p', layout: 'l', profile: 'vn-stock.v1' };
+const t = 1_700_000_000_000; const raw = (closed = false, session = 'CONT_AM') => ({ identity: id, timeframe: '60', session, bar_open_timestamp: t, bar_index: 1, source_timestamp: t, receipt_timestamp: t, evaluated_at: t, bar_closed: closed });
+const policy = { version: 'policy.v1', sessions: ['CONT_AM'] }; const a = normalizeObservation(raw(), { expectedIdentity: id, now: t, sessionPolicy: policy }); const e = (family, source_id, direction = 'BULLISH') => ({ family, source_id, bar_key: a.bar_key, config_version: 'cfg.v1', policy_version: 'policy.v1', profile: id.profile, session: 'CONT_AM', freshness: 'FRESH', canonical_value: 1, direction }); const ev = [e('levels', 'l'), e('structure', 's')];
+let d = detect({ observation: a, evidence: ev, profile: id.profile, now: t }); assert.equal(d.state.status, STATUS.PROVISIONAL);
+const c1 = normalizeObservation(raw(true), { expectedIdentity: id, now: t, sessionPolicy: policy }); d = detect({ observation: c1, evidence: ev, profile: id.profile, previousState: d.state, now: t });
+const c2 = normalizeObservation({ ...raw(true), receipt_timestamp: t + 1, evaluated_at: t + 1 }, { expectedIdentity: id, now: t + 1, sessionPolicy: policy }); assert.equal(c2.accepted, true); d = detect({ observation: c2, evidence: ev, profile: id.profile, previousState: d.state, now: t + 1 }); assert.equal(d.state.status, STATUS.CONFIRMED);
+assert.throws(() => detect({ observation: c2, evidence: [{ ...ev[0], bar_key: 'foreign' }, ev[1]], profile: id.profile }), /EVIDENCE_BAR_MISMATCH/);
+assert.throws(() => detect({ observation: c2, evidence: [{ ...ev[0], direction: undefined }], profile: id.profile }), /EVIDENCE_MISSING_PROVENANCE/);
+assert.equal(normalizeObservation(raw(), { expectedIdentity: id, now: t, sessionPolicy: policy, previousObservation: a }).accepted, false); assert.equal(normalizeObservation(raw(), { expectedIdentity: id, now: t }).accepted, false); assert.equal(normalizeObservation(raw(false, 'VN'), { expectedIdentity: id, now: t, sessionPolicy: policy }).accepted, false); console.log('ALL PASS');

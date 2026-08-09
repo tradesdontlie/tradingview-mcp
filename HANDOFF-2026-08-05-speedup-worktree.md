@@ -4,8 +4,9 @@
 
 - Đã triển khai xong gói **A (adaptive polling + full-symbol identity check) + E (VNINDEX cache ≤2h)** và **D (batch check một process/lock/connection)**; toàn bộ test deterministic pass.
 - Worktree **vốn đã bẩn từ trước** (công việc chưa commit của user: 7/22, sáng 04:21–04:44, chiều 13:51 hôm nay) — được giữ nguyên, KHÔNG đụng.
-- **Blocker:** usage limit tài khoản (reset `2026-08-08 20:32`). Coding child đã làm xong code trước khi lỗi; Sol-medium reviewer bị chặn chưa review.
-- **Khuyến nghị hiện tại: KHÔNG làm thêm thay đổi engine nào nữa; chờ 8/8 chạy lại Sol-medium review**, sau đó mới quyết định commit/branch và làm tiếp các mục C/I/F/B/G.
+- **Trạng thái review:** Sol-medium review 2026-08-09 = **PASS** (lần 1 NEEDS_FIX với 5 P1 + 1 P2 — đã sửa; re-review PASS, không còn finding). Chi tiết mục 6b.
+- **Trạng thái git:** gói A+E+D đã nằm trong commit `ff5caad` của user (2026-08-06). **Diff sửa review (2026-08-09) đang UNCOMMITTED** gồm: `check_one.mjs`, `scan_live.mjs`, `batch_check.mjs`, `test_check_runtime.mjs` + file mới `test_batch_check.mjs` — chờ user chốt commit.
+- **Khuyến nghị hiện tại:** commit diff sửa (5 file, riêng `check_one.mjs` không còn hỗn hợp vì đã commit chung với user), rồi làm tiếp các mục C/I/F/B/G nếu muốn.
 
 ## 2. Boundary & acceptance của gói này
 
@@ -84,6 +85,20 @@ git diff --check                      exit=0
 - Coding child hoàn thành code trước khi lỗi (bằng chứng mtime); root tự vá 2 lỗi còn lại (`waitForStudy` chịu lỗi transient; `confirmSymbol` chấp nhận actual không có exchange) và tự review toàn bộ diff.
 - **Sau 8/8:** chạy lại Sol-medium review trên diff 6 file (packet sẵn trong thread), rồi quyết định branch/commit theo ý user.
 - Chưa chạy smoke test live (cần TradingView + tạm đổi chart state). Không bắt buộc cho acceptance; làm khi TV rảnh nếu user muốn.
+
+### 6b. Kết quả review Sol-medium (2026-08-09) — PASS
+
+Lần 1: NEEDS_FIX — 5 P1 (batch_check `require()` trong .mjs → ReferenceError; parser CLI `OCB 360` gán timeframe="OCB"; attribution theo chỉ số sai khi mã giữa batch fail; initState snapshot trước lock + nuốt lỗi getState; wait cap 6×400=2000ms > 1500ms cũ) + 1 P2 (test thiếu). Không có P0.
+
+Lần 2 (sau sửa): **PASS — không còn finding P0/P1/P2**.
+
+Cách sửa:
+- `batch_check.mjs`: ESM import + guard `IS_DIRECT` (import vào test không chạy batch) + `buildResults()` attribution theo ticker (map), parse BATCH_ERROR tách ticker/message bằng `': '` (ticker tự chứa ':').
+- `check_one.mjs`: `parseCheckArgs()` — single mode giữ nguyên CLI legacy (argv[0]=ticker, argv[1]=timeframe|defaultTf), batch mode filter ticker có ':' + tf chung; `runBatchLoop()` — snapshot gọi BÊN TRONG lock (capture fail → fail-closed trước vòng lặp, lock vẫn release), loop trong try/finally restore+disconnect đúng 1 lần, onError từng mã, exitCode=1 khi partial.
+- `scan_live.mjs`: wait 250ms (cap 5×250=1250ms ≤ 1500ms cũ).
+- Test mới: `parseCheckArgs` (bare OCB→360, XAUUSD→5, legacy, batch tf chung), `runBatchLoop` (order capture→run→restore→disconnect, partial exitCode=1, capture-fail rejects), `test_batch_check.mjs` (attribution mã giữa batch fail, no-output fallback, guard import).
+
+Bằng chứng tươi: 10/10 test `.mjs` exit 0 (gồm `test_batch_check.mjs` mới) + `node --test tests/scan_policy.test.js` 0 + `node --check` 3 file runtime 0 + `git diff --check` 0.
 
 ## 7. Rollback
 
