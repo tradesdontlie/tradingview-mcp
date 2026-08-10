@@ -28,10 +28,10 @@ describe('Cup-and-Handle Pine clean-room contract', () => {
   it('is an original Pine v6 indicator carrying the frozen detector identity', () => {
     assert.match(pine, /^\/\/@version=6/m);
     assert.match(pine, /indicator\(\s*\n\s*"Cup-and-Handle Pattern Watch \[Clean-room V0\]"/);
-    assert.match(pine, /string VERSION = "0\.1\.1-cleanroom"/);
+    assert.match(pine, /string VERSION = "0\.1\.2-cleanroom"/);
     assert.match(pine, /string CONFIG_BASE_ID = "ch-v0-default"/);
     assert.match(pine, /string runtimeConfigId = CONFIG_BASE_ID \+ "\|settings:/);
-    assert.equal(contract.detector_version, '0.1.1-cleanroom');
+    assert.equal(contract.detector_version, '0.1.2-cleanroom');
     assert.equal(contract.status, 'draft_calibration');
     assert.match(pine, /no protected or\s*\n\/\/ proprietary source code was copied or extracted/i);
   });

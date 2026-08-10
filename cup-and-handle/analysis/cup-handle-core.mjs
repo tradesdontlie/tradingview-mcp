@@ -42,7 +42,7 @@ export const STAGES = Object.freeze([
 
 export const DEFAULT_CONFIG = Object.freeze({
   config_id: 'ch-v0-default',
-  detector_version: '0.1.1-cleanroom',
+  detector_version: '0.1.2-cleanroom',
   lookback_bars: 600,
   pivot_left_bars: 5,
   pivot_right_bars: 5,
@@ -767,10 +767,15 @@ export function detectCupAndHandle({
       config,
       locks,
     });
-    const confirmedIds = new Set(
-      confirmed
-        .filter((candidate) => !TERMINAL_STAGES.has(candidate.stage))
-        .map((candidate) => candidate.family_id),
+    // Pine only discovers a right rim on the bar where its pivot becomes
+    // knowable. Keep the reference detector on that same causal boundary:
+    // historical right rims remain available for an already-active confirmed
+    // pattern, but they cannot start or promote a different pattern later.
+    const newlyConfirmed = confirmed.filter(
+      (candidate) => candidate._p3?.confirmed_index === barIndex,
+    );
+    const newlyConfirmedFamilyIds = new Set(
+      newlyConfirmed.map((candidate) => candidate.family_id),
     );
     const approaches = approachCandidatesAt({
       bars,
@@ -779,7 +784,7 @@ export function detectCupAndHandle({
       symbol: symbol.trim(),
       timeframe: normalizedTimeframe,
       config,
-      confirmedIds,
+      confirmedIds: newlyConfirmedFamilyIds,
     });
     const allCandidates = [...confirmed, ...approaches]
       .filter((candidate) => !completedFamilyIds.has(candidate.family_id));
@@ -789,7 +794,7 @@ export function detectCupAndHandle({
     if (!selected && activePatternId) {
       const activeObservation = latestById.get(activePatternId);
       if (activeObservation?.provisional) {
-        selected = allCandidates
+        selected = newlyConfirmed
           .filter((candidate) => candidate.family_id === activeObservation.family_id)
           .sort(compareCandidates)[0] ?? null;
       }
@@ -834,7 +839,8 @@ export function detectCupAndHandle({
       continue;
     }
     if (!selected) {
-      selected = allCandidates
+      selected = [...newlyConfirmed, ...approaches]
+        .filter((candidate) => !completedFamilyIds.has(candidate.family_id))
         .filter((candidate) => (
           !TERMINAL_STAGES.has(candidate.stage)
           && !TERMINAL_STAGES.has(stageById.get(candidate.pattern_id))

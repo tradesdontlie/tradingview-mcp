@@ -11,7 +11,7 @@ indicator(
 // documentation is used as a behavioral specification; no protected or
 // proprietary source code was copied or extracted.
 
-string VERSION = "0.1.1-cleanroom"
+string VERSION = "0.1.2-cleanroom"
 string CONFIG_BASE_ID = "ch-v0-default"
 
 string GROUP_STRUCTURE = "Documented structure"

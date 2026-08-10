@@ -69,6 +69,26 @@ function detect(bars, overrides = {}) {
   });
 }
 
+function makeDeterministicRandomWalk(seed, length = 500) {
+  let state = seed >>> 0;
+  const random = () => {
+    state = (1664525 * state + 1013904223) >>> 0;
+    return state / 4294967296;
+  };
+  let previousClose = 100;
+  return Array.from({ length }, (_, index) => {
+    const open = previousClose;
+    const close = Math.max(5, open + (random() - 0.49) * 6);
+    const spread = 0.2 + random() * 2;
+    previousClose = close;
+    return makeBar(index, close, {
+      open,
+      high: Math.max(open, close) + spread,
+      low: Math.max(0.1, Math.min(open, close) - spread),
+    });
+  });
+}
+
 describe('Cup-and-Handle clean-room configuration', () => {
   it('freezes TradingView-documented structural defaults separately from tunable rules', () => {
     assert.equal(DEFAULT_CONFIG.lookback_bars, 600);
@@ -76,7 +96,7 @@ describe('Cup-and-Handle clean-room configuration', () => {
     assert.equal(DEFAULT_CONFIG.pivot_right_bars, 5);
     assert.equal(DEFAULT_CONFIG.minimum_cup_bars, 20);
     assert.equal(DEFAULT_CONFIG.prior_trend_gate_enabled, false);
-    assert.equal(DEFAULT_CONFIG.detector_version, '0.1.1-cleanroom');
+    assert.equal(DEFAULT_CONFIG.detector_version, '0.1.2-cleanroom');
   });
 
   it('normalizes only the approved first-slice timeframes', () => {
@@ -286,6 +306,20 @@ describe('Cup-and-Handle lifecycle', () => {
       && transition.detection_index > breakout.detection_index
     ));
     assert.deepEqual(sameFamilyAfterBreakout, []);
+  });
+
+  it('never starts a confirmed pattern from a right rim that was knowable on an earlier bar', () => {
+    const result = detect(makeDeterministicRandomWalk(1), {
+      minimum_u_shape_score: 0.2,
+      center_tolerance_fraction_of_half_width: 0.8,
+      rim_deviation_fraction_of_cup_height: 0.5,
+    });
+    const lateConfirmedStarts = result.transitions.filter((transition) => (
+      transition.to_stage === 'HANDLE_FORMING'
+      && transition.from_stage === 'NONE'
+      && transition.anchors?.right_rim?.confirmed_index < transition.detection_index
+    ));
+    assert.deepEqual(lateConfirmedStarts, []);
   });
 
   it('retires the provisional record when its family promotes to a confirmed cup', () => {

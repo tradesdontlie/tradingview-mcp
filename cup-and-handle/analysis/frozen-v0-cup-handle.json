@@ -1,6 +1,6 @@
 {
   "schema_version": "cup-handle-contract-v0",
-  "detector_version": "0.1.1-cleanroom",
+  "detector_version": "0.1.2-cleanroom",
   "status": "draft_calibration",
   "name": "Cup-and-Handle Pattern Watch",
   "purpose": "Causal attention signal for a forming bullish Cup-and-Handle pattern; not a trade recommendation.",

@@ -50,7 +50,7 @@ NONE
   -> HANDLE_READY
   -> BREAKOUT_CONFIRMED
 
-Any confirmed pattern can instead become INVALIDATED or EXPIRED.
+Any active pattern can instead become INVALIDATED or EXPIRED.
 ```
 
 Anchor timestamps describe where the geometry is drawn. Detection timestamps
@@ -70,7 +70,9 @@ encoded in the configuration identity carried by detector events.
 - `analysis/live-qa-v0.json` — source-bound historical 0.1.0 TradingView
   runtime-matrix, screenshot-hash, and cleanup receipt; superseded after the
   independent review found lifecycle defects.
-- `analysis/verification-0.1.1.json` — current source hashes, regression checks,
+- `analysis/verification-0.1.1.json` — historical verification receipt for the
+  first review-corrected build.
+- `analysis/verification-0.1.2.json` — current source hashes, regression checks,
   TradingView compile-only result, and exact remaining verification boundary.
 - `cup-and-handle.pine` — TradingView overlay and alert surface.
 - `../tests/cup_handle_core.test.js` — geometry, lifecycle, and causality tests.
@@ -115,16 +117,32 @@ were re-verified unchanged. Independent review then found lifecycle defects in
 that exact build, so its matrix is retained as historical integration evidence,
 not as acceptance evidence for the current source.
 
-Version 0.1.1 fixes the reproduced post-breakout re-arming, stale provisional,
-pre-handle upside-escape, and late historical-right-rim paths. The exact 0.1.1
+Version 0.1.2 fixes the reproduced post-breakout re-arming, stale provisional,
+pre-handle upside-escape, and late historical-right-rim paths, including the
+same late-right-rim rule in the JavaScript reference detector. The exact 0.1.2
 Pine source passes TradingView's server compiler with zero errors and warnings,
-the local analyzer reports zero issues, and all 35 focused tests pass. It has
+the local analyzer reports zero issues, all 36 focused tests pass, and all 188
+repository unit tests pass with two platform-specific skips. It has
 not yet been applied to a live chart.
 
 The historical matrix proves basic integration and runtime behavior, not signal
 quality for the current source.
 No alert was activated, no replay-vs-live Pine trace was produced, and the
 Pine/JavaScript implementations do not yet have per-bar parity evidence. This
-therefore remains a calibration draft until the 0.1.1 source receives a fresh
+therefore remains a calibration draft until the 0.1.2 source receives a fresh
 chart runtime check and representative good, early, late, and rejected
 formations are labeled against a frozen acceptance set.
+
+## Calibration review set
+
+The first stock tranche now contains 12 local, blind review cards: four each
+for 4H, 1D, and 1W. Every chart stops on the bar where the candidate became
+knowable; later bars, detector stage, score, and anchors are hidden. Candidate
+metadata stores hashes and timestamps but no OHLC arrays.
+
+The cards and append-only label events remain under the gitignored
+`screenshots/cup-handle-calibration-v1/stock-batch-01/` directory. They are not
+part of the public pull request because this repository forbids committing or
+redistributing market data and personal watchlist configurations. The 12-card
+crypto tranche remains separate until its source can be frozen under the same
+lookahead and local-only rules.
