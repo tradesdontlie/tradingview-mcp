@@ -1,0 +1,200 @@
+{
+  "schema_version": "cup-handle-live-qa-v1",
+  "run_id": "20260810171712",
+  "tested_at_utc": "2026-08-10T17:17:12Z",
+  "status": "superseded_after_parallel_grill",
+  "detector_version": "0.1.0-cleanroom",
+  "source": {
+    "pine_path": "cup-and-handle/cup-and-handle.pine",
+    "pine_sha256": "a610542464758b5c3a9831eb31c364c1acd20a62469eabd80d91f403c47965b5",
+    "reference_path": "cup-and-handle/analysis/cup-handle-core.mjs",
+    "reference_sha256": "32a4f94443bccafcbbf968b0301c8cb4f8c8cab211c106a77faef8c81df61c81"
+  },
+  "compile": {
+    "tradingview_server_compile": "passed",
+    "errors": 0,
+    "warnings": 0
+  },
+  "runtime_matrix": {
+    "result": "passed",
+    "invariants_checked_per_case": [
+      "exact temporary script identity and version",
+      "study completed and settled to the current main-series bar",
+      "two identical machine reads on the same closed bar",
+      "valid lifecycle code and transition coherence",
+      "stage-specific anchor, level, and drawing-count coherence",
+      "chart-only screenshot captured on the same bar"
+    ],
+    "cases": [
+      {
+        "id": "aapl-4h",
+        "requested_symbol": "NASDAQ:AAPL",
+        "resolved_chart_symbol": "BATS:AAPL",
+        "timeframe": "4H",
+        "supported": true,
+        "stage_code": 3,
+        "stage": "HANDLE_FORMING",
+        "quality": 64,
+        "rim": 276.54,
+        "invalidation": 262.52,
+        "line_count": 2,
+        "repeat_read_equal": true,
+        "screenshot": {
+          "path": "screenshots/cup-handle-live-qa-20260810171712/aapl-4h.png",
+          "sha256": "4f027e1e233e88e70802d9bbd7f8133fbe8aa73f601a1bea2ef52b1465a1150a",
+          "size_bytes": 142316,
+          "width": 1144,
+          "height": 1082
+        }
+      },
+      {
+        "id": "aapl-1d",
+        "requested_symbol": "NASDAQ:AAPL",
+        "resolved_chart_symbol": "BATS:AAPL",
+        "timeframe": "1D",
+        "supported": true,
+        "stage_code": 0,
+        "stage": "NONE",
+        "line_count": 0,
+        "repeat_read_equal": true,
+        "screenshot": {
+          "path": "screenshots/cup-handle-live-qa-20260810171712/aapl-1d.png",
+          "sha256": "e5a5ca44559b474529131d23e2658a4e4e8ec28e6546929ab67dea17c4dde6fc",
+          "size_bytes": 137931,
+          "width": 1144,
+          "height": 1082
+        }
+      },
+      {
+        "id": "aapl-1w",
+        "requested_symbol": "NASDAQ:AAPL",
+        "resolved_chart_symbol": "BATS:AAPL",
+        "timeframe": "1W",
+        "supported": true,
+        "stage_code": 0,
+        "stage": "NONE",
+        "line_count": 0,
+        "repeat_read_equal": true,
+        "screenshot": {
+          "path": "screenshots/cup-handle-live-qa-20260810171712/aapl-1w.png",
+          "sha256": "c2af55ebda077056012f72fb3d7f2f02b6bd8d25a295db0f0ccc7161b6b29ada",
+          "size_bytes": 124722,
+          "width": 1144,
+          "height": 1082
+        }
+      },
+      {
+        "id": "btc-4h",
+        "requested_symbol": "BITSTAMP:BTCUSD",
+        "resolved_chart_symbol": "BITSTAMP:BTCUSD",
+        "timeframe": "4H",
+        "supported": true,
+        "stage_code": 3,
+        "stage": "HANDLE_FORMING",
+        "quality": 70,
+        "rim": 64831,
+        "invalidation": 62080,
+        "line_count": 2,
+        "repeat_read_equal": true,
+        "screenshot": {
+          "path": "screenshots/cup-handle-live-qa-20260810171712/btc-4h.png",
+          "sha256": "d70660c97c0a3eb652fb330387eded0ac5b64bc0485312119a34e92ec8d4b746",
+          "size_bytes": 138717,
+          "width": 1144,
+          "height": 1082
+        }
+      },
+      {
+        "id": "btc-1d",
+        "requested_symbol": "BITSTAMP:BTCUSD",
+        "resolved_chart_symbol": "BITSTAMP:BTCUSD",
+        "timeframe": "1D",
+        "supported": true,
+        "stage_code": 0,
+        "stage": "NONE",
+        "line_count": 0,
+        "repeat_read_equal": true,
+        "screenshot": {
+          "path": "screenshots/cup-handle-live-qa-20260810171712/btc-1d.png",
+          "sha256": "061fdace392d79e2f37439c5c651e5f7895a3151470b1c4d76dc54f9b78811c3",
+          "size_bytes": 175253,
+          "width": 1144,
+          "height": 1082
+        }
+      },
+      {
+        "id": "btc-1w",
+        "requested_symbol": "BITSTAMP:BTCUSD",
+        "resolved_chart_symbol": "BITSTAMP:BTCUSD",
+        "timeframe": "1W",
+        "supported": true,
+        "stage_code": 0,
+        "stage": "NONE",
+        "line_count": 0,
+        "repeat_read_equal": true,
+        "screenshot": {
+          "path": "screenshots/cup-handle-live-qa-20260810171712/btc-1w.png",
+          "sha256": "cbb049c9a92fcb6f587c07cef0076113c41fbf3f40fda3c1fbce5ddb622564bf",
+          "size_bytes": 182080,
+          "width": 1144,
+          "height": 1082
+        }
+      },
+      {
+        "id": "aapl-1m-negative",
+        "requested_symbol": "NASDAQ:AAPL",
+        "resolved_chart_symbol": "BATS:AAPL",
+        "timeframe": "1M",
+        "supported": false,
+        "stage_code": 0,
+        "stage": "NONE",
+        "line_count": 0,
+        "exact_timeframe_warning_count": 1,
+        "repeat_read_equal": true,
+        "screenshot": {
+          "path": "screenshots/cup-handle-live-qa-20260810171712/aapl-1m-negative.png",
+          "sha256": "57df0a35e64fb21830f209070746b2c7e17f6ee422f9843600a91cafbf742134",
+          "size_bytes": 141122,
+          "width": 1144,
+          "height": 1082
+        }
+      }
+    ]
+  },
+  "visual_review": {
+    "result": "completed_with_context_noise",
+    "checked_images": 7,
+    "observed": [
+      "Cup-and-Handle transition labels and geometry rendered on live stock and crypto charts",
+      "the monthly negative control rendered the intended unsupported-timeframe warning",
+      "no blank chart or obvious Pine runtime-error overlay was visible"
+    ],
+    "limitation": "The disposable chart inherited the user's existing studies, so the screenshots are useful runtime evidence but are visually cluttered and do not independently prove that every historical label is a desirable pattern."
+  },
+  "cleanup": {
+    "result": "verified",
+    "temporary_study_references_after": 0,
+    "temporary_cloud_script_matches_after": 0,
+    "temporary_cloud_source_access_after": false,
+    "temporary_chart_targets_after": 0,
+    "temporary_shell_tabs_after": 0,
+    "original_chart_restored": true,
+    "original_alert_definitions_unchanged": true,
+    "cup_handle_alerts_created": 0
+  },
+  "claims_not_established": [
+    "Pine and JavaScript per-bar behavioral parity",
+    "replay-verified non-repainting behavior in TradingView",
+    "pattern precision or recall against human visual judgment",
+    "alert-delivery behavior",
+    "predictive or trading performance",
+    "monthly detection",
+    "watchlist or broader-market scanning"
+  ],
+  "artifact_note": "The screenshots and private recovery receipt are local, gitignored runtime evidence. Their content hashes are preserved here; no TradingView script identifier or account identity is recorded in this durable receipt.",
+  "superseded_by": {
+    "detector_version": "0.1.1-cleanroom",
+    "verification_receipt": "cup-and-handle/analysis/verification-0.1.1.json",
+    "reason": "Independent review reproduced post-breakout family re-arming, stale promoted provisional state, pre-handle upside escape, and late historical-right-rim resurrection in 0.1.0. The 0.1.1 build corrects those paths, so this live matrix is integration evidence for the earlier source only and must not be represented as exact-source runtime proof for 0.1.1."
+  }
+}

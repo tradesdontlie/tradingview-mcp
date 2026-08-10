@@ -1,0 +1,94 @@
+{
+  "schema_version": "cup-handle-verification-v1",
+  "verified_at_utc": "2026-08-10T19:17:11Z",
+  "detector_version": "0.1.2-cleanroom",
+  "source": {
+    "pine_path": "cup-and-handle/cup-and-handle.pine",
+    "pine_sha256": "27381b36ac02b554e4dffccaa79ef902a8df4009d530fe9079607cb0ef8cbb85",
+    "reference_path": "cup-and-handle/analysis/cup-handle-core.mjs",
+    "reference_sha256": "892811d1128b4acdbe06ce82d5353d41a6f59686c1bfa52a04f539b9c5b0b83a",
+    "contract_path": "cup-and-handle/analysis/frozen-v0-cup-handle.json",
+    "contract_sha256": "6658c496110e1a64d36288231ce38c7f198dafb98df9058b23bdfaefe6db773b"
+  },
+  "checks": {
+    "focused_tests": {
+      "command": "npm run test:cup-handle",
+      "passed": 36,
+      "failed": 0
+    },
+    "repository_unit_tests": {
+      "command": "npm run test:unit",
+      "passed": 188,
+      "skipped": 2,
+      "failed": 0
+    },
+    "eslint": {
+      "command": "npx eslint cup-and-handle/analysis/cup-handle-core.mjs tests/cup_handle_core.test.js tests/cup_handle_pine_contract.test.js",
+      "errors": 0,
+      "warnings": 0
+    },
+    "local_pine_analysis": {
+      "command": "node src/cli/index.js pine analyze --file cup-and-handle/cup-and-handle.pine",
+      "issue_count": 0
+    },
+    "tradingview_server_compile": {
+      "method": "pine_check compile-only; source was not injected, saved, or added to a chart",
+      "compiled": true,
+      "errors": 0,
+      "warnings": 0
+    },
+    "post_compile_live_state": {
+      "chart_symbol": "FX_IDC:XAGUSD",
+      "study_count": 7,
+      "cup_handle_study_count": 0,
+      "alert_count": 40,
+      "cup_handle_alert_count": 0
+    },
+    "git_diff_check": "passed"
+  },
+  "incremental_grill_fixes": [
+    {
+      "failure": "The JavaScript reference could start a confirmed pattern from a right-rim pivot that had become knowable on an earlier bar, contradicting the Pine detector's no-historical-resurrection rule.",
+      "resolution": "Only right rims whose pivot confirms on the current bar can start or promote a pattern; historical right rims remain available only to update the exact active confirmed pattern.",
+      "regression_covered": true
+    },
+    {
+      "failure": "Changing detector behavior without changing its version would make old and new event identities indistinguishable.",
+      "resolution": "The Pine, JavaScript, and frozen contract identity was advanced from 0.1.1-cleanroom to 0.1.2-cleanroom.",
+      "regression_covered": true
+    }
+  ],
+  "calibration_batch": {
+    "status": "awaiting_human_labels",
+    "scope": "12 local stock cards; four each on 4H, 1D, and 1W",
+    "local_manifest_path": "screenshots/cup-handle-calibration-v1/stock-batch-01/manifest.json",
+    "local_manifest_sha256": "bf7c9706e6438ac1d2f5b10a06955dc5040e87184d10ec33d86eba1e7b4aa75b",
+    "candidate_metadata_sha256": "51c785bcd0a5372b0aec969c8fd377c87bb0a15180dd034867d202edae43d660",
+    "label_event_log_sha256": "b41a6c00ca032f2039f7256cb3b1d0f68f3c6e94956d845e2b76c6341f0cf8e2",
+    "future_bars_hidden": true,
+    "visible_detector_annotations": false,
+    "raw_ohlcv_persisted_in_metadata": false,
+    "deterministic_regeneration": "byte-identical manifest, candidates, label log, and 12 SVG cards",
+    "tracked_or_pushed": false,
+    "crypto_half_batch_status": "not_started; requires a separately frozen source"
+  },
+  "historical_live_evidence": {
+    "receipt": "cup-and-handle/analysis/live-qa-v0.json",
+    "version": "0.1.0-cleanroom",
+    "status": "superseded for exact-source runtime proof",
+    "still_relevant_to": [
+      "TradingView integration and cleanup path",
+      "4H/1D/1W timeframe gating",
+      "stock and crypto chart rendering",
+      "1M fail-closed warning"
+    ]
+  },
+  "not_verified_for_0_1_2": [
+    "chart-applied runtime matrix",
+    "TradingView replay behavior",
+    "alert creation or delivery",
+    "Pine/JavaScript per-bar parity",
+    "human-approved signal precision or recall",
+    "crypto calibration cards"
+  ]
+}

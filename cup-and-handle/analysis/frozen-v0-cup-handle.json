@@ -1,0 +1,76 @@
+{
+  "schema_version": "cup-handle-contract-v0",
+  "detector_version": "0.1.2-cleanroom",
+  "status": "draft_calibration",
+  "name": "Cup-and-Handle Pattern Watch",
+  "purpose": "Causal attention signal for a forming bullish Cup-and-Handle pattern; not a trade recommendation.",
+  "supported_timeframes": ["4H", "1D", "1W"],
+  "documented_tradingview_rules": {
+    "source": "https://www.tradingview.com/support/solutions/43000732556-chart-pattern-cup-and-handle/",
+    "lookback_bars": 600,
+    "pivot_left_bars": 5,
+    "pivot_right_bars": 5,
+    "minimum_cup_bars": 20,
+    "bottom_is_lowest_pivot_near_center": true,
+    "approximately_level_rims": true,
+    "handle_rollback_is_limited_relative_to_cup_height": true,
+    "handle_cannot_outlive_cup": true,
+    "supports_in_progress_patterns": true,
+    "breakout_uses_close_above_handle_line": true,
+    "overlapping_patterns_prefer_awaiting_then_best_u_shape": true,
+    "prior_trend_check_is_optional_and_disabled_by_default": true
+  },
+  "explicit_cleanroom_defaults": {
+    "maximum_cup_bars": 240,
+    "center_tolerance_fraction_of_half_width": 0.35,
+    "rim_deviation_fraction_of_cup_height": 0.15,
+    "minimum_cup_depth_fraction_of_rim": 0.08,
+    "maximum_cup_depth_fraction_of_rim": 0.5,
+    "minimum_u_shape_score": 0.5,
+    "bottom_width_target_fraction": 0.12,
+    "forming_recovery_fraction": 0.65,
+    "rim_approach_recovery_fraction": 0.85,
+    "maximum_handle_rollback_fraction_of_cup_height": 0.4,
+    "minimum_handle_bars": 3,
+    "pre_handle_close_above_right_rim_invalidates": true,
+    "completed_breakout_family_cannot_rearm": true,
+    "prior_trend_gate_enabled": false,
+    "equal_price_pivot_plateau_policy": "rightmost"
+  },
+  "lifecycle": [
+    "NONE",
+    "CUP_FORMING",
+    "RIM_APPROACH",
+    "HANDLE_FORMING",
+    "HANDLE_READY",
+    "BREAKOUT_CONFIRMED",
+    "INVALIDATED",
+    "EXPIRED"
+  ],
+  "causality": {
+    "closed_bars_only": true,
+    "pivot_detection_is_not_backdated": true,
+    "anchors_lock_after_first_confirmed_pattern_transition": true,
+    "one_event_per_pattern_stage": true,
+    "historical_anchor_time_is_distinct_from_detection_time": true,
+    "event_reports_detection_bar_open_and_close_times": true,
+    "live_bar_drawings_use_last_closed_values": true,
+    "promoted_provisional_identity_is_retired": true
+  },
+  "identity": {
+    "family_id_anchors": ["left_rim", "cup_bottom"],
+    "provisional_pattern_id_uses_pending_right_rim": true,
+    "confirmed_pattern_id_adds_right_rim": true,
+    "configuration_id_encodes_all_runtime_thresholds": true
+  },
+  "non_goals": [
+    "Reproduce TradingView's undisclosed implementation exactly",
+    "Automated trading or order placement",
+    "Claim predictive efficacy",
+    "Scan or alert on off-watchlist symbols automatically",
+    "Watchlist scanner implementation in the first slice",
+    "Track or queue more than one overlapping active pattern family per chart",
+    "Monthly support before 4H/1D/1W calibration",
+    "Target-reached outcome tracking in the first slice"
+  ]
+}

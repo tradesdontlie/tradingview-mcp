@@ -1,0 +1,76 @@
+{
+  "schema_version": "cup-handle-verification-v1",
+  "verified_at_utc": "2026-08-10T17:44:58Z",
+  "detector_version": "0.1.1-cleanroom",
+  "source": {
+    "pine_path": "cup-and-handle/cup-and-handle.pine",
+    "pine_sha256": "bf594e19e26f825431e8408162f449224c69cc4f19d3549191d1bcccb26cd2ff",
+    "reference_path": "cup-and-handle/analysis/cup-handle-core.mjs",
+    "reference_sha256": "87bfe4c06ea9ffc4d13a42dbe3b48dff8c2d20e11aca05fcbccc29e3cf2eb3b3"
+  },
+  "checks": {
+    "focused_tests": {
+      "command": "npm run test:cup-handle",
+      "passed": 35,
+      "failed": 0
+    },
+    "repository_unit_tests": {
+      "command": "npm run test:unit",
+      "passed": 187,
+      "skipped": 2,
+      "failed": 0
+    },
+    "eslint": {
+      "command": "npx eslint cup-and-handle/analysis/cup-handle-core.mjs tests/cup_handle_core.test.js tests/cup_handle_pine_contract.test.js",
+      "errors": 0,
+      "warnings": 0
+    },
+    "local_pine_analysis": {
+      "command": "node src/cli/index.js pine analyze --file cup-and-handle/cup-and-handle.pine",
+      "issue_count": 0
+    },
+    "tradingview_server_compile": {
+      "method": "server API compile-only; source was not saved or added to a chart",
+      "compiled": true,
+      "errors": 0,
+      "warnings": 0
+    },
+    "json_validation": "passed",
+    "git_diff_check": "passed"
+  },
+  "parallel_grill_fixes": [
+    {
+      "failure": "A completed cup family could re-arm immediately after breakout under a different right-rim pattern ID.",
+      "resolution": "A breakout now retires the entire left-rim/bottom family; the provisional identity is retired when the cup promotes.",
+      "regression_covered": true
+    },
+    {
+      "failure": "A confirmed cup could remain HANDLE_FORMING after price closed above the right rim without ever producing a handle pivot.",
+      "resolution": "A pre-handle close above the right rim now invalidates the setup after giving a newly confirmed handle pivot first chance to lock.",
+      "regression_covered": true
+    },
+    {
+      "failure": "A historical right rim could be resurrected late as HANDLE_FORMING without reconstructing its already-known handle lifecycle.",
+      "resolution": "Historical right rims are no longer queued or resurrected; V0 explicitly tracks one active family at a time.",
+      "regression_covered": "static Pine contract plus documented V0 boundary"
+    }
+  ],
+  "historical_live_evidence": {
+    "receipt": "cup-and-handle/analysis/live-qa-v0.json",
+    "version": "0.1.0-cleanroom",
+    "status": "superseded for exact-source runtime proof",
+    "still_relevant_to": [
+      "TradingView integration and cleanup path",
+      "4H/1D/1W timeframe gating",
+      "stock and crypto chart rendering",
+      "1M fail-closed warning"
+    ]
+  },
+  "not_verified_for_0_1_1": [
+    "chart-applied runtime matrix",
+    "TradingView replay behavior",
+    "alert creation or delivery",
+    "Pine/JavaScript per-bar parity",
+    "human-approved signal precision or recall"
+  ]
+}
