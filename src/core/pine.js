@@ -550,12 +550,20 @@ export async function newScript({ type }) {
   // editor's "New script" menu action, so instead of pretending we created a
   // new script we (a) capture which saved script is currently open and
   // (b) return a loud warning so the caller can avoid clobbering it.
-  const openTitle = await evaluate(`
+  // Il nome dello script a rischio si ricava dal codice ATTUALMENTE nel buffer
+  // (dichiarazione indicator/strategy/library), non dal DOM: le classi CSS
+  // dell'header sono hashate e cambiano a ogni build di TradingView.
+  const prev = await evaluate(`
     (function() {
-      var el = document.querySelector('[data-name="scriptTitle"], [class*="scriptTitle"], [class*="scriptName"]');
-      return el ? (el.textContent || '').trim() : null;
+      var m = ${FIND_MONACO};
+      if (!m) return null;
+      var src = m.editor.getValue() || '';
+      var t = src.match(/(?:indicator|strategy|library)\\s*\\(\\s*(?:title\\s*=\\s*)?["']([^"']+)["']/);
+      return { title: t ? t[1] : null, lines: src.split('\\n').length };
     })()
   `).catch(() => null);
+  const openTitle = prev && prev.title ? prev.title : null;
+  const openLines = prev && prev.lines ? prev.lines : null;
 
   // Set the template into the editor and confirm the write actually applied.
   const escaped = JSON.stringify(template);
@@ -583,14 +591,16 @@ export async function newScript({ type }) {
     action: 'template_loaded_in_editor',
     template: typeMap[type],
     verified: true,
-    open_script_at_risk: openTitle || null,
+    open_script_at_risk: openTitle,
+    replaced_lines: openLines,
     warning:
       'Loaded a blank ' + (typeMap[type] || 'indicator') + ' template into the editor, ' +
       'but this does NOT create a new saved script — the editor is still bound to the ' +
-      'script that was open' + (openTitle ? ' ("' + openTitle + '")' : '') + '. ' +
-      'Saving now (e.g. pine_smart_compile) will OVERWRITE that script. To create a ' +
-      'genuinely new script, use the Pine editor menu -> New, or inject into a dedicated ' +
-      'throwaway slot.',
+      'script that was open' + (openTitle ? ' ("' + openTitle + '")' : '') +
+      (openLines ? ', whose ' + openLines + ' lines have just been replaced in the buffer' : '') +
+      '. Saving now (e.g. pine_smart_compile / pine_save) will OVERWRITE that script. ' +
+      'To create a genuinely new script use the Pine editor menu -> New; to restore, ' +
+      'reload the script with pine_open before saving.',
   };
 }
 
