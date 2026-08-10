@@ -25,12 +25,16 @@ function mockChild({ failWith } = {}) {
 /**
  * Build a _deps bundle simulating a win32 MSIX environment.
  * @param {object} opts
- *   spawnFailures — spawn paths (substring) that emit EACCES
+ *   spawnFailures — spawn paths (substring) that emit an async EACCES 'error'
+ *   spawnThrows  — spawn paths (substring) that throw synchronously (EPERM)
  *   cdpBindsFor  — spawn paths (substring) after which probeCdp starts succeeding
+ *   cdpBindsOnlyWithGpuOff — CDP binds only when spawned with --disable-gpu
+ *   cdpVanishesUnlessGpuOff — CDP answers one probe then disappears (the app
+ *     restarts itself after a GPU crash) until --disable-gpu is used
  *   copyExists   — local copy already present
  */
-function msixDeps({ spawnFailures = [], cdpBindsFor = [], copyExists = false } = {}) {
-  const state = { spawned: [], copies: [], removed: [], killed: 0, cdpUp: false };
+function msixDeps({ spawnFailures = [], spawnThrows = [], cdpBindsFor = [], cdpBindsOnlyWithGpuOff = false, cdpVanishesUnlessGpuOff = false, copyExists = false } = {}) {
+  const state = { spawned: [], spawnArgs: [], copies: [], removed: [], killed: 0, cdpUp: false, gpuOff: false, probes: 0 };
   const deps = {
     existsSync: (p) => {
       if (p === MSIX_EXE) return true;
@@ -44,17 +48,32 @@ function msixDeps({ spawnFailures = [], cdpBindsFor = [], copyExists = false } =
       if (cmd.includes('taskkill')) { state.killed++; return ''; }
       throw new Error(`unexpected execSync: ${cmd}`);
     },
-    spawn: (exe) => {
+    spawn: (exe, args = []) => {
       state.spawned.push(exe);
+      state.spawnArgs.push(args);
+      if (spawnThrows.some((s) => exe.includes(s))) {
+        throw Object.assign(new Error('spawn EPERM'), { code: 'EPERM' });
+      }
       const fail = spawnFailures.some((s) => exe.includes(s));
-      if (!fail && cdpBindsFor.some((s) => exe.includes(s))) state.cdpUp = true;
+      const gpuOff = args.includes('--disable-gpu');
+      if (gpuOff) state.gpuOff = true;
+      // When cdpBindsOnlyWithGpuOff is set, CDP binds only once the GPU is disabled.
+      const canBind = cdpBindsOnlyWithGpuOff ? gpuOff : cdpBindsFor.some((s) => exe.includes(s));
+      if (!fail && canBind) state.cdpUp = true;
       return mockChild(fail ? { failWith: 'EACCES' } : {});
     },
     cpSync: (src, dst) => { state.copies.push({ src, dst }); },
     rmSync: (p) => { state.removed.push(p); },
     readdirSync: () => ['TradingView.Desktop_3.0.0.7652_x64__n534cwy3pjxzj'],
     delay: async () => {},
-    probeCdp: async () => (state.cdpUp ? CDP_VERSION : null),
+    probeCdp: async () => {
+      if (cdpVanishesUnlessGpuOff) {
+        if (state.gpuOff) return CDP_VERSION; // stable once the GPU is off
+        state.probes++;
+        return state.probes === 1 ? CDP_VERSION : null; // binds once, then gone
+      }
+      return state.cdpUp ? CDP_VERSION : null;
+    },
   };
   return { deps, state };
 }
@@ -88,6 +107,19 @@ describe('launch() — MSIX WindowsApps handling', { skip: !onWindows }, () => {
     assert.ok(state.killed >= 2);
   });
 
+  it('synchronous EPERM on direct spawn falls back to local copy', async () => {
+    // Some machines throw EPERM synchronously from spawn() instead of emitting
+    // an async 'error' event; the fallback must still trigger.
+    const { deps, state } = msixDeps({ spawnThrows: ['WindowsApps'], cdpBindsFor: ['tradingview-mcp'] });
+    const result = await launch({ _deps: deps });
+    assert.equal(result.success, true);
+    assert.equal(result.msix_local_copy, true);
+    assert.equal(result.binary, LOCAL_COPY_EXE);
+    assert.equal(state.copies.length, 1);
+    assert.match(state.spawned[0], /WindowsApps/);
+    assert.match(state.spawned[1], /tradingview-mcp/);
+  });
+
   it('CDP never binding on direct spawn falls back to local copy', async () => {
     const { deps, state } = msixDeps({ cdpBindsFor: ['tradingview-mcp'] });
     const result = await launch({ _deps: deps });
@@ -104,6 +136,39 @@ describe('launch() — MSIX WindowsApps handling', { skip: !onWindows }, () => {
     assert.equal(result.success, true);
     assert.equal(result.msix_local_copy, true);
     assert.equal(state.copies.length, 0);
+  });
+
+  it('retries with GPU and sandbox disabled when CDP never binds otherwise', async () => {
+    // Electron's GPU process can crash-loop and take the app down before CDP is
+    // usable; the retry with --disable-gpu is what finally brings it up.
+    const { deps, state } = msixDeps({ cdpBindsOnlyWithGpuOff: true });
+    const result = await launch({ _deps: deps });
+    assert.equal(result.success, true);
+    assert.equal(result.crash_fallback, true);
+    assert.equal(result.cdp_ready, undefined); // CDP came up, so no warning branch
+    const lastArgs = state.spawnArgs.at(-1);
+    assert.ok(lastArgs.includes('--disable-gpu'), 'final spawn disables the GPU');
+    assert.ok(lastArgs.includes('--no-sandbox'), 'final spawn disables the sandbox');
+    assert.ok(lastArgs.includes('--remote-debugging-port=9222'), 'CDP port is kept');
+  });
+
+  it('treats CDP that binds then vanishes as a failure and retries with the crash fallback', async () => {
+    // The real failure mode: the app binds CDP, its GPU process crash-loops, the
+    // app restarts itself without the debug flag — processes stay alive but the
+    // port is gone. A single successful probe must not count as success.
+    const { deps, state } = msixDeps({ cdpVanishesUnlessGpuOff: true });
+    const result = await launch({ _deps: deps });
+    assert.equal(result.success, true);
+    assert.equal(result.crash_fallback, true);
+    assert.equal(result.cdp_ready, undefined);
+    assert.ok(state.spawnArgs.at(-1).includes('--disable-gpu'));
+  });
+
+  it('does not use the crash fallback when CDP binds normally', async () => {
+    const { deps } = msixDeps({ cdpBindsFor: ['WindowsApps'] });
+    const result = await launch({ _deps: deps });
+    assert.equal(result.success, true);
+    assert.equal(result.crash_fallback, undefined);
   });
 
   it('returns cdp_ready:false warning when nothing binds', async () => {
