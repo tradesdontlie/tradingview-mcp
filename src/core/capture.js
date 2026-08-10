@@ -3,21 +3,18 @@
  */
 import { getClient, evaluate, getChartCollection } from '../connection.js';
 import { waitForChartRender } from '../wait.js';
-import { writeFileSync, mkdirSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { writeFileSync } from 'fs';
+import { join } from 'path';
+import { resolveScreenshotDir } from './paths.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const SCREENSHOT_DIR = join(dirname(dirname(__dirname)), 'screenshots');
-
-export async function captureScreenshot({ region, filename, method, waitForRender = false } = {}) {
-  mkdirSync(SCREENSHOT_DIR, { recursive: true });
+export async function captureScreenshot({ region, filename, method, waitForRender = false, output_dir } = {}) {
+  const targetDir = resolveScreenshotDir(output_dir);
 
   if (waitForRender) await waitForChartRender();
 
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
   const fname = (filename || `tv_${region || 'full'}_${ts}`).replace(/[\/\\]/g, '_').replace(/\.\./g, '_');
-  const filePath = join(SCREENSHOT_DIR, `${fname}.png`);
+  const filePath = join(targetDir, `${fname}.png`);
 
   if (method === 'api') {
     try {

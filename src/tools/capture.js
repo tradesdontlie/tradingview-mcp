@@ -8,8 +8,9 @@ export function registerCaptureTools(server) {
     filename: z.string().optional().describe('Custom filename (without extension)'),
     method: z.string().optional().describe('Capture method: cdp (Page.captureScreenshot) or api (chartWidgetCollection.takeScreenshot) (default cdp)'),
     wait_for_render: z.boolean().optional().describe('Wait for the chart canvas to stabilize before capturing. Use after chart_set_symbol or chart_set_timeframe to avoid stale frames.'),
-  }, async ({ region, filename, method, wait_for_render }) => {
-    try { return jsonResult(await core.captureScreenshot({ region, filename, method, waitForRender: wait_for_render })); }
+    output_dir: z.string().optional().describe('Absolute path to save directory (default: screenshots/ in project root)'),
+  }, async ({ region, filename, method, wait_for_render, output_dir }) => {
+    try { return jsonResult(await core.captureScreenshot({ region, filename, method, waitForRender: wait_for_render, output_dir })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 }
