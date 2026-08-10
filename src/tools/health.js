@@ -27,7 +27,7 @@ export function registerHealthTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('tv_update', 'Update this MCP server to the latest version: git fast-forward of origin/main + npm ci when dependencies changed. Safe by design — refuses on non-git installs, dirty working trees, non-main branches, or diverged history. After a successful update the MCP server must be restarted to load the new code.', {}, async () => {
+  server.tool('tv_update', 'Update this MCP server to the latest version: git fast-forward of origin/main + npm ci when dependencies changed. Safe by design — refuses on non-git installs, dirty working trees, non-main branches, or diverged history. On success the server exits immediately so your MCP client restarts it with the new code.', {}, async () => {
     try { return jsonResult(await update({})); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });

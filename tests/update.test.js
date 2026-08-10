@@ -15,10 +15,11 @@ const NEW = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
  * @param {object} opts — branch, dirty, remoteSha, ahead, behind, lockChanged
  */
 function gitDeps({ branch = 'main', dirty = '', remoteSha = OLD, ahead = 0, behind = 0, lockChanged = false, npmFails = false } = {}) {
-  const state = { merged: false, npmCi: 0, cmds: [] };
+  const state = { merged: false, npmCi: 0, cmds: [], exited: false };
   const deps = {
     existsSync: () => true,
     repoRoot: 'C:/fake/repo',
+    exit: () => { state.exited = true; },
     execSync: (cmd) => {
       state.cmds.push(cmd);
       if (cmd.includes('rev-parse --abbrev-ref')) return branch;
@@ -40,6 +41,7 @@ function gitDeps({ branch = 'main', dirty = '', remoteSha = OLD, ahead = 0, behi
   };
   return { deps, state };
 }
+
 
 describe('update() — guards', () => {
   it('refuses non-git installs with a clone hint', async () => {
@@ -105,7 +107,8 @@ describe('update() — update paths', () => {
     assert.equal(r.to_commit, NEW.slice(0, 8));
     assert.equal(r.deps_installed, false);
     assert.equal(state.npmCi, 0);
-    assert.equal(r.restart_required, true);
+    assert.equal(r.self_disabling, true);
+    assert.ok(state.exited, 'exit() called after successful update');
   });
 
   it('runs npm ci when the lockfile changed', async () => {

@@ -17,11 +17,12 @@ function _resolve(deps) {
     execSync: deps?.execSync || _execSync,
     existsSync: deps?.existsSync || _existsSync,
     repoRoot: deps?.repoRoot || REPO_ROOT,
+    exit: deps?.exit || ((code) => setTimeout(() => process.exit(code), 500)),
   };
 }
 
 export async function update({ _deps } = {}) {
-  const { execSync, existsSync, repoRoot } = _resolve(_deps);
+  const { execSync, existsSync, repoRoot, exit } = _resolve(_deps);
   const git = (args, timeout = 15000) =>
     execSync(`git ${args}`, { cwd: repoRoot, timeout, stdio: ['ignore', 'pipe', 'pipe'] }).toString().trim();
 
@@ -90,7 +91,7 @@ export async function update({ _deps } = {}) {
     }
   }
 
-  return {
+  const result = {
     success: true,
     updated: true,
     from_commit: before.slice(0, 8),
@@ -98,7 +99,10 @@ export async function update({ _deps } = {}) {
     commits_pulled: behind,
     deps_installed: depsInstalled,
     ...(depsWarning && { warning: depsWarning }),
-    restart_required: true,
-    note: 'Update applied. Restart the MCP server (reconnect it in your client) to load the new code — the running process still has the old version.',
+    self_disabling: true,
+    note: 'Update applied. This MCP server process is shutting down now — your client will restart it automatically to load the new code.',
   };
+
+  exit(0);
+  return result;
 }
