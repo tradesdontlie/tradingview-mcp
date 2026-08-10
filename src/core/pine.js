@@ -26,7 +26,20 @@ const FIND_MONACO = `
         var env = current.memoizedProps.value.monacoEnv;
         if (env.editor && typeof env.editor.getEditors === 'function') {
           var editors = env.editor.getEditors();
-          if (editors.length > 0) return { editor: editors[0], env: env };
+          if (editors.length > 0) {
+            // TradingView keeps many stale/hidden Monaco instances alive
+            // (one per previously-opened script, undo buffers, etc.). Picking
+            // editors[0] grabs a detached editor: reads return stale content
+            // and writes silently miss the on-screen editor. Select the one
+            // actually visible (offsetParent set); fall back to the newest.
+            var chosen = null;
+            for (var e = 0; e < editors.length; e++) {
+              var dom = editors[e].getDomNode && editors[e].getDomNode();
+              if (dom && dom.offsetParent !== null) { chosen = editors[e]; break; }
+            }
+            if (!chosen) chosen = editors[editors.length - 1];
+            return { editor: chosen, env: env };
+          }
         }
       }
       current = current.return;
@@ -40,35 +53,36 @@ const FIND_MONACO = `
  * Returns true if editor is accessible, false on timeout.
  */
 export async function ensurePineEditorOpen() {
-  const already = await evaluate(`
-    (function() {
-      var m = ${FIND_MONACO};
-      return m !== null;
-    })()
-  `);
-  if (already) return true;
+  // NB: FIND_MONACO inizia con un a capo. NON usare `return ${FIND_MONACO} !== null`:
+  // l'ASI inserisce un punto e virgola dopo `return`, l'espressione vale sempre
+  // undefined e ogni tool pine_* fallisce con "Could not open Pine Editor".
+  const isReady = `(function() { var m = ${FIND_MONACO}; return m !== null; })()`;
+  if (await evaluate(isReady)) return true;
 
-  await evaluate(`
+  // open('scripteditor') opens the bottom bar AND selects the Pine tab;
+  // activateScriptEditorTab only switches tabs when the bar is already open.
+  // The button click is a fallback for older UIs.
+  const tryOpen = `
     (function() {
       var bwb = window.TradingView && window.TradingView.bottomWidgetBar;
-      if (!bwb) return;
-      if (typeof bwb.activateScriptEditorTab === 'function') bwb.activateScriptEditorTab();
-      else if (typeof bwb.showWidget === 'function') bwb.showWidget('pine-editor');
-    })()
-  `);
-
-  await evaluate(`
-    (function() {
+      if (bwb) {
+        try { if (typeof bwb.open === 'function') bwb.open('scripteditor'); } catch (e) {}
+        try { if (typeof bwb.activateScriptEditorTab === 'function') bwb.activateScriptEditorTab(); } catch (e) {}
+        try { if (typeof bwb.show === 'function') bwb.show(); } catch (e) {}
+      }
       var btn = document.querySelector('[aria-label="Pine"]')
         || document.querySelector('[data-name="pine-dialog-button"]');
       if (btn) btn.click();
     })()
-  `);
+  `;
 
-  for (let i = 0; i < 50; i++) {
+  // On a cold start (e.g. right after a restart) the Pine widget may not be
+  // mountable on the first attempt, so re-issue the open action periodically
+  // while polling for Monaco. ~15s total; re-open every ~2s.
+  for (let i = 0; i < 75; i++) {
+    if (i % 10 === 0) await evaluate(tryOpen);
     await new Promise(r => setTimeout(r, 200));
-    const ready = await evaluate(`(function() { return ${FIND_MONACO} !== null; })()`);
-    if (ready) return true;
+    if (await evaluate(isReady)) return true;
   }
   return false;
 }
@@ -268,17 +282,28 @@ export async function setSource({ source }) {
   if (!editorReady) throw new Error('Could not open Pine Editor.');
 
   const escaped = JSON.stringify(source);
-  const set = await evaluate(`
+  const result = await evaluate(`
     (function() {
       var m = ${FIND_MONACO};
-      if (!m) return false;
-      m.editor.setValue(${escaped});
-      return true;
+      if (!m) return { ok: false, reason: 'monaco_not_found' };
+      var target = ${escaped};
+      m.editor.setValue(target);
+      // Read back and confirm the write actually applied to THIS editor.
+      // Normalize CRLF so a differing EOL setting isn't a false mismatch.
+      var norm = function(s) { return (s || '').replace(/\\r\\n/g, '\\n'); };
+      var after = m.editor.getValue();
+      return { ok: norm(after) === norm(target), chars: after.length, reason: 'value_mismatch' };
     })()
   `);
 
-  if (!set) throw new Error('Monaco found but setValue() failed.');
-  return { success: true, lines_set: source.split('\n').length };
+  if (!result || !result.ok) {
+    const why = result && result.reason === 'monaco_not_found'
+      ? 'Pine Editor / Monaco not found.'
+      : 'editor value did not match after write (wrote to a detached editor?).';
+    throw new Error('setSource did not apply: ' + why +
+      ' Open and dock the Pine Editor (not split-view), then retry.');
+  }
+  return { success: true, lines_set: source.split('\n').length, verified: true, chars_written: result.chars };
 }
 
 export async function compile() {
@@ -518,20 +543,65 @@ export async function newScript({ type }) {
 
   const template = templates[type] || templates.indicator;
 
-  // Simply set the source to a new template — this is the most reliable approach
-  const escaped = JSON.stringify(template);
-  const set = await evaluate(`
+  // CLOBBER HAZARD: TradingView's editor stays bound to whatever saved script
+  // was open. Replacing the buffer text here does NOT allocate a new script id,
+  // so a subsequent Save (pine_smart_compile clicks "Save") OVERWRITES that
+  // open script — silent data loss. There is no reliable headless hook for the
+  // editor's "New script" menu action, so instead of pretending we created a
+  // new script we (a) capture which saved script is currently open and
+  // (b) return a loud warning so the caller can avoid clobbering it.
+  // Il nome dello script a rischio si ricava dal codice ATTUALMENTE nel buffer
+  // (dichiarazione indicator/strategy/library), non dal DOM: le classi CSS
+  // dell'header sono hashate e cambiano a ogni build di TradingView.
+  const prev = await evaluate(`
     (function() {
       var m = ${FIND_MONACO};
-      if (!m) return false;
-      m.editor.setValue(${escaped});
-      return true;
+      if (!m) return null;
+      var src = m.editor.getValue() || '';
+      var t = src.match(/(?:indicator|strategy|library)\\s*\\(\\s*(?:title\\s*=\\s*)?["']([^"']+)["']/);
+      return { title: t ? t[1] : null, lines: src.split('\\n').length };
+    })()
+  `).catch(() => null);
+  const openTitle = prev && prev.title ? prev.title : null;
+  const openLines = prev && prev.lines ? prev.lines : null;
+
+  // Set the template into the editor and confirm the write actually applied.
+  const escaped = JSON.stringify(template);
+  const result = await evaluate(`
+    (function() {
+      var m = ${FIND_MONACO};
+      if (!m) return { ok: false, reason: 'monaco_not_found' };
+      var target = ${escaped};
+      m.editor.setValue(target);
+      var norm = function(s) { return (s || '').replace(/\\r\\n/g, '\\n'); };
+      return { ok: norm(m.editor.getValue()) === norm(target), reason: 'value_mismatch' };
     })()
   `);
 
-  if (!set) throw new Error('Monaco editor not found. Ensure Pine Editor is open.');
+  if (!result || !result.ok) {
+    const why = result && result.reason === 'monaco_not_found'
+      ? 'Pine Editor / Monaco not found.'
+      : 'template did not apply to the editor (detached editor?).';
+    throw new Error('pine_new failed: ' + why + ' Open and dock the Pine Editor, then retry.');
+  }
 
-  return { success: true, type, action: 'new_script_created', template: typeMap[type] };
+  return {
+    success: true,
+    type,
+    action: 'template_loaded_in_editor',
+    template: typeMap[type],
+    verified: true,
+    open_script_at_risk: openTitle,
+    replaced_lines: openLines,
+    warning:
+      'Loaded a blank ' + (typeMap[type] || 'indicator') + ' template into the editor, ' +
+      'but this does NOT create a new saved script — the editor is still bound to the ' +
+      'script that was open' + (openTitle ? ' ("' + openTitle + '")' : '') +
+      (openLines ? ', whose ' + openLines + ' lines have just been replaced in the buffer' : '') +
+      '. Saving now (e.g. pine_smart_compile / pine_save) will OVERWRITE that script. ' +
+      'To create a genuinely new script use the Pine editor menu -> New; to restore, ' +
+      'reload the script with pine_open before saving.',
+  };
 }
 
 export async function openScript({ name }) {
@@ -570,11 +640,13 @@ export async function openScript({ name }) {
               var source = data.source || '';
               if (!source) return {error: 'Script source is empty', name: match.scriptName || match.scriptTitle};
               var m = ${FIND_MONACO};
-              if (m) {
-                m.editor.setValue(source);
-                return {success: true, name: match.scriptName || match.scriptTitle, id: id, lines: source.split('\\n').length};
+              if (!m) return {error: 'Monaco editor not found to inject source', name: match.scriptName || match.scriptTitle};
+              m.editor.setValue(source);
+              var norm = function(s) { return (s || '').replace(/\\r\\n/g, '\\n'); };
+              if (norm(m.editor.getValue()) !== norm(source)) {
+                return {error: 'Loaded script but editor value did not match after write (detached editor?)', name: match.scriptName || match.scriptTitle};
               }
-              return {error: 'Monaco editor not found to inject source', name: match.scriptName || match.scriptTitle};
+              return {success: true, name: match.scriptName || match.scriptTitle, id: id, lines: source.split('\\n').length, verified: true};
             });
         })
         .catch(function(e) { return {error: e.message}; });
@@ -585,7 +657,7 @@ export async function openScript({ name }) {
     throw new Error(result.error);
   }
 
-  return { success: true, name: result.name, script_id: result.id, lines: result.lines, source: 'internal_api', opened: true };
+  return { success: true, name: result.name, script_id: result.id, lines: result.lines, source: 'internal_api', opened: true, verified: result.verified === true };
 }
 
 export async function listScripts() {
