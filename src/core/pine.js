@@ -53,7 +53,10 @@ const FIND_MONACO = `
  * Returns true if editor is accessible, false on timeout.
  */
 export async function ensurePineEditorOpen() {
-  const isReady = `(function() { return ${FIND_MONACO} !== null; })()`;
+  // NB: FIND_MONACO inizia con un a capo. NON usare `return ${FIND_MONACO} !== null`:
+  // l'ASI inserisce un punto e virgola dopo `return`, l'espressione vale sempre
+  // undefined e ogni tool pine_* fallisce con "Could not open Pine Editor".
+  const isReady = `(function() { var m = ${FIND_MONACO}; return m !== null; })()`;
   if (await evaluate(isReady)) return true;
 
   // open('scripteditor') opens the bottom bar AND selects the Pine tab;
