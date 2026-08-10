@@ -1,5 +1,6 @@
 import { register } from '../router.js';
 import * as core from '../../core/data.js';
+import { getBiasSignal } from '../../core/bias.js';
 
 register('quote', {
   description: 'Get real-time price quote',
@@ -57,6 +58,13 @@ register('data', {
         verbose: { type: 'boolean', short: 'v', description: 'Include raw box data' },
       },
       handler: (opts) => core.getPineBoxes({ study_filter: opts.filter, verbose: opts.verbose }),
+    }],
+    ['bias', {
+      description: 'Infer bullish/bearish/neutral bias from custom indicator label/table text',
+      options: {
+        filter: { type: 'string', short: 'f', description: 'Filter by study name substring' },
+      },
+      handler: (opts) => getBiasSignal({ study_filter: opts.filter }),
     }],
     ['strategy', {
       description: 'Get strategy performance metrics',

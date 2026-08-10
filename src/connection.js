@@ -2,6 +2,7 @@ import CDP from 'chrome-remote-interface';
 
 let client = null;
 let targetInfo = null;
+let connecting = null;
 // Overridable via TV_CDP_HOST/TV_CDP_PORT (or CDP_HOST/CDP_PORT) env vars.
 // Default is 127.0.0.1, not localhost: on some Windows machines localhost
 // resolves to ::1 first, and Electron's --remote-debugging-port only listens on IPv4.
@@ -61,7 +62,15 @@ export async function getClient() {
       targetInfo = null;
     }
   }
-  return connect();
+  // Concurrent callers (e.g. Promise.all([getPineLabels(), getPineTables()]))
+  // must share a single in-flight connect() — otherwise each independently
+  // sees client === null and opens its own CDP WebSocket, and only the last
+  // one assigned to the module-level `client` singleton ever gets closed by
+  // disconnect(), leaking a connection that keeps the process alive forever.
+  if (!connecting) {
+    connecting = connect().finally(() => { connecting = null; });
+  }
+  return connecting;
 }
 
 export async function connect(targetId = null) {
