@@ -33,7 +33,7 @@ export async function getState({ _deps } = {}) {
         studies: studies,
       };
     })()
-  `);
+  `, { retry: true });
   return { success: true, ...state };
 }
 
@@ -196,7 +196,8 @@ export async function scrollToDate({ date }) {
   return { success: true, date, centered_on: timestamp, resolution, window: { from, to } };
 }
 
-export async function symbolInfo() {
+export async function symbolInfo({ _deps } = {}) {
+  const { evaluate } = _resolve(_deps);
   const result = await evaluate(`
     (function() {
       var chart = ${CHART_API};
@@ -207,7 +208,7 @@ export async function symbolInfo() {
         typespecs: info.typespecs, resolution: chart.resolution(), chart_type: chart.chartType()
       };
     })()
-  `);
+  `, { retry: true });
   return { success: true, ...result };
 }
 

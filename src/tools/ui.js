@@ -29,11 +29,17 @@ export function registerUiTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('layout_switch', 'Switch to a saved chart layout by name or ID', {
+  server.tool('layout_switch', 'Switch to a saved chart layout by name or ID and verify the loaded chart state', {
     name: z.string().describe('Name or ID of the layout to switch to'),
-  }, async ({ name }) => {
-    try { return jsonResult(await core.layoutSwitch({ name })); }
-    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+    expected_pane_signature: z.string().optional().describe('Optional exact pane signature returned by a prior verified switch (for example: 4|1D,1D,1D,1D)'),
+    expected_symbol: z.string().optional().describe('Optional symbol that must be rendered in every chart pane'),
+  }, async ({ name, expected_pane_signature, expected_symbol }) => {
+    try {
+      const result = await core.layoutSwitch({ name, expected_pane_signature, expected_symbol });
+      return jsonResult(result, !result.success);
+    } catch (err) {
+      return jsonResult({ success: false, reason: err.reason || 'chart_api_not_ready', error: err.message }, true);
+    }
   });
 
   server.tool('ui_keyboard', 'Press keyboard keys or shortcuts (e.g., Enter, Escape, Alt+S, Ctrl+Z)', {

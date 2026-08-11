@@ -11,6 +11,7 @@ import { execFileSync, execSync } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { writeFileSync, unlinkSync } from 'fs';
+import { execute } from '../src/cli/router.js';
 
 function require_fs() { return { writeFileSync, unlinkSync }; }
 
@@ -146,5 +147,34 @@ describe('CLI — pine check (server compile)', () => {
     const result = JSON.parse(stdout);
     assert.equal(result.compiled, false);
     assert.ok(result.error_count > 0);
+  });
+});
+
+describe('CLI — structured result exit status', () => {
+  it('prints a failing result to stdout, exits 1, and disconnects gracefully', async () => {
+    const output = [];
+    let disconnectCount = 0;
+    const previousExitCode = process.exitCode;
+    try {
+      await execute(
+        async () => ({ success: false, reason: 'target_replaced', verified: false }),
+        {},
+        [],
+        {
+          disconnect: async () => { disconnectCount++; },
+          log: line => output.push(line),
+        },
+      );
+
+      assert.equal(process.exitCode, 1);
+      assert.equal(disconnectCount, 1);
+      assert.deepEqual(JSON.parse(output.join('\n')), {
+        success: false,
+        reason: 'target_replaced',
+        verified: false,
+      });
+    } finally {
+      process.exitCode = previousExitCode ?? 0;
+    }
   });
 });

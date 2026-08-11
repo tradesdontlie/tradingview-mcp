@@ -339,11 +339,28 @@ The key flag: `--remote-debugging-port=9222`
 ## Testing
 
 ```bash
-# Requires TradingView running with --remote-debugging-port=9222
+# Offline/unit release gate (does not require a live TradingView target)
 npm test
+
+# Focused PR1 transport/layout tests
+npm run test:focused
+
+# Opt-in bounded live canary. Requires the authenticated TradingView Desktop
+# chart target on localhost:9222 and opens (but never saves) three layouts.
+npm run test:layout-canary
+
+# Broad, state-mutating live tool suite; run separately and deliberately.
+npm run test:e2e
 ```
 
-29 tests covering: Pine Script static analysis, server-side compilation, and CLI routing.
+The layout canary opens `Analysis - Stock Database`, `Analysis - Peers`, and
+`Analysis - Against Index` sequentially. Each switch has one hard 20-second
+deadline and must verify layout identity and stable chart API/pane state. After
+the in-memory lightweight screenshot, a fresh read-only layout snapshot must
+still match the layout, every pane, and pane geometry; the canary exits nonzero
+on a timeout or false success. Optional
+`layout_switch` inputs `expected_pane_signature` and `expected_symbol` add
+fail-closed verification without changing callers that pass only `name`.
 
 ## Architecture
 
