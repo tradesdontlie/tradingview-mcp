@@ -1,7 +1,9 @@
 node_modules/
 screenshots/
+.env
 scripts/current.pine
 temp_*
 *.log
 discovery-log.json
 rules.json
+.claude/settings.local.json
