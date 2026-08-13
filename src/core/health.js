@@ -10,12 +10,41 @@ import { dirname, basename, join } from 'path';
 // branch on GitHub. Never throws — returns null on any failure (offline,
 // detached HEAD, not a git checkout) so it can't break the health check.
 let _updateCache = null;
+
+const SHA_RE = /^[0-9a-f]{7,40}$/i;
+
+/**
+ * Decide what origin's HEAD means relative to local HEAD.
+ *
+ * A raw SHA inequality is not enough. When local carries commits that aren't on
+ * origin, origin's HEAD is an *ancestor* of local HEAD — that is being ahead, not
+ * behind — yet inequality reports it as an available update and points the user at
+ * tv_update, which then refuses because it cannot fast-forward.
+ *
+ * `git` is injected so this is unit-testable, and must throw on a non-zero exit
+ * (execSync semantics). A remote commit that isn't in the local object DB makes
+ * merge-base throw, which falls through to "behind" — the safe default, since we
+ * cannot prove we already have it.
+ */
+export function classifyUpdate(localSha, remoteSha, git) {
+  if (remoteSha === localSha) return { behind: false, ahead: 0 };
+  // Network-sourced value heading into a shell command — never interpolate it raw.
+  if (!SHA_RE.test(remoteSha)) return { behind: false, ahead: 0 };
+  try {
+    git(`merge-base --is-ancestor ${remoteSha} HEAD`);
+    return { behind: false, ahead: Number(git(`rev-list --count ${remoteSha}..HEAD`)) || 0 };
+  } catch {
+    return { behind: true, ahead: 0 };
+  }
+}
+
 async function checkForUpdate() {
   if (_updateCache && (Date.now() - _updateCache.at) < 3600_000) return _updateCache.value;
   let value = null;
   try {
-    const localSha = execSync('git rev-parse HEAD', { timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
-    const remoteUrl = execSync('git config --get remote.origin.url', { timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    const git = (args) => execSync(`git ${args}`, { timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    const localSha = git('rev-parse HEAD');
+    const remoteUrl = git('config --get remote.origin.url');
     const m = remoteUrl.match(/github\.com[:/](.+?)(?:\.git)?$/);
     if (localSha && m) {
       const repo = m[1];
@@ -29,11 +58,13 @@ async function checkForUpdate() {
         req.setTimeout(3000, () => { req.destroy(); resolve(null); });
       });
       if (remoteSha) {
+        const { behind, ahead } = classifyUpdate(localSha, remoteSha, git);
         value = {
-          update_available: remoteSha !== localSha,
+          update_available: behind,
           local_commit: localSha.slice(0, 8),
           latest_commit: remoteSha.slice(0, 8),
-          ...(remoteSha !== localSha && { hint: 'Run the tv_update tool (or `tv update` CLI) to update, then restart the MCP server.' }),
+          ...(ahead > 0 && { local_ahead: ahead }),
+          ...(behind && { hint: 'Run the tv_update tool (or `tv update` CLI) to update, then restart the MCP server.' }),
         };
       }
     }
