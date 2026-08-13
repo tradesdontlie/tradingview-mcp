@@ -33,7 +33,7 @@ function mockChild({ failWith } = {}) {
  */
 function msixDeps({
   spawnFailures = [], cdpBindsFor = [], copyExists = false,
-  activationBinds = false, activationThrows = false,
+  activationBinds = false, activationThrows = false, spawnThrows = [],
 } = {}) {
   const state = { spawned: [], copies: [], removed: [], killed: 0, cdpUp: false, activations: 0 };
   const deps = {
@@ -51,6 +51,11 @@ function msixDeps({
     },
     spawn: (exe) => {
       state.spawned.push(exe);
+      // Windows throws EPERM synchronously for WindowsApps binaries; other failures
+      // surface as an async 'error' event. Both must be survivable.
+      if (spawnThrows.some((s) => exe.includes(s))) {
+        throw Object.assign(new Error('spawn EPERM'), { code: 'EPERM' });
+      }
       const fail = spawnFailures.some((s) => exe.includes(s));
       if (!fail && cdpBindsFor.some((s) => exe.includes(s))) state.cdpUp = true;
       return mockChild(fail ? { failWith: 'EACCES' } : {});
@@ -84,6 +89,26 @@ describe('launch() — MSIX WindowsApps handling', { skip: !onWindows }, () => {
     // nothing extra is attempted when the direct spawn already works
     assert.equal(state.activations, 0);
     assert.equal(result.cdp_url, 'http://127.0.0.1:9222');
+  });
+
+  it('a synchronous EPERM from spawn still reaches activation', async () => {
+    // Regression: spawn() throwing synchronously (what Windows actually does for
+    // WindowsApps binaries) escaped launch() before any MSIX recovery could run,
+    // so tv_launch failed outright with "spawn EPERM".
+    const { deps, state } = msixDeps({ spawnThrows: ['WindowsApps'], activationBinds: true });
+    const result = await launch({ _deps: deps });
+    assert.equal(result.success, true);
+    assert.equal(result.msix_activation, true);
+    assert.equal(state.activations, 1);
+    assert.equal(result.pid, 4242);
+  });
+
+  it('a synchronous EPERM still reaches the local-copy fallback', async () => {
+    const { deps, state } = msixDeps({ spawnThrows: ['WindowsApps'], cdpBindsFor: ['tradingview-mcp'] });
+    const result = await launch({ _deps: deps });
+    assert.equal(result.success, true);
+    assert.equal(result.msix_local_copy, true);
+    assert.equal(state.copies.length, 1);
   });
 
   it('COM activation binds CDP without copying the package', async () => {

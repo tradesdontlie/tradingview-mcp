@@ -391,8 +391,10 @@ export async function launch({ port, kill_existing, _deps } = {}) {
 
   const killExisting = async () => {
     try {
-      if (platform === 'win32') deps.execSync('taskkill /F /IM TradingView.exe', { timeout: 5000 });
-      else deps.execSync('pkill -f TradingView', { timeout: 5000 });
+      // stdio ignored: taskkill/pkill write "process not found" to stderr when
+      // nothing is running, which is the normal case and not worth showing.
+      if (platform === 'win32') deps.execSync('taskkill /F /IM TradingView.exe', { timeout: 5000, stdio: 'ignore' });
+      else deps.execSync('pkill -f TradingView', { timeout: 5000, stdio: 'ignore' });
       await deps.delay(1500);
     } catch { /* may not be running */ }
   };
@@ -400,14 +402,28 @@ export async function launch({ port, kill_existing, _deps } = {}) {
   if (killFirst) await killExisting();
 
   const cdpArgs = [`--remote-debugging-port=${cdpPort}`];
-  let child = _spawnDetached(deps.spawn, tvPath, cdpArgs);
+  // Windows refuses direct execution of WindowsApps binaries by throwing EPERM
+  // synchronously from spawn(), not via an async 'error' event. Letting that escape
+  // would abort launch() before the MSIX recovery below — which exists precisely to
+  // handle this — so capture it and treat it as an early failure.
+  let child = null;
+  let spawnError = null;
+  try {
+    child = _spawnDetached(deps.spawn, tvPath, cdpArgs);
+  } catch (err) {
+    spawnError = err.code || err.message || 'spawn failed';
+  }
+  if (spawnError && !(platform === 'win32' && WINDOWS_APPS_RE.test(tvPath))) {
+    // A classic install that cannot be spawned has no fallback worth trying.
+    throw new Error(`Failed to launch ${tvPath}: ${spawnError}`);
+  }
   let info = null;
   let usedLocalCopy = false;
   let usedActivation = false;
   let activatedPid = null;
 
   if (platform === 'win32' && WINDOWS_APPS_RE.test(tvPath)) {
-    const earlyFailure = await _spawnFailedEarly(child);
+    const earlyFailure = spawnError || await _spawnFailedEarly(child);
     if (!earlyFailure) {
       info = await _waitForCdp({ cdpPort, attempts: 15, delay: deps.delay, probeCdp: deps.probeCdp });
     }
@@ -449,7 +465,7 @@ export async function launch({ port, kill_existing, _deps } = {}) {
 
   if (info) {
     return {
-      success: true, platform, binary: tvPath, pid: activatedPid ?? child.pid,
+      success: true, platform, binary: tvPath, pid: activatedPid ?? child?.pid,
       cdp_port: cdpPort, cdp_url: `http://${CDP_HOST}:${cdpPort}`,
       browser: info.Browser, user_agent: info['User-Agent'],
       ...(usedActivation && { msix_activation: true }),
@@ -458,7 +474,7 @@ export async function launch({ port, kill_existing, _deps } = {}) {
   }
 
   return {
-    success: true, platform, binary: tvPath, pid: activatedPid ?? child.pid, cdp_port: cdpPort, cdp_ready: false,
+    success: true, platform, binary: tvPath, pid: activatedPid ?? child?.pid, cdp_port: cdpPort, cdp_ready: false,
     ...(usedActivation && { msix_activation: true }),
     ...(usedLocalCopy && { msix_local_copy: true }),
     warning: 'TradingView launched but CDP not responding yet. It may still be loading. Try tv_health_check in a few seconds.',
