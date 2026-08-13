@@ -25,12 +25,17 @@ function mockChild({ failWith } = {}) {
 /**
  * Build a _deps bundle simulating a win32 MSIX environment.
  * @param {object} opts
- *   spawnFailures — spawn paths (substring) that emit EACCES
- *   cdpBindsFor  — spawn paths (substring) after which probeCdp starts succeeding
- *   copyExists   — local copy already present
+ *   spawnFailures   — spawn paths (substring) that emit EACCES
+ *   cdpBindsFor    — spawn paths (substring) after which probeCdp starts succeeding
+ *   copyExists     — local copy already present
+ *   activationBinds — COM activation succeeds and CDP binds after it
+ *   activationThrows — COM activation fails (e.g. ERROR_CANCELLED on some builds)
  */
-function msixDeps({ spawnFailures = [], cdpBindsFor = [], copyExists = false } = {}) {
-  const state = { spawned: [], copies: [], removed: [], killed: 0, cdpUp: false };
+function msixDeps({
+  spawnFailures = [], cdpBindsFor = [], copyExists = false,
+  activationBinds = false, activationThrows = false,
+} = {}) {
+  const state = { spawned: [], copies: [], removed: [], killed: 0, cdpUp: false, activations: 0 };
   const deps = {
     existsSync: (p) => {
       if (p === MSIX_EXE) return true;
@@ -49,6 +54,12 @@ function msixDeps({ spawnFailures = [], cdpBindsFor = [], copyExists = false } =
       const fail = spawnFailures.some((s) => exe.includes(s));
       if (!fail && cdpBindsFor.some((s) => exe.includes(s))) state.cdpUp = true;
       return mockChild(fail ? { failWith: 'EACCES' } : {});
+    },
+    activateMsix: () => {
+      state.activations++;
+      if (activationThrows) throw new Error('ActivateApplication failed: 0x800704C7');
+      if (activationBinds) state.cdpUp = true;
+      return 4242;
     },
     cpSync: (src, dst) => { state.copies.push({ src, dst }); },
     rmSync: (p) => { state.removed.push(p); },
@@ -70,7 +81,52 @@ describe('launch() — MSIX WindowsApps handling', { skip: !onWindows }, () => {
     assert.equal(result.binary, MSIX_EXE);
     assert.equal(result.msix_local_copy, undefined);
     assert.equal(state.copies.length, 0);
+    // nothing extra is attempted when the direct spawn already works
+    assert.equal(state.activations, 0);
     assert.equal(result.cdp_url, 'http://127.0.0.1:9222');
+  });
+
+  it('COM activation binds CDP without copying the package', async () => {
+    const { deps, state } = msixDeps({ spawnFailures: ['WindowsApps'], activationBinds: true });
+    const result = await launch({ _deps: deps });
+    assert.equal(result.success, true);
+    assert.equal(result.msix_activation, true);
+    assert.equal(result.msix_local_copy, undefined);
+    assert.equal(state.activations, 1);
+    assert.equal(state.copies.length, 0);
+    // the real install is used, not a duplicate
+    assert.equal(result.binary, MSIX_EXE);
+    // pid comes from ActivateApplication, not the denied direct spawn
+    assert.equal(result.pid, 4242);
+  });
+
+  it('kill_existing:false is honoured on the activation path', async () => {
+    const { deps, state } = msixDeps({ spawnFailures: ['WindowsApps'], activationBinds: true });
+    const result = await launch({ kill_existing: false, _deps: deps });
+    assert.equal(result.msix_activation, true);
+    // activation needs a stopped app to apply the flag, but never at the cost of
+    // killing an instance the caller explicitly asked us to keep
+    assert.equal(state.killed, 0);
+  });
+
+  it('activation is attempted before falling back to a copy', async () => {
+    const { deps, state } = msixDeps({ spawnFailures: ['WindowsApps'], cdpBindsFor: ['tradingview-mcp'] });
+    const result = await launch({ _deps: deps });
+    assert.equal(state.activations, 1);
+    assert.equal(result.msix_local_copy, true);
+    assert.equal(result.msix_activation, undefined);
+  });
+
+  it('activation throwing still falls back to a local copy', async () => {
+    const { deps, state } = msixDeps({
+      spawnFailures: ['WindowsApps'], activationThrows: true, cdpBindsFor: ['tradingview-mcp'],
+    });
+    const result = await launch({ _deps: deps });
+    assert.equal(result.success, true);
+    assert.equal(state.activations, 1);
+    assert.equal(result.msix_activation, undefined);
+    assert.equal(result.msix_local_copy, true);
+    assert.equal(result.binary, LOCAL_COPY_EXE);
   });
 
   it('EACCES on direct spawn falls back to local copy', async () => {

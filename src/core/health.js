@@ -5,6 +5,7 @@ import { getClient, getTargetInfo, evaluate, CDP_HOST, CDP_PORT } from '../conne
 import { existsSync, cpSync, rmSync, readdirSync } from 'fs';
 import { execSync, spawn } from 'child_process';
 import { dirname, basename, join } from 'path';
+import { fileURLToPath } from 'url';
 
 // Best-effort git-pull update check: compare local HEAD to origin's default
 // branch on GitHub. Never throws — returns null on any failure (offline,
@@ -211,7 +212,32 @@ function _resolveLaunchDeps(deps) {
     readdirSync: deps?.readdirSync || readdirSync,
     delay: deps?.delay || ((ms) => new Promise((r) => setTimeout(r, ms))),
     probeCdp: deps?.probeCdp || _probeCdp,
+    activateMsix: deps?.activateMsix || _activateMsix,
   };
+}
+
+/**
+ * COM-activate the MSIX package with the CDP flag, via scripts/activate_msix.ps1.
+ *
+ * WindowsApps ACLs allow execution only through package activation, and shell
+ * activation cannot pass arguments — IApplicationActivationManager is the one path
+ * that forwards an argument string to a full-trust exe. Cheaper than the local-copy
+ * fallback below (no multi-hundred-MB copy) so it is tried first, but it does not
+ * work on every Windows build, hence the fallback stays.
+ *
+ * Returns the activated pid, or null if the script produced no parseable output.
+ */
+function _activateMsix(cdpPort, { execSync: exec }) {
+  const script = fileURLToPath(new URL('../../scripts/activate_msix.ps1', import.meta.url));
+  const out = exec(
+    `powershell -NoProfile -ExecutionPolicy Bypass -STA -File "${script}" -Port ${cdpPort}`,
+    { timeout: 30000, stdio: ['ignore', 'pipe', 'ignore'] },
+  ).toString().trim();
+  try {
+    return JSON.parse(out).pid ?? null;
+  } catch {
+    return null;
+  }
 }
 
 async function _probeCdp(cdpPort) {
@@ -363,6 +389,8 @@ export async function launch({ port, kill_existing, _deps } = {}) {
   let child = _spawnDetached(deps.spawn, tvPath, cdpArgs);
   let info = null;
   let usedLocalCopy = false;
+  let usedActivation = false;
+  let activatedPid = null;
 
   if (platform === 'win32' && WINDOWS_APPS_RE.test(tvPath)) {
     const earlyFailure = await _spawnFailedEarly(child);
@@ -370,8 +398,26 @@ export async function launch({ port, kill_existing, _deps } = {}) {
       info = await _waitForCdp({ cdpPort, attempts: 15, delay: deps.delay, probeCdp: deps.probeCdp });
     }
     if (!info) {
-      // Direct WindowsApps launch was blocked or CDP never bound — fall back to
-      // a local copy of the package (see _copyMsixPackageLocal).
+      // Direct WindowsApps spawn is normally denied by ACL. COM activation is the
+      // cheap way through — no copy — so try it before duplicating the package.
+      // Activation only applies the flag when nothing is running: the single-instance
+      // lock otherwise makes it focus the existing window and silently drop it. Honour
+      // kill_existing:false anyway and let activation fail into the copy fallback,
+      // rather than killing an instance the caller asked us to leave alone.
+      try {
+        if (killFirst) await killExisting();
+        activatedPid = deps.activateMsix(cdpPort, deps);
+        usedActivation = true;
+        info = await _waitForCdp({ cdpPort, attempts: 15, delay: deps.delay, probeCdp: deps.probeCdp });
+      } catch {
+        usedActivation = false;
+      }
+    }
+    if (!info) {
+      // Activation unavailable, or it accepted the flag without ever binding the
+      // port — fall back to a local copy of the package (see _copyMsixPackageLocal).
+      usedActivation = false;
+      activatedPid = null;
       const localExe = _copyMsixPackageLocal(tvPath, deps);
       await killExisting();
       child = _spawnDetached(deps.spawn, localExe, cdpArgs);
@@ -386,15 +432,17 @@ export async function launch({ port, kill_existing, _deps } = {}) {
 
   if (info) {
     return {
-      success: true, platform, binary: tvPath, pid: child.pid,
+      success: true, platform, binary: tvPath, pid: activatedPid ?? child.pid,
       cdp_port: cdpPort, cdp_url: `http://${CDP_HOST}:${cdpPort}`,
       browser: info.Browser, user_agent: info['User-Agent'],
+      ...(usedActivation && { msix_activation: true }),
       ...(usedLocalCopy && { msix_local_copy: true }),
     };
   }
 
   return {
-    success: true, platform, binary: tvPath, pid: child.pid, cdp_port: cdpPort, cdp_ready: false,
+    success: true, platform, binary: tvPath, pid: activatedPid ?? child.pid, cdp_port: cdpPort, cdp_ready: false,
+    ...(usedActivation && { msix_activation: true }),
     ...(usedLocalCopy && { msix_local_copy: true }),
     warning: 'TradingView launched but CDP not responding yet. It may still be loading. Try tv_health_check in a few seconds.',
   };
