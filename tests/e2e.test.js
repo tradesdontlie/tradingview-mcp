@@ -1207,8 +1207,9 @@ val = array.get(a, 5)`;
         const rp = REPLAY_API;
         const started = await evaluate(wv(`${rp}.isReplayStarted()`));
         if (started) {
+          // No goToRealtime() here either: it throws after stopReplay(), and the
+          // throw used to skip hideReplayToolbar(), leaving the toolbar on screen.
           await evaluate(`${rp}.stopReplay()`);
-          await evaluate(`${rp}.goToRealtime()`);
           await evaluate(`${rp}.hideReplayToolbar()`);
           await sleep(500);
         }
@@ -1284,8 +1285,10 @@ val = array.get(a, 5)`;
       const started = await evaluate(wv(`${REPLAY_API}.isReplayStarted()`));
       if (!started) return;
 
+      // Mirror replay.js stop(), which calls stopReplay() and nothing else.
+      // goToRealtime() stops replay internally, so calling it after stopReplay()
+      // makes that inner stop assert with "Replay is not started".
       await evaluate(`${REPLAY_API}.stopReplay()`);
-      await evaluate(`${REPLAY_API}.goToRealtime()`);
       await evaluate(`${REPLAY_API}.hideReplayToolbar()`);
       await sleep(500);
 
