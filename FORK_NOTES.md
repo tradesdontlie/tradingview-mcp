@@ -1078,3 +1078,25 @@ requested instrument via `alert_list`; the no-`symbol` path still armed on
 `node --check` + eslint clean (0 errors, only pre-existing warnings), and
 `tests/alerts.test.js` covers the venue-rewrite-vs-wrong-ticker distinction that
 decides whether an alert is rolled back (10 assertions).
+
+## §28 — `scanner_enrich` also returns 60-day average volume (2026-08-12)
+
+**Change:** `scanner_enrich` now requests `average_volume_60d_calc` alongside the
+existing `average_volume_30d_calc`, and each `enriched[SYMBOL]` entry carries a
+new `avg_vol_60d` field (number or null) next to `avg_vol_30d`. The column list
+in `src/core/data.js` gained `average_volume_60d_calc` (inserted after the 30d
+column), the row destructure was widened to match the new column order, and the
+tool description in `src/tools/data.js` documents both windows.
+
+**Why:** a downstream consumer's liquidity screen is specced against a **60-day**
+average-volume window; the tool only exposed the 30-day figure, so the consumer
+either mis-cited its own threshold or could not implement the specced window at
+all. Both windows are cheap — the scanner returns any columns you ask for in one
+POST, so adding a column is free.
+
+**Verified:** the scanner endpoint returns `average_volume_60d_calc` for US
+equities (probed directly: e.g. a large-cap read 53.2M/30d vs 56.9M/60d, a
+mid-cap 8.34M/30d vs 9.11M/60d). `node --check` passes on both files. **Live
+smoke deferred to post-restart** (the MCP process must reload to expose the new
+field); the 30d field and every other output shape are unchanged, so existing
+callers are unaffected until they opt into `avg_vol_60d`.

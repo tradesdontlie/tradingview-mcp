@@ -394,7 +394,7 @@ async function enrichSymbols({ symbols } = {}) {
   }
   const body = JSON.stringify({
     symbols: { tickers },
-    columns: ['close', 'average_volume_30d_calc', 'market_cap_basic', 'description'],
+    columns: ['close', 'average_volume_30d_calc', 'average_volume_60d_calc', 'market_cap_basic', 'description'],
   });
   const escapedBody = body.replace(/[\\`$]/g, '\\$&');
   const expr = `
@@ -426,7 +426,7 @@ async function enrichSymbols({ symbols } = {}) {
   const returnedUpper = new Set();
   for (const row of rows) {
     if (!row || !Array.isArray(row.d)) continue;
-    const [close, avg_vol_30d, market_cap, description] = row.d;
+    const [close, avg_vol_30d, avg_vol_60d, market_cap, description] = row.d;
     const key = String(row.s || '').toUpperCase();
     if (!key) continue;
     returnedUpper.add(key);
@@ -434,6 +434,7 @@ async function enrichSymbols({ symbols } = {}) {
       symbol: row.s,
       close: typeof close === 'number' ? close : null,
       avg_vol_30d: typeof avg_vol_30d === 'number' ? avg_vol_30d : null,
+      avg_vol_60d: typeof avg_vol_60d === 'number' ? avg_vol_60d : null,
       market_cap: typeof market_cap === 'number' ? market_cap : null,
       description: description || '',
     };
