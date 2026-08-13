@@ -47,13 +47,31 @@ Mac:
 
 Windows:
 
-TradingView for Windows now ships **only as an MSIX package** (Microsoft Store and tvd-packages.tradingview.com both install under `C:\Program Files\WindowsApps\`). Use the launch script — it resolves the install via `Get-AppxPackage`, which works without admin rights:
+TradingView for Windows now ships **only as an MSIX package** (Microsoft Store and tvd-packages.tradingview.com both install under `C:\Program Files\WindowsApps\`). Use the launch script — no admin rights needed:
 
-```bat
-scripts\launch_tv_debug.bat
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\launch_tv_debug.ps1
 ```
 
-Or, preferred: let the `tv_launch` MCP tool do it — it auto-detects MSIX installs and, on Windows builds where launching from `WindowsApps` is blocked with **"Access is denied"**, automatically copies the package to `%LOCALAPPDATA%\tradingview-mcp\` (one-time, ~330MB) and launches from the copy. The copy keeps your login, layout, and chart state. If the fallback was used, the result includes `msix_local_copy: true`.
+It stops any running instance, COM-activates the package with the debug flag, and waits until the port actually binds before reporting success. `scripts\launch_tv_debug.vbs` is a double-clickable wrapper around the same script; `scripts\launch_tv_debug.bat` remains for legacy non-MSIX installs.
+
+**Why a dedicated launcher is needed.** An MSIX app under `WindowsApps` cannot be started with command-line arguments the usual ways:
+
+| Approach | Result |
+|----------|--------|
+| Run the exe directly | **Access is denied** — those ACLs allow execution only via package activation |
+| `explorer.exe shell:AppsFolder\...` | Activates, but provides no way to pass arguments |
+| `Invoke-CommandInDesktopPackage` | **ERROR_CANCELLED** (`0x800704C7`) on some builds, elevated or not |
+
+`IApplicationActivationManager::ActivateApplication` is the one activation path that forwards an argument string to a `Windows.FullTrustApplication` exe. That call lives in `scripts\activate_msix.ps1`, which the launcher and `tv_launch` both use.
+
+Note that a Start-menu launch produces a running chart with **no** debug port, which looks identical to a working one until a tool fails — so verify rather than assume:
+
+```powershell
+Get-NetTCPConnection -LocalPort 9222 -State Listen
+```
+
+Or, preferred: let the `tv_launch` MCP tool do it. It tries a direct spawn, then COM activation (`msix_activation: true` in the result), and finally — on Windows builds where activation accepts the flag but the port never binds — copies the package to `%LOCALAPPDATA%\tradingview-mcp\` (one-time, ~330MB) and launches from the copy (`msix_local_copy: true`). The copy keeps your login, layout, and chart state.
 
 Manual equivalent of that fallback, if you need it:
 
@@ -115,7 +133,9 @@ Then `tv status`, `tv quote`, `tv pine compile`, etc. work from anywhere.
 | Problem | Solution |
 |---------|----------|
 | `cdp_connected: false` | Launch TradingView with `--remote-debugging-port=9222` |
-| Windows: "Access is denied" launching from `WindowsApps` | Use `tv_launch` (auto copy-fallback) or the manual copy snippet in Step 3 — never `icacls` on WindowsApps |
+| Windows: "Access is denied" launching from `WindowsApps` | Expected — use `scripts\launch_tv_debug.ps1` or `tv_launch`; never `icacls` on WindowsApps |
+| Windows: `Invoke-CommandInDesktopPackage` fails with `0x800704C7` | Known-broken on some builds regardless of elevation; use `scripts\launch_tv_debug.ps1` instead |
+| Windows: app is running but `cdp_connected: false` | It was started without the flag (e.g. from the Start menu). Re-launch via `scripts\launch_tv_debug.ps1` — the port cannot be added to a running instance |
 | `ECONNREFUSED` | TradingView isn't running or port 9222 is blocked |
 | MCP server not showing in Claude Code | Check `~/.claude/.mcp.json` syntax, restart Claude Code |
 | `tv` command not found | Run `npm link` from the project directory |

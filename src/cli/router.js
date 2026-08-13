@@ -105,7 +105,7 @@ export async function run(argv) {
       }
       await execute(handler, values, positionals);
     } catch (err) {
-      handleError(err);
+      await handleError(err);
     }
   } else {
     handler = cmd.handler;
@@ -123,28 +123,45 @@ export async function run(argv) {
       }
       await execute(handler, values, positionals);
     } catch (err) {
-      handleError(err);
+      await handleError(err);
     }
   }
+}
+
+/**
+ * Close the CDP connection, then let the event loop drain on its own.
+ *
+ * Calling process.exit() with a live CDP WebSocket tears libuv down mid-flight.
+ * Node 24 on Windows turns that into a hard
+ * "Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), src\win\async.c"
+ * crash *after* the command has already printed its result — the work succeeds
+ * but the process dies with 0xC0000409, so callers see a failure.
+ *
+ * The timer is a safety net for a handle that never releases; unref'd so it
+ * cannot itself keep the process alive.
+ */
+async function shutdown(code) {
+  try {
+    const { disconnect } = await import('../connection.js');
+    await disconnect();
+  } catch { /* connection.js never loaded, or nothing open */ }
+  process.exitCode = code;
+  setTimeout(() => process.exit(code), 2000).unref();
 }
 
 async function execute(handler, values, positionals) {
   try {
     const result = await handler(values, positionals);
     console.log(JSON.stringify(result, null, 2));
-    process.exit(0);
+    await shutdown(0);
   } catch (err) {
-    handleError(err);
+    await handleError(err);
   }
 }
 
-function handleError(err) {
+async function handleError(err) {
   const message = err.message || String(err);
-  // Connection failures get exit code 2
-  if (/CDP|connection|ECONNREFUSED|not running/i.test(message)) {
-    console.error(JSON.stringify({ success: false, error: message }, null, 2));
-    process.exit(2);
-  }
   console.error(JSON.stringify({ success: false, error: message }, null, 2));
-  process.exit(1);
+  // Connection failures get exit code 2
+  await shutdown(/CDP|connection|ECONNREFUSED|not running/i.test(message) ? 2 : 1);
 }

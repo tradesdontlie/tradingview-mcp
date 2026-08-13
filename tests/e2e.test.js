@@ -146,14 +146,42 @@ describe('TradingView MCP — Full E2E (70 tools)', () => {
     });
 
     it('tv_launch — auto-detect binary (verify path resolution only)', async () => {
-      // tv_launch is destructive (kills TradingView), so we only test path detection
+      // tv_launch is destructive (kills TradingView), so we only test path detection.
+      // Candidates mirror the pathMap in src/core/health.js.
       const { existsSync } = await import('fs');
-      const paths = [
-        '/Applications/TradingView.app/Contents/MacOS/TradingView',
-        `${process.env.HOME}/Applications/TradingView.app/Contents/MacOS/TradingView`,
-      ];
-      const found = paths.some(p => existsSync(p));
-      assert.ok(found, 'TradingView binary found on disk');
+      const byPlatform = {
+        darwin: [
+          '/Applications/TradingView.app/Contents/MacOS/TradingView',
+          `${process.env.HOME}/Applications/TradingView.app/Contents/MacOS/TradingView`,
+        ],
+        win32: [
+          `${process.env.LOCALAPPDATA}\\TradingView\\TradingView.exe`,
+          `${process.env.PROGRAMFILES}\\TradingView\\TradingView.exe`,
+          `${process.env['PROGRAMFILES(X86)']}\\TradingView\\TradingView.exe`,
+        ],
+        linux: [
+          '/opt/TradingView/tradingview',
+          '/opt/TradingView/TradingView',
+          `${process.env.HOME}/.local/share/TradingView/TradingView`,
+          '/usr/bin/tradingview',
+          '/snap/tradingview/current/tradingview',
+        ],
+      };
+      const paths = byPlatform[process.platform] || byPlatform.linux;
+      let found = paths.some(p => existsSync(p));
+
+      // Windows now ships MSIX-only: the install lives under WindowsApps, which is
+      // ACL-restricted for enumeration but resolvable via Get-AppxPackage.
+      if (!found && process.platform === 'win32') {
+        const { execSync } = await import('child_process');
+        try {
+          const ps = 'powershell -NoProfile -Command "(Get-AppxPackage -Name \'TradingView.Desktop\' -ErrorAction SilentlyContinue).InstallLocation"';
+          const installDir = execSync(ps, { timeout: 10000 }).toString().trim();
+          found = !!installDir && existsSync(`${installDir}\\TradingView.exe`);
+        } catch { /* leave found false */ }
+      }
+
+      assert.ok(found, `TradingView binary found on disk (platform: ${process.platform})`);
     });
   });
 
@@ -935,6 +963,30 @@ val = array.get(a, 5)`;
       try { await evaluate(`${CHART_API}.removeAllShapes()`); } catch {}
     });
 
+    /**
+     * Guarantee at least one shape exists, creating one if needed.
+     * Tests must not depend on an earlier test having created a shape: bar data can
+     * be unavailable (outside market hours, symbol still loading), in which case the
+     * creating test bails silently and leaves the chart empty.
+     * Returns false when live bar data is unavailable and no shape could be made.
+     */
+    async function ensureShape() {
+      const existing = await evaluate(`${CHART_API}.getAllShapes()`);
+      if (existing && existing.length > 0) return true;
+
+      const quote = await evaluate(`
+        (function() {
+          var bars = ${BARS_PATH};
+          var last = bars.valueAt(bars.lastIndex());
+          return last ? { time: last[0], price: last[4] } : null;
+        })()
+      `);
+      if (!quote) return false;
+
+      await evaluate(`${CHART_API}.createShape({ time: ${quote.time}, price: ${quote.price} }, { shape: 'horizontal_line' })`);
+      return true;
+    }
+
     it('draw_shape — create horizontal line', async () => {
       const quote = await evaluate(`
         (function() {
@@ -960,6 +1012,7 @@ val = array.get(a, 5)`;
     });
 
     it('draw_list — list drawings', async () => {
+      const haveShape = await ensureShape();
       const shapes = await evaluate(`
         (function() {
           var all = ${CHART_API}.getAllShapes();
@@ -967,6 +1020,7 @@ val = array.get(a, 5)`;
         })()
       `);
       assert.ok(Array.isArray(shapes), 'Shapes is array');
+      if (!haveShape) return; // no live bar data to draw from
       assert.ok(shapes.length > 0, 'Has at least one shape');
     });
 
@@ -1001,17 +1055,7 @@ val = array.get(a, 5)`;
     });
 
     it('draw_clear — remove all drawings', async () => {
-      // Add a shape first
-      const quote = await evaluate(`
-        (function() {
-          var bars = ${BARS_PATH};
-          var last = bars.valueAt(bars.lastIndex());
-          return last ? { time: last[0], price: last[4] } : null;
-        })()
-      `);
-      if (quote) {
-        await evaluate(`${CHART_API}.createShape({ time: ${quote.time}, price: ${quote.price} }, { shape: 'horizontal_line' })`);
-      }
+      await ensureShape(); // clearing an already-empty chart would prove nothing
 
       await evaluate(`${CHART_API}.removeAllShapes()`);
       const after = await evaluate(`${CHART_API}.getAllShapes()`);
@@ -1163,8 +1207,9 @@ val = array.get(a, 5)`;
         const rp = REPLAY_API;
         const started = await evaluate(wv(`${rp}.isReplayStarted()`));
         if (started) {
+          // No goToRealtime() here either: it throws after stopReplay(), and the
+          // throw used to skip hideReplayToolbar(), leaving the toolbar on screen.
           await evaluate(`${rp}.stopReplay()`);
-          await evaluate(`${rp}.goToRealtime()`);
           await evaluate(`${rp}.hideReplayToolbar()`);
           await sleep(500);
         }
@@ -1240,8 +1285,10 @@ val = array.get(a, 5)`;
       const started = await evaluate(wv(`${REPLAY_API}.isReplayStarted()`));
       if (!started) return;
 
+      // Mirror replay.js stop(), which calls stopReplay() and nothing else.
+      // goToRealtime() stops replay internally, so calling it after stopReplay()
+      // makes that inner stop assert with "Replay is not started".
       await evaluate(`${REPLAY_API}.stopReplay()`);
-      await evaluate(`${REPLAY_API}.goToRealtime()`);
       await evaluate(`${REPLAY_API}.hideReplayToolbar()`);
       await sleep(500);
 

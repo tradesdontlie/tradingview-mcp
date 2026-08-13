@@ -5,6 +5,7 @@ import { getClient, getTargetInfo, evaluate, CDP_HOST, CDP_PORT } from '../conne
 import { existsSync, cpSync, rmSync, readdirSync } from 'fs';
 import { execSync, spawn } from 'child_process';
 import { dirname, basename, join } from 'path';
+import { fileURLToPath } from 'url';
 
 // Best-effort git-pull update check: compare local HEAD to origin's default
 // branch on GitHub. Never throws — returns null on any failure (offline,
@@ -29,11 +30,25 @@ async function checkForUpdate() {
         req.setTimeout(3000, () => { req.destroy(); resolve(null); });
       });
       if (remoteSha) {
+        // A different HEAD is not the same as being out of date: a feature branch
+        // sitting ahead of origin's default branch needs no update, and telling the
+        // user to run tv_update there would move them off their own commits. Only
+        // report an update when the remote commit is not already contained in HEAD.
+        let outdated = remoteSha !== localSha;
+        if (outdated && /^[0-9a-f]{40}$/i.test(remoteSha)) {
+          try {
+            // Exits 0 when remoteSha is an ancestor of HEAD (we are ahead of it).
+            // Throws when it is not, or when the commit was never fetched — in which
+            // case we keep the plain "differs" answer.
+            execSync(`git merge-base --is-ancestor ${remoteSha} HEAD`, { timeout: 3000, stdio: 'ignore' });
+            outdated = false;
+          } catch { /* genuinely behind, or the commit is unknown locally */ }
+        }
         value = {
-          update_available: remoteSha !== localSha,
+          update_available: outdated,
           local_commit: localSha.slice(0, 8),
           latest_commit: remoteSha.slice(0, 8),
-          ...(remoteSha !== localSha && { hint: 'Run the tv_update tool (or `tv update` CLI) to update, then restart the MCP server.' }),
+          ...(outdated && { hint: 'Run the tv_update tool (or `tv update` CLI) to update, then restart the MCP server.' }),
         };
       }
     }
@@ -211,7 +226,32 @@ function _resolveLaunchDeps(deps) {
     readdirSync: deps?.readdirSync || readdirSync,
     delay: deps?.delay || ((ms) => new Promise((r) => setTimeout(r, ms))),
     probeCdp: deps?.probeCdp || _probeCdp,
+    activateMsix: deps?.activateMsix || _activateMsix,
   };
+}
+
+/**
+ * COM-activate the MSIX package with the CDP flag, via scripts/activate_msix.ps1.
+ *
+ * WindowsApps ACLs allow execution only through package activation, and shell
+ * activation cannot pass arguments — IApplicationActivationManager is the one path
+ * that forwards an argument string to a full-trust exe. Cheaper than the local-copy
+ * fallback below (no multi-hundred-MB copy) so it is tried first, but it does not
+ * work on every Windows build, hence the fallback stays.
+ *
+ * Returns the activated pid, or null if the script produced no parseable output.
+ */
+function _activateMsix(cdpPort, { execSync: exec }) {
+  const script = fileURLToPath(new URL('../../scripts/activate_msix.ps1', import.meta.url));
+  const out = exec(
+    `powershell -NoProfile -ExecutionPolicy Bypass -STA -File "${script}" -Port ${cdpPort}`,
+    { timeout: 30000, stdio: ['ignore', 'pipe', 'ignore'] },
+  ).toString().trim();
+  try {
+    return JSON.parse(out).pid ?? null;
+  } catch {
+    return null;
+  }
 }
 
 async function _probeCdp(cdpPort) {
@@ -351,8 +391,10 @@ export async function launch({ port, kill_existing, _deps } = {}) {
 
   const killExisting = async () => {
     try {
-      if (platform === 'win32') deps.execSync('taskkill /F /IM TradingView.exe', { timeout: 5000 });
-      else deps.execSync('pkill -f TradingView', { timeout: 5000 });
+      // stdio ignored: taskkill/pkill write "process not found" to stderr when
+      // nothing is running, which is the normal case and not worth showing.
+      if (platform === 'win32') deps.execSync('taskkill /F /IM TradingView.exe', { timeout: 5000, stdio: 'ignore' });
+      else deps.execSync('pkill -f TradingView', { timeout: 5000, stdio: 'ignore' });
       await deps.delay(1500);
     } catch { /* may not be running */ }
   };
@@ -360,20 +402,57 @@ export async function launch({ port, kill_existing, _deps } = {}) {
   if (killFirst) await killExisting();
 
   const cdpArgs = [`--remote-debugging-port=${cdpPort}`];
-  let child = _spawnDetached(deps.spawn, tvPath, cdpArgs);
+  // Windows refuses direct execution of WindowsApps binaries by throwing EPERM
+  // synchronously from spawn(), not via an async 'error' event. Letting that escape
+  // would abort launch() before the MSIX recovery below — which exists precisely to
+  // handle this — so capture it and treat it as an early failure.
+  let child = null;
+  let spawnError = null;
+  try {
+    child = _spawnDetached(deps.spawn, tvPath, cdpArgs);
+  } catch (err) {
+    spawnError = err.code || err.message || 'spawn failed';
+  }
+  if (spawnError && !(platform === 'win32' && WINDOWS_APPS_RE.test(tvPath))) {
+    // A classic install that cannot be spawned has no fallback worth trying.
+    throw new Error(`Failed to launch ${tvPath}: ${spawnError}`);
+  }
   let info = null;
   let usedLocalCopy = false;
+  let usedActivation = false;
+  let activatedPid = null;
 
   if (platform === 'win32' && WINDOWS_APPS_RE.test(tvPath)) {
-    const earlyFailure = await _spawnFailedEarly(child);
+    const earlyFailure = spawnError || await _spawnFailedEarly(child);
     if (!earlyFailure) {
       info = await _waitForCdp({ cdpPort, attempts: 15, delay: deps.delay, probeCdp: deps.probeCdp });
     }
     if (!info) {
-      // Direct WindowsApps launch was blocked or CDP never bound — fall back to
-      // a local copy of the package (see _copyMsixPackageLocal).
+      // Direct WindowsApps spawn is normally denied by ACL. COM activation is the
+      // cheap way through — no copy — so try it before duplicating the package.
+      // Activation only applies the flag when nothing is running: the single-instance
+      // lock otherwise makes it focus the existing window and silently drop it. Honour
+      // kill_existing:false anyway and let activation fail into the copy fallback,
+      // rather than killing an instance the caller asked us to leave alone.
+      try {
+        if (killFirst) await killExisting();
+        activatedPid = deps.activateMsix(cdpPort, deps);
+        usedActivation = true;
+        info = await _waitForCdp({ cdpPort, attempts: 15, delay: deps.delay, probeCdp: deps.probeCdp });
+      } catch {
+        usedActivation = false;
+      }
+    }
+    if (!info) {
+      // Activation unavailable, or it accepted the flag without ever binding the
+      // port — fall back to a local copy of the package (see _copyMsixPackageLocal).
+      usedActivation = false;
+      activatedPid = null;
       const localExe = _copyMsixPackageLocal(tvPath, deps);
-      await killExisting();
+      // Same contract as above: never kill an instance the caller asked us to keep.
+      // Without the kill the copy will usually lose to the single-instance lock and
+      // bind no port, which surfaces as the cdp_ready:false warning below.
+      if (killFirst) await killExisting();
       child = _spawnDetached(deps.spawn, localExe, cdpArgs);
       tvPath = localExe;
       usedLocalCopy = true;
@@ -386,15 +465,17 @@ export async function launch({ port, kill_existing, _deps } = {}) {
 
   if (info) {
     return {
-      success: true, platform, binary: tvPath, pid: child.pid,
+      success: true, platform, binary: tvPath, pid: activatedPid ?? child?.pid,
       cdp_port: cdpPort, cdp_url: `http://${CDP_HOST}:${cdpPort}`,
       browser: info.Browser, user_agent: info['User-Agent'],
+      ...(usedActivation && { msix_activation: true }),
       ...(usedLocalCopy && { msix_local_copy: true }),
     };
   }
 
   return {
-    success: true, platform, binary: tvPath, pid: child.pid, cdp_port: cdpPort, cdp_ready: false,
+    success: true, platform, binary: tvPath, pid: activatedPid ?? child?.pid, cdp_port: cdpPort, cdp_ready: false,
+    ...(usedActivation && { msix_activation: true }),
     ...(usedLocalCopy && { msix_local_copy: true }),
     warning: 'TradingView launched but CDP not responding yet. It may still be loading. Try tv_health_check in a few seconds.',
   };
