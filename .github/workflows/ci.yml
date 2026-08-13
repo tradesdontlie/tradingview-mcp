@@ -32,5 +32,7 @@ jobs:
         run: npm run test:unit
 
       - name: Audit (high severity)
+        # Blocking on purpose. A high-severity advisory can appear against a
+        # lockfile nobody touched, so an advisory-only step is never seen.
+        # --audit-level=high keeps moderate and low findings non-blocking.
         run: npm audit --audit-level=high
-        continue-on-error: true
