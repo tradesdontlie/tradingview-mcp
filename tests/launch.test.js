@@ -109,6 +109,13 @@ describe('launch() — MSIX WindowsApps handling', { skip: !onWindows }, () => {
     assert.equal(state.killed, 0);
   });
 
+  it('kill_existing:false is honoured on the local-copy path too', async () => {
+    const { deps, state } = msixDeps({ spawnFailures: ['WindowsApps'], cdpBindsFor: ['tradingview-mcp'] });
+    const result = await launch({ kill_existing: false, _deps: deps });
+    assert.equal(result.msix_local_copy, true);
+    assert.equal(state.killed, 0);
+  });
+
   it('activation is attempted before falling back to a copy', async () => {
     const { deps, state } = msixDeps({ spawnFailures: ['WindowsApps'], cdpBindsFor: ['tradingview-mcp'] });
     const result = await launch({ _deps: deps });

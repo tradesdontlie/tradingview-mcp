@@ -30,11 +30,25 @@ async function checkForUpdate() {
         req.setTimeout(3000, () => { req.destroy(); resolve(null); });
       });
       if (remoteSha) {
+        // A different HEAD is not the same as being out of date: a feature branch
+        // sitting ahead of origin's default branch needs no update, and telling the
+        // user to run tv_update there would move them off their own commits. Only
+        // report an update when the remote commit is not already contained in HEAD.
+        let outdated = remoteSha !== localSha;
+        if (outdated && /^[0-9a-f]{40}$/i.test(remoteSha)) {
+          try {
+            // Exits 0 when remoteSha is an ancestor of HEAD (we are ahead of it).
+            // Throws when it is not, or when the commit was never fetched — in which
+            // case we keep the plain "differs" answer.
+            execSync(`git merge-base --is-ancestor ${remoteSha} HEAD`, { timeout: 3000, stdio: 'ignore' });
+            outdated = false;
+          } catch { /* genuinely behind, or the commit is unknown locally */ }
+        }
         value = {
-          update_available: remoteSha !== localSha,
+          update_available: outdated,
           local_commit: localSha.slice(0, 8),
           latest_commit: remoteSha.slice(0, 8),
-          ...(remoteSha !== localSha && { hint: 'Run the tv_update tool (or `tv update` CLI) to update, then restart the MCP server.' }),
+          ...(outdated && { hint: 'Run the tv_update tool (or `tv update` CLI) to update, then restart the MCP server.' }),
         };
       }
     }
@@ -419,7 +433,10 @@ export async function launch({ port, kill_existing, _deps } = {}) {
       usedActivation = false;
       activatedPid = null;
       const localExe = _copyMsixPackageLocal(tvPath, deps);
-      await killExisting();
+      // Same contract as above: never kill an instance the caller asked us to keep.
+      // Without the kill the copy will usually lose to the single-instance lock and
+      // bind no port, which surfaces as the cdp_ready:false warning below.
+      if (killFirst) await killExisting();
       child = _spawnDetached(deps.spawn, localExe, cdpArgs);
       tvPath = localExe;
       usedLocalCopy = true;
