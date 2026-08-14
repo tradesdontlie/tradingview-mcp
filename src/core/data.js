@@ -524,8 +524,30 @@ export async function getStudyValues() {
           // (e.g. two EMAs with different lengths) are distinguishable (#143).
           var id = null;
           try { id = s.id ? s.id() : null; } catch(e) {}
+          // A Pine study's inputs() carries its identity alongside its configuration:
+          // the obfuscated source (text, multi-KB), the script id and version, the
+          // feature list and the internal calc flags. None of it says how the study
+          // is configured, and pineId is identical across every instance of a script
+          // — so it cannot help tell instances apart either (#143). Drop that set,
+          // keep the in_* values that do, and unwrap the {v,f,t} envelope.
+          var META = ['text', 'pineId', 'pineVersion', 'pineFeatures', '__fast_calc', '__profile'];
           var inputs = null;
-          try { var ip = s.inputs ? s.inputs() : null; if (ip && Object.keys(ip).length) inputs = ip; } catch(e) {}
+          try {
+            var ip = s.inputs ? s.inputs() : null;
+            if (ip) {
+              var lean = {};
+              for (var k in ip) {
+                if (META.indexOf(k) !== -1) continue;
+                var iv = ip[k];
+                var val = (iv && typeof iv === 'object' && 'v' in iv) ? iv.v : iv;
+                // Safety net for unknown blobs: getIndicator() drops strings over
+                // 500 chars (src/core/data.js:203) — same threshold here.
+                if (typeof val === 'string' && val.length > 500) continue;
+                lean[k] = val;
+              }
+              if (Object.keys(lean).length) inputs = lean;
+            }
+          } catch(e) {}
           if (Object.keys(values).length > 0) results.push({ id: id, name: name, inputs: inputs, values: values });
         } catch(e) {}
       }
