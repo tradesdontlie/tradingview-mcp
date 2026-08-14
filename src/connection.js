@@ -55,13 +55,123 @@ export async function getClient() {
     try {
       // Quick liveness check
       await client.Runtime.evaluate({ expression: '1', returnByValue: true });
-      return client;
     } catch {
       client = null;
       targetInfo = null;
+      return connect();
     }
+
+    // Liveness alone isn't enough: with multiple chart tabs open, the cached
+    // target can still be a live but backgrounded tab (stale state/screenshots)
+    // if the user switched tabs outside of tab_switch. TradingView Desktop's
+    // custom tab bar doesn't drive document.visibilityState/hasFocus() per tab
+    // (every tab reports hidden/unfocused regardless of which is on screen —
+    // confirmed by direct probing), so visibility APIs can't tell us which tab
+    // is actually shown. Compare layout names instead: read which tab is
+    // .active in the shell's tab bar, and if that differs from what the cached
+    // target itself is displaying, find and follow the matching one.
+    try {
+      const shellActiveName = await getShellActiveLayoutName();
+      if (shellActiveName) {
+        const cachedName = await readLayoutName(client);
+        if (cachedName && cachedName === shellActiveName) return client;
+
+        const match = await findTargetByLayoutName(shellActiveName);
+        if (match && match.id !== targetInfo?.id) {
+          return reconnectTo(match.id);
+        }
+      }
+    } catch {
+      // Best-effort — fall through and keep using the cached client rather
+      // than breaking a previously-working connection over this.
+    }
+    return client;
   }
   return connect();
+}
+
+// Reads the layout name TradingView itself is currently rendering in the
+// save/load toolbar button, e.g. "Daily Set Up - Crypto". The primary
+// selector targets today's (hashed, build-specific) class name; the fallback
+// scans buttons for the "<name>Save" pattern that button renders as, so a
+// TradingView UI update that changes the hash doesn't silently break this.
+const READ_LAYOUT_NAME_EXPR = `
+  (function() {
+    var el = document.querySelector('span[class*="text-OjWQ1m5F"]');
+    if (el && el.textContent.trim()) return el.textContent.trim();
+    var btns = document.querySelectorAll('button');
+    for (var i = 0; i < btns.length; i++) {
+      var t = (btns[i].textContent || '').trim();
+      if (/Save$/.test(t) && t.length > 4) return t.replace(/Save$/, '').trim();
+    }
+    return null;
+  })()
+`;
+
+async function readLayoutName(cdpClient) {
+  const { result } = await cdpClient.Runtime.evaluate({ expression: READ_LAYOUT_NAME_EXPR, returnByValue: true });
+  return result?.value || null;
+}
+
+/**
+ * Read the layout name of whichever tab is .active in the Electron shell's
+ * tab bar (the top tab strip, not the chart page itself).
+ */
+async function getShellActiveLayoutName() {
+  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
+  const targets = await resp.json();
+  const shells = targets.filter(t => t.type === 'page' && /\/window\/index\.html/i.test(t.url || ''));
+
+  for (const s of shells) {
+    let c;
+    try {
+      c = await CDP({ host: CDP_HOST, port: CDP_PORT, target: s.id });
+      const probe = await c.Runtime.evaluate({
+        expression: `!!document.querySelector('.tabs-container .tab')`, returnByValue: true,
+      });
+      if (!probe.result?.value) continue;
+
+      const { result } = await c.Runtime.evaluate({
+        expression: `
+          (function() {
+            var active = document.querySelector('.tabs-container .tab.active');
+            if (!active) return null;
+            var nameEl = active.querySelector('[class*="layout-name"]');
+            var text = nameEl ? nameEl.textContent : '';
+            return text.replace(/^\\s*\\/\\s*/, '').trim() || null;
+          })()
+        `,
+        returnByValue: true,
+      });
+      if (result?.value) return result.value;
+    } catch {
+      // This target wasn't the shell (or closed mid-probe) — try the next one.
+    } finally {
+      try { if (c) await c.close(); } catch { /* already gone */ }
+    }
+  }
+  return null;
+}
+
+/** Find the open chart tab whose own rendered layout name matches `name`. */
+async function findTargetByLayoutName(name) {
+  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
+  const targets = await resp.json();
+  const chartTargets = targets.filter(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url));
+
+  for (const t of chartTargets) {
+    let c;
+    try {
+      c = await CDP({ host: CDP_HOST, port: CDP_PORT, target: t.id });
+      const layoutName = await readLayoutName(c);
+      if (layoutName === name) return t;
+    } catch {
+      // Target may have closed mid-probe or not be ready yet — skip it.
+    } finally {
+      try { if (c) await c.close(); } catch { /* already gone */ }
+    }
+  }
+  return null;
 }
 
 export async function connect(targetId = null) {
@@ -110,8 +220,21 @@ export async function reconnectTo(targetId) {
 async function findChartTarget() {
   const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
   const targets = await resp.json();
-  // Prefer targets with tradingview.com/chart in the URL
-  return targets.find(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
+  const chartTargets = targets.filter(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url));
+
+  if (chartTargets.length > 1) {
+    try {
+      const shellActiveName = await getShellActiveLayoutName();
+      if (shellActiveName) {
+        const match = await findTargetByLayoutName(shellActiveName);
+        if (match) return match;
+      }
+    } catch {
+      // Fall through to "just pick the first one" below.
+    }
+  }
+
+  return chartTargets[0]
     || targets.find(t => t.type === 'page' && /tradingview/i.test(t.url))
     || null;
 }
@@ -123,9 +246,13 @@ async function findTargetById(id) {
 }
 
 export async function getTargetInfo() {
-  if (!targetInfo) {
-    await getClient();
-  }
+  // Always run getClient(), not just when nothing is cached yet — it's the
+  // one that re-checks whether the cached target is still the tab actually
+  // on screen and follows the user if it isn't. Skipping that check here
+  // left tv_health_check reporting a stale target after a tab switch even
+  // though evaluate()-based tools (which always call getClient()) had
+  // already followed it correctly.
+  await getClient();
   return targetInfo;
 }
 
