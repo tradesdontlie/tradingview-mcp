@@ -57,6 +57,97 @@ export const FIND_MONACO = `
   })()
 `;
 
+// TradingView's Pine toolbar uses icon-only buttons in some layouts. The
+// action is then exposed through title/data-tooltip instead of textContent.
+export const FIND_PINE_ACTION_BUTTON = `
+  (function findPineActionButton() {
+    function isVisible(button) {
+      if (!button || !button.isConnected || button.offsetParent === null) return false;
+      var rect = button.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    }
+
+    function labels(button) {
+      return [
+        button.textContent,
+        button.getAttribute('aria-label'),
+        button.getAttribute('title'),
+        button.getAttribute('data-tooltip'),
+      ].filter(Boolean).map(function(label) { return label.trim().replace(/\\s+/g, ' '); });
+    }
+
+    var buttons = Array.from(document.querySelectorAll('button')).filter(isVisible);
+    var actions = [
+      { name: 'Save and add to chart', pattern: /^save and add to chart$/i },
+      { name: 'Add to chart', pattern: /^add to chart$/i },
+      { name: 'Update on chart', pattern: /^update on chart$/i },
+    ];
+
+    for (var a = 0; a < actions.length; a++) {
+      for (var b = 0; b < buttons.length; b++) {
+        if (labels(buttons[b]).some(function(label) { return actions[a].pattern.test(label); })) {
+          return { button: buttons[b], action: actions[a].name };
+        }
+      }
+    }
+    return null;
+  })()
+`;
+
+export const READ_PINE_CONSOLE = `
+  (function readPineConsole() {
+    function isVisible(element) {
+      if (!element || !element.isConnected || element.offsetParent === null) return false;
+      var rect = element.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    }
+
+    var wrappers = Array.from(document.querySelectorAll('[class*="consoleWrapper"]')).filter(isVisible);
+    var wrapper = wrappers.find(function(element) {
+      return /consoleWrapperOpen/.test(String(element.className));
+    }) || wrappers[0];
+    if (!wrapper) return { available: false, entries: [] };
+
+    var rows = wrapper.querySelectorAll('table[class*="messages"] tbody tr');
+    var entries = Array.from(rows).map(function(row) {
+      var cells = Array.from(row.querySelectorAll('td'));
+      var timestamp = null;
+      var messageCells = cells;
+      if (cells.length > 1 && /time/i.test(String(cells[0].className))) {
+        timestamp = cells[0].textContent.trim() || null;
+        messageCells = cells.slice(1);
+      }
+      var message = messageCells.map(function(cell) { return cell.textContent.trim(); }).filter(Boolean).join(' ');
+      if (!message && cells.length === 0) message = row.textContent.trim();
+
+      var signal = String(row.className) + ' ' + message;
+      var type = 'info';
+      if (/\\berror\\b/i.test(signal)) type = 'error';
+      else if (/\\bwarn(?:ing)?\\b/i.test(signal)) type = 'warning';
+      else if (/compil/i.test(message)) type = 'compile';
+      return { timestamp: timestamp, type: type, message: message };
+    }).filter(function(entry) { return entry.message; });
+
+    return { available: true, entries: entries };
+  })()
+`;
+
+async function clickPineActionButton() {
+  const action = await evaluate(`
+    (function() {
+      var match = ${FIND_PINE_ACTION_BUTTON};
+      if (!match) return null;
+      match.button.click();
+      return match.action;
+    })()
+  `);
+
+  if (!action) {
+    throw new Error('Could not find a visible Add to chart or Update on chart control.');
+  }
+  return action;
+}
+
 /**
  * Opens the Pine Editor panel and waits for Monaco to become available.
  * Returns true if editor is accessible, false on timeout.
@@ -307,38 +398,10 @@ export async function compile() {
   const editorReady = await ensurePineEditorOpen();
   if (!editorReady) throw new Error('Could not open Pine Editor.');
 
-  const clicked = await evaluate(`
-    (function() {
-      var btns = document.querySelectorAll('button');
-      var fallback = null;
-      var saveBtn = null;
-      for (var i = 0; i < btns.length; i++) {
-        var text = btns[i].textContent.trim();
-        if (/save and add to chart/i.test(text)) {
-          btns[i].click();
-          return 'Save and add to chart';
-        }
-        if (!fallback && /^(Add to chart|Update on chart)/i.test(text)) {
-          fallback = btns[i];
-        }
-        if (!saveBtn && btns[i].className.indexOf('saveButton') !== -1 && btns[i].offsetParent !== null) {
-          saveBtn = btns[i];
-        }
-      }
-      if (fallback) { fallback.click(); return fallback.textContent.trim(); }
-      if (saveBtn) { saveBtn.click(); return 'Pine Save'; }
-      return null;
-    })()
-  `);
-
-  if (!clicked) {
-    const c = await getClient();
-    await c.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: 2, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
-    await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 'Enter', code: 'Enter' });
-  }
+  const clicked = await clickPineActionButton();
 
   await new Promise(r => setTimeout(r, 2000));
-  return { success: true, button_clicked: clicked || 'keyboard_shortcut', source: 'dom_fallback' };
+  return { success: true, button_clicked: clicked, source: 'pine_toolbar' };
 }
 
 export async function getErrors() {
@@ -402,50 +465,35 @@ export async function getConsole() {
   const editorReady = await ensurePineEditorOpen();
   if (!editorReady) throw new Error('Could not open Pine Editor.');
 
-  const entries = await evaluate(`
+  const consoleState = await evaluate(`
     (function() {
-      var results = [];
-      var rows = document.querySelectorAll('[class*="consoleRow"], [class*="log-"], [class*="consoleLine"]');
-      if (rows.length === 0) {
-        var bottomArea = document.querySelector('[class*="layout__area--bottom"]')
-          || document.querySelector('[class*="bottom-widgetbar-content"]');
-        if (bottomArea) {
-          rows = bottomArea.querySelectorAll('[class*="message"], [class*="log"], [class*="console"]');
-        }
+      var visible = function(element) {
+        if (!element || !element.isConnected || element.offsetParent === null) return false;
+        var rect = element.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      };
+      var openButton = Array.from(document.querySelectorAll('button[data-tooltip="Open console"]')).find(visible);
+      if (openButton) {
+        openButton.click();
+        return { available: true, opened: true };
       }
-      if (rows.length === 0) {
-        var pinePanel = document.querySelector('.pine-editor-container')
-          || document.querySelector('[class*="pine-editor"]')
-          || document.querySelector('[class*="layout__area--bottom"]');
-        if (pinePanel) {
-          var allSpans = pinePanel.querySelectorAll('span, div');
-          for (var s = 0; s < allSpans.length; s++) {
-            var txt = allSpans[s].textContent.trim();
-            if (/^\\d{2}:\\d{2}:\\d{2}/.test(txt) || /error|warning|info/i.test(allSpans[s].className)) {
-              rows = Array.from(rows || []);
-              rows.push(allSpans[s]);
-            }
-          }
-        }
-      }
-      for (var i = 0; i < rows.length; i++) {
-        var text = rows[i].textContent.trim();
-        if (!text) continue;
-        var ts = null;
-        var tsMatch = text.match(/^(\\d{4}-\\d{2}-\\d{2}\\s+)?\\d{2}:\\d{2}:\\d{2}/);
-        if (tsMatch) ts = tsMatch[0];
-        var type = 'info';
-        var cls = rows[i].className || '';
-        if (/error/i.test(cls) || /error/i.test(text.substring(0, 30))) type = 'error';
-        else if (/compil/i.test(text.substring(0, 40))) type = 'compile';
-        else if (/warn/i.test(cls)) type = 'warning';
-        results.push({ timestamp: ts, type: type, message: text });
-      }
-      return results;
+      var closeButton = Array.from(document.querySelectorAll('button[data-tooltip="Close console"]')).find(visible);
+      return { available: !!closeButton, opened: false };
     })()
   `);
 
-  return { success: true, entries: entries || [], entry_count: entries?.length || 0 };
+  if (consoleState?.opened) await new Promise(r => setTimeout(r, 250));
+
+  const result = await evaluate(READ_PINE_CONSOLE);
+  const entries = result?.entries || [];
+  return {
+    success: true,
+    console_available: result?.available || consoleState?.available || false,
+    console_opened: consoleState?.opened || false,
+    entries,
+    entry_count: entries.length,
+    source: 'pine_console',
+  };
 }
 
 export async function smartCompile() {
@@ -456,42 +504,34 @@ export async function smartCompile() {
     (function() {
       try {
         var chart = window.TradingViewApi._activeChartWidgetWV.value();
-        if (chart && typeof chart.getAllStudies === 'function') return chart.getAllStudies().length;
+        if (chart && typeof chart.getAllStudies === 'function') {
+          return chart.getAllStudies().map(function(study) { return String(study.id); });
+        }
       } catch(e) {}
       return null;
     })()
   `);
 
-  const buttonClicked = await evaluate(`
-    (function() {
-      var btns = document.querySelectorAll('button');
-      var addBtn = null;
-      var updateBtn = null;
-      var saveBtn = null;
-      for (var i = 0; i < btns.length; i++) {
-        var text = btns[i].textContent.trim();
-        if (/save and add to chart/i.test(text)) {
-          btns[i].click();
-          return 'Save and add to chart';
-        }
-        if (!addBtn && /^add to chart$/i.test(text)) addBtn = btns[i];
-        if (!updateBtn && /^update on chart$/i.test(text)) updateBtn = btns[i];
-        if (!saveBtn && btns[i].className.indexOf('saveButton') !== -1 && btns[i].offsetParent !== null) saveBtn = btns[i];
-      }
-      if (addBtn) { addBtn.click(); return 'Add to chart'; }
-      if (updateBtn) { updateBtn.click(); return 'Update on chart'; }
-      if (saveBtn) { saveBtn.click(); return 'Pine Save'; }
-      return null;
-    })()
-  `);
-
-  if (!buttonClicked) {
-    const c = await getClient();
-    await c.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: 2, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
-    await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 'Enter', code: 'Enter' });
+  const buttonClicked = await clickPineActionButton();
+  const expectsNewStudy = /add to chart/i.test(buttonClicked);
+  if (expectsNewStudy) {
+    for (let i = 0; i < 40; i++) {
+      await new Promise(r => setTimeout(r, 250));
+      const added = await evaluate(`
+        (function() {
+          try {
+            var chart = window.TradingViewApi._activeChartWidgetWV.value();
+            if (!chart || typeof chart.getAllStudies !== 'function') return false;
+            var before = ${JSON.stringify(studiesBefore)};
+            return chart.getAllStudies().some(function(study) { return before.indexOf(String(study.id)) === -1; });
+          } catch(e) { return false; }
+        })()
+      `);
+      if (added) break;
+    }
+  } else {
+    await new Promise(r => setTimeout(r, 2500));
   }
-
-  await new Promise(r => setTimeout(r, 2500));
 
   const errors = await evaluate(`
     (function() {
@@ -510,20 +550,29 @@ export async function smartCompile() {
     (function() {
       try {
         var chart = window.TradingViewApi._activeChartWidgetWV.value();
-        if (chart && typeof chart.getAllStudies === 'function') return chart.getAllStudies().length;
+        if (chart && typeof chart.getAllStudies === 'function') {
+          return chart.getAllStudies().map(function(study) { return String(study.id); });
+        }
       } catch(e) {}
       return null;
     })()
   `);
 
-  const studyAdded = (studiesBefore !== null && studiesAfter !== null) ? studiesAfter > studiesBefore : null;
+  const studyIdsAdded = (studiesBefore !== null && studiesAfter !== null)
+    ? studiesAfter.filter(id => !studiesBefore.includes(id))
+    : null;
+  const studyAdded = studyIdsAdded === null ? null : studyIdsAdded.length > 0;
+  if (expectsNewStudy && studyAdded === false && !(errors?.length > 0)) {
+    throw new Error('Add to chart control was clicked but no study was added.');
+  }
 
   return {
     success: true,
-    button_clicked: buttonClicked || 'keyboard_shortcut',
+    button_clicked: buttonClicked,
     has_errors: errors?.length > 0,
     errors: errors || [],
     study_added: studyAdded,
+    study_ids_added: studyIdsAdded || [],
   };
 }
 
