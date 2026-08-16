@@ -26,11 +26,12 @@ function mockChild({ failWith } = {}) {
  * Build a _deps bundle simulating a win32 MSIX environment.
  * @param {object} opts
  *   spawnFailures — spawn paths (substring) that emit EACCES
+ *   syncThrowFor  — spawn paths (substring) where spawn throws synchronously
  *   cdpBindsFor  — spawn paths (substring) after which probeCdp starts succeeding
  *   copyExists   — local copy already present
  */
-function msixDeps({ spawnFailures = [], cdpBindsFor = [], copyExists = false } = {}) {
-  const state = { spawned: [], copies: [], removed: [], killed: 0, cdpUp: false };
+function msixDeps({ spawnFailures = [], syncThrowFor = [], cdpBindsFor = [], copyExists = false } = {}) {
+  const state = { spawned: [], copies: [], removed: [], killed: 0, cdpUp: false, appxQueries: [] };
   const deps = {
     existsSync: (p) => {
       if (p === MSIX_EXE) return true;
@@ -39,6 +40,7 @@ function msixDeps({ spawnFailures = [], cdpBindsFor = [], copyExists = false } =
     },
     execSync: (cmd) => {
       if (cmd.includes('Get-AppxPackage')) {
+        state.appxQueries.push(cmd);
         return 'C:\\Program Files\\WindowsApps\\TradingView.Desktop_3.1.0.7818_x64__n534cwy3pjxzj\n';
       }
       if (cmd.includes('taskkill')) { state.killed++; return ''; }
@@ -46,6 +48,9 @@ function msixDeps({ spawnFailures = [], cdpBindsFor = [], copyExists = false } =
     },
     spawn: (exe) => {
       state.spawned.push(exe);
+      if (syncThrowFor.some((s) => exe.includes(s))) {
+        throw Object.assign(new Error('spawn EPERM'), { code: 'EPERM' });
+      }
       const fail = spawnFailures.some((s) => exe.includes(s));
       if (!fail && cdpBindsFor.some((s) => exe.includes(s))) state.cdpUp = true;
       return mockChild(fail ? { failWith: 'EACCES' } : {});
@@ -86,6 +91,44 @@ describe('launch() — MSIX WindowsApps handling', { skip: !onWindows }, () => {
     assert.match(state.removed[0], /3\.0\.0\.7652/);
     // the CDP-less direct instance is killed before relaunching from the copy
     assert.ok(state.killed >= 2);
+  });
+
+  it('synchronous EPERM on direct spawn falls back to local copy', async () => {
+    // Some Windows builds reject the WindowsApps spawn by throwing from spawn()
+    // itself rather than emitting 'error', so the throw has to be caught for the
+    // fallback to run at all.
+    const { deps, state } = msixDeps({ syncThrowFor: ['WindowsApps'], cdpBindsFor: ['tradingview-mcp'] });
+    const result = await launch({ _deps: deps });
+    assert.equal(result.success, true);
+    assert.equal(result.msix_local_copy, true);
+    assert.equal(result.binary, LOCAL_COPY_EXE);
+    assert.equal(result.pid, 12345);
+    assert.equal(state.copies.length, 1);
+    assert.match(state.spawned[0], /WindowsApps/);
+    assert.match(state.spawned[1], /tradingview-mcp/);
+  });
+
+  it('a synchronous spawn failure on a classic path still propagates', async () => {
+    // Only WindowsApps launches have a fallback; anything else should surface.
+    const classicExe = `${process.env.LOCALAPPDATA}\\TradingView\\TradingView.exe`;
+    const deps = {
+      existsSync: (p) => p === classicExe,
+      execSync: (cmd) => { if (cmd.includes('taskkill')) return ''; throw new Error(`unexpected: ${cmd}`); },
+      spawn: () => { throw Object.assign(new Error('spawn EPERM'), { code: 'EPERM' }); },
+      cpSync: () => { throw new Error('should not copy'); },
+      rmSync: () => {}, readdirSync: () => [],
+      delay: async () => {}, probeCdp: async () => null,
+    };
+    await assert.rejects(() => launch({ _deps: deps }), /EPERM/);
+  });
+
+  it('resolves the Store package by wildcard, not one hardcoded name', async () => {
+    // Store-published builds carry a numeric-publisher package name
+    // (e.g. 31178TradingViewInc.TradingView), so an exact-name lookup finds nothing.
+    const { deps, state } = msixDeps({ cdpBindsFor: ['WindowsApps'] });
+    await launch({ _deps: deps });
+    assert.equal(state.appxQueries.length, 1);
+    assert.match(state.appxQueries[0], /\*TradingView\*/);
   });
 
   it('CDP never binding on direct spawn falls back to local copy', async () => {
