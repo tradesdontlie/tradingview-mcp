@@ -6,30 +6,52 @@
 import { evaluate, evaluateAsync, getClient } from '../connection.js';
 
 // ── Monaco finder (injected into TV page) ──
-const FIND_MONACO = `
+export const FIND_MONACO = `
   (function findMonacoEditor() {
-    var container = document.querySelector('.monaco-editor.pine-editor-monaco');
-    if (!container) return null;
-    var el = container;
-    var fiberKey;
-    for (var i = 0; i < 20; i++) {
-      if (!el) break;
-      fiberKey = Object.keys(el).find(function(k) { return k.startsWith('__reactFiber$'); });
-      if (fiberKey) break;
-      el = el.parentElement;
-    }
-    if (!fiberKey) return null;
-    var current = el[fiberKey];
-    for (var d = 0; d < 15; d++) {
-      if (!current) break;
-      if (current.memoizedProps && current.memoizedProps.value && current.memoizedProps.value.monacoEnv) {
-        var env = current.memoizedProps.value.monacoEnv;
-        if (env.editor && typeof env.editor.getEditors === 'function') {
-          var editors = env.editor.getEditors();
-          if (editors.length > 0) return { editor: editors[0], env: env };
-        }
+    var containers = Array.from(document.querySelectorAll('.monaco-editor.pine-editor-monaco'));
+    var visible = containers.filter(function(container) {
+      var rect = container.getBoundingClientRect();
+      return container.isConnected && container.offsetParent !== null && rect.width > 0 && rect.height > 0;
+    });
+
+    for (var c = 0; c < visible.length; c++) {
+      var container = visible[c];
+      var el = container;
+      var fiberKey;
+      for (var i = 0; i < 40; i++) {
+        if (!el) break;
+        fiberKey = Object.keys(el).find(function(k) { return k.startsWith('__reactFiber$'); });
+        if (fiberKey) break;
+        el = el.parentElement;
       }
-      current = current.return;
+      if (!fiberKey) continue;
+
+      var current = el[fiberKey];
+      for (var d = 0; d < 40; d++) {
+        if (!current) break;
+        if (current.memoizedProps && current.memoizedProps.value && current.memoizedProps.value.monacoEnv) {
+          var env = current.memoizedProps.value.monacoEnv;
+          if (env.editor && typeof env.editor.getEditors === 'function') {
+            var editors = env.editor.getEditors();
+            var matched = editors.find(function(editor) {
+              if (typeof editor.getDomNode !== 'function') return false;
+              var node = editor.getDomNode();
+              return node === container;
+            });
+            if (matched) return { editor: matched, env: env };
+
+            var active = editors.find(function(editor) {
+              if (typeof editor.getDomNode !== 'function') return false;
+              var node = editor.getDomNode();
+              if (!node || !node.isConnected || node.offsetParent === null) return false;
+              var rect = node.getBoundingClientRect();
+              return rect.width > 0 && rect.height > 0;
+            });
+            if (active) return { editor: active, env: env };
+          }
+        }
+        current = current.return;
+      }
     }
     return null;
   })()

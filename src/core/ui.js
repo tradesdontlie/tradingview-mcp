@@ -41,20 +41,28 @@ export async function openPanel({ panel, action }) {
         var action = ${JSON.stringify(action)};
         var bottomArea = document.querySelector('[class*="layout__area--bottom"]');
         var isOpen = !!(bottomArea && bottomArea.offsetHeight > 50);
-        if (panel === 'pine-editor') { var monacoEl = document.querySelector('.monaco-editor.pine-editor-monaco'); isOpen = isOpen && !!monacoEl; }
+        if (panel === 'pine-editor') {
+          var monacoEls = document.querySelectorAll('.monaco-editor.pine-editor-monaco');
+          isOpen = Array.from(monacoEls).some(function(el) {
+            var rect = el.getBoundingClientRect();
+            return el.isConnected && el.offsetParent !== null && rect.width > 0 && rect.height > 0;
+          });
+        }
         if (panel === 'strategy-tester') { var stratPanel = document.querySelector('[data-name="backtesting"]') || document.querySelector('[class*="strategyReport"]'); isOpen = isOpen && !!(stratPanel && stratPanel.offsetParent); }
         var performed = 'none';
-        if (action === 'open' || (action === 'toggle' && !isOpen)) {
+        if ((action === 'open' && !isOpen) || (action === 'toggle' && !isOpen)) {
           if (panel === 'pine-editor') { if (typeof bwb.activateScriptEditorTab === 'function') bwb.activateScriptEditorTab(); else if (typeof bwb.showWidget === 'function') bwb.showWidget(widgetName); }
           else { if (typeof bwb.showWidget === 'function') bwb.showWidget(widgetName); }
           performed = 'opened';
-        } else if (action === 'close' || (action === 'toggle' && isOpen)) {
+        } else if ((action === 'close' && isOpen) || (action === 'toggle' && isOpen)) {
           // hideWidget(name) was removed in newer TradingView builds; fall back to
           // close() (minimizes the bottom panel) and then hide() (hides the bar).
           if (typeof bwb.hideWidget === 'function') bwb.hideWidget(widgetName);
           else if (typeof bwb.close === 'function') bwb.close();
           else if (typeof bwb.hide === 'function') bwb.hide();
           performed = 'closed';
+        } else {
+          performed = isOpen ? 'already_open' : 'already_closed';
         }
         return { was_open: isOpen, performed: performed };
       })()
