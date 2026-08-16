@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import { FIND_PINE_ACTION_BUTTON, READ_PINE_CONSOLE } from '../src/core/pine.js';
+import {
+  FIND_PINE_ACTION_BUTTON,
+  FIND_SAVE_BEFORE_ADD_BUTTON,
+  READ_PINE_CONSOLE,
+} from '../src/core/pine.js';
 
 function element({ text = '', attributes = {}, visible = true, className = '', cells = [] } = {}) {
   return {
@@ -37,6 +41,24 @@ test('Pine action finder never treats the save icon as a compile control', () =>
   const context = { document: { querySelectorAll: () => [save] } };
 
   assert.equal(vm.runInNewContext(FIND_PINE_ACTION_BUTTON, context), null);
+});
+
+test('save-before-add finder selects only the affirmative button in the explicit confirmation', () => {
+  const yes = element({ text: 'Save', attributes: { 'data-qa-id': 'yes-btn' } });
+  const dialog = element({ text: 'Save this script before adding? Script with unsaved changes cannot be added.' });
+  dialog.querySelector = () => yes;
+  const context = { document: { querySelectorAll: () => [dialog] } };
+
+  assert.equal(vm.runInNewContext(FIND_SAVE_BEFORE_ADD_BUTTON, context), yes);
+});
+
+test('save-before-add finder ignores unrelated save dialogs', () => {
+  const save = element({ text: 'Save' });
+  const dialog = element({ text: 'Save chart layout' });
+  dialog.querySelector = () => save;
+  const context = { document: { querySelectorAll: () => [dialog] } };
+
+  assert.equal(vm.runInNewContext(FIND_SAVE_BEFORE_ADD_BUTTON, context), null);
 });
 
 test('Pine console reader returns only rows from the visible console table', () => {

@@ -94,6 +94,25 @@ export const FIND_PINE_ACTION_BUTTON = `
   })()
 `;
 
+export const FIND_SAVE_BEFORE_ADD_BUTTON = `
+  (function findSaveBeforeAddButton() {
+    function isVisible(element) {
+      if (!element || !element.isConnected || element.offsetParent === null) return false;
+      var rect = element.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    }
+
+    var dialogs = Array.from(document.querySelectorAll('[data-name="confirm-dialog"]')).filter(isVisible);
+    var dialog = dialogs.find(function(element) {
+      return element.textContent.toLowerCase().includes('save this script before adding?');
+    });
+    if (!dialog) return null;
+
+    var button = dialog.querySelector('button[data-qa-id="yes-btn"], button[name="yes"]');
+    return isVisible(button) ? button : null;
+  })()
+`;
+
 export const READ_PINE_CONSOLE = `
   (function readPineConsole() {
     function isVisible(element) {
@@ -146,6 +165,22 @@ async function clickPineActionButton() {
     throw new Error('Could not find a visible Add to chart or Update on chart control.');
   }
   return action;
+}
+
+async function handleSaveBeforeAddDialog() {
+  for (let i = 0; i < 20; i++) {
+    const handled = await evaluate(`
+      (function() {
+        var button = ${FIND_SAVE_BEFORE_ADD_BUTTON};
+        if (!button) return false;
+        button.click();
+        return true;
+      })()
+    `);
+    if (handled) return true;
+    await new Promise(r => setTimeout(r, 100));
+  }
+  return false;
 }
 
 /**
@@ -399,9 +434,17 @@ export async function compile() {
   if (!editorReady) throw new Error('Could not open Pine Editor.');
 
   const clicked = await clickPineActionButton();
+  const saveBeforeAddHandled = /add to chart/i.test(clicked)
+    ? await handleSaveBeforeAddDialog()
+    : false;
 
   await new Promise(r => setTimeout(r, 2000));
-  return { success: true, button_clicked: clicked, source: 'pine_toolbar' };
+  return {
+    success: true,
+    button_clicked: clicked,
+    save_before_add_handled: saveBeforeAddHandled,
+    source: 'pine_toolbar',
+  };
 }
 
 export async function getErrors() {
@@ -514,6 +557,9 @@ export async function smartCompile() {
 
   const buttonClicked = await clickPineActionButton();
   const expectsNewStudy = /add to chart/i.test(buttonClicked);
+  const saveBeforeAddHandled = expectsNewStudy
+    ? await handleSaveBeforeAddDialog()
+    : false;
   if (expectsNewStudy) {
     for (let i = 0; i < 40; i++) {
       await new Promise(r => setTimeout(r, 250));
@@ -573,6 +619,7 @@ export async function smartCompile() {
     errors: errors || [],
     study_added: studyAdded,
     study_ids_added: studyIdsAdded || [],
+    save_before_add_handled: saveBeforeAddHandled,
   };
 }
 
