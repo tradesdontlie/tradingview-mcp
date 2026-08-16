@@ -88,6 +88,11 @@ test('Pine console reader does not fall back to editor or dialog text', () => {
 });
 
 test('Pine study log reader returns structured logs for the compiled study', () => {
+  const brokenUnrelatedSource = {
+    id: () => 'broken-unrelated',
+    logLevelMask: () => { throw new Error('uninitialized internal value'); },
+    logs: () => { throw new Error('must not be called'); },
+  };
   const source = {
     id: () => 'study-1',
     title: () => 'MCP smoke',
@@ -107,7 +112,9 @@ test('Pine study log reader returns structured logs for the compiled study', () 
       TradingViewApi: {
         _activeChartWidgetWV: {
           value: () => ({
-            _chartWidget: { model: () => ({ model: () => ({ dataSources: () => [source] }) }) },
+            _chartWidget: {
+              model: () => ({ model: () => ({ dataSources: () => [brokenUnrelatedSource, source] }) }),
+            },
           }),
         },
       },

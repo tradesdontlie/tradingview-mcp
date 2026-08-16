@@ -174,15 +174,22 @@ export const READ_PINE_STUDY_LOGS = `
       var id;
       try { id = String(typeof source.id === 'function' ? source.id() : source.id); }
       catch (e) { continue; }
-      var mask = source.logLevelMask() || {};
-      var selected = preferredStudyIds.indexOf(id) !== -1 || mask.error || mask.warning || mask.info;
+      var preferred = preferredStudyIds.indexOf(id) !== -1;
+      var mask = {};
+      if (!preferred) {
+        try { mask = source.logLevelMask() || {}; }
+        catch (e) { continue; }
+      }
+      var selected = preferred || mask.error || mask.warning || mask.info;
       if (!selected) continue;
       available = true;
 
       var title = '';
       try { title = String(typeof source.title === 'function' ? source.title() : source.title || ''); }
       catch (e) {}
-      var logs = source.logs();
+      var logs;
+      try { logs = source.logs(); }
+      catch (e) { continue; }
       var values = logs && typeof logs.values === 'function' ? Array.from(logs.values()) : [];
       for (var l = 0; l < values.length; l++) {
         var item = values[l] || {};
