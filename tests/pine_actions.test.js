@@ -5,6 +5,7 @@ import {
   FIND_PINE_ACTION_BUTTON,
   FIND_SAVE_BEFORE_ADD_BUTTON,
   READ_PINE_CONSOLE,
+  READ_PINE_STUDY_LOGS,
 } from '../src/core/pine.js';
 
 function element({ text = '', attributes = {}, visible = true, className = '', cells = [] } = {}) {
@@ -81,6 +82,66 @@ test('Pine console reader does not fall back to editor or dialog text', () => {
   const context = { document: { querySelectorAll: () => [] } };
 
   const result = vm.runInNewContext(READ_PINE_CONSOLE, context);
+
+  assert.equal(result.available, false);
+  assert.equal(result.entries.length, 0);
+});
+
+test('Pine study log reader returns structured logs for the compiled study', () => {
+  const source = {
+    id: () => 'study-1',
+    title: () => 'MCP smoke',
+    logLevelMask: () => ({ error: true, warning: true, info: true }),
+    logs: () => ({
+      values: () => [{
+        barTime: 1700000000000,
+        time: 1700000000000,
+        level: 4,
+        message: 'MCP_LOG_SMOKE|123.45',
+        source: { start: { line: 4, column: 5 } },
+      }],
+    }),
+  };
+  const context = {
+    window: {
+      TradingViewApi: {
+        _activeChartWidgetWV: {
+          value: () => ({
+            _chartWidget: { model: () => ({ model: () => ({ dataSources: () => [source] }) }) },
+          }),
+        },
+      },
+    },
+  };
+
+  const result = vm.runInNewContext(`${READ_PINE_STUDY_LOGS}(['study-1'])`, context);
+
+  assert.equal(result.available, true);
+  assert.equal(result.entries.length, 1);
+  assert.equal(result.entries[0].message, 'MCP_LOG_SMOKE|123.45');
+  assert.equal(result.entries[0].study_id, 'study-1');
+  assert.equal(result.entries[0].source, 'pine_logs');
+});
+
+test('Pine study log reader ignores unselected studies with logging disabled', () => {
+  const source = {
+    id: () => 'other-study',
+    logLevelMask: () => ({ error: false, warning: false, info: false }),
+    logs: () => ({ values: () => [{ message: 'must not leak' }] }),
+  };
+  const context = {
+    window: {
+      TradingViewApi: {
+        _activeChartWidgetWV: {
+          value: () => ({
+            _chartWidget: { model: () => ({ model: () => ({ dataSources: () => [source] }) }) },
+          }),
+        },
+      },
+    },
+  };
+
+  const result = vm.runInNewContext(`${READ_PINE_STUDY_LOGS}(['study-1'])`, context);
 
   assert.equal(result.available, false);
   assert.equal(result.entries.length, 0);

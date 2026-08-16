@@ -5,6 +5,8 @@
  */
 import { evaluate, evaluateAsync, getClient } from '../connection.js';
 
+let lastCompiledStudyIds = [];
+
 // ── Monaco finder (injected into TV page) ──
 export const FIND_MONACO = `
   (function findMonacoEditor() {
@@ -151,6 +153,64 @@ export const READ_PINE_CONSOLE = `
   })()
 `;
 
+export const READ_PINE_STUDY_LOGS = `
+  (function readPineStudyLogs(preferredStudyIds) {
+    var chart;
+    try {
+      chart = window.TradingViewApi._activeChartWidgetWV.value();
+    } catch (e) {
+      return { available: false, entries: [] };
+    }
+    if (!chart || !chart._chartWidget) return { available: false, entries: [] };
+
+    var model = chart._chartWidget.model().model();
+    var sources = typeof model.dataSources === 'function' ? model.dataSources() : [];
+    var entries = [];
+    var available = false;
+    for (var i = 0; i < sources.length; i++) {
+      var source = sources[i];
+      if (typeof source.logs !== 'function' || typeof source.logLevelMask !== 'function') continue;
+
+      var id;
+      try { id = String(typeof source.id === 'function' ? source.id() : source.id); }
+      catch (e) { continue; }
+      var mask = source.logLevelMask() || {};
+      var selected = preferredStudyIds.indexOf(id) !== -1 || mask.error || mask.warning || mask.info;
+      if (!selected) continue;
+      available = true;
+
+      var title = '';
+      try { title = String(typeof source.title === 'function' ? source.title() : source.title || ''); }
+      catch (e) {}
+      var logs = source.logs();
+      var values = logs && typeof logs.values === 'function' ? Array.from(logs.values()) : [];
+      for (var l = 0; l < values.length; l++) {
+        var item = values[l] || {};
+        var level = Number(item.level);
+        var type = level === 1 ? 'error' : level === 2 ? 'warning' : 'info';
+        var time = Number(item.time);
+        entries.push({
+          timestamp: Number.isFinite(time) ? new Date(time).toISOString() : null,
+          type: type,
+          level: Number.isFinite(level) ? level : null,
+          message: String(item.message || ''),
+          bar_time: Number.isFinite(Number(item.barTime)) ? Number(item.barTime) : null,
+          study_id: id,
+          study: title,
+          line: item.source && item.source.start ? item.source.start.line : null,
+          column: item.source && item.source.start ? item.source.start.column : null,
+          source: 'pine_logs',
+        });
+      }
+    }
+
+    entries.sort(function(a, b) {
+      return (a.bar_time || 0) - (b.bar_time || 0) || a.study_id.localeCompare(b.study_id);
+    });
+    return { available: available, entries: entries };
+  })
+`;
+
 async function clickPineActionButton() {
   const action = await evaluate(`
     (function() {
@@ -181,6 +241,34 @@ async function handleSaveBeforeAddDialog() {
     await new Promise(r => setTimeout(r, 100));
   }
   return false;
+}
+
+async function enablePineLogs(studyIds) {
+  if (!studyIds || studyIds.length === 0) return [];
+  return evaluate(`
+    (function() {
+      var chart;
+      try { chart = window.TradingViewApi._activeChartWidgetWV.value(); }
+      catch (e) { return []; }
+      if (!chart || !chart._chartWidget) return [];
+
+      var wanted = ${JSON.stringify(studyIds)};
+      var model = chart._chartWidget.model().model();
+      var sources = typeof model.dataSources === 'function' ? model.dataSources() : [];
+      var enabled = [];
+      for (var i = 0; i < sources.length; i++) {
+        var source = sources[i];
+        if (typeof source.setLogLevelMask !== 'function') continue;
+        var id;
+        try { id = String(typeof source.id === 'function' ? source.id() : source.id); }
+        catch (e) { continue; }
+        if (wanted.indexOf(id) === -1) continue;
+        source.setLogLevelMask({ error: true, warning: true, info: true });
+        enabled.push(id);
+      }
+      return enabled;
+    })()
+  `);
 }
 
 /**
@@ -508,6 +596,10 @@ export async function getConsole() {
   const editorReady = await ensurePineEditorOpen();
   if (!editorReady) throw new Error('Could not open Pine Editor.');
 
+  const studyResult = await evaluate(
+    `${READ_PINE_STUDY_LOGS}(${JSON.stringify(lastCompiledStudyIds)})`
+  );
+
   const consoleState = await evaluate(`
     (function() {
       var visible = function(element) {
@@ -528,14 +620,18 @@ export async function getConsole() {
   if (consoleState?.opened) await new Promise(r => setTimeout(r, 250));
 
   const result = await evaluate(READ_PINE_CONSOLE);
-  const entries = result?.entries || [];
+  const studyEntries = studyResult?.entries || [];
+  const consoleEntries = (result?.entries || []).map(entry => ({ ...entry, source: 'pine_console' }));
+  const entries = [...studyEntries, ...consoleEntries];
   return {
     success: true,
+    pine_logs_available: studyResult?.available || false,
+    pine_log_entry_count: studyEntries.length,
     console_available: result?.available || consoleState?.available || false,
     console_opened: consoleState?.opened || false,
     entries,
     entry_count: entries.length,
-    source: 'pine_console',
+    source: studyEntries.length > 0 ? 'pine_logs_and_console' : 'pine_console',
   };
 }
 
@@ -611,6 +707,9 @@ export async function smartCompile() {
   if (expectsNewStudy && studyAdded === false && !(errors?.length > 0)) {
     throw new Error('Add to chart control was clicked but no study was added.');
   }
+  if (studyIdsAdded && studyIdsAdded.length > 0) lastCompiledStudyIds = studyIdsAdded;
+  const pineLogsEnabledFor = await enablePineLogs(lastCompiledStudyIds);
+  if (pineLogsEnabledFor.length > 0) await new Promise(r => setTimeout(r, 250));
 
   return {
     success: true,
@@ -620,6 +719,7 @@ export async function smartCompile() {
     study_added: studyAdded,
     study_ids_added: studyIdsAdded || [],
     save_before_add_handled: saveBeforeAddHandled,
+    pine_logs_enabled_for: pineLogsEnabledFor,
   };
 }
 
