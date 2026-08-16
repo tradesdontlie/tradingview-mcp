@@ -22,7 +22,7 @@ REM Check MSIX / Windows Store installs.
 REM Get-AppxPackage resolves the install without elevation; enumerating
 REM %PROGRAMFILES%\WindowsApps with dir requires admin rights, so keep it as a fallback.
 if "%TV_EXE%"=="" (
-    for /f "usebackq tokens=*" %%i in (`powershell -NoProfile -Command "(Get-AppxPackage -Name 'TradingView.Desktop' -ErrorAction SilentlyContinue).InstallLocation" 2^>nul`) do (
+    for /f "usebackq tokens=*" %%i in (`powershell -NoProfile -Command "(Get-AppxPackage -Name '*TradingView*' -ErrorAction SilentlyContinue | Select-Object -First 1).InstallLocation" 2^>nul`) do (
         if exist "%%i\TradingView.exe" set "TV_EXE=%%i\TradingView.exe"
     )
 )

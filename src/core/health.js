@@ -318,7 +318,9 @@ export async function launch({ port, kill_existing, _deps } = {}) {
     // MSIX/Windows Store install — InstallLocation is in WindowsApps, which is ACL-restricted
     // for normal `dir` enumeration but readable via Get-AppxPackage without elevation.
     try {
-      const ps = 'powershell -NoProfile -Command "(Get-AppxPackage -Name \'TradingView.Desktop\' -ErrorAction SilentlyContinue).InstallLocation"';
+      // Wildcard match: the Store listing publishes under a numeric-publisher name
+      // (e.g. 31178TradingViewInc.TradingView), not just TradingView.Desktop.
+      const ps = 'powershell -NoProfile -Command "(Get-AppxPackage -Name \'*TradingView*\' -ErrorAction SilentlyContinue | Select-Object -First 1).InstallLocation"';
       const installDir = deps.execSync(ps, { timeout: 5000 }).toString().trim();
       if (installDir) {
         const candidate = `${installDir}\\TradingView.exe`;
@@ -360,12 +362,27 @@ export async function launch({ port, kill_existing, _deps } = {}) {
   if (killFirst) await killExisting();
 
   const cdpArgs = [`--remote-debugging-port=${cdpPort}`];
-  let child = _spawnDetached(deps.spawn, tvPath, cdpArgs);
+  const isWindowsApps = platform === 'win32' && WINDOWS_APPS_RE.test(tvPath);
+
+  // On some machines spawning out of WindowsApps raises EPERM synchronously
+  // rather than via an 'error' event, so the throw has to be caught here for
+  // the local-copy fallback below to be reachable at all.
+  let child = null;
+  let syncSpawnError = null;
+  try {
+    child = _spawnDetached(deps.spawn, tvPath, cdpArgs);
+  } catch (err) {
+    if (!isWindowsApps) throw err;
+    syncSpawnError = err;
+  }
+
   let info = null;
   let usedLocalCopy = false;
 
-  if (platform === 'win32' && WINDOWS_APPS_RE.test(tvPath)) {
-    const earlyFailure = await _spawnFailedEarly(child);
+  if (isWindowsApps) {
+    const earlyFailure = syncSpawnError
+      ? (syncSpawnError.code || syncSpawnError.message)
+      : await _spawnFailedEarly(child);
     if (!earlyFailure) {
       info = await _waitForCdp({ cdpPort, attempts: 15, delay: deps.delay, probeCdp: deps.probeCdp });
     }
@@ -386,7 +403,7 @@ export async function launch({ port, kill_existing, _deps } = {}) {
 
   if (info) {
     return {
-      success: true, platform, binary: tvPath, pid: child.pid,
+      success: true, platform, binary: tvPath, pid: child?.pid,
       cdp_port: cdpPort, cdp_url: `http://${CDP_HOST}:${cdpPort}`,
       browser: info.Browser, user_agent: info['User-Agent'],
       ...(usedLocalCopy && { msix_local_copy: true }),
@@ -394,7 +411,7 @@ export async function launch({ port, kill_existing, _deps } = {}) {
   }
 
   return {
-    success: true, platform, binary: tvPath, pid: child.pid, cdp_port: cdpPort, cdp_ready: false,
+    success: true, platform, binary: tvPath, pid: child?.pid, cdp_port: cdpPort, cdp_ready: false,
     ...(usedLocalCopy && { msix_local_copy: true }),
     warning: 'TradingView launched but CDP not responding yet. It may still be loading. Try tv_health_check in a few seconds.',
   };
