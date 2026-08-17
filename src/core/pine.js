@@ -565,10 +565,12 @@ export async function newScript({ type }) {
   if (!editorReady) throw new Error('Could not open Pine Editor.');
 
   const typeMap = { indicator: 'indicator', strategy: 'strategy', library: 'library' };
+  // Submenu labels carry their shortcut inline ("Indicator⌘ K, ⌘ I"), so anchor
+  // at the start only. "Built-in…" sits in the same submenu and must not match.
   const patterns = {
-    indicator: 'new blank indicator|new indicator',
-    strategy: 'new blank strategy|new strategy',
-    library: 'new blank library|new library',
+    indicator: '^indicator',
+    strategy: '^strategy',
+    library: '^library',
   };
   const wanted = patterns[type] || patterns.indicator;
 
@@ -583,10 +585,13 @@ export async function newScript({ type }) {
     (function() {
       var root = document.querySelector('${PINE_ROOT}');
       if (!root) return false;
-      // The script-name button is the dropdown holding Create new / Make a copy /
-      // Version history. Class suffixes are build-hashed, so match on the prefix.
-      var title = root.querySelector('button[class*="nameButton"]');
-      if (title && title.offsetParent !== null) { title.click(); return 'title-dropdown'; }
+      // The script-name control is the dropdown holding Create new / Make a copy /
+      // Version history. It is a DIV[role=button], NOT a <button>, so do not
+      // restrict by tag. Class suffixes are build-hashed; match on the prefix.
+      var title = Array.prototype.slice.call(
+        root.querySelectorAll('[class*="nameButton"]')
+      ).filter(function(e) { return e.offsetParent !== null; })[0];
+      if (title) { title.click(); return 'title-dropdown'; }
       var more = Array.prototype.slice.call(
         root.querySelectorAll('button[aria-label="More"], button[data-name*="menu"], button[aria-label*="menu" i]')
       ).filter(function(b) { return b.offsetParent !== null; });
@@ -604,28 +609,39 @@ export async function newScript({ type }) {
 
   await new Promise(r => setTimeout(r, 400));
 
-  // Click the "New blank <type>" item. Only ever click an item matching this
-  // regex — never anything else in that menu (it also contains destructive items).
-  const itemClicked = await evaluate(`
+  // "Create new" opens a submenu; the type lives one level down. Only ever click
+  // items matching these exact patterns — the same menu holds destructive entries.
+  const MENU_SEL = '[role="menuitem"], [class*="item-"], [class*="label-"]';
+  const clickMenuItem = (pattern) => evaluate(`
     (function() {
-      var re = new RegExp(${JSON.stringify(wanted)}, 'i');
-      var nodes = document.querySelectorAll('[role="menuitem"], [class*="item" i], [class*="label" i]');
+      var re = new RegExp(${JSON.stringify('PLACEHOLDER')}, 'i');
+      var nodes = document.querySelectorAll('${MENU_SEL}');
       for (var i = 0; i < nodes.length; i++) {
         var n = nodes[i];
         if (n.offsetParent === null) continue;
         var t = (n.textContent || '').trim();
-        if (t.length > 60) continue;
+        if (t.length > 40) continue;
         if (re.test(t)) { n.click(); return t; }
       }
       return null;
     })()
-  `);
+  `.replace(JSON.stringify('PLACEHOLDER'), JSON.stringify(pattern)));
+
+  const submenuOpened = await clickMenuItem('^create new$');
+  if (!submenuOpened) {
+    await evaluate(`(function(){ document.body.click(); return true; })()`);
+    throw new Error('Could not find "Create new" in the Pine Editor script menu. Refusing to fall back to overwriting the open script.');
+  }
+
+  await new Promise(r => setTimeout(r, 400));
+
+  const itemClicked = await clickMenuItem(wanted);
 
   if (!itemClicked) {
     // Close the menu so we do not leave the UI in a half-open state.
     await evaluate(`(function(){ document.body.click(); return true; })()`);
     throw new Error(
-      'Could not find a "New blank ' + type + '" item in the Pine Editor menu. ' +
+      'Could not find a "' + type + '" item in the Pine Editor "Create new" submenu. ' +
       'Refusing to fall back to overwriting the open script.'
     );
   }
