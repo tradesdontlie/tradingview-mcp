@@ -35,12 +35,14 @@ export function registerPineTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('pine_smart_compile', 'Intelligent compile: detects button, compiles, checks errors, reports study changes', {}, async () => {
-    try { return jsonResult(await core.smartCompile()); }
+  server.tool('pine_smart_compile', 'Intelligent compile: detects button, compiles, checks errors, reports study changes. Does NOT save by default.', {
+    allow_save: z.boolean().optional().describe('Allow clicking Save if no non-destructive compile button is found. DANGEROUS: Save persists into the script slot the editor is bound to and will overwrite that saved script. Default false.'),
+  }, async ({ allow_save }) => {
+    try { return jsonResult(await core.smartCompile({ allowSave: allow_save === true })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('pine_new', 'Create a new blank Pine Script', {
+  server.tool('pine_new', 'Create a genuinely new, unsaved Pine Script via the editor menu. Throws rather than overwriting the currently open script.', {
     type: z.enum(['indicator', 'strategy', 'library']).describe('Type of script to create'),
   }, async ({ type }) => {
     try { return jsonResult(await core.newScript({ type })); }
