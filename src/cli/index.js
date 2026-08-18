@@ -25,6 +25,7 @@ import './commands/ui.js';
 import './commands/pane.js';
 import './commands/tab.js';
 import './commands/stream.js';
+import './commands/mt5.js';
 
 // Run
 import { run } from './router.js';

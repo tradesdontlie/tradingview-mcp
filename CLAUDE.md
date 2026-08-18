@@ -1,6 +1,6 @@
 # TradingView MCP — Claude Instructions
 
-84 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
+91 tools: 84 for reading and controlling a live TradingView Desktop chart via CDP (port 9222), plus 7 optional MT5 trading tools via a local Python bridge (port 8721).
 
 ## Decision Tree — Which Tool When
 
@@ -84,6 +84,18 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 - `tv_launch` → auto-detect and launch TradingView with CDP on Mac/Win/Linux
 - `tv_health_check` → verify connection is working
 
+### "Trade on MT5" (real order execution — separate from TradingView)
+Requires `scripts/mt5_bridge.py` running on the machine with the MT5 terminal (Windows + `pip install MetaTrader5`). This is a distinct system from the CDP-based TradingView tools above — it places real orders (demo or live, whichever account the bridge is logged into).
+
+1. `mt5_health_check` → verify the bridge + terminal are reachable
+2. `mt5_get_account` → balance, equity, margin, and **`is_demo`** — always check this before trading
+3. `mt5_get_positions` / `mt5_get_quote` → read current positions and prices
+4. `mt5_place_order` → place a market buy/sell order. **Requires `confirm: true`.** Never set this without the user explicitly asking for a trade to be placed.
+5. `mt5_close_order` → close a position by ticket. **Requires `confirm: true`.**
+6. `mt5_modify_order` → adjust SL/TP on an open position (no confirm needed — does not change exposure)
+
+Never place or close an MT5 order speculatively or as part of "analysis" — only when the user explicitly asks to trade.
+
 ## Context Management Rules
 
 These tools can return large payloads. Follow these rules to avoid context bloat:
@@ -124,6 +136,7 @@ These tools can return large payloads. Follow these rules to avoid context bloat
 
 ```
 Claude Code ←→ MCP Server (stdio) ←→ CDP (localhost:9222) ←→ TradingView Desktop (Electron)
+                                 └──→ HTTP (localhost:8721) ←→ mt5_bridge.py ←→ MT5 terminal (optional, Windows only)
 ```
 
 Pine graphics path: `study._graphics._primitivesCollection.dwglines.get('lines').get(false)._primitivesDataById`

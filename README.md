@@ -16,6 +16,9 @@ Personal AI assistant for your TradingView Desktop charts. Connects Claude Code 
 > [!CAUTION]
 > This tool accesses undocumented internal TradingView APIs via the Electron debug interface. These can change or break without notice in any TradingView update. Pin your TradingView Desktop version if stability matters to you.
 
+> [!CAUTION]
+> **The optional MT5 module executes real orders.** Unlike the TradingView chart tools (read/draw/navigate only), the `mt5_place_order` / `mt5_close_order` tools send live trade requests to whatever MetaTrader 5 account the bridge (`scripts/mt5_bridge.py`) is logged into — demo or real money. It is a separate opt-in component: nothing trades until you install `MetaTrader5`, run the bridge, and explicitly call those tools with `confirm: true`. Always check `mt5_get_account`'s `is_demo` field before trading, and see [MT5 Trading (optional)](#mt5-trading-optional) below.
+
 ## How It Works (and why it's safe to run)
 
 This tool does not connect to TradingView's servers, modify any TradingView files, or intercept any network traffic. It communicates exclusively with your locally running TradingView Desktop instance via Chrome DevTools Protocol (CDP) — a standard debugging interface built into all Chromium/Electron applications by Google, including VS Code, Slack, and Discord.
@@ -28,8 +31,10 @@ The debug port is disabled by default and must be explicitly enabled by you usin
 - Store, transmit, or redistribute any market data
 - Work without a valid TradingView subscription and installed Desktop app
 - Bypass any TradingView paywall or access restriction
-- Execute real trades (chart interaction only)
+- Execute trades through TradingView itself (chart interaction only — TradingView is read/draw/navigate)
 - Work if TradingView changes their internal Electron structure
+
+The **core tool is not a trading bot** for TradingView charts. The separate, opt-in **MT5 module** (below) is the one part of this project that does execute real orders — through MetaTrader 5, not TradingView — and only when you set it up and explicitly confirm each order.
 
 ## Research Context
 
@@ -43,7 +48,7 @@ Specifically it investigates:
 - Whether natural language is an effective interface for chart navigation and Pine Script development
 - The failure modes of LLM agents operating in real-time data environments
 
-This is not a trading bot. It is an interface layer that makes a trading application legible to an LLM agent, allowing researchers and developers to study human-AI collaboration in financial workflows.
+The TradingView side of this project is not a trading bot — it is an interface layer that makes a trading application legible to an LLM agent, allowing researchers and developers to study human-AI collaboration in financial workflows. (The optional MT5 module is the exception: see [MT5 Trading (optional)](#mt5-trading-optional).)
 
 See [RESEARCH.md](RESEARCH.md) for open questions, findings, and related work.
 
@@ -53,6 +58,7 @@ See [RESEARCH.md](RESEARCH.md) for open questions, findings, and related work.
 - **Node.js 18+**
 - **Claude Code** with MCP support (for MCP tools) or any terminal (for CLI)
 - **macOS, Windows, or Linux**
+- Optional, for MT5 trading: **Windows** + **Python 3.9+** with `pip install MetaTrader5`, plus a running **MT5 terminal** — see [MT5 Trading (optional)](#mt5-trading-optional)
 
 ## What It Does
 
@@ -311,6 +317,40 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 | `ui_open_panel` / `ui_click` / `ui_evaluate` | UI automation |
 | `tv_launch` / `tv_health_check` / `tv_discover` | Connection management |
 
+## MT5 Trading (optional)
+
+> [!CAUTION]
+> **This module executes real orders.** `mt5_place_order` and `mt5_close_order` send live trade requests to whatever MT5 account the bridge is logged into. There is no simulation layer — a demo account behaves identically to a live one from this tool's perspective except for the money involved. Both tools require `confirm: true`, and you should check `mt5_get_account`'s `is_demo` field before trading. This is entirely separate from the TradingView chart tools above, which never place orders.
+
+Unlike TradingView (controlled via CDP on the same machine), MetaTrader 5 has no debug protocol — its Python package (`MetaTrader5`) talks to the terminal over a local IPC channel and only works on Windows. So this integration ships as a small local HTTP bridge (`scripts/mt5_bridge.py`) that the Node MCP server calls over `http://127.0.0.1:8721`.
+
+**Setup:**
+
+```bash
+# On the Windows machine running the MT5 terminal:
+pip install MetaTrader5
+python scripts/mt5_bridge.py
+# or, to auto-login:
+set MT5_LOGIN=12345678
+set MT5_PASSWORD=your-password
+set MT5_SERVER=YourBroker-Demo
+python scripts/mt5_bridge.py
+```
+
+The bridge logs which account it connected to (and prints a warning if it's live, not demo) and listens on `127.0.0.1:8721` by default. It must stay running while you use the `mt5_*` tools. Override host/port with `MT5_BRIDGE_HOST` / `MT5_BRIDGE_PORT` (bridge) and the same env vars on the Node side.
+
+| Tool | What it does |
+|------|-------------|
+| `mt5_health_check` | Verify the bridge + MT5 terminal are reachable |
+| `mt5_get_account` | Balance, equity, margin, leverage, and `is_demo` |
+| `mt5_get_positions` | List open positions, optionally filtered by symbol |
+| `mt5_get_quote` | Current bid/ask for a symbol |
+| `mt5_place_order` | Place a market buy/sell order — **requires `confirm: true`** |
+| `mt5_close_order` | Close an open position by ticket — **requires `confirm: true`** |
+| `mt5_modify_order` | Change SL/TP on an open position |
+
+CLI equivalents: `tv mt5 health`, `tv mt5 account`, `tv mt5 positions`, `tv mt5 quote <symbol>`, `tv mt5 order <buy|sell> <symbol> <volume> --confirm`, `tv mt5 close <ticket> --confirm`, `tv mt5 modify <ticket> --sl <price> --tp <price>`.
+
 ## Context Management
 
 Tools return compact output by default to minimize context usage. For a typical "analyze my chart" workflow, total context is ~5-10KB instead of ~80KB.
@@ -353,10 +393,11 @@ npm test
 Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  TradingView Desktop (Electron)
 ```
 
-- **Transport**: MCP over stdio (84 tools) + CLI (`tv` command, 30 commands with 66 subcommands)
+- **Transport**: MCP over stdio (91 tools) + CLI (`tv` command)
 - **Connection**: Chrome DevTools Protocol on localhost:9222
 - **Streaming**: Poll-and-diff loop with deduplication, JSONL output to stdout
 - **No dependencies** beyond `@modelcontextprotocol/sdk` and `chrome-remote-interface`
+- **MT5 (optional)**: Node → HTTP (`127.0.0.1:8721`) → `scripts/mt5_bridge.py` → `MetaTrader5` package → MT5 terminal (Windows only, requires a separate Python install)
 
 ## Attributions
 

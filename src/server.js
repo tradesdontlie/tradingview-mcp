@@ -14,6 +14,7 @@ import { registerWatchlistTools } from './tools/watchlist.js';
 import { registerUiTools } from './tools/ui.js';
 import { registerPaneTools } from './tools/pane.js';
 import { registerTabTools } from './tools/tab.js';
+import { registerMt5Tools } from './tools/mt5.js';
 
 const server = new McpServer(
   {
@@ -22,7 +23,7 @@ const server = new McpServer(
     description: 'AI-assisted TradingView chart analysis and Pine Script development via Chrome DevTools Protocol',
   },
   {
-    instructions: `TradingView MCP — 84 tools for reading and controlling a live TradingView Desktop chart.
+    instructions: `TradingView MCP — 91 tools for reading and controlling a live TradingView Desktop chart, plus live MT5 trading via a local bridge.
 
 TOOL SELECTION GUIDE — use this to pick the right tool:
 
@@ -60,6 +61,13 @@ Launch: tv_launch → auto-detect and start TradingView with CDP on any platform
 Panes: pane_list, pane_set_layout (s, 2h, 2v, 4, 6, 8), pane_focus, pane_set_symbol
 Tabs: tab_list, tab_new, tab_close, tab_switch
 
+MT5 live trading (requires scripts/mt5_bridge.py running — see SETUP_GUIDE.md):
+- mt5_health_check → verify the bridge + terminal are reachable
+- mt5_get_account → balance, equity, margin, and is_demo (check this before trading)
+- mt5_get_positions, mt5_get_quote → read account state and prices
+- mt5_place_order, mt5_close_order → REAL order execution (demo or live account, whichever the bridge is logged into). Both require confirm: true.
+- mt5_modify_order → change SL/TP on an open position
+
 CONTEXT MANAGEMENT:
 - ALWAYS use summary=true on data_get_ohlcv
 - ALWAYS use study_filter on pine tools when you know which indicator you want
@@ -84,6 +92,7 @@ registerWatchlistTools(server);
 registerUiTools(server);
 registerPaneTools(server);
 registerTabTools(server);
+registerMt5Tools(server);
 
 // Startup notice (stderr so it doesn't interfere with MCP stdio protocol)
 process.stderr.write('⚠  tradingview-mcp  |  Unofficial tool. Not affiliated with TradingView Inc. or Anthropic.\n');

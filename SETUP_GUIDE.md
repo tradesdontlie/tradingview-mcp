@@ -110,6 +110,21 @@ npm link
 
 Then `tv status`, `tv quote`, `tv pine compile`, etc. work from anywhere.
 
+## Step 7: MT5 Trading (Optional)
+
+Only do this if the user explicitly asks for MT5/MetaTrader trading support — it is a separate, opt-in module that executes real orders (demo or live, depending on which account the user logs into). Do not set it up proactively.
+
+1. Confirm the MT5 terminal runs on **Windows** (the `MetaTrader5` Python package requires it) and that Python 3.9+ is available there.
+2. Install the package: `pip install MetaTrader5`
+3. Start the bridge on that same machine, with the MT5 terminal already open (or let the bridge launch it via `MT5_TERMINAL_PATH`):
+   ```bash
+   python scripts/mt5_bridge.py
+   ```
+   For auto-login, set `MT5_LOGIN`, `MT5_PASSWORD`, `MT5_SERVER` env vars first.
+4. The bridge prints which account it connected to and whether it's demo or live — read that output back to the user so they can confirm it's the account they intended.
+5. Verify from Claude Code with the `mt5_health_check` tool, then `mt5_get_account` to confirm `is_demo`.
+6. Before ever calling `mt5_place_order` or `mt5_close_order`, tell the user which account (`is_demo`) the order will hit and get explicit confirmation — those tools also require `confirm: true` in the call itself.
+
 ## Troubleshooting
 
 | Problem | Solution |
@@ -121,6 +136,8 @@ Then `tv status`, `tv quote`, `tv pine compile`, etc. work from anywhere.
 | `tv` command not found | Run `npm link` from the project directory |
 | Tools return stale data | TradingView may still be loading — wait a few seconds |
 | Pine Editor tools fail | Open the Pine Editor panel first (`ui_open_panel pine-editor open`) |
+| MT5 bridge unreachable | Confirm `python scripts/mt5_bridge.py` is running on the machine with the MT5 terminal, and that `MT5_BRIDGE_HOST`/`MT5_BRIDGE_PORT` match on both sides (default `127.0.0.1:8721`) |
+| `mt5_place_order`/`mt5_close_order` reject the call | These require `confirm: true` in the tool call — this is intentional, not a bug |
 
 ## What to Read Next
 
