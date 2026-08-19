@@ -37,4 +37,18 @@ export function registerDrawingTools(server) {
     try { return jsonResult(await core.getProperties({ entity_id })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
+
+  server.tool('draw_position', 'Draw a Long or Short position on the chart with entry, take-profit, and stop-loss price levels', {
+    direction: z.enum(['long', 'short']).describe('Trade direction'),
+    entry_price: z.coerce.number().describe('Entry price level'),
+    stop_loss: z.coerce.number().describe('Stop-loss price level'),
+    take_profit: z.coerce.number().describe('Take-profit price level'),
+    entry_time: z.coerce.number().optional().describe('Unix timestamp for horizontal placement (defaults to latest visible bar)'),
+    account_size: z.coerce.number().optional().describe('Account balance for P&L calculation'),
+    risk: z.coerce.number().optional().describe('Risk as percentage of account (e.g. 2 for 2%)'),
+    lot_size: z.coerce.number().optional().describe('Lot/contract size'),
+  }, async ({ direction, entry_price, stop_loss, take_profit, entry_time, account_size, risk, lot_size }) => {
+    try { return jsonResult(await core.drawPosition({ direction, entry_price, stop_loss, take_profit, entry_time, account_size, risk, lot_size })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
 }

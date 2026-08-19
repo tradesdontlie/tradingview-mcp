@@ -8,7 +8,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { safeString, requireFinite } from '../src/connection.js';
 import { setSymbol, setTimeframe, setType, manageIndicator, setVisibleRange } from '../src/core/chart.js';
-import { drawShape } from '../src/core/drawing.js';
+import { drawShape, drawPosition } from '../src/core/drawing.js';
 
 // ── Mock helpers ─────────────────────────────────────────────────────────
 
@@ -281,6 +281,190 @@ describe('drawing.js — sanitized evaluate calls', () => {
     const call = evaluate.calls.find(c => c.includes('createMultipointShape'));
     assert.ok(call, 'createMultipointShape called');
     assert.ok(call.includes('"trend_line"'), 'shape name via safeString');
+  });
+});
+
+// ── drawing.js — drawPosition validation ────────────────────────────────
+
+describe('drawing.js — drawPosition validation', () => {
+  it('rejects long with stop_loss >= entry_price', async () => {
+    const { _deps } = mockDeps();
+    await assert.rejects(
+      () => drawPosition({ direction: 'long', entry_price: 100, stop_loss: 100, take_profit: 110, _deps }),
+      /long position: stop_loss must be below entry_price/,
+    );
+    await assert.rejects(
+      () => drawPosition({ direction: 'long', entry_price: 100, stop_loss: 105, take_profit: 110, _deps }),
+      /long position: stop_loss must be below entry_price/,
+    );
+  });
+
+  it('rejects long with take_profit <= entry_price', async () => {
+    const { _deps } = mockDeps();
+    await assert.rejects(
+      () => drawPosition({ direction: 'long', entry_price: 100, stop_loss: 90, take_profit: 100, _deps }),
+      /long position: take_profit must be above entry_price/,
+    );
+    await assert.rejects(
+      () => drawPosition({ direction: 'long', entry_price: 100, stop_loss: 90, take_profit: 95, _deps }),
+      /long position: take_profit must be above entry_price/,
+    );
+  });
+
+  it('rejects short with stop_loss <= entry_price', async () => {
+    const { _deps } = mockDeps();
+    await assert.rejects(
+      () => drawPosition({ direction: 'short', entry_price: 100, stop_loss: 100, take_profit: 90, _deps }),
+      /short position: stop_loss must be above entry_price/,
+    );
+    await assert.rejects(
+      () => drawPosition({ direction: 'short', entry_price: 100, stop_loss: 95, take_profit: 90, _deps }),
+      /short position: stop_loss must be above entry_price/,
+    );
+  });
+
+  it('rejects short with take_profit >= entry_price', async () => {
+    const { _deps } = mockDeps();
+    await assert.rejects(
+      () => drawPosition({ direction: 'short', entry_price: 100, stop_loss: 110, take_profit: 100, _deps }),
+      /short position: take_profit must be below entry_price/,
+    );
+    await assert.rejects(
+      () => drawPosition({ direction: 'short', entry_price: 100, stop_loss: 110, take_profit: 105, _deps }),
+      /short position: take_profit must be below entry_price/,
+    );
+  });
+
+  it('rejects invalid direction', async () => {
+    const { _deps } = mockDeps();
+    await assert.rejects(
+      () => drawPosition({ direction: 'up', entry_price: 100, stop_loss: 90, take_profit: 110, _deps }),
+      /direction must be "long" or "short"/,
+    );
+    await assert.rejects(
+      () => drawPosition({ direction: undefined, entry_price: 100, stop_loss: 90, take_profit: 110, _deps }),
+      /direction must be "long" or "short"/,
+    );
+  });
+
+  it('rejects NaN entry_price', async () => {
+    const { _deps } = mockDeps();
+    await assert.rejects(
+      () => drawPosition({ direction: 'long', entry_price: NaN, stop_loss: 90, take_profit: 110, _deps }),
+      /entry_price must be a finite number/,
+    );
+  });
+
+  it('rejects Infinity stop_loss', async () => {
+    const { _deps } = mockDeps();
+    await assert.rejects(
+      () => drawPosition({ direction: 'long', entry_price: 100, stop_loss: Infinity, take_profit: 110, _deps }),
+      /stop_loss must be a finite number/,
+    );
+  });
+
+  it('rejects undefined take_profit', async () => {
+    const { _deps } = mockDeps();
+    await assert.rejects(
+      () => drawPosition({ direction: 'long', entry_price: 100, stop_loss: 90, take_profit: undefined, _deps }),
+      /take_profit must be a finite number/,
+    );
+  });
+
+  function makeEvalFn() {
+    const calls = [];
+    const fn = async (expr) => {
+      calls.push(expr);
+      if (expr.includes('pricescale')) return 100000;
+      if (expr.includes('getVisibleRange')) return { to: 1700000000 };
+      if (expr.includes('getAllShapes')) return ['existing1'];
+      return undefined;
+    };
+    fn.calls = calls;
+    return fn;
+  }
+
+  it('creates long_position shape with correct createShape call', async () => {
+    const evalFn = makeEvalFn();
+    const _deps = {
+      evaluate: evalFn,
+      getChartApi: async () => 'window.__api',
+    };
+    const result = await drawPosition({
+      direction: 'long',
+      entry_price: 100,
+      stop_loss: 90,
+      take_profit: 120,
+      _deps,
+    });
+    assert.equal(result.success, true);
+    assert.equal(result.direction, 'long');
+    const createCall = evalFn.calls.find(c => c.includes('createShape'));
+    assert.ok(createCall, 'createShape was called');
+    assert.ok(createCall.includes('"long_position"'), 'shape name is long_position');
+    assert.ok(createCall.includes('stopLevel'), 'overrides contain stopLevel');
+    assert.ok(createCall.includes('profitLevel'), 'overrides contain profitLevel');
+  });
+
+  it('creates short_position shape', async () => {
+    const evalFn = makeEvalFn();
+    const _deps = {
+      evaluate: evalFn,
+      getChartApi: async () => 'window.__api',
+    };
+    const result = await drawPosition({
+      direction: 'short',
+      entry_price: 100,
+      stop_loss: 110,
+      take_profit: 80,
+      _deps,
+    });
+    assert.equal(result.success, true);
+    assert.equal(result.direction, 'short');
+    const createCall = evalFn.calls.find(c => c.includes('createShape'));
+    assert.ok(createCall.includes('"short_position"'), 'shape name is short_position');
+  });
+
+  it('passes optional overrides when provided', async () => {
+    const evalFn = makeEvalFn();
+    const _deps = {
+      evaluate: evalFn,
+      getChartApi: async () => 'window.__api',
+    };
+    await drawPosition({
+      direction: 'long',
+      entry_price: 100,
+      stop_loss: 90,
+      take_profit: 120,
+      account_size: 10000,
+      risk: 1,
+      lot_size: 0.5,
+      _deps,
+    });
+    const createCall = evalFn.calls.find(c => c.includes('createShape'));
+    assert.ok(createCall.includes('accountSize'), 'overrides contain accountSize');
+    assert.ok(createCall.includes('risk'), 'overrides contain risk');
+    assert.ok(createCall.includes('lotSize'), 'overrides contain lotSize');
+  });
+
+  it('skips getVisibleRange when entry_time is provided', async () => {
+    const evalFn = makeEvalFn();
+    const _deps = {
+      evaluate: evalFn,
+      getChartApi: async () => 'window.__api',
+    };
+    await drawPosition({
+      direction: 'long',
+      entry_price: 100,
+      stop_loss: 90,
+      take_profit: 120,
+      entry_time: 1700000000,
+      _deps,
+    });
+    const rangeCall = evalFn.calls.find(c => c.includes('getVisibleRange'));
+    assert.equal(rangeCall, undefined, 'getVisibleRange was not called');
+    const createCall = evalFn.calls.find(c => c.includes('createShape'));
+    assert.ok(createCall.includes('1700000000'), 'entry_time used in createShape');
   });
 });
 

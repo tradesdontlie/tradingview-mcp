@@ -64,6 +64,7 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 
 ### "Draw on the chart"
 - `draw_shape` → horizontal_line, trend_line, rectangle, text (pass point + optional point2)
+- `draw_position` → native Long/Short position with entry, TP, SL price levels (auto-converts to ticks)
 - `draw_list` → see what's drawn
 - `draw_remove_one` → remove by ID
 - `draw_clear` → remove all
