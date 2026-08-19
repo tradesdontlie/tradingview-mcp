@@ -10,6 +10,12 @@ export const CDP_PORT = Number(process.env.TV_CDP_PORT || process.env.CDP_PORT) 
 const MAX_RETRIES = 5;
 const BASE_DELAY = 500;
 
+// In-flight connect() calls, keyed by targetId ('' = auto-discover chart target).
+// Concurrent tool calls (the MCP host may dispatch several in parallel) that
+// ask for the same target share one CDP handshake instead of each opening
+// its own session and stomping the module-level client/targetInfo state.
+const _connecting = new Map();
+
 // Known direct API paths discovered via live probing (see PROBE_RESULTS.md)
 const KNOWN_PATHS = {
   chartApi: 'window.TradingViewApi._activeChartWidgetWV.value()',
@@ -65,6 +71,22 @@ export async function getClient() {
 }
 
 export async function connect(targetId = null) {
+  // Single-flight: piggyback on an already-running connect() for the same
+  // target instead of racing it. Without this, two concurrent first-connects
+  // (e.g. two tool calls dispatched in parallel while `client` is still null)
+  // would each open their own CDP session and independently overwrite the
+  // shared `client`/`targetInfo` module state — leaking whichever session
+  // loses the race and potentially handing one caller a client object that
+  // no longer matches what `targetInfo` claims.
+  const key = targetId || '';
+  if (_connecting.has(key)) return _connecting.get(key);
+
+  const promise = _doConnect(targetId).finally(() => _connecting.delete(key));
+  _connecting.set(key, promise);
+  return promise;
+}
+
+async function _doConnect(targetId) {
   let lastError;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
@@ -74,15 +96,19 @@ export async function connect(targetId = null) {
           ? `CDP target ${targetId} not found — is the tab still open?`
           : 'No TradingView chart target found. Is TradingView open with a chart?');
       }
-      targetInfo = target;
-      client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: target.id });
+      const newClient = await CDP({ host: CDP_HOST, port: CDP_PORT, target: target.id });
 
       // Enable required domains
-      await client.Runtime.enable();
-      await client.Page.enable();
-      await client.DOM.enable();
+      await newClient.Runtime.enable();
+      await newClient.Page.enable();
+      await newClient.DOM.enable();
 
-      return client;
+      targetInfo = target;
+      client = newClient;
+      // Return the client this call actually created, not the shared module
+      // variable — a concurrent connect() for a different target could have
+      // reassigned `client` again by the time this resolves.
+      return newClient;
     } catch (err) {
       lastError = err;
       const delay = Math.min(BASE_DELAY * Math.pow(2, attempt), 30000);
