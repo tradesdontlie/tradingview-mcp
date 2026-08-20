@@ -2,7 +2,7 @@
  * Core pane/layout management logic.
  * Controls multi-chart layouts (split panes) in TradingView.
  */
-import { evaluate, evaluateAsync, getClient, safeString } from '../connection.js';
+import { evaluate, evaluateAsync, safeString } from '../connection.js';
 
 const CWC = 'window.TradingViewApi._chartWidgetCollection';
 
