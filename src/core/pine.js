@@ -48,14 +48,20 @@ export async function ensurePineEditorOpen() {
   `);
   if (already) return true;
 
-  await evaluate(`
+  // 'scripteditor' is the widget's registered name; activateScriptEditorTab()
+  // silently no-ops while the widget is missing from the bar's enabled list
+  // (the state after the user closes the panel), so enable + show come first.
+  const OPEN_EDITOR = `
     (function() {
       var bwb = window.TradingView && window.TradingView.bottomWidgetBar;
-      if (!bwb) return;
+      if (!bwb) return false;
+      if (typeof bwb.setWidgetAvailability === 'function') bwb.setWidgetAvailability('scripteditor', true);
+      if (typeof bwb.showWidget === 'function') bwb.showWidget('scripteditor');
       if (typeof bwb.activateScriptEditorTab === 'function') bwb.activateScriptEditorTab();
-      else if (typeof bwb.showWidget === 'function') bwb.showWidget('pine-editor');
+      return true;
     })()
-  `);
+  `;
+  await evaluate(OPEN_EDITOR);
 
   await evaluate(`
     (function() {
@@ -65,10 +71,30 @@ export async function ensurePineEditorOpen() {
     })()
   `);
 
+  let remounted = false;
   for (let i = 0; i < 50; i++) {
     await new Promise(r => setTimeout(r, 200));
     const ready = await evaluate(`(function() { return ${FIND_MONACO} !== null; })()`);
     if (ready) return true;
+    // Stale mount: Monaco DOM is present but its subtree carries no React
+    // fiber keys, so FIND_MONACO can never succeed against it. Hide the bar
+    // and reopen once to force a fresh React-attached mount.
+    if (!remounted && i >= 15) {
+      const zombie = await evaluate(`!!document.querySelector('.monaco-editor.pine-editor-monaco')`);
+      if (zombie) {
+        await evaluate(`
+          (function() {
+            var bwb = window.TradingView && window.TradingView.bottomWidgetBar;
+            if (bwb && typeof bwb.hide === 'function') bwb.hide();
+          })()
+        `);
+        await new Promise(r => setTimeout(r, 400));
+        await evaluate(OPEN_EDITOR);
+        // Consume the one-shot only on an actual remount attempt, so a
+        // slow first mount that turns out fiber-less can still be recovered.
+        remounted = true;
+      }
+    }
   }
   return false;
 }

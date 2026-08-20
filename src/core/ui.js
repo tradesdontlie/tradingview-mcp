@@ -31,7 +31,10 @@ export async function click({ by, value }) {
 export async function openPanel({ panel, action }) {
   const isBottomPanel = panel === 'pine-editor' || panel === 'strategy-tester';
   if (isBottomPanel) {
-    const widgetName = panel === 'pine-editor' ? 'pine-editor' : 'backtesting';
+    // The bottom bar's registered widget name for the Pine editor is
+    // 'scripteditor' (see bwb._getWidgetConfigByNames) — 'pine-editor' is
+    // only the public tool-facing panel name and is unknown to showWidget().
+    const widgetName = panel === 'pine-editor' ? 'scripteditor' : 'backtesting';
     const result = await evaluate(`
       (function() {
         var bwb = window.TradingView && window.TradingView.bottomWidgetBar;
@@ -45,7 +48,10 @@ export async function openPanel({ panel, action }) {
         if (panel === 'strategy-tester') { var stratPanel = document.querySelector('[data-name="backtesting"]') || document.querySelector('[class*="strategyReport"]'); isOpen = isOpen && !!(stratPanel && stratPanel.offsetParent); }
         var performed = 'none';
         if (action === 'open' || (action === 'toggle' && !isOpen)) {
-          if (panel === 'pine-editor') { if (typeof bwb.activateScriptEditorTab === 'function') bwb.activateScriptEditorTab(); else if (typeof bwb.showWidget === 'function') bwb.showWidget(widgetName); }
+          // activateScriptEditorTab() silently no-ops while the widget is not
+          // in the bar's enabled list (the state after the user closes the
+          // panel), so enable + show first and only then activate the tab.
+          if (panel === 'pine-editor') { if (typeof bwb.setWidgetAvailability === 'function') bwb.setWidgetAvailability(widgetName, true); if (typeof bwb.showWidget === 'function') bwb.showWidget(widgetName); if (typeof bwb.activateScriptEditorTab === 'function') bwb.activateScriptEditorTab(); }
           else { if (typeof bwb.showWidget === 'function') bwb.showWidget(widgetName); }
           performed = 'opened';
         } else if (action === 'close' || (action === 'toggle' && isOpen)) {

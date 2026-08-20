@@ -673,7 +673,7 @@ describe('TradingView MCP — Full E2E (70 tools)', () => {
     after(async () => {
       // Restore editor state
       if (!editorWasOpen) {
-        await evaluate(`try { ${CLOSE_BOTTOM('pine-editor')} } catch(e) {}`);
+        await evaluate(`try { ${CLOSE_BOTTOM('scripteditor')} } catch(e) {}`);
         await sleep(300);
       }
     });
@@ -684,8 +684,10 @@ describe('TradingView MCP — Full E2E (70 tools)', () => {
       await evaluate(`
         (function() {
           var bwb = window.TradingView && window.TradingView.bottomWidgetBar;
-          if (bwb && typeof bwb.activateScriptEditorTab === 'function') bwb.activateScriptEditorTab();
-          else if (bwb && typeof bwb.showWidget === 'function') bwb.showWidget('pine-editor');
+          if (!bwb) return;
+          if (typeof bwb.setWidgetAvailability === 'function') bwb.setWidgetAvailability('scripteditor', true);
+          if (typeof bwb.showWidget === 'function') bwb.showWidget('scripteditor');
+          if (typeof bwb.activateScriptEditorTab === 'function') bwb.activateScriptEditorTab();
         })()
       `);
       for (let i = 0; i < 50; i++) {
