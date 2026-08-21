@@ -10,6 +10,29 @@ export const CDP_PORT = Number(process.env.TV_CDP_PORT || process.env.CDP_PORT) 
 const MAX_RETRIES = 5;
 const BASE_DELAY = 500;
 
+// Command timeouts (chrome-remote-interface has none by design — issue #194).
+// Layered: protocol-level Runtime.evaluate timeout kills hung in-page JS;
+// the Promise.race handles a fully dead renderer that never replies.
+const EVAL_TIMEOUT_MS = Number(process.env.TV_EVAL_TIMEOUT_MS) || 15000;
+const HTTP_TIMEOUT_MS = 5000;
+
+/** Reject with a timeout error after ms. Labels the operation for debugging. */
+export function withTimeout(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+/** Fetch a CDP HTTP endpoint (/json/*) with a hard timeout (upstream #275). */
+export async function fetchJson(pathname) {
+  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}${pathname}`, {
+    signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
+  });
+  return resp.json();
+}
+
 // Known direct API paths discovered via live probing (see PROBE_RESULTS.md)
 const KNOWN_PATHS = {
   chartApi: 'window.TradingViewApi._activeChartWidgetWV.value()',
@@ -53,8 +76,12 @@ export function requireFinite(value, name) {
 export async function getClient() {
   if (client) {
     try {
-      // Quick liveness check
-      await client.Runtime.evaluate({ expression: '1', returnByValue: true });
+      // Quick liveness check (bounded — a hung renderer must not block reconnect)
+      await withTimeout(
+        client.Runtime.evaluate({ expression: '1', returnByValue: true }),
+        EVAL_TIMEOUT_MS,
+        'liveness check',
+      );
       return client;
     } catch {
       client = null;
@@ -108,8 +135,7 @@ export async function reconnectTo(targetId) {
 }
 
 async function findChartTarget() {
-  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
-  const targets = await resp.json();
+  const targets = await fetchJson('/json/list');
   // Prefer targets with tradingview.com/chart in the URL
   return targets.find(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
     || targets.find(t => t.type === 'page' && /tradingview/i.test(t.url))
@@ -117,8 +143,7 @@ async function findChartTarget() {
 }
 
 async function findTargetById(id) {
-  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
-  const targets = await resp.json();
+  const targets = await fetchJson('/json/list');
   return targets.find(t => t.id === id) || null;
 }
 
@@ -131,12 +156,20 @@ export async function getTargetInfo() {
 
 export async function evaluate(expression, opts = {}) {
   const c = await getClient();
-  const result = await c.Runtime.evaluate({
-    expression,
-    returnByValue: true,
-    awaitPromise: opts.awaitPromise ?? false,
-    ...opts,
-  });
+  const timeoutMs = opts.timeoutMs ?? EVAL_TIMEOUT_MS;
+  // Protocol-level timeout terminates hung JS in-page; the race catches a
+  // dead renderer that never replies. (CRI #194/#512, Runtime#evaluate docs.)
+  const result = await withTimeout(
+    c.Runtime.evaluate({
+      expression,
+      returnByValue: true,
+      awaitPromise: opts.awaitPromise ?? false,
+      ...opts,
+      ...(timeoutMs > 0 ? { timeout: timeoutMs } : {}),
+    }),
+    timeoutMs > 0 ? timeoutMs + 5000 : 0,
+    'Runtime.evaluate',
+  );
   if (result.exceptionDetails) {
     const msg = result.exceptionDetails.exception?.description
       || result.exceptionDetails.text

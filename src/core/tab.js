@@ -10,14 +10,25 @@
  * (Approach from issue #155 and PR #163, verified on Desktop 3.1.0.)
  */
 import CDP from 'chrome-remote-interface';
-import { getClient, reconnectTo, CDP_HOST, CDP_PORT } from '../connection.js';
+import { getClient, reconnectTo, CDP_HOST, CDP_PORT, fetchJson, withTimeout } from '../connection.js';
+
+const EVAL_TIMEOUT_MS = Number(process.env.TV_EVAL_TIMEOUT_MS) || 15000;
+
+/** Runtime.evaluate on an arbitrary target, bounded and self-cleaning. */
+async function evalOn(c, expression) {
+  const { result } = await withTimeout(
+    c.Runtime.evaluate({ expression, returnByValue: true, timeout: EVAL_TIMEOUT_MS }),
+    EVAL_TIMEOUT_MS + 5000,
+    'Runtime.evaluate',
+  );
+  return result?.value;
+}
 
 /**
  * List all open chart tabs (CDP page targets).
  */
 export async function list() {
-  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
-  const targets = await resp.json();
+  const targets = await fetchJson('/json/list');
 
   // Chart tabs plus new-tab landing pages (layout picker), so every tab in the
   // top bar is listable and switchable.
@@ -41,23 +52,16 @@ export async function list() {
  * is the one whose DOM actually contains `.tabs-container .tab`.
  */
 async function withShell(fn) {
-  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
-  const targets = await resp.json();
+  const targets = await fetchJson('/json/list');
   const candidates = targets.filter(t => t.type === 'page' && /\/window\/index\.html/i.test(t.url || ''));
 
   for (const cand of candidates) {
     let c = null;
     try {
       c = await CDP({ host: CDP_HOST, port: CDP_PORT, target: cand.id });
-      const probe = await c.Runtime.evaluate({
-        expression: `!!document.querySelector('.tabs-container .tab')`,
-        returnByValue: true,
-      });
-      if (probe.result?.value) {
-        const out = await fn(async (expression) => {
-          const { result } = await c.Runtime.evaluate({ expression, returnByValue: true });
-          return result?.value;
-        });
+      const probe = await evalOn(c, `!!document.querySelector('.tabs-container .tab')`);
+      if (probe) {
+        const out = await fn((expression) => evalOn(c, expression));
         await c.close();
         return out;
       }
@@ -74,8 +78,7 @@ async function isTargetVisible(targetId) {
   let c = null;
   try {
     c = await CDP({ host: CDP_HOST, port: CDP_PORT, target: targetId });
-    const { result } = await c.Runtime.evaluate({ expression: 'document.visibilityState', returnByValue: true });
-    return result?.value === 'visible';
+    return (await evalOn(c, 'document.visibilityState')) === 'visible';
   } catch {
     return false;
   } finally {
@@ -85,8 +88,7 @@ async function isTargetVisible(targetId) {
 
 /** Find an open new-tab landing page target (shows the layout picker). */
 async function findLandingTarget() {
-  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
-  const targets = await resp.json();
+  const targets = await fetchJson('/json/list');
   return targets.find(t => t.type === 'page' && t.title === 'New tab') || null;
 }
 
@@ -95,10 +97,7 @@ async function withTarget(targetId, fn) {
   let c = null;
   try {
     c = await CDP({ host: CDP_HOST, port: CDP_PORT, target: targetId });
-    return await fn(async (expression) => {
-      const { result } = await c.Runtime.evaluate({ expression, returnByValue: true });
-      return result?.value;
-    });
+    return await fn((expression) => evalOn(c, expression));
   } finally {
     try { if (c) await c.close(); } catch { /* already gone */ }
   }
@@ -147,9 +146,8 @@ export async function newTab({ layout, name } = {}) {
   if (!landing) throw new Error('New tab opened but its landing page target was not found.');
 
   // Snapshot existing chart targets so we can spot the one the pick creates.
-  const beforeResp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
   const chartIdsBefore = new Set(
-    (await beforeResp.json())
+    (await fetchJson('/json/list'))
       .filter(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
       .map(t => t.id)
   );
@@ -226,8 +224,7 @@ export async function newTab({ layout, name } = {}) {
   let chartTarget = null;
   for (let i = 0; i < 30; i++) {
     await new Promise(r => setTimeout(r, 500));
-    const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
-    const targets = await resp.json();
+    const targets = await fetchJson('/json/list');
     chartTarget = targets.find(x =>
       x.type === 'page' && /tradingview\.com\/chart/i.test(x.url) && !chartIdsBefore.has(x.id)
     ) || targets.find(x => x.id === landing.id && /tradingview\.com\/chart/i.test(x.url)) || null;
@@ -293,6 +290,13 @@ export async function switchTab({ index }) {
   }
 
   const target = tabs.tabs[idx];
+
+  // Guard: never re-attach the shared client to a non-chart target. The
+  // file:// layout-picker renderer is throttled/frozen under xvfb — every
+  // subsequent tool call would hang. Only chart tabs are drivable.
+  if (!target.is_chart) {
+    throw new Error(`Tab ${idx} is the layout picker (not a chart). CDP automation can only switch to chart tabs — pick a layout via tab_new({layout}) instead.`);
+  }
 
   if (!(await isTargetVisible(target.id))) {
     const clicked = await withShell(async (evalIn) => {

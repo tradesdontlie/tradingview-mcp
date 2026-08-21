@@ -289,6 +289,17 @@ export async function launch({ port, kill_existing, _deps } = {}) {
   const killFirst = kill_existing !== false;
   const platform = process.platform;
 
+  // Guard: on systemd-managed deployments (headless VPS) the TV process is
+  // owned by a unit — spawning or killing it here fights the service manager
+  // (tv_launch spawns without a display → SUID sandbox crash, and kills the
+  // unit's instance). Launching on such hosts is systemd's job, always.
+  if (process.env.TV_MANAGED_BY_SYSTEMD === '1') {
+    throw new Error(
+      'tv_launch is disabled on this deployment: TradingView is managed by systemd. ' +
+      'Use: systemctl --user restart tradingview-headless (or set TV_MANAGED_BY_SYSTEMD=0 to override).'
+    );
+  }
+
   const pathMap = {
     darwin: [
       '/Applications/TradingView.app/Contents/MacOS/TradingView',
@@ -303,6 +314,9 @@ export async function launch({ port, kill_existing, _deps } = {}) {
       '/opt/TradingView/tradingview',
       '/opt/TradingView/TradingView',
       `${process.env.HOME}/.local/share/TradingView/TradingView`,
+      // Non-root install: .deb extracted with dpkg-deb -x into the home dir
+      // (common on headless VPS boxes where sudo is unavailable).
+      `${process.env.HOME}/tv-headless/app/opt/TradingView/tradingview`,
       '/usr/bin/tradingview',
       '/snap/tradingview/current/tradingview',
     ],

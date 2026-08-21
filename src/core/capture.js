@@ -1,7 +1,7 @@
 /**
  * Core screenshot/capture logic.
  */
-import { getClient, evaluate, getChartCollection } from '../connection.js';
+import { getClient, evaluate, getChartCollection, withTimeout } from '../connection.js';
 import { waitForChartRender } from '../wait.js';
 import { writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
@@ -63,12 +63,24 @@ export async function captureScreenshot({ region, filename, method, waitForRende
   const params = { format: 'png' };
   if (clip) params.clip = clip;
 
-  const { data } = await client.Page.captureScreenshot(params);
-  writeFileSync(filePath, Buffer.from(data, 'base64'));
+  // Bounded: Page.captureScreenshot hangs forever on unresponsive renderers
+  // (upstream issue #174). Race with a generous budget for big captures.
+  const { data } = await withTimeout(
+    client.Page.captureScreenshot(params),
+    60000,
+    'Page.captureScreenshot',
+  );
+  const buf = Buffer.from(data, 'base64');
+  writeFileSync(filePath, buf);
 
+  // Remote deployments (SSE over Tailscale) can't read VPS-local paths, so the
+  // image is embedded as a data URL in addition to being written to disk.
+  // Images can be large — cap embedded preview at ~2 MB.
+  const includeData = buf.length <= 2 * 1024 * 1024;
   return {
     success: true, method: 'cdp', file_path: filePath, region,
     waited_for_render: !!waitForRender,
-    size_bytes: Buffer.from(data, 'base64').length,
+    size_bytes: buf.length,
+    ...(includeData ? { image_base64: `data:image/png;base64,${data}` } : { note: 'image too large to embed (>2MB) — read file_path on the host' }),
   };
 }
