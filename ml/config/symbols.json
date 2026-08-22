@@ -1,0 +1,45 @@
+{
+  "_comment": "Strategy parameters \u2014 review before training on real data. tp_ticks/sl_ticks are EXCHANGE TICKS (matching the field name), converted to price points internally via tick_size (points_per_tick) \u2014 see build_dataset.py's load_symbol_config(). point_value is $ per 1.0 price-point move (not per tick). horizon_bars = how many bars forward to look for TP/SL resolution before labeling as timeout (dropped from training).",
+  "MNQ1!": {
+    "point_value": 2.0,
+    "tick_size": 0.25,
+    "timeframes": {
+      "1": {
+        "tp_ticks": 120,
+        "sl_ticks": 80,
+        "horizon_bars": 60
+      },
+      "5": {
+        "tp_ticks": 120,
+        "sl_ticks": 80,
+        "horizon_bars": 48
+      },
+      "60": {
+        "tp_ticks": 120,
+        "sl_ticks": 80,
+        "horizon_bars": 24
+      }
+    }
+  },
+  "MGC1!": {
+    "point_value": 10.0,
+    "tick_size": 0.10,
+    "timeframes": {
+      "1": {
+        "tp_ticks": 100.0,
+        "sl_ticks": 50,
+        "horizon_bars": 60
+      },
+      "5": {
+        "tp_ticks": 100.0,
+        "sl_ticks": 50,
+        "horizon_bars": 48
+      },
+      "60": {
+        "tp_ticks": 100.0,
+        "sl_ticks": 50.0,
+        "horizon_bars": 24
+      }
+    }
+  }
+}

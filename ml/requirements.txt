@@ -1,0 +1,6 @@
+pandas
+numpy
+lightgbm
+pyarrow
+scikit-learn
+python-dateutil

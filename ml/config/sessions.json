@@ -1,0 +1,20 @@
+{
+  "_comment": "All times are US Eastern (ET), matching the conventions already used in strategies/mgc_vwap_asian.py, strategies/asian_vol_by_hour.py, strategies/ny_vol_by_hour.py, and strategies/mnq_1m_liq_sweep.pine.",
+  "timezone": "America/New_York",
+  "sessions": {
+    "asian_futures": { "start": "18:00", "end": "02:00", "note": "CME Globex day rollover / Asian futures session, matches mgc_vwap_asian.py ASIAN_START_H/ASIAN_END_H" },
+    "asian_cash_open": { "start": "20:00", "end": "21:30", "note": "Tokyo/HK/Shanghai cash equity opens land in this ET window depending on DST" },
+    "london_open": { "start": "03:00", "end": "05:00" },
+    "ny_premarket": { "start": "04:00", "end": "09:29", "note": "matches mnq_1m_liq_sweep.pine pre-market range" },
+    "ny_open": { "start": "09:30", "end": "10:30", "note": "sweep/reversal window, matches mnq_1m_liq_sweep.pine" },
+    "ny_session": { "start": "09:30", "end": "16:00" }
+  },
+  "macro_slot_et": "08:30",
+  "_macro_slot_note": "Most US scheduled macro releases (CPI, PPI, retail sales, jobless claims, and NFP) land at 08:30 ET on weekdays. session_context.py flags proximity to this time daily regardless of which specific release it is, since there is no structured economic-calendar source in this repo (see news_aggregator.py limitations noted in the plan).",
+  "recurring_macro_rules": {
+    "nfp": { "rule": "first_friday_of_month", "time_et": "08:30" },
+    "cpi_ppi_typical_window": { "rule": "weekday_08:30_any_day", "note": "CPI/PPI dates vary month to month and are not a fixed weekday rule — leave to fomc_dates-style manual list if precision is needed" }
+  },
+  "fomc_dates": [],
+  "_fomc_note": "Intentionally left empty — FOMC meeting dates are irregular and must be filled in from the official Federal Reserve calendar (federalreserve.gov/monetarypolicy/fomccalendars.htm) rather than guessed. Format: ['YYYY-MM-DD', ...] for the second (decision) day of each two-day meeting. Until populated, the fomc_proximity feature in session_context.py will always be 0."
+}

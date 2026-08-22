@@ -128,11 +128,19 @@ export async function run(argv) {
   }
 }
 
+// console.log()/console.error() write asynchronously when stdout/stderr is
+// piped (not a TTY) — a process.exit() issued right after can kill the process
+// before the OS pipe buffer (commonly 64KB) finishes flushing, silently
+// truncating any output past that point. Waiting for the write's own callback
+// guarantees the data is actually handed off before exiting.
+function writeAndExit(stream, str, code) {
+  stream.write(str + '\n', () => process.exit(code));
+}
+
 async function execute(handler, values, positionals) {
   try {
     const result = await handler(values, positionals);
-    console.log(JSON.stringify(result, null, 2));
-    process.exit(0);
+    writeAndExit(process.stdout, JSON.stringify(result, null, 2), 0);
   } catch (err) {
     handleError(err);
   }
@@ -140,11 +148,8 @@ async function execute(handler, values, positionals) {
 
 function handleError(err) {
   const message = err.message || String(err);
+  const payload = JSON.stringify({ success: false, error: message }, null, 2);
   // Connection failures get exit code 2
-  if (/CDP|connection|ECONNREFUSED|not running/i.test(message)) {
-    console.error(JSON.stringify({ success: false, error: message }, null, 2));
-    process.exit(2);
-  }
-  console.error(JSON.stringify({ success: false, error: message }, null, 2));
-  process.exit(1);
+  const code = /CDP|connection|ECONNREFUSED|not running/i.test(message) ? 2 : 1;
+  writeAndExit(process.stderr, payload, code);
 }
