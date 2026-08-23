@@ -242,12 +242,22 @@ export async function getEquity() {
   return { success: true, data_points: equity?.data?.length || 0, source: equity?.source, data: equity?.data || [], equity_summary: equity?.equity_summary, note: equity?.note, error: equity?.error };
 }
 
+/**
+ * Normalize a symbol for comparison: drop any exchange prefix and upper-case.
+ * "BATS:TSLA" and "tsla" both become "TSLA".
+ */
+function normalizeSymbol(s) {
+  if (!s) return '';
+  const parts = String(s).trim().toUpperCase().split(':');
+  return parts[parts.length - 1];
+}
+
 export async function getQuote({ symbol } = {}) {
   const data = await evaluate(`
     (function() {
       var api = ${CHART_API};
-      var sym = ${safeString(symbol || '')};
-      if (!sym) { try { sym = api.symbol(); } catch(e) {} }
+      var sym = '';
+      try { sym = api.symbol(); } catch(e) {}
       if (!sym) { try { sym = api.symbolExt().symbol; } catch(e) {} }
       var ext = {};
       try { ext = api.symbolExt() || {}; } catch(e) {}
@@ -274,7 +284,19 @@ export async function getQuote({ symbol } = {}) {
     })()
   `);
   if (!data || (!data.last && !data.close)) throw new Error('Could not retrieve quote. The chart may still be loading.');
-  return { success: true, ...data };
+
+  // getQuote reads the chart's main series, so it can only report the symbol on the chart.
+  // Refuse rather than return the chart's prices labelled with the caller's symbol.
+  if (symbol && normalizeSymbol(symbol) !== normalizeSymbol(data.symbol)) {
+    throw new Error(
+      `quote_get reads the symbol currently on the chart. You asked for "${symbol}" but the chart shows ` +
+      `"${data.symbol}". Call chart_set_symbol with "${symbol}" first, then call quote_get.`
+    );
+  }
+
+  const result = { success: true, ...data };
+  if (symbol) result.requested_symbol = symbol;
+  return result;
 }
 
 export async function getDepth() {
