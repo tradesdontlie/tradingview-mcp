@@ -50,7 +50,7 @@ See [RESEARCH.md](RESEARCH.md) for open questions, findings, and related work.
 ## Prerequisites
 
 - **TradingView Desktop app** (paid subscription required for real-time data)
-- **Node.js 18+**
+- **Node.js 20+**
 - **Claude Code** with MCP support (for MCP tools) or any terminal (for CLI)
 - **macOS, Windows, or Linux**
 
