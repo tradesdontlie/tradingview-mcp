@@ -2,8 +2,8 @@ import CDP from 'chrome-remote-interface';
 
 let client = null;
 let targetInfo = null;
-const CDP_HOST = 'localhost';
-const CDP_PORT = 9222;
+const CDP_HOST = process.env.TV_CDP_HOST || '127.0.0.1';
+const CDP_PORT = Number(process.env.TV_CDP_PORT) || 9222;
 const MAX_RETRIES = 5;
 const BASE_DELAY = 500;
 
@@ -26,7 +26,7 @@ const KNOWN_PATHS = {
   pineFacadeApi: 'https://pine-facade.tradingview.com/pine-facade',
 };
 
-export { KNOWN_PATHS };
+export { KNOWN_PATHS, CDP_HOST, CDP_PORT };
 
 /**
  * Sanitize a string for safe interpolation into JavaScript code evaluated via CDP.
