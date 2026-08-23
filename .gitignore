@@ -9,3 +9,9 @@ strategies/.regime_state/
 ml/models/
 ml/__pycache__/
 ml/**/__pycache__/
+strategies/__pycache__/
+strategies/**/__pycache__/
+ml/serve/public/data/
+.claude/
+.DS_Store
+**/.DS_Store

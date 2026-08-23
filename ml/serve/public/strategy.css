@@ -1,0 +1,102 @@
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: #0e1117;
+  color: #e6e6e6;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 16px;
+  background: #161b22;
+  border-bottom: 1px solid #2a2f3a;
+  flex-wrap: wrap;
+}
+
+.toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #9aa4b2;
+}
+
+.toolbar select, .toolbar button {
+  background: #21262d;
+  color: #e6e6e6;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 13px;
+}
+
+.toolbar button {
+  cursor: pointer;
+}
+
+.toolbar button:hover {
+  background: #2d333b;
+}
+
+.grow {
+  flex: 1;
+  min-width: 200px;
+}
+
+.grow input[type="range"] {
+  width: 100%;
+}
+
+.clock {
+  font-variant-numeric: tabular-nums;
+  color: #58a6ff;
+  font-size: 13px;
+  min-width: 170px;
+}
+
+.badge {
+  background: #3a2b0a;
+  color: #e3b341;
+  border: 1px solid #4d3a12;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+#chart {
+  display: block;
+  width: 100%;
+  height: 62vh;
+  background: #0e1117;
+}
+
+.statbar {
+  display: flex;
+  gap: 24px;
+  padding: 10px 16px;
+  background: #161b22;
+  border-top: 1px solid #2a2f3a;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stat .label {
+  font-size: 11px;
+  color: #9aa4b2;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.stat span:last-child {
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}

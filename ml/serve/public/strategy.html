@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Strategy Replay</title>
+<link rel="stylesheet" href="strategy.css">
+</head>
+<body>
+  <div class="toolbar">
+    <label>Symbol
+      <select id="symbol">
+        <option value="MGC1!">MGC1!</option>
+        <option value="MNQ1!">MNQ1!</option>
+      </select>
+    </label>
+    <label>Strategy
+      <select id="strategy">
+        <option value="trend_breakout">trend_breakout</option>
+        <option value="liquidity_sweep_asian">liquidity_sweep_asian</option>
+        <option value="liquidity_sweep_ny">liquidity_sweep_ny</option>
+      </select>
+    </label>
+    <button id="playPause">▶ Play</button>
+    <label>Speed
+      <select id="speed">
+        <option value="1">1x</option>
+        <option value="5" selected>5x</option>
+        <option value="20">20x</option>
+        <option value="100">100x</option>
+      </select>
+    </label>
+    <label class="grow">
+      <input type="range" id="scrub" min="0" max="0" value="0">
+    </label>
+    <span id="clock" class="clock">—</span>
+    <span id="dataMode" class="badge">REPLAY DATA</span>
+  </div>
+
+  <canvas id="chart"></canvas>
+
+  <div class="statbar">
+    <div class="stat"><span class="label">trades so far</span><span id="statN">0</span></div>
+    <div class="stat"><span class="label">win%</span><span id="statWin">—</span></div>
+    <div class="stat"><span class="label">profit factor</span><span id="statPF">—</span></div>
+    <div class="stat"><span class="label">total $</span><span id="statTotal">—</span></div>
+    <div class="stat"><span class="label">position</span><span id="statPos">flat</span></div>
+  </div>
+
+  <script src="strategy.js"></script>
+</body>
+</html>

@@ -16,9 +16,11 @@ from pathlib import Path
 
 import pandas as pd
 
+from .ict_smc import add_ict_smc_features
 from .indicators import compute_all
 from .liquidity_sweep import add_liquidity_sweep_features
 from .session_context import add_session_context
+from .session_levels import add_session_levels
 from ..data_collection.collect_replay import parquet_path
 from ..labels.triple_barrier import label_triple_barrier
 
@@ -33,6 +35,8 @@ CONTEXT_FEATURE_COLS = [
     "premarket_swept_high_recently", "premarket_swept_low_recently",
     "prior_day_swept_high_recently", "prior_day_swept_low_recently",
     "structural_swept_high_recently", "structural_swept_low_recently",
+    "in_bull_fvg", "in_bear_fvg", "dist_to_bull_fvg", "dist_to_bear_fvg",
+    "in_bull_ob", "in_bear_ob", "dist_to_bull_ob", "dist_to_bear_ob",
 ]
 
 
@@ -62,8 +66,10 @@ def load_symbol_config(symbol: str, timeframe: str) -> dict:
 
 
 def compute_features(raw: pd.DataFrame) -> pd.DataFrame:
-    df = compute_all(raw)
+    df = compute_all(raw)  # must run first — ict_smc's order blocks need atr_14
     df = add_liquidity_sweep_features(df)
+    df = add_ict_smc_features(df)
+    df = add_session_levels(df)
     df = add_session_context(df)
     return df
 
@@ -87,8 +93,26 @@ def build(symbol: str, timeframe: str, context_timeframes: list[str]) -> pd.Data
         ctx_df = compute_features(ctx_raw)
         cols = ["time"] + [c for c in CONTEXT_FEATURE_COLS if c in ctx_df.columns]
         ctx_slice = ctx_df[cols].add_prefix(f"ctx_{ctx_tf}m_").rename(columns={f"ctx_{ctx_tf}m_time": "time"})
-        df = pd.merge_asof(df.sort_values("time"), ctx_slice.sort_values("time"), on="time", direction="backward")
-        print(f"[{symbol} {timeframe}] joined context tf={ctx_tf} ({len(ctx_df)} bars)", file=sys.stderr)
+        # ctx_slice["time"] is each higher-timeframe bar's OPEN time (standard
+        # OHLCV convention, confirmed against src/core/data.js's raw bar array —
+        # time: v[0]). Its feature columns (vwap, rsi, ...) are computed from
+        # that bar's FULL range, which isn't settled until the bar closes. A
+        # plain merge_asof on open time would let e.g. a 1m row at 10:05 match
+        # the 60m bar opened at 10:00 — whose values reflect the entire
+        # 10:00-11:00 hour, i.e. up to 55 minutes of future information relative
+        # to that 1m row. Shift the merge key to each context bar's CLOSE time
+        # so a 1m row only ever sees higher-timeframe bars that had fully
+        # closed by that point — this was a real lookahead leak, not just an
+        # off-by-one, and it's the reason ctx_60m features (esp.
+        # dist_from_vwap_sigma) previously dominated feature importance.
+        ctx_tf_seconds = int(ctx_tf) * 60
+        ctx_slice = ctx_slice.copy()
+        ctx_slice["close_time"] = ctx_slice["time"] + ctx_tf_seconds
+        ctx_slice = ctx_slice.drop(columns=["time"])
+        df = pd.merge_asof(df.sort_values("time"), ctx_slice.sort_values("close_time"),
+                            left_on="time", right_on="close_time", direction="backward")
+        df = df.drop(columns=["close_time"])
+        print(f"[{symbol} {timeframe}] joined context tf={ctx_tf} (close-time aligned, {len(ctx_df)} bars)", file=sys.stderr)
 
     tf_cfg = load_symbol_config(symbol, timeframe)
     df = label_triple_barrier(df, tp_points=tf_cfg["tp_points"], sl_points=tf_cfg["sl_points"],

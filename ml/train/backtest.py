@@ -30,14 +30,20 @@ import sys
 from pathlib import Path
 
 import lightgbm as lgb
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
 from ..data_collection.collect_replay import epoch_to_date_str
 from ..features.build_dataset import load_symbol_config
+from ..features.indicators import ET
 from .train_model import MODELS_DIR, PROCESSED_DIR, load_dataset, time_split
 
 TRADE_LOG_DIR = Path.home() / "data" / "ml-backtests"
+PLOTS_DIR = Path.home() / "data" / "ml-plots"
 
 
 def load_model(symbol: str, timeframe: str, direction: str):
@@ -115,6 +121,7 @@ def run_backtest(symbol: str, timeframe: str, days: int, threshold: float, min_e
         bars_to_resolve = df[bars_col].iloc[i]
         prob_used = pl if take_long else ps
 
+        entry_price = float(df["close"].iloc[i])
         if pd.isna(label):
             outcome = "timeout"
             points = 0.0
@@ -128,11 +135,21 @@ def run_backtest(symbol: str, timeframe: str, days: int, threshold: float, min_e
             points = -sl_points
             hold_bars = int(bars_to_resolve)
 
+        exit_idx = min(i + hold_bars, n - 1)
+        if outcome == "win":
+            exit_price = entry_price + tp_points if direction == "long" else entry_price - tp_points
+        elif outcome == "loss":
+            exit_price = entry_price - sl_points if direction == "long" else entry_price + sl_points
+        else:
+            exit_price = float(df["close"].iloc[exit_idx])
+
         trades.append({
             "entry_time": int(df["time"].iloc[i]),
+            "exit_time": int(df["time"].iloc[exit_idx]),
             "direction": direction,
             "prob": float(prob_used),
-            "entry_price": float(df["close"].iloc[i]),
+            "entry_price": entry_price,
+            "exit_price": exit_price,
             "outcome": outcome,
             "points": points,
             "dollars": points * point_value,
@@ -148,6 +165,8 @@ def summarize(trades: pd.DataFrame) -> dict:
         return {"n_trades": 0}
     resolved = trades[trades["outcome"] != "timeout"]
     wins = resolved[resolved["outcome"] == "win"]
+    gross_profit = trades.loc[trades["dollars"] > 0, "dollars"].sum()
+    gross_loss = -trades.loc[trades["dollars"] < 0, "dollars"].sum()  # positive number
     return {
         "n_trades": len(trades),
         "n_resolved": len(resolved),
@@ -156,8 +175,63 @@ def summarize(trades: pd.DataFrame) -> dict:
         "total_points": float(trades["points"].sum()),
         "total_dollars": float(trades["dollars"].sum()),
         "avg_points_per_trade": float(trades["points"].mean()),
+        # gross profit / gross loss — how many dollars of winners for every dollar
+        # of losers, independent of trade count or win rate. >1 means profitable;
+        # infinite (no losses at all) reported as null rather than a fake number.
+        "profit_factor": float(gross_profit / gross_loss) if gross_loss > 0 else None,
+        "gross_profit": float(gross_profit),
+        "gross_loss": float(gross_loss),
         "by_direction": trades.groupby("direction")["points"].agg(["count", "sum", "mean"]).to_dict("index"),
     }
+
+
+def plot_trade_date(price_df: pd.DataFrame, trades: pd.DataFrame, date: str, symbol: str, timeframe: str, out_path: Path):
+    """Both long and short entries/exits for one calendar day (ET) on a single
+    price chart — green markers for wins, red for losses, triangle-up for long
+    entries, triangle-down for short entries, X for exits."""
+    et = pd.to_datetime(price_df["time"], unit="s", utc=True).dt.tz_convert(ET)
+    day_mask = et.dt.strftime("%Y-%m-%d") == date
+    day = price_df[day_mask]
+    day_times = et[day_mask]
+    if day.empty:
+        raise ValueError(f"No price data for {date}")
+
+    day_trades = trades[trades["entry_time"].apply(lambda t: epoch_to_date_str(int(t))) == date]
+
+    fig, ax = plt.subplots(figsize=(13, 5.5))
+    ax.plot(day_times, day["close"], color="black", linewidth=0.7, label="price", zorder=1)
+
+    for _, t in day_trades.iterrows():
+        entry_dt = pd.to_datetime(t["entry_time"], unit="s", utc=True).tz_convert(ET)
+        exit_dt = pd.to_datetime(t["exit_time"], unit="s", utc=True).tz_convert(ET)
+        win = t["outcome"] == "win"
+        color = "#2CA02C" if win else ("#D62728" if t["outcome"] == "loss" else "#999999")
+        marker_entry = "^" if t["direction"] == "long" else "v"
+        ax.scatter([entry_dt], [t["entry_price"]], marker=marker_entry, color=color, s=90, zorder=5,
+                   edgecolors="black", linewidths=0.5)
+        ax.scatter([exit_dt], [t["exit_price"]], marker="x", color=color, s=80, zorder=5)
+        ax.plot([entry_dt, exit_dt], [t["entry_price"], t["exit_price"]], "--", color=color, linewidth=0.9, zorder=4, alpha=0.8)
+
+    n_long = (day_trades["direction"] == "long").sum()
+    n_short = (day_trades["direction"] == "short").sum()
+    n_win = (day_trades["outcome"] == "win").sum()
+    n_loss = (day_trades["outcome"] == "loss").sum()
+    day_pnl = day_trades["dollars"].sum()
+
+    legend_elems = [
+        plt.Line2D([0], [0], marker="^", color="w", markerfacecolor="gray", markeredgecolor="black", markersize=9, label="long entry"),
+        plt.Line2D([0], [0], marker="v", color="w", markerfacecolor="gray", markeredgecolor="black", markersize=9, label="short entry"),
+        plt.Line2D([0], [0], marker="x", color="gray", markersize=8, label="exit", linestyle="None"),
+        plt.Line2D([0], [0], color="#2CA02C", linewidth=2, label="win"),
+        plt.Line2D([0], [0], color="#D62728", linewidth=2, label="loss"),
+    ]
+    ax.legend(handles=legend_elems, loc="upper left", fontsize=8)
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M", tz=ET))
+    ax.set_title(f"{symbol} {timeframe} — {date} — {len(day_trades)} trades ({n_long} long / {n_short} short, "
+                 f"{n_win}W/{n_loss}L, PNL ${day_pnl:+.0f})")
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=130)
+    plt.close(fig)
 
 
 def main():
@@ -167,6 +241,7 @@ def main():
     parser.add_argument("--days", type=int, default=7)
     parser.add_argument("--threshold", type=float, default=0.55, help="minimum probability to take a trade")
     parser.add_argument("--min-edge", type=float, default=0.05, help="minimum prob_long - prob_short gap (or vice versa) to pick a direction")
+    parser.add_argument("--plot-date", help="YYYY-MM-DD (ET) — plot that day's long+short entries/exits on one chart")
     args = parser.parse_args()
 
     trades = run_backtest(args.symbol, args.timeframe, args.days, args.threshold, args.min_edge)
@@ -178,6 +253,13 @@ def main():
     out_path = TRADE_LOG_DIR / f"{stem}_backtest_trades.csv"
     trades.to_csv(out_path, index=False)
     print(f"\nTrade log: {out_path}", file=sys.stderr)
+
+    if args.plot_date and not trades.empty:
+        full_df = load_dataset(args.symbol, args.timeframe)
+        PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+        plot_path = PLOTS_DIR / f"{stem}_backtest_{args.plot_date}.png"
+        plot_trade_date(full_df, trades, args.plot_date, args.symbol, args.timeframe, plot_path)
+        print(f"Plot: {plot_path}", file=sys.stderr)
 
 
 if __name__ == "__main__":

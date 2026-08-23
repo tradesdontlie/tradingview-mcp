@@ -26,6 +26,17 @@ PROCESSED_DIR = Path.home() / "data" / "ml-processed"
 MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
 MODELS_ARCHIVE_DIR = MODELS_DIR / "archive"
 
+# Asian/London/NY genuinely trade differently (different volatility, different
+# dominant participants) — session_context.py already tags every row with
+# which session(s) it falls in (in_asian_futures / in_london_open /
+# in_ny_session), so training on a session-filtered subset instead of the
+# whole day is just a row filter, not new feature engineering.
+SESSION_COLUMNS = {
+    "asian": "in_asian_futures",
+    "london": "in_london_open",
+    "ny": "in_ny_session",
+}
+
 NON_FEATURE_COLS = {
     "time", "open", "high", "low", "close", "volume", "session_id",
     "label_long", "label_short", "bars_to_resolve_long", "bars_to_resolve_short",
@@ -48,10 +59,18 @@ def time_split(df: pd.DataFrame, test_frac: float):
     return df.iloc[:split_idx], df.iloc[split_idx:]
 
 
-def train(symbol: str, timeframe: str, direction: str, test_frac: float, val_frac: float):
+def train(symbol: str, timeframe: str, direction: str, test_frac: float, val_frac: float,
+          session: str | None = None):
     label_col = f"label_{direction}"
     df = load_dataset(symbol, timeframe)
     df = df.dropna(subset=[label_col]).reset_index(drop=True)
+
+    if session:
+        session_col = SESSION_COLUMNS[session]
+        before = len(df)
+        df = df[df[session_col] == 1].reset_index(drop=True)
+        print(f"[{symbol} {timeframe} {direction}] session={session}: {before} -> {len(df)} rows", file=sys.stderr)
+
     feat_cols = feature_columns(df)
     print(f"[{symbol} {timeframe} {direction}] {len(df)} labeled rows, {len(feat_cols)} features", file=sys.stderr)
 
@@ -89,7 +108,8 @@ def train(symbol: str, timeframe: str, direction: str, test_frac: float, val_fra
     print(f"[{symbol} {timeframe} {direction}] test metrics: {json.dumps(metrics, indent=2)}", file=sys.stderr)
 
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
-    model_path = MODELS_DIR / f"{symbol.replace(':', '_').replace('!', '')}_{timeframe}_{direction}.txt"
+    session_suffix = f"_{session}" if session else ""
+    model_path = MODELS_DIR / f"{symbol.replace(':', '_').replace('!', '')}_{timeframe}_{direction}{session_suffix}.txt"
     meta_path = model_path.with_suffix(".meta.json")
 
     # train_model.py used to overwrite the previous model with no history at
@@ -106,7 +126,7 @@ def train(symbol: str, timeframe: str, direction: str, test_frac: float, val_fra
 
     model.save_model(str(model_path))
     meta_path.write_text(json.dumps({
-        "symbol": symbol, "timeframe": timeframe, "direction": direction,
+        "symbol": symbol, "timeframe": timeframe, "direction": direction, "session": session,
         "feature_columns": feat_cols, "metrics": metrics,
         "train_rows": len(train_df), "val_rows": len(val_df), "test_rows": len(test),
         "time_range": [int(df["time"].min()), int(df["time"].max())],
@@ -123,8 +143,9 @@ def main():
     parser.add_argument("--direction", choices=["long", "short"], required=True)
     parser.add_argument("--test-frac", type=float, default=0.2)
     parser.add_argument("--val-frac", type=float, default=0.15)
+    parser.add_argument("--session", choices=list(SESSION_COLUMNS), help="train only on this session's bars (asian/london/ny) instead of all day")
     args = parser.parse_args()
-    train(args.symbol, args.timeframe, args.direction, args.test_frac, args.val_frac)
+    train(args.symbol, args.timeframe, args.direction, args.test_frac, args.val_frac, args.session)
 
 
 if __name__ == "__main__":

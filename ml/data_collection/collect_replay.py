@@ -260,11 +260,33 @@ def _collect_locked(symbol: str, timeframe: str, start_date: str, end_date: str,
     # docstring for why the bar-to-bar check alone can miss this.
     last_good_close = float(existing["close"].iloc[-1]) if len(existing) else None
 
+    hit_live_edge = False
     try:
-        while batch_idx < max_batches:
+        while batch_idx < max_batches and not hit_live_edge:
             batch_idx += 1
             for step_no in range(batch_size):
-                step_result = tv(["replay", "step"])
+                try:
+                    step_result = tv(["replay", "step"])
+                except RuntimeError as e:
+                    # Confirmed via MGC1! 60m repeatedly dying at this exact
+                    # point: replay stepping toward a market-closed boundary
+                    # (e.g. Friday close -> weekend) exits the replay session
+                    # out from under us instead of just stopping at the last
+                    # available bar. Previously this propagated as an
+                    # unhandled crash, and since the ohlcv() read (and thus
+                    # flush()) for this batch hadn't run yet, EVERY bar
+                    # stepped through in the batch so far was silently lost —
+                    # explaining why retries kept landing on the same
+                    # timestamp. Treat it like reaching end_ts: stop stepping,
+                    # fall through to the ohlcv/flush below, and end the run
+                    # instead of crashing.
+                    if "Replay is not started" in str(e):
+                        print(f"[{symbol} {timeframe}]   step {step_no + 1}/{batch_size} (batch {batch_idx}): "
+                              f"replay exited (likely hit a market-closed boundary) — stopping here, "
+                              f"saving what was collected so far.", file=sys.stderr)
+                        hit_live_edge = True
+                        break
+                    raise
                 if step_pause:
                     time.sleep(step_pause)
                 current_date = step_result.get("current_date")
@@ -275,6 +297,19 @@ def _collect_locked(symbol: str, timeframe: str, start_date: str, end_date: str,
                           f"(batch {batch_idx}), at {epoch_to_datetime_str(current_date)}", file=sys.stderr)
                 if current_date and current_date >= end_ts:
                     break
+
+            if hit_live_edge:
+                # Replay already exited and the chart reverted to live mode —
+                # an ohlcv read here isn't replay data at all (confirmed: it
+                # trips the contamination check against last_good_close nearly
+                # every time), so don't bother reading or flushing it. Whatever
+                # this batch's steps produced before the exit is gone; that's
+                # a real limitation of this API (no per-step bar fetch, only
+                # a bulk read once per batch), not something worth chasing
+                # further right now.
+                print(f"[{symbol} {timeframe}] batch {batch_idx}: skipping ohlcv read after live-edge exit "
+                      f"(chart is back in live mode, not replay)", file=sys.stderr)
+                break
 
             bars = tv(["ohlcv", "-n", "500"]).get("bars", [])
             if bars_look_contaminated(bars, reference_price=last_good_close):
@@ -335,7 +370,14 @@ def _collect_locked(symbol: str, timeframe: str, start_date: str, end_date: str,
     finally:
         if pending_rows:
             existing = flush(symbol, timeframe, existing, pending_rows)
-        tv(["replay", "stop"])
+        try:
+            tv(["replay", "stop"])
+        except RuntimeError as e:
+            # Already exited on its own (the hit_live_edge case above) —
+            # nothing to stop, and letting this raise here would mask the
+            # clean return with a spurious crash.
+            if "Replay is not started" not in str(e):
+                raise
         print(f"[{symbol} {timeframe}] done. total bars on disk: {len(existing)}", file=sys.stderr)
 
     return existing
@@ -384,7 +426,18 @@ def plan_runs(symbol: str, timeframe: str, target_start: str, target_end: str) -
         print(f"[{symbol} {timeframe}] internal gap: {epoch_to_datetime_str(before)} -> {epoch_to_datetime_str(after)}", file=sys.stderr)
         runs.append((epoch_to_replay_datetime_str(before), epoch_to_date_str(after)))
 
-    if existing_max < target_end:
+    # Comparing bare *dates* here ("2026-08-21" < "2026-08-21" is False) missed
+    # a real case: a run that only reaches the first bar of target_end's day
+    # (e.g. just its 00:00 bar) looks "equal" to target_end and gets skipped,
+    # even though nearly the whole day is still missing — confirmed the hard
+    # way when 5m/60m context data quietly stopped updating for the last
+    # ~17-41 hours of two different symbols while the 1m execution data kept
+    # going, freezing the model's top feature at a stale value for that whole
+    # stretch. Compare actual timestamps instead, with a couple hours of
+    # slack so a genuinely-complete day (last bar shortly before target_end's
+    # boundary) doesn't spuriously trigger a run.
+    target_end_ts = date_str_to_epoch(target_end) + 86400
+    if int(existing["time"].max()) < target_end_ts - 2 * 3600:
         # Resume from the *exact* last bar, minute-precise (see
         # epoch_to_replay_datetime_str) — a bare date here would restart
         # replay hours before the last collected bar and re-walk all of it
