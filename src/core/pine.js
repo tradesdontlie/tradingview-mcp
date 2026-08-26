@@ -458,7 +458,27 @@ export async function smartCompile() {
       }
       if (addBtn) { addBtn.click(); return 'Add to chart'; }
       if (updateBtn) { updateBtn.click(); return 'Update on chart'; }
-      if (saveBtn) { saveBtn.click(); return 'Pine Save'; }
+      // Language-independent fallback: the English text match above only
+      // works when the TradingView UI language is English. On any other
+      // locale (e.g. German) the compile/add-to-chart icon button has no
+      // matching text, so we locate it structurally instead: it's the
+      // icon-only button ("noContent" class, no text) that sits immediately
+      // before the Save button inside the script toolbar row.
+      if (saveBtn) {
+        var row = saveBtn.closest('.tv-script-widget') || saveBtn.parentElement;
+        var rowBtns = row ? Array.prototype.slice.call(row.querySelectorAll('button')) : [];
+        var saveIdx = rowBtns.indexOf(saveBtn);
+        var playBtn = null;
+        for (var j = saveIdx - 1; j >= 0; j--) {
+          if (rowBtns[j].className.indexOf('noContent') !== -1 && rowBtns[j].offsetParent !== null) {
+            playBtn = rowBtns[j];
+            break;
+          }
+        }
+        if (playBtn) { playBtn.click(); return 'Add to chart (structural)'; }
+        saveBtn.click();
+        return 'Pine Save';
+      }
       return null;
     })()
   `);
