@@ -227,8 +227,17 @@ async function _probeCdp(cdpPort) {
   });
 }
 
-function _spawnDetached(spawnFn, exe, args) {
-  const child = spawnFn(exe, args, { detached: true, stdio: 'ignore' });
+function _spawnDetached(spawnFn, exe, args, { tolerateSyncFailure = false } = {}) {
+  let child;
+  try {
+    child = spawnFn(exe, args, { detached: true, stdio: 'ignore' });
+  } catch (e) {
+    // Windows rejects a WindowsApps binary with a synchronous EPERM throw
+    // rather than the async 'error' event the caller waits on. Hand back a stub
+    // carrying the failure so the local-copy fallback still gets its turn.
+    if (!tolerateSyncFailure) throw e;
+    return { pid: null, spawnError: e.code || e.message, unref() {}, on() {}, off() {} };
+  }
   child.unref();
   return child;
 }
@@ -236,6 +245,7 @@ function _spawnDetached(spawnFn, exe, args) {
 // Resolves once with an error string if the process fails/exits within graceMs,
 // or with null if it survives that long.
 function _spawnFailedEarly(child, graceMs = 1500) {
+  if (child.spawnError) return Promise.resolve(child.spawnError);
   return new Promise((resolve) => {
     const timer = setTimeout(() => { cleanup(); resolve(null); }, graceMs);
     const onError = (e) => { cleanup(); resolve(e.code || e.message || 'spawn error'); };
@@ -273,7 +283,10 @@ function _copyMsixPackageLocal(tvPath, { cpSync, rmSync, readdirSync, existsSync
   if (!existsSync(dstExe)) {
     try {
       for (const entry of readdirSync(cacheRoot)) {
-        if (entry !== pkgName && /^TradingView\./i.test(entry)) {
+        // Match anywhere, not just a leading "TradingView.": Store packages are
+        // publisher-prefixed (31178TradingViewInc.TradingView_...), and stale
+        // copies would otherwise pile up at ~330MB each.
+        if (entry !== pkgName && /TradingView/i.test(entry)) {
           rmSync(join(cacheRoot, entry), { recursive: true, force: true });
         }
       }
@@ -318,7 +331,9 @@ export async function launch({ port, kill_existing, _deps } = {}) {
     // MSIX/Windows Store install — InstallLocation is in WindowsApps, which is ACL-restricted
     // for normal `dir` enumeration but readable via Get-AppxPackage without elevation.
     try {
-      const ps = 'powershell -NoProfile -Command "(Get-AppxPackage -Name \'TradingView.Desktop\' -ErrorAction SilentlyContinue).InstallLocation"';
+      // Match on a wildcard: the published package name is publisher-prefixed
+      // (e.g. 31178TradingViewInc.TradingView), not a fixed literal.
+      const ps = 'powershell -NoProfile -Command "(Get-AppxPackage -Name \'*TradingView*\' -ErrorAction SilentlyContinue | Select-Object -First 1).InstallLocation"';
       const installDir = deps.execSync(ps, { timeout: 5000 }).toString().trim();
       if (installDir) {
         const candidate = `${installDir}\\TradingView.exe`;
@@ -360,11 +375,12 @@ export async function launch({ port, kill_existing, _deps } = {}) {
   if (killFirst) await killExisting();
 
   const cdpArgs = [`--remote-debugging-port=${cdpPort}`];
-  let child = _spawnDetached(deps.spawn, tvPath, cdpArgs);
+  const fromWindowsApps = platform === 'win32' && WINDOWS_APPS_RE.test(tvPath);
+  let child = _spawnDetached(deps.spawn, tvPath, cdpArgs, { tolerateSyncFailure: fromWindowsApps });
   let info = null;
   let usedLocalCopy = false;
 
-  if (platform === 'win32' && WINDOWS_APPS_RE.test(tvPath)) {
+  if (fromWindowsApps) {
     const earlyFailure = await _spawnFailedEarly(child);
     if (!earlyFailure) {
       info = await _waitForCdp({ cdpPort, attempts: 15, delay: deps.delay, probeCdp: deps.probeCdp });
