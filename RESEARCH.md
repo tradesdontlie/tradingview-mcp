@@ -22,7 +22,7 @@ How does an agent reason about data that may be stale by the time it responds? W
 
 ### 3. Tool Granularity
 
-Should an agent have one `read_chart` tool or 78 granular tools? This project chose granularity — separate tools for quote, OHLCV, indicator values, pine lines, pine labels, pine tables, pine boxes, etc.
+Should an agent have one `read_chart` tool or 84 granular tools? This project chose granularity — separate tools for quote, OHLCV, indicator values, pine lines, pine labels, pine tables, pine boxes, etc.
 
 The tradeoff: granular tools give the agent precise control and small payloads, but require the agent to know which tool to call (solved via `CLAUDE.md` decision trees and MCP server instructions). A single coarse tool would be simpler but would waste context on unneeded data.
 
@@ -54,7 +54,7 @@ The most impactful design decision was making all tools return compact output by
 
 ### Tool Count Does Not Confuse the Agent
 
-78 tools seems excessive, but with clear MCP server instructions and a `CLAUDE.md` decision tree, Claude consistently selects the right tools. The key is descriptive tool names and the instruction block — not reducing tool count.
+84 tools seems excessive, but with clear MCP server instructions and a `CLAUDE.md` decision tree, Claude consistently selects the right tools. The key is descriptive tool names and the instruction block — not reducing tool count.
 
 ### Pine Script Development is the Strongest Use Case
 
