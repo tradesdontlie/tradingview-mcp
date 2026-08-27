@@ -110,6 +110,10 @@ These tools can return large payloads. Follow these rules to avoid context bloat
 | `data_get_ohlcv` (100 bars) | ~8 KB |
 | `capture_screenshot` | ~300 bytes (returns file path, not image data) |
 
+## User Preferences
+
+- **Default chart layout: `PBNormalWeekly`** — the user's preferred saved layout. Any automated/scheduled TradingView work (scan-sync routines, etc.) should `layout_switch` to this layout before making changes, regardless of the scan's own timeframe (daily scans included — this is a fixed default, not matched to cadence).
+
 ## Tool Conventions
 
 - All tools return `{ success: true/false, ... }`
