@@ -2,13 +2,16 @@ import CDP from 'chrome-remote-interface';
 
 let client = null;
 let targetInfo = null;
+let explicitTargetId = null;
+let _cdpFactory = CDP;
+let _fetchFn = (...args) => fetch(...args);
 // Overridable via TV_CDP_HOST/TV_CDP_PORT (or CDP_HOST/CDP_PORT) env vars.
 // Default is 127.0.0.1, not localhost: on some Windows machines localhost
 // resolves to ::1 first, and Electron's --remote-debugging-port only listens on IPv4.
 export const CDP_HOST = process.env.TV_CDP_HOST || process.env.CDP_HOST || '127.0.0.1';
 export const CDP_PORT = Number(process.env.TV_CDP_PORT || process.env.CDP_PORT) || 9222;
-const MAX_RETRIES = 5;
-const BASE_DELAY = 500;
+let MAX_RETRIES = 5;
+let BASE_DELAY = 500;
 
 // Known direct API paths discovered via live probing (see PROBE_RESULTS.md)
 const KNOWN_PATHS = {
@@ -53,18 +56,33 @@ export function requireFinite(value, name) {
 export async function getClient() {
   if (client) {
     try {
-      // Quick liveness check
-      await client.Runtime.evaluate({ expression: '1', returnByValue: true });
-      return client;
+      const probe = await client.Runtime.evaluate({
+        expression: "typeof window.TradingViewApi !== 'undefined' && !!(window.TradingViewApi && window.TradingViewApi._activeChartWidgetWV)",
+        returnByValue: true,
+      });
+      if (probe.result?.value === true) return client;
+      try { await client.close(); } catch { /* already gone */ }
+      client = null;
+      targetInfo = null;
     } catch {
+      try { await client.close(); } catch { /* already gone */ }
       client = null;
       targetInfo = null;
     }
+  }
+  if (explicitTargetId) {
+    try {
+      const still = await findTargetById(explicitTargetId);
+      if (still) return connect(explicitTargetId);
+    } catch { /* network error — fall through to connect() with retry */ }
+    explicitTargetId = null;
   }
   return connect();
 }
 
 export async function connect(targetId = null) {
+  if (targetId) explicitTargetId = targetId;
+  else explicitTargetId = null;
   let lastError;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
@@ -75,7 +93,7 @@ export async function connect(targetId = null) {
           : 'No TradingView chart target found. Is TradingView open with a chart?');
       }
       targetInfo = target;
-      client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: target.id });
+      client = await _cdpFactory({ host: CDP_HOST, port: CDP_PORT, target: target.id });
 
       // Enable required domains
       await client.Runtime.enable();
@@ -108,16 +126,22 @@ export async function reconnectTo(targetId) {
 }
 
 async function findChartTarget() {
-  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
+  const resp = await _fetchFn(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
   const targets = await resp.json();
-  // Prefer targets with tradingview.com/chart in the URL
-  return targets.find(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
-    || targets.find(t => t.type === 'page' && /tradingview/i.test(t.url))
-    || null;
+  const pages = targets.filter(t => t.type === 'page');
+  // 1) Real chart page: web (tradingview.com/chart) or desktop (Electron) where the
+  //    loaded layout URL contains /chart/.
+  const chart = pages.find(t => /tradingview\.com\/chart|\/chart\//i.test(t.url));
+  if (chart) return chart;
+  // 2) Desktop fallback: every TradingView.app file:// page matches /tradingview/i,
+  //    so the old fallback grabbed the window shell / new-tab. Exclude known
+  //    non-chart shells/helpers instead of taking the first match blindly.
+  const NON_CHART = /new-tab|tooltip|browser-api-container|renderer-services|drag-service|\/window\/index\.html/i;
+  return pages.find(t => /tradingview/i.test(t.url) && !NON_CHART.test(t.url)) || null;
 }
 
 async function findTargetById(id) {
-  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
+  const resp = await _fetchFn(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
   const targets = await resp.json();
   return targets.find(t => t.id === id) || null;
 }
@@ -155,7 +179,18 @@ export async function disconnect() {
     try { await client.close(); } catch {}
     client = null;
     targetInfo = null;
+    explicitTargetId = null;
   }
+}
+
+export function _resetForTest({ cdpFactory, fetchFn, retries, delay } = {}) {
+  client = null;
+  targetInfo = null;
+  explicitTargetId = null;
+  if (cdpFactory) _cdpFactory = cdpFactory;
+  if (fetchFn) _fetchFn = fetchFn;
+  if (retries !== undefined) MAX_RETRIES = retries;
+  if (delay !== undefined) BASE_DELAY = delay;
 }
 
 // --- Direct API path helpers ---
