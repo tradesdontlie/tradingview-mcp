@@ -81,6 +81,19 @@ describe('CLI — help and routing', () => {
 });
 
 describe('CLI — pine analyze (offline)', () => {
+  it('emits one complete JSON document when piped output exceeds 64 KiB', () => {
+    const violations = Array.from(
+      { length: 1800 },
+      (_, index) => `v${index} = array.get(arr, ${index + 5})`,
+    ).join('\n');
+    const source = `//@version=6\nindicator("large")\narr = array.from(1, 2, 3)\n${violations}`;
+    const { stdout, exitCode } = run(['pine', 'analyze'], { input: source });
+    assert.equal(exitCode, 0);
+    assert.ok(Buffer.byteLength(stdout, 'utf8') > 65536);
+    const result = JSON.parse(stdout);
+    assert.ok(result.issue_count > 1000);
+  });
+
   it('analyzes clean v6 script', () => {
     const source = '//@version=6\nindicator("test")\nplot(close)';
     const { stdout, exitCode } = run(['pine', 'analyze'], { input: source });

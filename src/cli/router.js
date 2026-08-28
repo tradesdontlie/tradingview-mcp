@@ -3,6 +3,7 @@
  * Zero dependencies — uses only Node.js built-ins.
  */
 import { parseArgs } from 'node:util';
+import { writeFileSync } from 'node:fs';
 
 /** @type {Map<string, { description: string, options?: object, handler: Function, subcommands?: Map<string, object> }>} */
 const commands = new Map();
@@ -131,7 +132,11 @@ export async function run(argv) {
 async function execute(handler, values, positionals) {
   try {
     const result = await handler(values, positionals);
-    console.log(JSON.stringify(result, null, 2));
+    // console.log() writes asynchronously when stdout is a pipe. Calling
+    // process.exit() immediately after a large Strategy Tester payload used
+    // to truncate it at the pipe buffer boundary (~64 KiB). A synchronous
+    // descriptor write preserves the CLI's one-complete-JSON contract.
+    writeFileSync(1, `${JSON.stringify(result, null, 2)}\n`);
     process.exit(0);
   } catch (err) {
     handleError(err);
@@ -140,11 +145,12 @@ async function execute(handler, values, positionals) {
 
 function handleError(err) {
   const message = err.message || String(err);
+  const rendered = `${JSON.stringify({ success: false, error: message }, null, 2)}\n`;
   // Connection failures get exit code 2
   if (/CDP|connection|ECONNREFUSED|not running/i.test(message)) {
-    console.error(JSON.stringify({ success: false, error: message }, null, 2));
+    writeFileSync(2, rendered);
     process.exit(2);
   }
-  console.error(JSON.stringify({ success: false, error: message }, null, 2));
+  writeFileSync(2, rendered);
   process.exit(1);
 }
