@@ -37,7 +37,8 @@ Reading custom Pine indicator output (line.new/label.new/table.new/box.new drawi
 - data_get_pine_labels → text annotations with prices ("PDH 24550", "Bias Long", etc.)
 - data_get_pine_tables → table data as formatted rows (session stats, analytics dashboards)
 - data_get_pine_boxes → price zones as {high, low} pairs
-- ALWAYS pass study_filter to target a specific indicator by name (e.g., study_filter="Profiler")
+- data_get_pine_shapes → plotshape/plotchar markers (triangles, diamonds, squares) with OHLC of the bar they fired on
+- ALWAYS pass study_filter to target a specific indicator by name (e.g., study_filter="Flow Matrix")
 - Indicators must be VISIBLE on chart for these to work
 
 Changing the chart:

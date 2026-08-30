@@ -79,6 +79,14 @@ export function registerDataTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
+  server.tool('data_get_pine_shapes', 'Read plotshape/plotchar markers from Pine Script indicators. Returns which bars have active shape signals (triangles, diamonds, squares, circles, labels) with OHLC data. Use study_filter to target a specific indicator.', {
+    study_filter: z.string().optional().describe('Substring to match study name (e.g., "Flow Matrix"). Omit for all.'),
+    last_n_bars: z.coerce.number().optional().describe('Number of recent bars to scan (default 100, max 500)'),
+  }, async ({ study_filter, last_n_bars }) => {
+    try { return jsonResult(await core.getPineShapes({ study_filter, last_n_bars })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
   server.tool('data_get_study_values', 'Get current indicator values from the data window for all visible studies (RSI, MACD, Bollinger Bands, EMAs, custom indicators with plot()).', {}, async () => {
     try { return jsonResult(await core.getStudyValues()); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
