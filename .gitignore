@@ -5,3 +5,4 @@ temp_*
 *.log
 discovery-log.json
 rules.json
+.DS_Store
