@@ -105,28 +105,28 @@ export const SOURCE_BINDINGS = Object.freeze({
   sma_fib: Object.freeze({
     definition_version: 'sma-fib-watchlist-alert-scanner/v2',
     source_path: 'ma reaction classifier/sma-fib-watchlist-alert-scanner-metals-v2.pine',
-    source_sha256: '857af9158cfaf63a0b8d52ea65008809c9dda3cef7ca3d68cad4c58d1f7a1564',
+    source_sha256: '963c8e848fc6dd3cc004c5d8c548182669bb04e608f18ed4c20a427ba8b65386',
     selected_query_source_path: 'contracts/sources/sma-fib-confluence-selected-v2.pine',
     selected_query_source_sha256: 'a6157850ff55cce7c4c539ab59d0b337a1db553327a8cc8f3ef0147aa9d12ec0',
   }),
   rsi_scanner_s1: Object.freeze({
     definition_version: 'rsi-watchlist-alert-scanner/v1',
     source_path: 'rsi indicator/bullish-rsi-watchlist-alert-scanner-metals-s01-v1.pine',
-    source_sha256: 'a53aa4fe99d765870978ea70180f28047fb44da3de8104e9ef6a408679d01ba1',
+    source_sha256: '3614a1d689a56487cc796ea8709c60e56439f836a1f500f755ae001015a3a90a',
     selected_query_source_path: 'contracts/sources/rsi-divergence-selected-v1.pine',
     selected_query_source_sha256: '5c8368f21c3d83fbac517f250b0bb6614924286fecde403701de1e40d722832e',
   }),
   rsi_scanner_s2: Object.freeze({
     definition_version: 'rsi-watchlist-alert-scanner/v1',
     source_path: 'rsi indicator/bullish-rsi-watchlist-alert-scanner-metals-s02-v1.pine',
-    source_sha256: '03e31aeaa57b62a0292573eb2f90745bfadbf670351d3ada9792ed4fe36f08c0',
+    source_sha256: 'de7e7a82a2b64de5cc3cebb543e6998022e9537cb670edc1fbb7def5596e8a2b',
     selected_query_source_path: 'contracts/sources/rsi-divergence-selected-v1.pine',
     selected_query_source_sha256: '5c8368f21c3d83fbac517f250b0bb6614924286fecde403701de1e40d722832e',
   }),
   cup_and_handle: Object.freeze({
     definition_version: '0.2.0-cleanroom',
     source_path: 'cup-and-handle/cup-and-handle.pine',
-    source_sha256: '0247dd799161f4cfde61f172f24bbfd5888b8934008d87ded5e922e6e936483e',
+    source_sha256: 'b7609bda7ecf5d51f003e6ae3b19b25e1ccbaf9744c1b7c398bb813eb21c17bc',
   }),
 });
 

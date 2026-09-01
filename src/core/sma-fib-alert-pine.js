@@ -105,11 +105,16 @@ humanEventText(int mask) =>
     result += hasBit(mask, FIB_INSIDE) ? (str.length(result) == 0 ? "" : "; ") + "Inside the golden Fib zone" : ""
     result
 
+humanMeaning(int mask, bool confluence) =>
+    bool hasMa = hasBit(mask, MA_APPROACH) or hasBit(mask, MA_TOUCH) or hasBit(mask, MA_CROSS_UP) or hasBit(mask, MA_CROSS_DOWN)
+    bool hasFib = hasBit(mask, FIB_APPROACH) or hasBit(mask, FIB_TOUCH) or hasBit(mask, FIB_INSIDE)
+    confluence ? "The 200-period SMA and Fibonacci retracement overlap, making this price area more technically important" : hasMa and hasFib ? "Both a long-term moving-average event and a Fibonacci event fired" : hasMa ? "Price is testing or crossing its long-term 200-period average" : hasFib ? "Price is near the 61.8%-65.0% Fibonacci retracement area" : "A tracked SMA/Fibonacci condition changed"
+
 humanLine(string symbol, string path, int mask, bool confluence) =>
     string profileText = targetProfile == "1D" ? "Daily" : "Weekly"
-    string statusText = path == "PROVISIONAL" ? "WATCH ONLY" : confluence ? "REVIEW" : "LOW PRIORITY"
-    string actionText = path == "PROVISIONAL" ? "Wait for the " + str.lower(profileText) + " close" : confluence ? "SMA/Fib overlap—review the chart" : "No action needed unless it fits your plan"
-    statusText + " — " + shortSymbol(symbol) + " (" + profileText + ")\\n" + humanEventText(mask) + ". " + actionText + ". Not a trade signal."
+    string statusText = path == "PROVISIONAL" ? "Developing - " + str.lower(profileText) + " candle still open" : "Confirmed at " + str.lower(profileText) + " close"
+    string actionText = path == "PROVISIONAL" ? "Wait for the " + str.lower(profileText) + " close, then review the chart" : confluence ? "Review the SMA/Fibonacci overlap on the chart" : "Review only if it fits your plan"
+    "ACTUAL ALERT: " + symbol + "\\nTIMEFRAME: " + str.upper(profileText) + "\\nFIRED: " + humanEventText(mask) + "\\nMEANING: " + humanMeaning(mask, confluence) + "\\nSTATUS: " + statusText + "\\nACTION: " + actionText + ". Not a trade signal."
 
 strictPivotLow() =>
     bool result = bar_index >= PIVOT_LEFT + PIVOT_RIGHT
@@ -325,7 +330,7 @@ if hostSupported
                     string closedKey = symbol + ":" + targetProfile + ":CLOSED:" + closedMaEpisode + ":" + closedPair + ":" + str.tostring(closedTime) + ":" + str.tostring(closedFreshMask)
                     string closedLine = symbol + "|CLOSED|EVENTS=" + eventText(closedFreshMask) + "|MASK=" + str.tostring(closedFreshMask) + "|KEY=" + closedKey + "|MA_EP=" + closedMaEpisode + "|PAIR=" + closedPair + "|STAGE_TIME=" + str.tostring(closedTime) + "|CONF=" + (closedConfluence ? "1" : "0") + "|TARGET_CLOSE_UTC=" + str.format_time(closedCloseTime, "yyyy-MM-dd HH:mm", "UTC") + "|C=" + priceText(closedClose) + "|SMA=" + priceText(closedSma) + "|GP=" + priceText(closedPocketLow) + "-" + priceText(closedPocketHigh)
                     eventLines += (str.length(eventLines) == 0 ? "" : "\\n") + closedLine
-                    humanLines += (str.length(humanLines) == 0 ? "" : "\\n") + humanLine(symbol, "CLOSED", closedFreshMask, closedConfluence)
+                    humanLines += (str.length(humanLines) == 0 ? "" : "\\n\\n") + humanLine(symbol, "CLOSED", closedFreshMask, closedConfluence)
 
             bool developingPairEligible = frozenPairEligible and developingLow >= frozenPairLow and developingHigh <= frozenPairHigh
             float frozenPairRange = developingPairEligible ? frozenPairHigh - frozenPairLow : na
@@ -366,7 +371,7 @@ if hostSupported
                         string currentClosedKey = symbol + ":" + targetProfile + ":CLOSED:" + currentClosedMaEpisode + ":" + currentClosedPair + ":" + str.tostring(developingTime) + ":" + str.tostring(currentClosedFreshMask)
                         string currentClosedLine = symbol + "|CLOSED|EVENTS=" + eventText(currentClosedFreshMask) + "|MASK=" + str.tostring(currentClosedFreshMask) + "|KEY=" + currentClosedKey + "|MA_EP=" + currentClosedMaEpisode + "|PAIR=" + currentClosedPair + "|STAGE_TIME=" + str.tostring(developingTime) + "|CONF=" + (provisionalMaNear and provisionalFibNear ? "1" : "0") + "|TARGET_CLOSE_UTC=" + str.format_time(developingCloseTime, "yyyy-MM-dd HH:mm", "UTC") + "|C=" + priceText(developingClose) + "|SMA=" + priceText(frozenSma) + "|GP=" + priceText(provisionalPocketLow) + "-" + priceText(provisionalPocketHigh)
                         eventLines += (str.length(eventLines) == 0 ? "" : "\\n") + currentClosedLine
-                        humanLines += (str.length(humanLines) == 0 ? "" : "\\n") + humanLine(symbol, "CLOSED", currentClosedFreshMask, provisionalMaNear and provisionalFibNear)
+                        humanLines += (str.length(humanLines) == 0 ? "" : "\\n\\n") + humanLine(symbol, "CLOSED", currentClosedFreshMask, provisionalMaNear and provisionalFibNear)
 
             bool developingFresh = not na(developingTime) and time_close > developingTime and time_close < developingCloseTime
             if realtimeHostClose and developingFresh
@@ -387,10 +392,10 @@ if hostSupported
                     string provisionalKey = symbol + ":" + targetProfile + ":PROVISIONAL:" + provisionalMaEpisode + ":" + provisionalPair + ":" + str.tostring(developingTime) + ":" + str.tostring(freshMask)
                     string provisionalLine = symbol + "|PROVISIONAL|EVENTS=" + eventText(freshMask) + "|MASK=" + str.tostring(freshMask) + "|KEY=" + provisionalKey + "|MA_EP=" + provisionalMaEpisode + "|PAIR=" + provisionalPair + "|STAGE_TIME=" + str.tostring(developingTime) + "|CONF=" + (provisionalConfluence ? "1" : "0") + "|TARGET_CLOSE_UTC=" + str.format_time(developingCloseTime, "yyyy-MM-dd HH:mm", "UTC") + "|C=" + priceText(developingClose) + "|SMA=" + priceText(frozenSma) + "|GP=" + priceText(provisionalPocketLow) + "-" + priceText(provisionalPocketHigh)
                     eventLines += (str.length(eventLines) == 0 ? "" : "\\n") + provisionalLine
-                    humanLines += (str.length(humanLines) == 0 ? "" : "\\n") + humanLine(symbol, "PROVISIONAL", freshMask, provisionalConfluence)
+                    humanLines += (str.length(humanLines) == 0 ? "" : "\\n\\n") + humanLine(symbol, "PROVISIONAL", freshMask, provisionalConfluence)
 
 if hostSupported and barstate.isconfirmed and str.length(eventLines) > 0
-    alert(humanLines + "\\n--- DATA ---\\nSMA_FIB_ATTENTION|V1|PROFILE=" + targetProfile + "|SHARD=" + str.tostring(shard) + "\\n" + eventLines, alert.freq_once_per_bar_close)
+    alert(humanLines, alert.freq_once_per_bar_close)
 
 plot(float(array.size(symbols)), "SFA Configured Symbols", display=display.data_window)
 plot(float(availableCount), "SFA Available Symbols", display=display.data_window)

@@ -644,31 +644,32 @@ f_readableTimeframe() =>
         => profileTimeframe
 
 f_eventHuman(LifecycleEvent event) =>
-    string status = switch event.toStage
-        STAGE_RIM_APPROACH => "WATCH ONLY"
-        STAGE_HANDLE_FORMING => "WATCH ONLY"
-        STAGE_HANDLE_READY => "REVIEW"
-        STAGE_PRICE_BREAKOUT => "REVIEW"
-        STAGE_INVALIDATED => "STATUS"
-        STAGE_EXPIRED => "STATUS"
-        => "STATUS"
     string description = switch event.toStage
-        STAGE_RIM_APPROACH => "Cup is approaching its rim"
+        STAGE_RIM_APPROACH => "Price is approaching the cup rim"
         STAGE_HANDLE_FORMING => "Cup-and-handle is forming"
-        STAGE_HANDLE_READY => "Handle is ready"
-        STAGE_PRICE_BREAKOUT => "Price breakout confirmed"
-        STAGE_INVALIDATED => "Setup invalidated"
-        STAGE_EXPIRED => "Setup expired"
+        STAGE_HANDLE_READY => "Cup-and-handle setup is ready"
+        STAGE_PRICE_BREAKOUT => "Cup-and-handle breakout confirmed"
+        STAGE_INVALIDATED => "Cup-and-handle setup invalidated"
+        STAGE_EXPIRED => "Cup-and-handle setup expired"
         => "Cup-and-handle status changed"
+    string meaning = switch event.toStage
+        STAGE_RIM_APPROACH => "Price is nearing the prior rim; this is an early pattern-development alert"
+        STAGE_HANDLE_FORMING => "A rounded cup is present and the handle is still developing"
+        STAGE_HANDLE_READY => "The handle meets the detector rules; this is a potential breakout setup"
+        STAGE_PRICE_BREAKOUT => "A completed bar closed above the cup rim"
+        STAGE_INVALIDATED => "The pattern no longer meets the detector rules"
+        STAGE_EXPIRED => "The monitoring window ended before the setup completed"
+        => "The detected pattern changed stage"
+    string status = event.provisional ? "Developing on the current " + str.lower(f_readableTimeframe()) + " candle" : event.toStage == STAGE_PRICE_BREAKOUT ? "Confirmed on a completed candle" : event.toStage == STAGE_INVALIDATED or event.toStage == STAGE_EXPIRED ? "Closed" : "Pattern stage confirmed"
     string action = switch event.toStage
-        STAGE_RIM_APPROACH => "Wait for pattern development"
+        STAGE_RIM_APPROACH => "Wait for the pattern to develop"
         STAGE_HANDLE_FORMING => "Wait for the handle to mature"
         STAGE_HANDLE_READY => "Review the chart for a potential breakout"
         STAGE_PRICE_BREAKOUT => "Review the confirmed breakout"
         STAGE_INVALIDATED => "No action"
         STAGE_EXPIRED => "No action"
         => "Review the chart"
-    status + " — " + syminfo.ticker + " (" + f_readableTimeframe() + ")\n" + description + ". " + action + ". Not a trade signal."
+    "ACTUAL ALERT: " + syminfo.tickerid + "\nTIMEFRAME: " + str.upper(f_readableTimeframe()) + "\nFIRED: " + description + "\nMEANING: " + meaning + "\nSTATUS: " + status + "\nACTION: " + action + ". Not a trade signal."
 
 f_eventJson(LifecycleEvent event) =>
     string eventType = event.toStage == STAGE_RIM_APPROACH or event.toStage == STAGE_HANDLE_FORMING ? "attention" : "status"
@@ -1064,7 +1065,7 @@ if supportedProfile and barstate.isconfirmed and eventCount > 0
         if enabled
             if primaryTransitionStage == STAGE_NONE
                 primaryTransitionStage := event.toStage
-            alert(f_eventHuman(event) + "\n--- DATA ---\n" + f_eventJson(event), alert.freq_all)
+            alert(f_eventHuman(event), alert.freq_all)
         if showTransitionLabels
             color eventColor = event.toStage == STAGE_RIM_APPROACH ? color.blue : event.toStage == STAGE_HANDLE_FORMING ? color.orange : event.toStage == STAGE_HANDLE_READY ? color.yellow : event.toStage == STAGE_PRICE_BREAKOUT ? color.lime : color.red
             label.new(bar_index, high, f_stageName(event.toStage), style = label.style_label_down, color = eventColor, textcolor = color.black, size = size.tiny)

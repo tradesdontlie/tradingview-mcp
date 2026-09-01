@@ -227,6 +227,9 @@ f_humanEventName(int bitIndex) =>
         2 => "Confirmed regular bullish RSI divergence"
         => "Confirmed hidden bullish RSI divergence"
 
+f_humanMeaning(int bitIndex) =>
+    bitIndex == 0 or bitIndex == 2 ? "Price made a lower low while RSI made a higher low; this can precede a bullish reversal" : "Price held a higher low while RSI made a lower low; this can precede bullish trend continuation"
+
 f_append(string events, string humanLines, string symbolText, string profile, int mask, int signalTime, bool provisional, int symbolIndex, bool suppressAttachBaseline, int attachedAtMs, array<int> lastEventTimes) =>
     string nextEvents = events
     string nextHumanLines = humanLines
@@ -243,10 +246,10 @@ f_append(string events, string humanLines, string symbolText, string profile, in
                     string prefix = nextEvents == "" ? "" : ","
                     nextEvents += prefix + "{\"symbol\":\"" + symbolText + "\",\"event\":\"" + f_eventName(bitIndex) + "\",\"data_bar_time_ms\":" + str.tostring(signalTime) + ",\"provisional\":" + str.tostring(provisional) + "}"
                     string humanPrefix = nextHumanLines == "" ? "" : "\n\n"
-                    string status = provisional ? "WATCH ONLY" : "REVIEW"
                     string profileLabel = profile == "W" ? "Weekly" : "Daily"
-                    string action = provisional ? "Wait for the " + str.lower(profileLabel) + " close." : "Review the chart."
-                    nextHumanLines += humanPrefix + status + " — " + f_shortSymbol(symbolText) + " (" + profileLabel + ")\n" + f_humanEventName(bitIndex) + ". " + action + " Not a trade signal."
+                    string status = provisional ? "Developing - " + str.lower(profileLabel) + " candle still open" : "Confirmed at " + str.lower(profileLabel) + " close"
+                    string action = provisional ? "Wait for the " + str.lower(profileLabel) + " close, then review the chart" : "Review the completed divergence on the chart"
+                    nextHumanLines += humanPrefix + "ACTUAL ALERT: " + symbolText + "\nTIMEFRAME: " + str.upper(profileLabel) + "\nFIRED: " + f_humanEventName(bitIndex) + "\nMEANING: " + f_humanMeaning(bitIndex) + "\nSTATUS: " + status + "\nACTION: " + action + ". Not a trade signal."
     [nextEvents, nextHumanLines]
 
 var array<string> scannerSymbols = array.from(symbol01, symbol02, symbol03, symbol04, symbol05, symbol06, symbol07, symbol08, symbol09, symbol10, symbol11, symbol12, symbol13, symbol14, symbol15, symbol16, symbol17, symbol18, symbol19, symbol20, symbol21, symbol22, symbol23, symbol24, symbol25, symbol26, symbol27, symbol28, symbol29, symbol30)
@@ -292,8 +295,7 @@ if barstate.isrealtime
     realtimeBootstrapped := true
 
 if barstate.isrealtime and historyBootstrapped and eventJson != ""
-    string payload = "{\"schema_version\":\"rsi-watchlist-alert-batch/v1\",\"definition_version\":\"rsi-watchlist-alert-scanner/v1\",\"scanner_id\":\"" + scannerId + "\",\"profile\":\"" + targetProfile + "\",\"source_sha256\":\"5c8368f21c3d83fbac517f250b0bb6614924286fecde403701de1e40d722832e\",\"events\":[" + eventJson + "]}"
-    alert(humanLines + "\n--- DATA ---\n" + payload, alert.freq_all)
+    alert(humanLines, alert.freq_all)
 
 plot(float(configuredCount), "RSI Configured Symbols", display=display.data_window)
 plot(float(availableCount), "RSI Available Symbols", display=display.data_window)

@@ -18,8 +18,14 @@ import {
   queryInvestmentAttention,
 } from '../src/core/investment-attention-query.js';
 import {
+  generateRsiAlertScannerPine,
+} from '../src/core/rsi-alert-pine.js';
+import {
   proveRsiSemanticParity,
 } from '../src/core/rsi-semantic-parity.js';
+import {
+  renderSmaFibAlertScannerPine,
+} from '../src/core/sma-fib-alert-pine.js';
 
 function stateDir() {
   return mkdtempSync(join(tmpdir(), 'investment-attention-test-'));
@@ -64,6 +70,53 @@ function cupPayload(stage = 'HANDLE_READY') {
 function humanEnvelope(headline, payload) {
   return `${headline}\n--- DATA ---\n${payload}`;
 }
+
+function assertPhoneAlertCopyIsHumanOnly(source) {
+  for (const label of ['ACTUAL ALERT:', 'TIMEFRAME:', 'FIRED:', 'MEANING:', 'STATUS:', 'ACTION:']) {
+    assert.match(source, new RegExp(label));
+  }
+  const alertCalls = source
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line.startsWith('alert('));
+  assert.equal(alertCalls.length > 0, true);
+  for (const call of alertCalls) {
+    assert.doesNotMatch(call, /--- DATA ---|SHARD=|MASK=|KEY=|STAGE_TIME=|data_bar_time_ms/u);
+  }
+}
+
+describe('Investment Attention phone alert copy', () => {
+  it('keeps SMA/Fib phone notifications human-only in generated and deployed source', () => {
+    const generated = renderSmaFibAlertScannerPine({ symbols: ['BATS:SLV'] });
+    const deployed = readFileSync(
+      new URL('../ma reaction classifier/sma-fib-watchlist-alert-scanner-metals-v2.pine', import.meta.url),
+      'utf8',
+    );
+    assertPhoneAlertCopyIsHumanOnly(generated);
+    assertPhoneAlertCopyIsHumanOnly(deployed);
+    assert.match(deployed, /ACTUAL ALERT: " \+ symbol/u);
+  });
+
+  it('keeps RSI phone notifications human-only in generated and both deployed shards', () => {
+    const sources = [
+      generateRsiAlertScannerPine({ symbols: ['BATS:ATI'] }).source,
+      readFileSync(new URL('../rsi indicator/bullish-rsi-watchlist-alert-scanner-metals-s01-v1.pine', import.meta.url), 'utf8'),
+      readFileSync(new URL('../rsi indicator/bullish-rsi-watchlist-alert-scanner-metals-s02-v1.pine', import.meta.url), 'utf8'),
+    ];
+    for (const source of sources) {
+      assertPhoneAlertCopyIsHumanOnly(source);
+      assert.match(source, /Price made a lower low while RSI made a higher low/u);
+      assert.match(source, /Price held a higher low while RSI made a lower low/u);
+    }
+  });
+
+  it('keeps Cup-and-Handle phone notifications human-only and exchange-qualified', () => {
+    const source = readFileSync(new URL('../cup-and-handle/cup-and-handle.pine', import.meta.url), 'utf8');
+    assertPhoneAlertCopyIsHumanOnly(source);
+    assert.match(source, /ACTUAL ALERT: " \+ syminfo\.tickerid/u);
+    assert.match(source, /A rounded cup is present and the handle is still developing/u);
+  });
+});
 
 describe('Investment Attention ledger and collector', () => {
   it('deduplicates SMA provisional to closed as one episode and survives restart', async () => {

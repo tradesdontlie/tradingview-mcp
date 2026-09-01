@@ -6,32 +6,32 @@ import { fileURLToPath } from 'node:url';
 import { disconnect, evaluate, evaluateAsync } from '../src/connection.js';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const receiptPath = resolve(repoRoot, 'analysis/investment-attention-readable-alert-migration-receipt-v1.json');
+const receiptPath = resolve(repoRoot, 'analysis/investment-attention-readable-alert-migration-receipt-v2.json');
 
 const RELEASES = Object.freeze({
   'USER;a4bbd841edfc4444a2253c71953105bf': Object.freeze({
     family: 'sma_fib',
-    old_version: '4.0',
-    new_version: '5.0',
-    source_sha256: '857af9158cfaf63a0b8d52ea65008809c9dda3cef7ca3d68cad4c58d1f7a1564',
+    old_version: '5.0',
+    new_version: '6.0',
+    source_sha256: '963c8e848fc6dd3cc004c5d8c548182669bb04e608f18ed4c20a427ba8b65386',
   }),
   'USER;53eb4225f4f44cb4a9c7d5022fd50419': Object.freeze({
     family: 'rsi',
-    old_version: '1.0',
-    new_version: '2.0',
-    source_sha256: 'a53aa4fe99d765870978ea70180f28047fb44da3de8104e9ef6a408679d01ba1',
+    old_version: '2.0',
+    new_version: '3.0',
+    source_sha256: '3614a1d689a56487cc796ea8709c60e56439f836a1f500f755ae001015a3a90a',
   }),
   'USER;7a48561c91f14232aec86357d70a37e4': Object.freeze({
     family: 'rsi',
-    old_version: '1.0',
-    new_version: '2.0',
-    source_sha256: '03e31aeaa57b62a0292573eb2f90745bfadbf670351d3ada9792ed4fe36f08c0',
+    old_version: '2.0',
+    new_version: '4.0',
+    source_sha256: 'de7e7a82a2b64de5cc3cebb543e6998022e9537cb670edc1fbb7def5596e8a2b',
   }),
   'USER;5ef3959331454d5c8dbabae491ac3eed': Object.freeze({
     family: 'cup_and_handle',
-    old_version: '1.0',
-    new_version: '2.0',
-    source_sha256: '0247dd799161f4cfde61f172f24bbfd5888b8934008d87ded5e922e6e936483e',
+    old_version: '2.0',
+    new_version: '5.0',
+    source_sha256: 'b7609bda7ecf5d51f003e6ae3b19b25e1ccbaf9744c1b7c398bb813eb21c17bc',
   }),
 });
 
@@ -358,7 +358,7 @@ async function main() {
   }
 
   const receipt = {
-    schema_version: 'investment-attention-readable-alert-migration-receipt/v1',
+    schema_version: 'investment-attention-readable-alert-migration-receipt/v2',
     started_at_utc: startedAt,
     completed_at_utc: new Date().toISOString(),
     environment: 'authenticated TradingView production session through loopback CDP',
