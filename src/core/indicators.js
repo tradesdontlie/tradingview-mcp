@@ -174,21 +174,66 @@ export async function setInputs({ entity_id, inputs: inputsRaw }) {
       var study = chart.getStudyById(${safeString(entity_id)});
       if (!study) return { error: 'Study not found: ' + ${safeString(entity_id)} };
       var currentInputs = study.getInputValues();
+      if (!currentInputs || !currentInputs.length) {
+        return { error: 'Study exposes no inputs (input registration unavailable); refusing to write.' };
+      }
       var overrides = ${inputsJson};
+      // Write back ONLY the changed {id, value} pairs. Writing the full input
+      // array corrupts user Pine studies: re-submitting the pineId/pineVersion/
+      // pineFeatures meta-inputs wipes the study's input registration
+      // (getInputValues() then returns []) and every plot goes empty until the
+      // layout is reloaded. Meta-inputs are never legitimate targets, so block
+      // them even when named explicitly.
+      var META = { pineId: 1, pineVersion: 1, pineFeatures: 1, __fast_calc: 1, __profile: 1 };
+      var known = {};
+      for (var i = 0; i < currentInputs.length; i++) known[currentInputs[i].id] = true;
+      var patch = [];
       var updatedKeys = {};
-      for (var i = 0; i < currentInputs.length; i++) {
-        if (overrides.hasOwnProperty(currentInputs[i].id)) {
-          currentInputs[i].value = overrides[currentInputs[i].id];
-          updatedKeys[currentInputs[i].id] = overrides[currentInputs[i].id];
+      var unknown = [];
+      var blocked = [];
+      for (var k in overrides) {
+        if (!overrides.hasOwnProperty(k)) continue;
+        if (META[k]) { blocked.push(k); continue; }
+        if (!known[k]) { unknown.push(k); continue; }
+        patch.push({ id: k, value: overrides[k] });
+        updatedKeys[k] = overrides[k];
+      }
+      if (!patch.length) {
+        var parts = [];
+        if (unknown.length) parts.push('unknown ids: ' + unknown.join(', '));
+        if (blocked.length) parts.push('meta-inputs not writable: ' + blocked.join(', '));
+        return { error: 'No writable inputs matched (' + (parts.join('; ') || 'empty overrides') + '). Use data_get_indicator to list input ids.' };
+      }
+      study.setInputValues(patch);
+      // Verify: registration must survive the write and the values must take.
+      var after = study.getInputValues();
+      if (!after || !after.length) {
+        return { error: 'Input write corrupted the study (getInputValues returned empty afterwards). Reload the chart layout WITHOUT saving to recover.' };
+      }
+      var applied = {};
+      var mismatched = [];
+      for (var j = 0; j < after.length; j++) {
+        var id = after[j].id;
+        if (updatedKeys.hasOwnProperty(id)) {
+          applied[id] = after[j].value;
+          if (JSON.stringify(after[j].value) !== JSON.stringify(updatedKeys[id])) mismatched.push(id);
         }
       }
-      study.setInputValues(currentInputs);
-      return { updated_inputs: updatedKeys };
+      return { updated_inputs: applied, unknown_keys: unknown, blocked_keys: blocked, mismatched: mismatched };
     })()
   `);
 
   if (result && result.error) throw new Error(result.error);
-  return { success: true, entity_id, updated_inputs: result.updated_inputs };
+  const out = { success: true, entity_id, updated_inputs: result.updated_inputs };
+  const warnings = [];
+  if (result.unknown_keys?.length) warnings.push('unknown input ids ignored: ' + result.unknown_keys.join(', '));
+  if (result.blocked_keys?.length) warnings.push('meta-inputs are not writable, ignored: ' + result.blocked_keys.join(', '));
+  if (warnings.length) out.warning = warnings.join('; ');
+  if (result.mismatched?.length) {
+    out.success = false;
+    out.error = 'Read-back mismatch — values did not take for: ' + result.mismatched.join(', ');
+  }
+  return out;
 }
 
 export async function toggleVisibility({ entity_id, visible }) {
