@@ -1,0 +1,1280 @@
+//@version=6
+indicator(
+     "Cup-and-Handle Pattern Watch [Clean-room V1]",
+     shorttitle = "CH Pattern Watch V1",
+     overlay = true,
+     max_bars_back = 700,
+     max_lines_count = 20,
+     max_labels_count = 100)
+
+// Original clean-room implementation. Public TradingView, IBD, and Fidelity
+// documentation is used as a behavioral specification; no protected or
+// proprietary source code was copied or extracted.
+
+string VERSION = "0.2.0-cleanroom"
+string CONFIG_BASE_ID = "ch-recognition-v1"
+
+int LOOKBACK_BARS = 600
+int PIVOT_LEFT = 5
+int PIVOT_RIGHT = 5
+int MAX_PIVOTS_PER_KIND = 64
+int MAX_ACTIVE_FAMILIES = 4
+int MAX_PROVISIONAL_FAMILIES = 2
+int MAX_FAMILY_HISTORY = 512
+int MAX_EVENT_IDS = 512
+int MAX_PARITY_EVENTS = 8
+int PARITY_BAR_IDENTITY_BASE = 1000000
+
+float CENTER_TOLERANCE = 0.35
+float RIM_GAP_PRICE_MAX = 0.08
+float RIM_GAP_HEIGHT_MAX = 0.25
+float MINIMUM_U_SCORE = 0.70
+float MINIMUM_ROBUST_U_SCORE = 0.66
+float BOTTOM_WIDTH_TARGET = 0.12
+float MINIMUM_BOTTOM_DWELL = 0.08
+float MINIMUM_DIRECTIONAL_CONSISTENCY = 0.65
+float DIRECTIONAL_TOLERANCE = 0.06
+float MAXIMUM_DISCONTINUITY = 0.50
+float MAXIMUM_INTERIOR_OVERSHOOT = 0.20
+float MINIMUM_PRIOR_RETURN = 0.15
+float MINIMUM_PRIOR_R2 = 0.15
+float CUP_FORMING_DIAGNOSTIC_RECOVERY = 0.65
+float RIM_APPROACH_CLOSE_RECOVERY = 0.85
+float RIM_APPROACH_CLOSE_OVERSHOOT = 0.003
+float MINIMUM_HANDLE_DEPTH = 0.05
+float MAXIMUM_HANDLE_DEPTH = 0.33
+float MINIMUM_HANDLE_LOW_POSITION = 0.55
+float PROVISIONAL_HANDLE_RIM_DISTANCE = 0.25
+float READY_HANDLE_RIM_DISTANCE = 0.22
+float MAXIMUM_HANDLE_UPWARD_RETURN = 0.08
+float MAXIMUM_HANDLE_RANGE_RATIO = 1.10
+float MAXIMUM_STOCK_HANDLE_VOLUME_RATIO = 1.10
+
+string GROUP_DISPLAY = "Display and events"
+bool showGeometry = input.bool(true, "Show primary geometry", group = GROUP_DISPLAY)
+bool showTransitionLabels = input.bool(true, "Show transition labels", group = GROUP_DISPLAY)
+bool alertRimApproach = input.bool(true, "Alert: right side near rim", group = GROUP_DISPLAY)
+bool alertHandleForming = input.bool(true, "Alert: credible handle forming", group = GROUP_DISPLAY)
+bool alertHandleReady = input.bool(false, "Alert: handle ready", group = GROUP_DISPLAY)
+bool alertPriceBreakout = input.bool(false, "Alert: price breakout confirmed", group = GROUP_DISPLAY)
+bool alertInvalidated = input.bool(false, "Alert: invalidated or expired", group = GROUP_DISPLAY)
+
+int STAGE_NONE = 0
+int STAGE_CUP_FORMING = 1
+int STAGE_RIM_APPROACH = 2
+int STAGE_CUP_CONFIRMED = 3
+int STAGE_HANDLE_FORMING = 4
+int STAGE_HANDLE_READY = 5
+int STAGE_PRICE_BREAKOUT = 6
+int STAGE_INVALIDATED = -1
+int STAGE_EXPIRED = -2
+
+bool supportedTimeframe = timeframe.period == "240" or timeframe.period == "4H" or timeframe.period == "D" or timeframe.period == "1D" or timeframe.period == "W" or timeframe.period == "1W"
+string profileTimeframe = timeframe.period == "240" or timeframe.period == "4H" ? "4H" : timeframe.period == "D" or timeframe.period == "1D" ? "1D" : timeframe.period == "W" or timeframe.period == "1W" ? "1W" : "UNSUPPORTED"
+bool stockAsset = syminfo.type == "stock"
+bool cryptoAsset = syminfo.type == "crypto"
+bool supportedAsset = stockAsset or cryptoAsset
+bool standardChart = chart.is_standard
+bool supportedProfile = supportedTimeframe and supportedAsset and standardChart
+string profileId = not standardChart ? "UNSUPPORTED" : stockAsset ? profileTimeframe == "4H" ? "experimental_stock_4h" : profileTimeframe == "1D" ? "classic_stock_daily" : profileTimeframe == "1W" ? "classic_stock_weekly" : "UNSUPPORTED" : cryptoAsset ? profileTimeframe == "4H" ? "experimental_crypto_4h" : profileTimeframe == "1D" ? "experimental_crypto_daily" : profileTimeframe == "1W" ? "experimental_crypto_weekly" : "UNSUPPORTED" : "UNSUPPORTED"
+int minimumCupBars = profileTimeframe == "4H" ? 30 : profileTimeframe == "1D" ? 35 : profileTimeframe == "1W" ? 7 : 0
+int maximumCupBars = profileTimeframe == "4H" ? 240 : profileTimeframe == "1D" ? 260 : profileTimeframe == "1W" ? 80 : 0
+float minimumDepth = 0.12
+float maximumDepth = stockAsset ? 0.33 : cryptoAsset ? 0.45 : 0.0
+int minimumHandleBars = profileTimeframe == "4H" ? 9 : profileTimeframe == "1D" ? 5 : profileTimeframe == "1W" ? 2 : 0
+string runtimeConfigId = CONFIG_BASE_ID + "|settings:asset=" + (stockAsset ? "stock" : cryptoAsset ? "crypto" : "unsupported") + ",tf=" + profileTimeframe + ",profile=" + profileId + ",lb=600,pl=5,pr=5,cmin=" + str.tostring(minimumCupBars) + ",cmax=" + str.tostring(maximumCupBars) + ",center=0.35,rimprice=0.08,rimdepth=0.25,dmin=0.12,dmax=" + str.tostring(maximumDepth) + ",ushape=0.7,robustu=0.66,bottom=0.12,dwell=0.08,direction=0.65,dirtol=0.06,gap=0.5,overshoot=0.2,priorfrac=0.5,priorminbars=8,priormaxbars=60,priorreturn=0.15,priorr2=0.15,recovery=0.85,diagnostic=0.65,closeover=0.003,handlemin=0.05,handlemax=0.33,handlelow=0.55,hmin=" + str.tostring(minimumHandleBars) + ",hfrac=0.08,hmaxfrac=0.45,hrimforming=0.25,hrimready=0.22,hreturn=0.08,hrange=1.1,hvolume=1.1,hlowconfirm=5,pivots=64,active=4,provisional=2,history=512,trend=true"
+
+type FamilyState
+    string familyId
+    string patternId
+    int stage
+    bool provisional
+    int p1Index
+    int p1Time
+    float p1Price
+    int p2Index
+    int p2Time
+    float p2Price
+    int p3Index
+    int p3Time
+    float p3Price
+    int p4Index
+    int p4Time
+    float p4Price
+    float rim
+    float cupHeight
+    float quality
+    float uScore
+    float robustUScore
+    float recovery
+    float pivot
+    float invalidation
+    bool alreadyBroken
+    int lastTransitionIndex
+    string lastReason
+
+type LifecycleEvent
+    string eventId
+    string familyId
+    string patternId
+    int fromStage
+    int toStage
+    bool provisional
+    int p1Time
+    int p2Time
+    int p3Time
+    int p4Time
+    float rim
+    float pivot
+    float invalidation
+    float quality
+    float uScore
+    float robustUScore
+    float recovery
+    bool alreadyBroken
+    string reason
+    int orderBucket
+    int orderSequence
+
+f_stageName(int stage) =>
+    switch stage
+        STAGE_CUP_FORMING => "CUP_FORMING"
+        STAGE_RIM_APPROACH => "RIM_APPROACH"
+        STAGE_CUP_CONFIRMED => "CUP_CONFIRMED"
+        STAGE_HANDLE_FORMING => "HANDLE_FORMING"
+        STAGE_HANDLE_READY => "HANDLE_READY"
+        STAGE_PRICE_BREAKOUT => "PRICE_BREAKOUT_CONFIRMED"
+        STAGE_INVALIDATED => "INVALIDATED"
+        STAGE_EXPIRED => "EXPIRED"
+        => "NONE"
+
+f_stageRank(int stage) =>
+    switch stage
+        STAGE_PRICE_BREAKOUT => 6
+        STAGE_HANDLE_READY => 5
+        STAGE_HANDLE_FORMING => 4
+        STAGE_CUP_CONFIRMED => 3
+        STAGE_RIM_APPROACH => 2
+        STAGE_CUP_FORMING => 1
+        => 0
+
+f_stageBit(int stage) =>
+    switch stage
+        STAGE_RIM_APPROACH => 1
+        STAGE_HANDLE_FORMING => 2
+        STAGE_HANDLE_READY => 4
+        STAGE_PRICE_BREAKOUT => 8
+        STAGE_INVALIDATED => 16
+        STAGE_EXPIRED => 32
+        => 0
+
+f_maskHas(int mask, int bit) =>
+    bit > 0 and int(math.floor(mask / bit)) % 2 == 1
+
+f_isTerminal(int stage) =>
+    stage == STAGE_PRICE_BREAKOUT or stage == STAGE_INVALIDATED or stage == STAGE_EXPIRED
+
+f_isAwaiting(int stage) =>
+    stage == STAGE_RIM_APPROACH or stage == STAGE_CUP_CONFIRMED or stage == STAGE_HANDLE_FORMING or stage == STAGE_HANDLE_READY
+
+f_quantized(float value) =>
+    int(math.round(10000 * nz(value, 0)))
+
+f_clamp(float value, float minimum, float maximum) =>
+    math.min(maximum, math.max(minimum, value))
+
+f_betterState(FamilyState left, FamilyState right) =>
+    int leftConfirmed = left.provisional ? 0 : 1
+    int rightConfirmed = right.provisional ? 0 : 1
+    int leftU = f_quantized(math.min(left.uScore, left.robustUScore))
+    int rightU = f_quantized(math.min(right.uScore, right.robustUScore))
+    int leftRecovery = f_quantized(left.recovery)
+    int rightRecovery = f_quantized(right.recovery)
+    int leftQuality = f_quantized(left.quality)
+    int rightQuality = f_quantized(right.quality)
+    int leftP3 = nz(left.p3Index, -1)
+    int rightP3 = nz(right.p3Index, -1)
+    // Within one Pine instance, equal P1/P2/P3 anchors imply the same stable
+    // pattern ID because version/config/symbol/timeframe are runtime constants.
+    leftConfirmed != rightConfirmed ? leftConfirmed > rightConfirmed : f_stageRank(left.stage) != f_stageRank(right.stage) ? f_stageRank(left.stage) > f_stageRank(right.stage) : leftU != rightU ? leftU > rightU : leftQuality != rightQuality ? leftQuality > rightQuality : leftRecovery != rightRecovery ? leftRecovery > rightRecovery : left.p1Index != right.p1Index ? left.p1Index > right.p1Index : left.p2Index != right.p2Index ? left.p2Index > right.p2Index : leftP3 > rightP3
+
+f_betterDisplay(FamilyState left, FamilyState right) =>
+    int leftAwaiting = f_isAwaiting(left.stage) ? 1 : 0
+    int rightAwaiting = f_isAwaiting(right.stage) ? 1 : 0
+    int leftU = f_quantized(math.min(left.uScore, left.robustUScore))
+    int rightU = f_quantized(math.min(right.uScore, right.robustUScore))
+    int leftQuality = f_quantized(left.quality)
+    int rightQuality = f_quantized(right.quality)
+    int leftP3 = nz(left.p3Index, -1)
+    int rightP3 = nz(right.p3Index, -1)
+    // The final stable-ID tie is implicit after P1/P2/P3 for the same runtime.
+    leftAwaiting != rightAwaiting ? leftAwaiting > rightAwaiting : leftU != rightU ? leftU > rightU : f_stageRank(left.stage) != f_stageRank(right.stage) ? f_stageRank(left.stage) > f_stageRank(right.stage) : leftQuality != rightQuality ? leftQuality > rightQuality : left.p1Index != right.p1Index ? left.p1Index > right.p1Index : left.p2Index != right.p2Index ? left.p2Index > right.p2Index : leftP3 > rightP3
+
+f_betterEvent(LifecycleEvent left, LifecycleEvent right) =>
+    left.orderBucket != right.orderBucket ? left.orderBucket < right.orderBucket : left.orderSequence < right.orderSequence
+
+f_isPivotHigh() =>
+    bool valid = bar_index >= PIVOT_LEFT + PIVOT_RIGHT
+    float candidate = high[PIVOT_RIGHT]
+    if valid
+        for offset = 1 to PIVOT_LEFT
+            if high[PIVOT_RIGHT + offset] > candidate
+                valid := false
+        for offset = 1 to PIVOT_RIGHT
+            if high[PIVOT_RIGHT - offset] >= candidate
+                valid := false
+    valid
+
+f_isPivotLow() =>
+    bool valid = bar_index >= PIVOT_LEFT + PIVOT_RIGHT
+    float candidate = low[PIVOT_RIGHT]
+    if valid
+        for offset = 1 to PIVOT_LEFT
+            if low[PIVOT_RIGHT + offset] < candidate
+                valid := false
+        for offset = 1 to PIVOT_RIGHT
+            if low[PIVOT_RIGHT - offset] <= candidate
+                valid := false
+    valid
+
+f_pushPivot(array<int> indices, array<int> times, array<float> prices, int pivotIndex, int pivotTime, float pivotPrice) =>
+    array.push(indices, pivotIndex)
+    array.push(times, pivotTime)
+    array.push(prices, pivotPrice)
+    while array.size(indices) > MAX_PIVOTS_PER_KIND
+        array.shift(indices)
+        array.shift(times)
+        array.shift(prices)
+
+f_prunePivots(array<int> indices, array<int> times, array<float> prices) =>
+    while array.size(indices) > 0 and bar_index - array.get(indices, 0) >= LOOKBACK_BARS
+        array.shift(indices)
+        array.shift(times)
+        array.shift(prices)
+
+f_minLowBetween(int startIndex, int endIndex) =>
+    float result = na
+    if startIndex <= endIndex
+        for absoluteIndex = startIndex to endIndex
+            int offset = bar_index - absoluteIndex
+            if offset >= 0 and offset <= LOOKBACK_BARS
+                result := na(result) ? low[offset] : math.min(result, low[offset])
+    result
+
+f_minLowIndexBetween(int startIndex, int endIndex) =>
+    int resultIndex = na
+    float resultPrice = na
+    if startIndex <= endIndex
+        for absoluteIndex = startIndex to endIndex
+            int offset = bar_index - absoluteIndex
+            if offset >= 0 and offset <= LOOKBACK_BARS
+                if na(resultPrice) or low[offset] < resultPrice
+                    resultIndex := absoluteIndex
+                    resultPrice := low[offset]
+    [resultIndex, resultPrice]
+
+f_lineValue(int firstIndex, float firstPrice, int secondIndex, float secondPrice, int targetIndex) =>
+    int span = secondIndex - firstIndex
+    span <= 0 ? secondPrice : firstPrice + (secondPrice - firstPrice) * (targetIndex - firstIndex) / span
+
+f_representativePrice(int absoluteIndex) =>
+    int offset = bar_index - absoluteIndex
+    (high[offset] + low[offset] + close[offset]) / 3
+
+f_medianRepresentative(int startIndex, int endIndex) =>
+    array<float> values = array.new_float()
+    if startIndex <= endIndex
+        for absoluteIndex = startIndex to endIndex
+            array.push(values, f_representativePrice(absoluteIndex))
+    array.sort(values)
+    int count = array.size(values)
+    float result = na
+    if count > 0
+        int middle = int(math.floor(count / 2))
+        result := count % 2 == 0 ? (array.get(values, middle - 1) + array.get(values, middle)) / 2 : array.get(values, middle)
+    result
+
+f_binnedMedians(int startIndex, int endIndex, int requestedBins) =>
+    int length = endIndex - startIndex + 1
+    int count = math.max(2, math.min(requestedBins, length))
+    array<float> values = array.new_float()
+    if length > 0
+        for bin = 0 to count - 1
+            int binStart = startIndex + int(math.floor(length * bin / count))
+            int binEnd = startIndex + int(math.floor(length * (bin + 1) / count)) - 1
+            array.push(values, f_medianRepresentative(binStart, binEnd))
+    values
+
+f_uShapeScore(int p1Index, float p1Price, int p3Index, float p3Price, float cupHeight) =>
+    int width = p3Index - p1Index
+    float rim = (p1Price + p3Price) / 2
+    float absoluteError = 0.0
+    int samples = 0
+    int bottomSamples = 0
+    if width > 0 and cupHeight > 0
+        for absoluteIndex = p1Index to p3Index
+            float x = (absoluteIndex - p1Index) / width
+            float idealDepth = 1 - math.pow(2 * x - 1, 2)
+            float observedDepth = math.max(-0.25, math.min(1.25, (rim - f_representativePrice(absoluteIndex)) / cupHeight))
+            absoluteError += math.abs(observedDepth - idealDepth)
+            samples += 1
+            if observedDepth >= 0.75
+                bottomSamples += 1
+    float fitScore = samples > 0 ? math.max(0.0, math.min(1.0, 1 - absoluteError / samples)) : 0.0
+    float bottomFraction = samples > 0 ? bottomSamples / samples : 0.0
+    float bottomScore = math.max(0.0, math.min(1.0, bottomFraction / BOTTOM_WIDTH_TARGET))
+    math.max(0.0, math.min(1.0, 0.8 * fitScore + 0.2 * bottomScore))
+
+f_robustUShapeScore(int p1Index, float p1Price, int p3Index, float p3Price, float cupHeight) =>
+    array<float> bins = f_binnedMedians(p1Index, p3Index, 15)
+    int count = array.size(bins)
+    float rim = (p1Price + p3Price) / 2
+    float error = 0.0
+    if count >= 5 and cupHeight > 0
+        for position = 0 to count - 1
+            float x = position / (count - 1.0)
+            float idealDepth = 1 - math.pow(2 * x - 1, 2)
+            float observedDepth = math.max(-0.25, math.min(1.25, (rim - array.get(bins, position)) / cupHeight))
+            error += math.abs(observedDepth - idealDepth)
+    count >= 5 ? math.max(0.0, math.min(1.0, 1 - error / count)) : 0.0
+
+f_directionalConsistency(array<float> values, int direction, float tolerance) =>
+    int count = array.size(values)
+    int consistent = 0
+    if count >= 2
+        for position = 1 to count - 1
+            float change = array.get(values, position) - array.get(values, position - 1)
+            if direction < 0 ? change <= tolerance : change >= -tolerance
+                consistent += 1
+    count >= 2 ? consistent / (count - 1.0) : 0.0
+
+f_regression(int startIndex, int endIndex) =>
+    int count = endIndex - startIndex + 1
+    float sumX = 0.0
+    float sumY = 0.0
+    if count >= 3
+        for absoluteIndex = startIndex to endIndex
+            float x = absoluteIndex - startIndex
+            float y = math.log(close[bar_index - absoluteIndex])
+            sumX += x
+            sumY += y
+    float meanX = count >= 3 ? sumX / count : 0.0
+    float meanY = count >= 3 ? sumY / count : 0.0
+    float numerator = 0.0
+    float denominatorX = 0.0
+    float denominatorY = 0.0
+    if count >= 3
+        for absoluteIndex = startIndex to endIndex
+            float x = absoluteIndex - startIndex
+            float y = math.log(close[bar_index - absoluteIndex])
+            float dx = x - meanX
+            float dy = y - meanY
+            numerator += dx * dy
+            denominatorX += dx * dx
+            denominatorY += dy * dy
+    float slope = denominatorX > 0 ? numerator / denominatorX : 0.0
+    float r2 = denominatorX > 0 and denominatorY > 0 ? numerator * numerator / (denominatorX * denominatorY) : 0.0
+    float returnFraction = count >= 3 ? math.exp(slope * (count - 1)) - 1 : 0.0
+    [returnFraction, r2]
+
+f_meanRange(int startIndex, int endIndex) =>
+    float total = 0.0
+    int count = 0
+    if startIndex <= endIndex
+        for absoluteIndex = startIndex to endIndex
+            total += high[bar_index - absoluteIndex] - low[bar_index - absoluteIndex]
+            count += 1
+    count > 0 ? total / count : na
+
+f_meanVolume(int startIndex, int endIndex, bool requireComplete) =>
+    float total = 0.0
+    int count = 0
+    int expected = math.max(0, endIndex - startIndex + 1)
+    bool complete = expected > 0
+    if startIndex <= endIndex
+        for absoluteIndex = startIndex to endIndex
+            float value = volume[bar_index - absoluteIndex]
+            if not na(value) and value >= 0
+                total += value
+                count += 1
+            else
+                complete := false
+    count > 0 and (not requireComplete or complete and count == expected) ? total / count : na
+
+f_cupMetrics(int p1Index, float p1Price, int p2Index, float p2Price, int p3Index, float p3Price, bool ignoreMaximumWidth) =>
+    int width = p3Index - p1Index
+    int leftWidth = p2Index - p1Index
+    int rightWidth = p3Index - p2Index
+    float rim = (p1Price + p3Price) / 2
+    float cupHeight = rim - p2Price
+    float centerError = width > 0 ? math.abs(p2Index - (p1Index + p3Index) / 2.0) / (width / 2.0) : 10.0
+    float depthFraction = cupHeight > 0 and rim != 0 ? cupHeight / math.abs(rim) : 10.0
+    float rimGapPrice = rim != 0 ? math.abs(p1Price - p3Price) / math.abs(rim) : 10.0
+    float rimGapHeight = cupHeight > 0 ? math.abs(p1Price - p3Price) / cupHeight : 10.0
+    bool widthValid = width >= minimumCupBars and (ignoreMaximumWidth or width <= maximumCupBars)
+    bool cheapValid = widthValid and leftWidth > 0 and rightWidth > 0 and centerError <= CENTER_TOLERANCE and cupHeight > 0 and depthFraction >= minimumDepth and depthFraction <= maximumDepth and rimGapPrice <= RIM_GAP_PRICE_MAX and rimGapHeight <= RIM_GAP_HEIGHT_MAX
+    float uScore = cheapValid ? f_uShapeScore(p1Index, p1Price, p3Index, p3Price, cupHeight) : 0.0
+    float robustUScore = cheapValid ? f_robustUShapeScore(p1Index, p1Price, p3Index, p3Price, cupHeight) : 0.0
+    int sampleCount = width + 1
+    int bottomSamples = 0
+    float maximumDiscontinuity = 0.0
+    float interiorHigh = na
+    if cheapValid
+        for absoluteIndex = p1Index to p3Index
+            int offset = bar_index - absoluteIndex
+            float observedDepth = (rim - f_representativePrice(absoluteIndex)) / cupHeight
+            if observedDepth >= 0.75
+                bottomSamples += 1
+            float priorClose = absoluteIndex > p1Index ? close[offset + 1] : open[offset]
+            float trueRange = math.max(high[offset] - low[offset], math.max(math.abs(high[offset] - priorClose), math.abs(low[offset] - priorClose)))
+            maximumDiscontinuity := math.max(maximumDiscontinuity, trueRange / cupHeight)
+            if absoluteIndex > p1Index and absoluteIndex < p3Index
+                interiorHigh := na(interiorHigh) ? high[offset] : math.max(interiorHigh, high[offset])
+    float bottomDwell = sampleCount > 0 ? bottomSamples / sampleCount : 0.0
+    float interiorOvershoot = not na(interiorHigh) and cupHeight > 0 ? math.max(0.0, interiorHigh - math.max(p1Price, p3Price)) / cupHeight : 0.0
+    array<float> leftBins = cheapValid ? f_binnedMedians(p1Index, p2Index, 8) : array.new_float()
+    array<float> rightBins = cheapValid ? f_binnedMedians(p2Index, p3Index, 8) : array.new_float()
+    float leftDirectional = cheapValid ? f_directionalConsistency(leftBins, -1, cupHeight * DIRECTIONAL_TOLERANCE) : 0.0
+    float rightDirectional = cheapValid ? f_directionalConsistency(rightBins, 1, cupHeight * DIRECTIONAL_TOLERANCE) : 0.0
+    int priorLength = math.max(8, math.min(60, int(math.round(width * 0.5))))
+    int priorStart = p1Index - priorLength
+    [calculatedPriorReturn, calculatedPriorR2] = f_regression(math.max(0, priorStart), p1Index)
+    float priorReturn = priorStart >= 0 ? calculatedPriorReturn : 0.0
+    float priorR2 = priorStart >= 0 ? calculatedPriorR2 : 0.0
+    bool historyValid = priorStart >= 0 and (not stockAsset or time[bar_index - p1Index] >= 946684800000)
+    bool valid = cheapValid and uScore >= MINIMUM_U_SCORE and robustUScore >= MINIMUM_ROBUST_U_SCORE and bottomDwell >= MINIMUM_BOTTOM_DWELL and leftDirectional >= MINIMUM_DIRECTIONAL_CONSISTENCY and rightDirectional >= MINIMUM_DIRECTIONAL_CONSISTENCY and maximumDiscontinuity <= MAXIMUM_DISCONTINUITY and interiorOvershoot <= MAXIMUM_INTERIOR_OVERSHOOT and priorReturn >= MINIMUM_PRIOR_RETURN and priorR2 >= MINIMUM_PRIOR_R2 and historyValid
+    float rimScore = f_clamp(1 - rimGapHeight / RIM_GAP_HEIGHT_MAX, 0, 1)
+    float centerScore = f_clamp(1 - centerError / CENTER_TOLERANCE, 0, 1)
+    float quality = math.round(100 * (0.18 * f_clamp((uScore - 0.35) / 0.45, 0, 1) + 0.16 * f_clamp((robustUScore - 0.35) / 0.45, 0, 1) + 0.18 * rimScore + 0.14 * centerScore + 0.12 * f_clamp(bottomDwell / 0.14, 0, 1) + 0.12 * f_clamp(priorReturn / 0.25, 0, 1) + 0.04 * f_clamp(priorR2 / 0.50, 0, 1) + 0.03 * leftDirectional + 0.03 * rightDirectional))
+    [valid, quality, rim, cupHeight, uScore, robustUScore, depthFraction, centerError, rimGapPrice, rimGapHeight, bottomDwell, leftDirectional, rightDirectional, maximumDiscontinuity, interiorOvershoot, priorReturn, priorR2]
+
+f_findBottom(array<int> lowIndices, array<int> lowTimes, array<float> lowPrices, int p1Index, int p3Index) =>
+    int bestIndex = na
+    int bestTime = na
+    float bestPrice = na
+    float midpoint = (p1Index + p3Index) / 2.0
+    float halfWidth = (p3Index - p1Index) / 2.0
+    int count = array.size(lowIndices)
+    if count > 0 and halfWidth > 0
+        for position = 0 to count - 1
+            int candidateIndex = array.get(lowIndices, position)
+            float candidatePrice = array.get(lowPrices, position)
+            bool centered = candidateIndex > p1Index and candidateIndex < p3Index and math.abs(candidateIndex - midpoint) / halfWidth <= CENTER_TOLERANCE
+            if centered and (na(bestPrice) or candidatePrice < bestPrice or candidatePrice == bestPrice and candidateIndex < bestIndex)
+                bestIndex := candidateIndex
+                bestTime := array.get(lowTimes, position)
+                bestPrice := candidatePrice
+    [bestIndex, bestTime, bestPrice]
+
+f_handleMetrics(int p3Index, float p3Price, int cupWidth, float rim, float cupHeight, int measurementIndex) =>
+    int boundedMeasurementIndex = math.max(p3Index, math.min(bar_index, measurementIndex))
+    int handleAge = boundedMeasurementIndex - p3Index
+    [handleLowIndex, handleLow] = f_minLowIndexBetween(p3Index + 1, boundedMeasurementIndex)
+    float depth = not na(handleLow) and cupHeight > 0 ? (p3Price - handleLow) / cupHeight : 0.0
+    float lowPosition = not na(handleLow) and cupHeight > 0 ? (handleLow - (rim - cupHeight)) / cupHeight : 0.0
+    float measurementClose = close[bar_index - boundedMeasurementIndex]
+    float rimDistance = cupHeight > 0 ? (rim - measurementClose) / cupHeight : 10.0
+    [handleReturn, handleR2] = f_regression(p3Index, boundedMeasurementIndex)
+    float cupRange = f_meanRange(p3Index - cupWidth, p3Index)
+    float handleRange = f_meanRange(p3Index + 1, boundedMeasurementIndex)
+    float rangeRatio = not na(cupRange) and cupRange > 0 and not na(handleRange) ? handleRange / cupRange : na
+    float cupVolume = f_meanVolume(p3Index - cupWidth, p3Index, stockAsset)
+    float handleVolume = f_meanVolume(p3Index + 1, boundedMeasurementIndex, stockAsset)
+    float volumeRatio = not na(cupVolume) and cupVolume > 0 and not na(handleVolume) ? handleVolume / cupVolume : na
+    int minimumBars = profileTimeframe == "4H" ? math.max(9, int(math.ceil(cupWidth * 0.08))) : profileTimeframe == "1D" ? math.max(5, int(math.ceil(cupWidth * 0.08))) : math.max(2, int(math.ceil(cupWidth * 0.08)))
+    int maximumBars = math.max(minimumBars, int(math.ceil(cupWidth * 0.45)))
+    bool lowConfirmed = not na(handleLowIndex) and bar_index - handleLowIndex >= PIVOT_RIGHT
+    bool actualPullback = depth >= MINIMUM_HANDLE_DEPTH
+    bool durationOkay = handleAge >= minimumBars and handleAge <= maximumBars
+    bool nonDurationGates = actualPullback and depth <= MAXIMUM_HANDLE_DEPTH and lowPosition >= MINIMUM_HANDLE_LOW_POSITION and rimDistance <= PROVISIONAL_HANDLE_RIM_DISTANCE and handleReturn <= MAXIMUM_HANDLE_UPWARD_RETURN and (na(rangeRatio) or rangeRatio <= MAXIMUM_HANDLE_RANGE_RATIO) and (not stockAsset or not na(volumeRatio) and volumeRatio <= MAXIMUM_STOCK_HANDLE_VOLUME_RATIO)
+    bool credibleForming = nonDurationGates and handleAge <= maximumBars
+    bool strictReady = nonDurationGates and durationOkay and lowConfirmed and rimDistance <= READY_HANDLE_RIM_DISTANCE
+    [credibleForming, strictReady, actualPullback, durationOkay, lowConfirmed, handleAge, maximumBars, handleLowIndex, handleLow, depth, lowPosition, rimDistance, handleReturn, rangeRatio, volumeRatio]
+
+f_familyId(int p1Time, int p2Time) =>
+    str.format("{0}|{1}|{2}|{3}|{4}|{5}", VERSION, runtimeConfigId, syminfo.tickerid, profileTimeframe, p1Time, p2Time)
+
+f_provisionalPatternId(string familyId) =>
+    familyId + "|p3=pending"
+
+f_confirmedPatternId(string familyId, int p3Time) =>
+    familyId + "|p3=" + str.tostring(p3Time)
+
+f_newState(string familyId, string patternId, int stage, bool provisional, int p1Index, int p1Time, float p1Price, int p2Index, int p2Time, float p2Price, int p3Index, int p3Time, float p3Price, float rim, float cupHeight, float quality, float uScore, float robustUScore, float recovery) =>
+    float pivot = provisional ? p1Price : na
+    float invalidation = provisional ? na : p3Price - cupHeight * MAXIMUM_HANDLE_DEPTH
+    FamilyState.new(familyId, patternId, stage, provisional, p1Index, p1Time, p1Price, p2Index, p2Time, p2Price, p3Index, p3Time, p3Price, na, na, na, rim, cupHeight, quality, uScore, robustUScore, recovery, pivot, invalidation, false, na, "")
+
+f_findPattern(array<FamilyState> states, string patternId) =>
+    int result = -1
+    int count = array.size(states)
+    if count > 0
+        for position = 0 to count - 1
+            if array.get(states, position).patternId == patternId
+                result := position
+                break
+    result
+
+f_findFamily(array<FamilyState> states, string familyId) =>
+    int result = -1
+    int count = array.size(states)
+    if count > 0
+        for position = 0 to count - 1
+            if array.get(states, position).familyId == familyId
+                result := position
+                break
+    result
+
+f_findProvisionalFamily(array<FamilyState> states, string familyId) =>
+    int result = -1
+    int count = array.size(states)
+    if count > 0
+        for position = 0 to count - 1
+            FamilyState state = array.get(states, position)
+            if state.provisional and state.familyId == familyId
+                result := position
+                break
+    result
+
+f_findConfirmedFamily(array<FamilyState> states, string familyId) =>
+    int result = -1
+    int count = array.size(states)
+    if count > 0
+        for position = 0 to count - 1
+            FamilyState state = array.get(states, position)
+            if not state.provisional and state.familyId == familyId
+                result := position
+                break
+    result
+
+f_countProvisional(array<FamilyState> states) =>
+    int result = 0
+    int count = array.size(states)
+    if count > 0
+        for position = 0 to count - 1
+            if array.get(states, position).provisional
+                result += 1
+    result
+
+f_worstProvisional(array<FamilyState> states) =>
+    int result = -1
+    int count = array.size(states)
+    if count > 0
+        for position = 0 to count - 1
+            FamilyState candidate = array.get(states, position)
+            if candidate.provisional and (result < 0 or f_betterState(array.get(states, result), candidate))
+                result := position
+    result
+
+f_historyCanAdmit(map<string, int> history, string patternId) =>
+    map.contains(history, patternId) or map.size(history) < MAX_FAMILY_HISTORY
+
+f_commitHistory(map<string, int> history, map<string, int> historyP1, FamilyState state) =>
+    if not map.contains(history, state.patternId)
+        map.put(history, state.patternId, 0)
+    if not map.contains(historyP1, state.patternId)
+        map.put(historyP1, state.patternId, state.p1Index)
+
+f_pruneHistory(map<string, int> history, map<string, int> historyP1, map<string, int> overflow, array<FamilyState> states) =>
+    array<string> patternIds = map.keys(history)
+    int count = array.size(patternIds)
+    if count > 0
+        for position = 0 to count - 1
+            string patternId = array.get(patternIds, position)
+            int p1Index = map.contains(historyP1, patternId) ? map.get(historyP1, patternId) : na
+            bool beyondCutoff = not na(p1Index) and bar_index - p1Index >= LOOKBACK_BARS
+            if beyondCutoff and f_findPattern(states, patternId) < 0
+                map.remove(history, patternId)
+                map.remove(historyP1, patternId)
+    array<string> overflowIds = map.keys(overflow)
+    int overflowCount = array.size(overflowIds)
+    if overflowCount > 0
+        for position = 0 to overflowCount - 1
+            string patternId = array.get(overflowIds, position)
+            int p1Index = map.get(overflow, patternId)
+            if bar_index - p1Index >= LOOKBACK_BARS
+                map.remove(overflow, patternId)
+
+f_patternTerminal(map<string, int> history, string patternId) =>
+    if not map.contains(history, patternId)
+        false
+    else
+        int mask = map.get(history, patternId)
+        f_maskHas(mask, f_stageBit(STAGE_PRICE_BREAKOUT)) or f_maskHas(mask, f_stageBit(STAGE_INVALIDATED)) or f_maskHas(mask, f_stageBit(STAGE_EXPIRED))
+
+f_patternBlocked(map<string, int> history, map<string, int> overflow, string patternId) =>
+    map.contains(overflow, patternId) or f_patternTerminal(history, patternId)
+
+f_eventEnabled(int stage) =>
+    stage == STAGE_RIM_APPROACH ? alertRimApproach : stage == STAGE_HANDLE_FORMING ? alertHandleForming : stage == STAGE_HANDLE_READY ? alertHandleReady : stage == STAGE_PRICE_BREAKOUT ? alertPriceBreakout : stage == STAGE_INVALIDATED or stage == STAGE_EXPIRED ? alertInvalidated : false
+
+f_recordTransition(array<LifecycleEvent> events, map<string, int> history, array<string> emittedEventIds, FamilyState state, int fromStage, int toStage, string reason, bool admissionEvent) =>
+    int bit = f_stageBit(toStage)
+    int mask = map.get(history, state.patternId)
+    string eventId = state.patternId + "|stage=" + f_stageName(toStage)
+    bool unclaimed = bit > 0 and not f_maskHas(mask, bit) and not array.includes(emittedEventIds, eventId)
+    if unclaimed
+        int orderBucket = admissionEvent ? state.provisional ? 3 : 2 : f_isTerminal(toStage) ? 0 : 1
+        int orderSequence = array.size(events)
+        map.put(history, state.patternId, mask + bit)
+        array.push(emittedEventIds, eventId)
+        while array.size(emittedEventIds) > MAX_EVENT_IDS
+            array.shift(emittedEventIds)
+        array.push(events, LifecycleEvent.new(eventId, state.familyId, state.patternId, fromStage, toStage, state.provisional, state.p1Time, state.p2Time, state.p3Time, state.p4Time, state.rim, state.pivot, state.invalidation, state.quality, state.uScore, state.robustUScore, state.recovery, state.alreadyBroken, reason, orderBucket, orderSequence))
+    state.lastTransitionIndex := bar_index
+    state.lastReason := reason
+    unclaimed
+
+f_jsonString(string value) =>
+    string escaped = str.replace_all(value, "\\", "\\\\")
+    escaped := str.replace_all(escaped, "\"", "\\\"")
+    "\"" + escaped + "\""
+
+f_jsonFloat(float value) =>
+    na(value) ? "null" : str.tostring(value)
+
+f_jsonInt(int value) =>
+    na(value) ? "null" : str.tostring(value)
+
+f_readableTimeframe() =>
+    switch profileTimeframe
+        "4H" => "4-hour"
+        "1D" => "Daily"
+        "1W" => "Weekly"
+        => profileTimeframe
+
+f_eventHuman(LifecycleEvent event) =>
+    string status = switch event.toStage
+        STAGE_RIM_APPROACH => "WATCH ONLY"
+        STAGE_HANDLE_FORMING => "WATCH ONLY"
+        STAGE_HANDLE_READY => "REVIEW"
+        STAGE_PRICE_BREAKOUT => "REVIEW"
+        STAGE_INVALIDATED => "STATUS"
+        STAGE_EXPIRED => "STATUS"
+        => "STATUS"
+    string description = switch event.toStage
+        STAGE_RIM_APPROACH => "Cup is approaching its rim"
+        STAGE_HANDLE_FORMING => "Cup-and-handle is forming"
+        STAGE_HANDLE_READY => "Handle is ready"
+        STAGE_PRICE_BREAKOUT => "Price breakout confirmed"
+        STAGE_INVALIDATED => "Setup invalidated"
+        STAGE_EXPIRED => "Setup expired"
+        => "Cup-and-handle status changed"
+    string action = switch event.toStage
+        STAGE_RIM_APPROACH => "Wait for pattern development"
+        STAGE_HANDLE_FORMING => "Wait for the handle to mature"
+        STAGE_HANDLE_READY => "Review the chart for a potential breakout"
+        STAGE_PRICE_BREAKOUT => "Review the confirmed breakout"
+        STAGE_INVALIDATED => "No action"
+        STAGE_EXPIRED => "No action"
+        => "Review the chart"
+    status + " — " + syminfo.ticker + " (" + f_readableTimeframe() + ")\n" + description + ". " + action + ". Not a trade signal."
+
+f_eventJson(LifecycleEvent event) =>
+    string eventType = event.toStage == STAGE_RIM_APPROACH or event.toStage == STAGE_HANDLE_FORMING ? "attention" : "status"
+    bool experimental = str.startswith(profileId, "experimental_")
+    "{" +
+      "\"schema_version\":\"cup-handle-alert-v1\"," +
+      "\"detector_version\":" + f_jsonString(VERSION) + "," +
+      "\"policy_id\":" + f_jsonString(CONFIG_BASE_ID) + "," +
+      "\"config_id\":" + f_jsonString(runtimeConfigId) + "," +
+      "\"event_id\":" + f_jsonString(event.eventId) + "," +
+      "\"symbol\":" + f_jsonString(syminfo.tickerid) + "," +
+      "\"timeframe\":" + f_jsonString(profileTimeframe) + "," +
+      "\"asset_class\":" + f_jsonString(stockAsset ? "stock" : "crypto") + "," +
+      "\"profile\":" + f_jsonString(profileId) + "," +
+      "\"event_type\":" + f_jsonString(eventType) + "," +
+      "\"from_stage\":" + f_jsonString(f_stageName(event.fromStage)) + "," +
+      "\"to_stage\":" + f_jsonString(f_stageName(event.toStage)) + "," +
+      "\"provisional\":" + (event.provisional ? "true" : "false") + "," +
+      "\"family_id\":" + f_jsonString(event.familyId) + "," +
+      "\"pattern_id\":" + f_jsonString(event.patternId) + "," +
+      "\"detection_bar_open_ms\":" + str.tostring(time) + "," +
+      "\"detection_bar_close_ms\":" + str.tostring(time_close) + "," +
+      "\"quality_score\":" + f_jsonFloat(event.quality) + "," +
+      "\"rim\":" + f_jsonFloat(event.rim) + "," +
+      "\"pivot\":" + f_jsonFloat(event.pivot) + "," +
+      "\"invalidation\":" + f_jsonFloat(event.invalidation) + "," +
+      "\"p1_time_ms\":" + f_jsonInt(event.p1Time) + "," +
+      "\"p2_time_ms\":" + f_jsonInt(event.p2Time) + "," +
+      "\"p3_time_ms\":" + f_jsonInt(event.p3Time) + "," +
+      "\"p4_time_ms\":" + f_jsonInt(event.p4Time) + "," +
+      "\"already_broken_when_discovered\":" + (event.alreadyBroken ? "true" : "false") + "," +
+      "\"experimental_profile\":" + (experimental ? "true" : "false") + "," +
+      "\"reason_code\":" + f_jsonString(event.reason) + "}"
+
+var array<int> pivotHighIndices = array.new_int()
+var array<int> pivotHighTimes = array.new_int()
+var array<float> pivotHighPrices = array.new_float()
+var array<int> pivotLowIndices = array.new_int()
+var array<int> pivotLowTimes = array.new_int()
+var array<float> pivotLowPrices = array.new_float()
+var array<FamilyState> activeFamilies = array.new<FamilyState>()
+var map<string, int> patternHistory = map.new<string, int>()
+var map<string, int> patternHistoryP1 = map.new<string, int>()
+var map<string, int> patternOverflow = map.new<string, int>()
+var array<string> emittedEventIds = array.new_string()
+var int confirmedOverflowCount = 0
+var int capacityGuardCount = 0
+
+bool newPivotHigh = false
+bool newPivotLow = false
+int newPivotHighIndex = na
+int newPivotHighTime = na
+float newPivotHighPrice = na
+int newPivotLowIndex = na
+float newPivotLowPrice = na
+bool withinExecutionWindow = bar_index >= math.max(0, last_bar_index - LOOKBACK_BARS - PIVOT_LEFT - PIVOT_RIGHT - 60)
+
+if supportedProfile and barstate.isconfirmed and withinExecutionWindow and bar_index >= PIVOT_LEFT + PIVOT_RIGHT
+    newPivotHigh := f_isPivotHigh()
+    newPivotLow := f_isPivotLow()
+    if newPivotHigh
+        newPivotHighIndex := bar_index - PIVOT_RIGHT
+        newPivotHighTime := time[PIVOT_RIGHT]
+        newPivotHighPrice := high[PIVOT_RIGHT]
+        f_pushPivot(pivotHighIndices, pivotHighTimes, pivotHighPrices, newPivotHighIndex, newPivotHighTime, newPivotHighPrice)
+    if newPivotLow
+        newPivotLowIndex := bar_index - PIVOT_RIGHT
+        newPivotLowPrice := low[PIVOT_RIGHT]
+        f_pushPivot(pivotLowIndices, pivotLowTimes, pivotLowPrices, newPivotLowIndex, time[PIVOT_RIGHT], newPivotLowPrice)
+    f_prunePivots(pivotHighIndices, pivotHighTimes, pivotHighPrices)
+    f_prunePivots(pivotLowIndices, pivotLowTimes, pivotLowPrices)
+
+var array<LifecycleEvent> barEvents = array.new<LifecycleEvent>()
+array.clear(barEvents)
+bool cupFormingDiagnostic = false
+
+if supportedProfile and barstate.isconfirmed
+    // Terminal snapshots persist for one closed bar, then free their slot.
+    int removePosition = array.size(activeFamilies) - 1
+    while removePosition >= 0
+        FamilyState state = array.get(activeFamilies, removePosition)
+        if f_isTerminal(state.stage) and bar_index > state.lastTransitionIndex
+            array.remove(activeFamilies, removePosition)
+        removePosition -= 1
+
+    // Prune exact-pattern dedup history before current-bar work. Unknown
+    // rejected candidates never commit history; different P3s in one family
+    // retain independent lifecycle keys.
+    f_pruneHistory(patternHistory, patternHistoryP1, patternOverflow, activeFamilies)
+
+    // Update all retained slots before admitting current-bar candidates.
+    int updateCount = array.size(activeFamilies)
+    if updateCount > 0
+        for position = 0 to updateCount - 1
+            FamilyState state = array.get(activeFamilies, position)
+            if state.provisional
+                float provisionalHeight = state.p1Price - state.p2Price
+                float recovery = provisionalHeight > 0 ? (close - state.p2Price) / provisionalHeight : 0.0
+                [refreshedP2Index, refreshedP2Time, refreshedP2Price] = f_findBottom(pivotLowIndices, pivotLowTimes, pivotLowPrices, state.p1Index, bar_index)
+                bool bottomSuperseded = na(refreshedP2Index) or refreshedP2Index != state.p2Index
+                // Ignore only the maximum-width gate here so all structural
+                // gates (including a full, center-shifted P2 reselection) can
+                // take precedence over a pure duration expiry.
+                [stillValid, refreshedQuality, refreshedRim, refreshedHeight, refreshedU, refreshedRobustU, refreshedDepth, refreshedCenter, refreshedRimPrice, refreshedRimHeight, refreshedDwell, refreshedLeft, refreshedRight, refreshedDiscontinuity, refreshedOvershoot, refreshedPriorReturn, refreshedPriorR2] = f_cupMetrics(state.p1Index, state.p1Price, state.p2Index, state.p2Price, bar_index, high, true)
+                bool closeOvershoot = close > state.p1Price * (1 + RIM_APPROACH_CLOSE_OVERSHOOT)
+                if not stillValid or recovery < RIM_APPROACH_CLOSE_RECOVERY or closeOvershoot or bottomSuperseded
+                    int fromStage = state.stage
+                    state.stage := STAGE_INVALIDATED
+                    f_recordTransition(barEvents, patternHistory, emittedEventIds, state, fromStage, STAGE_INVALIDATED, "ACTIVE_GEOMETRY_NO_LONGER_VALID", false)
+                else if bar_index - state.p1Index > maximumCupBars
+                    int fromStage = state.stage
+                    state.stage := STAGE_EXPIRED
+                    f_recordTransition(barEvents, patternHistory, emittedEventIds, state, fromStage, STAGE_EXPIRED, "CUP_OUTLIVED_PROFILE_MAXIMUM", false)
+                else
+                    state.quality := refreshedQuality
+                    state.uScore := refreshedU
+                    state.robustUScore := refreshedRobustU
+                    state.recovery := recovery
+                    state.rim := state.p1Price
+                    state.cupHeight := provisionalHeight
+                    state.pivot := state.p1Price
+                    state.p3Index := bar_index
+                    state.p3Time := time
+                    state.p3Price := high
+            else if not f_isTerminal(state.stage)
+                int cupWidth = state.p3Index - state.p1Index
+                state.invalidation := state.p3Price - state.cupHeight * MAXIMUM_HANDLE_DEPTH
+
+                // P4 can be discovered only on its own five-right confirmation
+                // bar. Its anchor may be younger than the overall handle-duration
+                // gate; once locked it is retained until readiness can mature.
+                bool p4JustLocked = false
+                if na(state.p4Index) and newPivotHigh and newPivotHighPrice <= state.p3Price
+                    float beforeLow = f_minLowBetween(state.p3Index + 1, newPivotHighIndex)
+                    float afterLow = f_minLowBetween(newPivotHighIndex + 1, bar_index)
+                    if not na(beforeLow) and not na(afterLow) and beforeLow > afterLow
+                        state.p4Index := newPivotHighIndex
+                        state.p4Time := newPivotHighTime
+                        state.p4Price := newPivotHighPrice
+                        p4JustLocked := true
+
+                bool closeCross = false
+                if not na(state.p4Index)
+                    state.pivot := f_lineValue(state.p3Index, state.p3Price, state.p4Index, state.p4Price, bar_index)
+                    float previousPivot = f_lineValue(state.p3Index, state.p3Price, state.p4Index, state.p4Price, math.max(state.p4Index, bar_index - 1))
+                    bool previousAbove = bar_index > state.p4Index and close[1] > previousPivot
+                    closeCross := close > state.pivot and (not previousAbove or p4JustLocked)
+
+                // Current-bar structure always includes the breakout wick.
+                // Readiness may use the prior closed bar so the breakout close
+                // cannot manufacture the handle that it is breaking out from.
+                [structuralCredible, structuralReady, structuralActualPullback, structuralDurationOkay, structuralLowConfirmed, structuralHandleAge, structuralMaximumHandleBars, structuralHandleLowIndex, structuralHandleLow, structuralHandleDepth, structuralLowPosition, structuralRimDistance, structuralHandleReturn, structuralRangeRatio, structuralVolumeRatio] = f_handleMetrics(state.p3Index, state.p3Price, cupWidth, state.rim, state.cupHeight, bar_index)
+                int measurementIndex = closeCross and bar_index - 1 > state.p3Index ? bar_index - 1 : bar_index
+                [credibleForming, strictReady, actualPullback, durationOkay, lowConfirmed, handleAge, maximumHandleBars, handleLowIndex, handleLow, handleDepth, lowPosition, rimDistance, handleReturn, rangeRatio, volumeRatio] = f_handleMetrics(state.p3Index, state.p3Price, cupWidth, state.rim, state.cupHeight, measurementIndex)
+                bool fatalHandleFailure = structuralHandleDepth > MAXIMUM_HANDLE_DEPTH or structuralLowPosition < MINIMUM_HANDLE_LOW_POSITION
+                bool preHandleEscape = na(state.p4Index) and bar_index > state.p3Index and close > state.p3Price
+
+                // Frozen precedence: structural invalidation, then expiry, then
+                // breakout/progression. A breakout on an unready handle fails.
+                if fatalHandleFailure or preHandleEscape
+                    int fromStage = state.stage
+                    state.stage := STAGE_INVALIDATED
+                    string fatalReason = structuralHandleDepth > MAXIMUM_HANDLE_DEPTH ? "HANDLE_TOO_DEEP" : "HANDLE_IN_LOWER_HALF"
+                    f_recordTransition(barEvents, patternHistory, emittedEventIds, state, fromStage, STAGE_INVALIDATED, preHandleEscape ? "PRE_HANDLE_UPSIDE_ESCAPE" : fatalReason, false)
+                else if structuralHandleAge > structuralMaximumHandleBars
+                    int fromStage = state.stage
+                    state.stage := STAGE_EXPIRED
+                    f_recordTransition(barEvents, patternHistory, emittedEventIds, state, fromStage, STAGE_EXPIRED, "HANDLE_EXCEEDED_FROZEN_DURATION", false)
+                else if closeCross and not strictReady
+                    int fromStage = state.stage
+                    state.stage := STAGE_INVALIDATED
+                    f_recordTransition(barEvents, patternHistory, emittedEventIds, state, fromStage, STAGE_INVALIDATED, "BREAKOUT_BEFORE_HANDLE_READY", false)
+                else if closeCross and strictReady
+                    int fromStage = state.stage
+                    state.alreadyBroken := p4JustLocked
+                    state.stage := STAGE_PRICE_BREAKOUT
+                    f_recordTransition(barEvents, patternHistory, emittedEventIds, state, fromStage, STAGE_PRICE_BREAKOUT, "CLOSE_ABOVE_HANDLE_LINE", false)
+                else if not na(state.p4Index) and strictReady
+                    int fromStage = state.stage
+                    state.stage := STAGE_HANDLE_READY
+                    state.lastReason := "STRICT_HANDLE_READY"
+                    if f_stageRank(fromStage) < f_stageRank(STAGE_HANDLE_READY)
+                        f_recordTransition(barEvents, patternHistory, emittedEventIds, state, fromStage, STAGE_HANDLE_READY, "STRICT_HANDLE_READY", false)
+                else if credibleForming
+                    int fromStage = state.stage
+                    state.stage := STAGE_HANDLE_FORMING
+                    state.lastReason := "CREDIBLE_HANDLE_FORMING"
+                    if f_stageRank(fromStage) < f_stageRank(STAGE_HANDLE_FORMING)
+                        f_recordTransition(barEvents, patternHistory, emittedEventIds, state, fromStage, STAGE_HANDLE_FORMING, "CREDIBLE_HANDLE_FORMING", false)
+                else
+                    state.stage := STAGE_CUP_CONFIRMED
+                    state.lastReason := actualPullback ? "HANDLE_GATES_PENDING" : "HANDLE_PULLBACK_NOT_ESTABLISHED"
+
+    // Preserve terminal events, but free their slots before current-bar admissions.
+    removePosition := array.size(activeFamilies) - 1
+    while removePosition >= 0
+        if f_isTerminal(array.get(activeFamilies, removePosition).stage)
+            array.remove(activeFamilies, removePosition)
+        removePosition -= 1
+
+    // Generate all P3 candidates only on the bar where that 5-right pivot confirms.
+    array<FamilyState> confirmedCandidates = array.new<FamilyState>()
+    if newPivotHigh
+        int highCount = array.size(pivotHighIndices)
+        if highCount > 1
+            int p3Position = highCount - 1
+            for highPosition = 0 to p3Position - 1
+                int p1Index = array.get(pivotHighIndices, highPosition)
+                int width = newPivotHighIndex - p1Index
+                if width >= minimumCupBars and width <= maximumCupBars
+                    int p1Time = array.get(pivotHighTimes, highPosition)
+                    float p1Price = array.get(pivotHighPrices, highPosition)
+                    [p2Index, p2Time, p2Price] = f_findBottom(pivotLowIndices, pivotLowTimes, pivotLowPrices, p1Index, newPivotHighIndex)
+                    if not na(p2Index)
+                        [valid, quality, rim, cupHeight, uScore, robustUScore, depth, center, rimPrice, rimHeight, dwell, leftDirection, rightDirection, discontinuity, overshoot, priorReturn, priorR2] = f_cupMetrics(p1Index, p1Price, p2Index, p2Price, newPivotHighIndex, newPivotHighPrice, false)
+                        if valid
+                            string familyId = f_familyId(p1Time, p2Time)
+                            string patternId = f_confirmedPatternId(familyId, newPivotHighTime)
+                            int exactPosition = f_findPattern(activeFamilies, patternId)
+                            int provisionalPosition = f_findProvisionalFamily(activeFamilies, familyId)
+                            bool exactAlreadyActive = exactPosition >= 0
+                            if not exactAlreadyActive and not f_patternBlocked(patternHistory, patternOverflow, patternId)
+                                float confirmedRecovery = p1Price > p2Price ? (newPivotHighPrice - p2Price) / (p1Price - p2Price) : 0.0
+                                FamilyState candidate = f_newState(familyId, patternId, STAGE_CUP_CONFIRMED, false, p1Index, p1Time, p1Price, p2Index, p2Time, p2Price, newPivotHighIndex, newPivotHighTime, newPivotHighPrice, rim, cupHeight, quality, uScore, robustUScore, confirmedRecovery)
+                                [candidateCredible, candidateReady, candidateActualPullback, candidateDurationOkay, candidateLowConfirmed, candidateHandleAge, candidateMaximumHandleBars, candidateHandleLowIndex, candidateHandleLow, candidateHandleDepth, candidateLowPosition, candidateRimDistance, candidateHandleReturn, candidateRangeRatio, candidateVolumeRatio] = f_handleMetrics(newPivotHighIndex, newPivotHighPrice, width, rim, cupHeight, bar_index)
+                                bool candidateFatal = candidateHandleDepth > MAXIMUM_HANDLE_DEPTH or candidateLowPosition < MINIMUM_HANDLE_LOW_POSITION
+                                bool candidatePreHandleEscape = bar_index > newPivotHighIndex and close > newPivotHighPrice
+                                if candidateFatal or candidatePreHandleEscape
+                                    candidate.stage := STAGE_INVALIDATED
+                                    string candidateFatalReason = candidateHandleDepth > MAXIMUM_HANDLE_DEPTH ? "HANDLE_TOO_DEEP" : "HANDLE_IN_LOWER_HALF"
+                                    candidate.lastReason := candidatePreHandleEscape ? "PRE_HANDLE_UPSIDE_ESCAPE" : candidateFatalReason
+                                else if candidateHandleAge > candidateMaximumHandleBars
+                                    candidate.stage := STAGE_EXPIRED
+                                    candidate.lastReason := "HANDLE_EXCEEDED_FROZEN_DURATION"
+                                else if candidateCredible
+                                    candidate.stage := STAGE_HANDLE_FORMING
+                                    candidate.lastReason := "CREDIBLE_HANDLE_FORMING"
+                                // A terminal P3 candidate is observable only when
+                                // it causally promotes a provisional family that
+                                // was still live after the existing-slot update.
+                                if not f_isTerminal(candidate.stage) or provisionalPosition >= 0
+                                    array.push(confirmedCandidates, candidate)
+
+    // Deterministic best-first confirmed admissions and same-family promotions.
+    int confirmedCount = array.size(confirmedCandidates)
+    if confirmedCount > 1
+        for left = 0 to confirmedCount - 2
+            for right = left + 1 to confirmedCount - 1
+                if f_betterState(array.get(confirmedCandidates, right), array.get(confirmedCandidates, left))
+                    FamilyState swap = array.get(confirmedCandidates, left)
+                    array.set(confirmedCandidates, left, array.get(confirmedCandidates, right))
+                    array.set(confirmedCandidates, right, swap)
+    if confirmedCount > 0
+        for candidatePosition = 0 to confirmedCount - 1
+            FamilyState candidate = array.get(confirmedCandidates, candidatePosition)
+            int existingPosition = f_findPattern(activeFamilies, candidate.patternId)
+            int provisionalPosition = f_findProvisionalFamily(activeFamilies, candidate.familyId)
+            bool admitted = false
+            if provisionalPosition >= 0
+                if f_historyCanAdmit(patternHistory, candidate.patternId)
+                    array.set(activeFamilies, provisionalPosition, candidate)
+                    admitted := true
+                else
+                    capacityGuardCount += 1
+            else if existingPosition < 0 and f_historyCanAdmit(patternHistory, candidate.patternId)
+                if array.size(activeFamilies) < MAX_ACTIVE_FAMILIES
+                    array.push(activeFamilies, candidate)
+                    admitted := true
+                else
+                    int worstProvisional = f_worstProvisional(activeFamilies)
+                    if worstProvisional >= 0
+                        FamilyState evicted = array.get(activeFamilies, worstProvisional)
+                        // Match Map insertion order in the reference engine:
+                        // survivors retain order and a replacement joins last.
+                        array.remove(activeFamilies, worstProvisional)
+                        array.push(activeFamilies, candidate)
+                        admitted := true
+                    else
+                        confirmedOverflowCount += 1
+                        map.put(patternOverflow, candidate.patternId, candidate.p1Index)
+                        if showTransitionLabels
+                            label.new(bar_index, high, "CONFIRMED_OVERFLOW", style = label.style_label_down, color = color.fuchsia, textcolor = color.white, size = size.tiny)
+                        log.warning("Cup-and-Handle confirmed_overflow: all four family slots are confirmed")
+            else
+                capacityGuardCount += 1
+            if admitted
+                int admittedPosition = f_findPattern(activeFamilies, candidate.patternId)
+                FamilyState admittedState = array.get(activeFamilies, admittedPosition)
+                f_commitHistory(patternHistory, patternHistoryP1, admittedState)
+                if f_isTerminal(admittedState.stage)
+                    f_recordTransition(barEvents, patternHistory, emittedEventIds, admittedState, STAGE_CUP_CONFIRMED, admittedState.stage, admittedState.lastReason, true)
+                    array.remove(activeFamilies, admittedPosition)
+                else if admittedState.stage == STAGE_HANDLE_FORMING
+                    f_recordTransition(barEvents, patternHistory, emittedEventIds, admittedState, STAGE_CUP_CONFIRMED, STAGE_HANDLE_FORMING, admittedState.lastReason, true)
+
+    // Provisional RIM_APPROACH candidates use the current closed close, never a wick.
+    array<FamilyState> provisionalCandidates = array.new<FamilyState>()
+    int highCount = array.size(pivotHighIndices)
+    if highCount > 0
+        for highPosition = 0 to highCount - 1
+            int p1Index = array.get(pivotHighIndices, highPosition)
+            int width = bar_index - p1Index
+            if width >= minimumCupBars and width <= maximumCupBars
+                int p1Time = array.get(pivotHighTimes, highPosition)
+                float p1Price = array.get(pivotHighPrices, highPosition)
+                [p2Index, p2Time, p2Price] = f_findBottom(pivotLowIndices, pivotLowTimes, pivotLowPrices, p1Index, bar_index)
+                if not na(p2Index)
+                    float leftHeight = p1Price - p2Price
+                    float recovery = leftHeight > 0 ? (close - p2Price) / leftHeight : 0.0
+                    bool closeNearRim = recovery >= RIM_APPROACH_CLOSE_RECOVERY and close <= p1Price * (1 + RIM_APPROACH_CLOSE_OVERSHOOT)
+                    if recovery >= CUP_FORMING_DIAGNOSTIC_RECOVERY
+                        [valid, quality, rim, cupHeight, uScore, robustUScore, depth, center, rimPrice, rimHeight, dwell, leftDirection, rightDirection, discontinuity, overshoot, priorReturn, priorR2] = f_cupMetrics(p1Index, p1Price, p2Index, p2Price, bar_index, high, false)
+                        if valid
+                            cupFormingDiagnostic := true
+                            if closeNearRim
+                                string familyId = f_familyId(p1Time, p2Time)
+                                string patternId = f_provisionalPatternId(familyId)
+                                int confirmedPosition = f_findConfirmedFamily(activeFamilies, familyId)
+                                bool confirmedAlreadyActive = confirmedPosition >= 0
+                                if not confirmedAlreadyActive and not f_patternBlocked(patternHistory, patternOverflow, patternId)
+                                    array.push(provisionalCandidates, f_newState(familyId, patternId, STAGE_RIM_APPROACH, true, p1Index, p1Time, p1Price, p2Index, p2Time, p2Price, bar_index, time, high, p1Price, leftHeight, quality, uScore, robustUScore, recovery))
+
+    int provisionalCount = array.size(provisionalCandidates)
+    if provisionalCount > 1
+        for left = 0 to provisionalCount - 2
+            for right = left + 1 to provisionalCount - 1
+                if f_betterState(array.get(provisionalCandidates, right), array.get(provisionalCandidates, left))
+                    FamilyState swap = array.get(provisionalCandidates, left)
+                    array.set(provisionalCandidates, left, array.get(provisionalCandidates, right))
+                    array.set(provisionalCandidates, right, swap)
+    if provisionalCount > 0
+        for candidatePosition = 0 to provisionalCount - 1
+            FamilyState candidate = array.get(provisionalCandidates, candidatePosition)
+            int existingPosition = f_findProvisionalFamily(activeFamilies, candidate.familyId)
+            int confirmedPosition = f_findConfirmedFamily(activeFamilies, candidate.familyId)
+            bool admitted = false
+            bool firstAdmission = false
+            if existingPosition >= 0
+                FamilyState existing = array.get(activeFamilies, existingPosition)
+                if existing.provisional and not f_isTerminal(existing.stage)
+                    candidate.lastTransitionIndex := existing.lastTransitionIndex
+                    array.set(activeFamilies, existingPosition, candidate)
+                    admitted := true
+            else if confirmedPosition < 0 and f_historyCanAdmit(patternHistory, candidate.patternId)
+                int provisionalSlots = f_countProvisional(activeFamilies)
+                if array.size(activeFamilies) < MAX_ACTIVE_FAMILIES and provisionalSlots < MAX_PROVISIONAL_FAMILIES
+                    array.push(activeFamilies, candidate)
+                    admitted := true
+                    firstAdmission := true
+                else
+                    int worstProvisional = f_worstProvisional(activeFamilies)
+                    if worstProvisional >= 0 and f_betterState(candidate, array.get(activeFamilies, worstProvisional))
+                        FamilyState evicted = array.get(activeFamilies, worstProvisional)
+                        array.remove(activeFamilies, worstProvisional)
+                        array.push(activeFamilies, candidate)
+                        admitted := true
+                        firstAdmission := true
+            else
+                capacityGuardCount += 1
+            if admitted
+                int admittedPosition = f_findPattern(activeFamilies, candidate.patternId)
+                FamilyState admittedState = array.get(activeFamilies, admittedPosition)
+                f_commitHistory(patternHistory, patternHistoryP1, admittedState)
+                if firstAdmission
+                    f_recordTransition(barEvents, patternHistory, emittedEventIds, admittedState, STAGE_NONE, STAGE_RIM_APPROACH, "CLOSED_BAR_RIGHT_SIDE_RECOVERY", true)
+
+// Deterministic same-bar event order. All calls occur only on a confirmed bar.
+int eventCount = array.size(barEvents)
+if eventCount > 1
+    for left = 0 to eventCount - 2
+        for right = left + 1 to eventCount - 1
+            if f_betterEvent(array.get(barEvents, right), array.get(barEvents, left))
+                LifecycleEvent swap = array.get(barEvents, left)
+                array.set(barEvents, left, array.get(barEvents, right))
+                array.set(barEvents, right, swap)
+
+bool earlyAttentionEvent = false
+bool handleReadyEvent = false
+bool priceBreakoutEvent = false
+bool invalidatedEvent = false
+bool enabledLifecycleEvent = false
+int primaryTransitionStage = STAGE_NONE
+
+if supportedProfile and barstate.isconfirmed and eventCount > 0
+    for eventPosition = 0 to eventCount - 1
+        LifecycleEvent event = array.get(barEvents, eventPosition)
+        bool enabled = f_eventEnabled(event.toStage)
+        earlyAttentionEvent := earlyAttentionEvent or enabled and (event.toStage == STAGE_RIM_APPROACH or event.toStage == STAGE_HANDLE_FORMING)
+        handleReadyEvent := handleReadyEvent or enabled and event.toStage == STAGE_HANDLE_READY
+        priceBreakoutEvent := priceBreakoutEvent or enabled and event.toStage == STAGE_PRICE_BREAKOUT
+        invalidatedEvent := invalidatedEvent or enabled and (event.toStage == STAGE_INVALIDATED or event.toStage == STAGE_EXPIRED)
+        enabledLifecycleEvent := enabledLifecycleEvent or enabled
+        if enabled
+            if primaryTransitionStage == STAGE_NONE
+                primaryTransitionStage := event.toStage
+            alert(f_eventHuman(event) + "\n--- DATA ---\n" + f_eventJson(event), alert.freq_all)
+        if showTransitionLabels
+            color eventColor = event.toStage == STAGE_RIM_APPROACH ? color.blue : event.toStage == STAGE_HANDLE_FORMING ? color.orange : event.toStage == STAGE_HANDLE_READY ? color.yellow : event.toStage == STAGE_PRICE_BREAKOUT ? color.lime : color.red
+            label.new(bar_index, high, f_stageName(event.toStage), style = label.style_label_down, color = eventColor, textcolor = color.black, size = size.tiny)
+
+alertcondition(earlyAttentionEvent, "Cup-and-Handle Early Attention", "Cup-and-Handle is approaching its rim or forming a credible handle on {{ticker}} {{interval}}. Inspect the chart; this is not a trade recommendation.")
+alertcondition(handleReadyEvent, "Cup-and-Handle Handle Ready", "At least one tracked Cup-and-Handle family is price-breakout-ready on {{ticker}} {{interval}}. This aggregate condition does not include family-specific levels; use the JSON alert stream for those.")
+alertcondition(priceBreakoutEvent, "Cup-and-Handle Price Breakout Confirmed", "At least one tracked Cup-and-Handle family closed across its handle line on {{ticker}} {{interval}}. This aggregate condition does not include family-specific levels; use the JSON alert stream for those.")
+alertcondition(invalidatedEvent, "Cup-and-Handle Invalidated or Expired", "A tracked Cup-and-Handle was invalidated or expired on {{ticker}} {{interval}}.")
+alertcondition(enabledLifecycleEvent, "Any Enabled Cup-and-Handle Event", "Enabled Cup-and-Handle lifecycle event on {{ticker}} {{interval}}. Stage {{plot(\"CH Transition Stage\")}}.")
+
+int primaryIndex = -1
+int activeCount = array.size(activeFamilies)
+if activeCount > 0
+    for position = 0 to activeCount - 1
+        if primaryIndex < 0 or f_betterDisplay(array.get(activeFamilies, position), array.get(activeFamilies, primaryIndex))
+            primaryIndex := position
+
+int primaryStage = primaryIndex >= 0 ? array.get(activeFamilies, primaryIndex).stage : STAGE_NONE
+float primaryQuality = primaryIndex >= 0 ? array.get(activeFamilies, primaryIndex).quality : na
+float primaryPivot = primaryIndex >= 0 ? array.get(activeFamilies, primaryIndex).pivot : na
+float primaryInvalidation = primaryIndex >= 0 ? array.get(activeFamilies, primaryIndex).invalidation : na
+float primaryRim = primaryIndex >= 0 ? array.get(activeFamilies, primaryIndex).rim : na
+float primaryCupHeight = primaryIndex >= 0 ? array.get(activeFamilies, primaryIndex).cupHeight : na
+int primaryP1Time = primaryIndex >= 0 ? array.get(activeFamilies, primaryIndex).p1Time : na
+int primaryP2Time = primaryIndex >= 0 ? array.get(activeFamilies, primaryIndex).p2Time : na
+int primaryP3Time = primaryIndex >= 0 ? array.get(activeFamilies, primaryIndex).p3Time : na
+int primaryP4Time = primaryIndex >= 0 ? array.get(activeFamilies, primaryIndex).p4Time : na
+bool primaryProvisional = primaryIndex >= 0 and array.get(activeFamilies, primaryIndex).provisional
+bool primaryAlreadyBroken = primaryIndex >= 0 and array.get(activeFamilies, primaryIndex).alreadyBroken
+
+// Bounded, hidden per-bar parity surface. Active slots retain insertion order,
+// matching the reference registry. Event slots expose the first eight events
+// after deterministic same-bar ordering; the total count reveals truncation.
+bool parityClosedBar = barstate.isconfirmed
+int parityReadableEventCount = parityClosedBar ? math.min(eventCount, MAX_PARITY_EVENTS) : 0
+
+int parityActive0Stage = parityClosedBar and activeCount > 0 ? array.get(activeFamilies, 0).stage : na
+int parityActive0P1Time = parityClosedBar and activeCount > 0 ? array.get(activeFamilies, 0).p1Time : na
+int parityActive0P2Time = parityClosedBar and activeCount > 0 ? array.get(activeFamilies, 0).p2Time : na
+int parityActive0P3Time = parityClosedBar and activeCount > 0 ? array.get(activeFamilies, 0).p3Time : na
+int parityActive1Stage = parityClosedBar and activeCount > 1 ? array.get(activeFamilies, 1).stage : na
+int parityActive1P1Time = parityClosedBar and activeCount > 1 ? array.get(activeFamilies, 1).p1Time : na
+int parityActive1P2Time = parityClosedBar and activeCount > 1 ? array.get(activeFamilies, 1).p2Time : na
+int parityActive1P3Time = parityClosedBar and activeCount > 1 ? array.get(activeFamilies, 1).p3Time : na
+int parityActive2Stage = parityClosedBar and activeCount > 2 ? array.get(activeFamilies, 2).stage : na
+int parityActive2P1Time = parityClosedBar and activeCount > 2 ? array.get(activeFamilies, 2).p1Time : na
+int parityActive2P2Time = parityClosedBar and activeCount > 2 ? array.get(activeFamilies, 2).p2Time : na
+int parityActive2P3Time = parityClosedBar and activeCount > 2 ? array.get(activeFamilies, 2).p3Time : na
+int parityActive3Stage = parityClosedBar and activeCount > 3 ? array.get(activeFamilies, 3).stage : na
+int parityActive3P1Time = parityClosedBar and activeCount > 3 ? array.get(activeFamilies, 3).p1Time : na
+int parityActive3P2Time = parityClosedBar and activeCount > 3 ? array.get(activeFamilies, 3).p2Time : na
+int parityActive3P3Time = parityClosedBar and activeCount > 3 ? array.get(activeFamilies, 3).p3Time : na
+
+int parityEvent0ToStage = parityReadableEventCount > 0 ? array.get(barEvents, 0).toStage : na
+int parityEvent0P1Time = parityReadableEventCount > 0 ? array.get(barEvents, 0).p1Time : na
+int parityEvent0P2Time = parityReadableEventCount > 0 ? array.get(barEvents, 0).p2Time : na
+int parityEvent1ToStage = parityReadableEventCount > 1 ? array.get(barEvents, 1).toStage : na
+int parityEvent1P1Time = parityReadableEventCount > 1 ? array.get(barEvents, 1).p1Time : na
+int parityEvent1P2Time = parityReadableEventCount > 1 ? array.get(barEvents, 1).p2Time : na
+int parityEvent2ToStage = parityReadableEventCount > 2 ? array.get(barEvents, 2).toStage : na
+int parityEvent2P1Time = parityReadableEventCount > 2 ? array.get(barEvents, 2).p1Time : na
+int parityEvent2P2Time = parityReadableEventCount > 2 ? array.get(barEvents, 2).p2Time : na
+int parityEvent3ToStage = parityReadableEventCount > 3 ? array.get(barEvents, 3).toStage : na
+int parityEvent3P1Time = parityReadableEventCount > 3 ? array.get(barEvents, 3).p1Time : na
+int parityEvent3P2Time = parityReadableEventCount > 3 ? array.get(barEvents, 3).p2Time : na
+int parityEvent4ToStage = parityReadableEventCount > 4 ? array.get(barEvents, 4).toStage : na
+int parityEvent4P1Time = parityReadableEventCount > 4 ? array.get(barEvents, 4).p1Time : na
+int parityEvent4P2Time = parityReadableEventCount > 4 ? array.get(barEvents, 4).p2Time : na
+int parityEvent5ToStage = parityReadableEventCount > 5 ? array.get(barEvents, 5).toStage : na
+int parityEvent5P1Time = parityReadableEventCount > 5 ? array.get(barEvents, 5).p1Time : na
+int parityEvent5P2Time = parityReadableEventCount > 5 ? array.get(barEvents, 5).p2Time : na
+int parityEvent6ToStage = parityReadableEventCount > 6 ? array.get(barEvents, 6).toStage : na
+int parityEvent6P1Time = parityReadableEventCount > 6 ? array.get(barEvents, 6).p1Time : na
+int parityEvent6P2Time = parityReadableEventCount > 6 ? array.get(barEvents, 6).p2Time : na
+int parityEvent7ToStage = parityReadableEventCount > 7 ? array.get(barEvents, 7).toStage : na
+int parityEvent7P1Time = parityReadableEventCount > 7 ? array.get(barEvents, 7).p1Time : na
+int parityEvent7P2Time = parityReadableEventCount > 7 ? array.get(barEvents, 7).p2Time : na
+int parityEventCount = parityClosedBar ? eventCount : na
+int parityBarIdentity = parityClosedBar and not na(time_close) and bar_index >= 0 and bar_index < PARITY_BAR_IDENTITY_BASE ? int(math.floor(time_close / 1000)) * PARITY_BAR_IDENTITY_BASE + bar_index : na
+
+plot(primaryStage, "CH Stage Code", display = display.data_window)
+plot(primaryTransitionStage != STAGE_NONE ? primaryTransitionStage : na, "CH Transition Stage", display = display.data_window)
+plot(primaryQuality, "CH Quality Score", display = display.data_window)
+plot(primaryPivot, "CH Pivot", display = display.data_window)
+plot(primaryInvalidation, "CH Invalidation", display = display.data_window)
+plot(primaryRim, "CH Rim", display = display.data_window)
+plot(primaryCupHeight, "CH Cup Height", display = display.data_window)
+plot(primaryProvisional ? 1 : 0, "CH Provisional", display = display.data_window)
+plot(primaryP1Time, "CH Left Rim Time", display = display.data_window)
+plot(primaryP2Time, "CH Bottom Time", display = display.data_window)
+plot(primaryP3Time, "CH Right Rim Time", display = display.data_window)
+plot(primaryP4Time, "CH Handle Time", display = display.data_window)
+plot(primaryAlreadyBroken ? 1 : 0, "CH Already Broken When Discovered", display = display.data_window)
+plot(activeCount, "CH Active Family Count", display = display.data_window)
+plot(confirmedOverflowCount, "CH Confirmed Overflow Count", display = display.data_window)
+plot(capacityGuardCount, "CH Capacity Guard Count", display = display.data_window)
+plot(cupFormingDiagnostic ? 1 : 0, "CH Cup Forming Diagnostic", display = display.data_window)
+
+plot(parityActive0Stage, "CH Parity Active 0 Stage", display = display.none)
+plot(parityActive0P1Time, "CH Parity Active 0 P1 Time", display = display.none)
+plot(parityActive0P2Time, "CH Parity Active 0 P2 Time", display = display.none)
+plot(parityActive0P3Time, "CH Parity Active 0 P3 Time", display = display.none)
+plot(parityActive1Stage, "CH Parity Active 1 Stage", display = display.none)
+plot(parityActive1P1Time, "CH Parity Active 1 P1 Time", display = display.none)
+plot(parityActive1P2Time, "CH Parity Active 1 P2 Time", display = display.none)
+plot(parityActive1P3Time, "CH Parity Active 1 P3 Time", display = display.none)
+plot(parityActive2Stage, "CH Parity Active 2 Stage", display = display.none)
+plot(parityActive2P1Time, "CH Parity Active 2 P1 Time", display = display.none)
+plot(parityActive2P2Time, "CH Parity Active 2 P2 Time", display = display.none)
+plot(parityActive2P3Time, "CH Parity Active 2 P3 Time", display = display.none)
+plot(parityActive3Stage, "CH Parity Active 3 Stage", display = display.none)
+plot(parityActive3P1Time, "CH Parity Active 3 P1 Time", display = display.none)
+plot(parityActive3P2Time, "CH Parity Active 3 P2 Time", display = display.none)
+plot(parityActive3P3Time, "CH Parity Active 3 P3 Time", display = display.none)
+
+plot(parityEvent0ToStage, "CH Parity Event 0 To Stage", display = display.none)
+plot(parityEvent0P1Time, "CH Parity Event 0 P1 Time", display = display.none)
+plot(parityEvent0P2Time, "CH Parity Event 0 P2 Time", display = display.none)
+plot(parityEvent1ToStage, "CH Parity Event 1 To Stage", display = display.none)
+plot(parityEvent1P1Time, "CH Parity Event 1 P1 Time", display = display.none)
+plot(parityEvent1P2Time, "CH Parity Event 1 P2 Time", display = display.none)
+plot(parityEvent2ToStage, "CH Parity Event 2 To Stage", display = display.none)
+plot(parityEvent2P1Time, "CH Parity Event 2 P1 Time", display = display.none)
+plot(parityEvent2P2Time, "CH Parity Event 2 P2 Time", display = display.none)
+plot(parityEvent3ToStage, "CH Parity Event 3 To Stage", display = display.none)
+plot(parityEvent3P1Time, "CH Parity Event 3 P1 Time", display = display.none)
+plot(parityEvent3P2Time, "CH Parity Event 3 P2 Time", display = display.none)
+plot(parityEvent4ToStage, "CH Parity Event 4 To Stage", display = display.none)
+plot(parityEvent4P1Time, "CH Parity Event 4 P1 Time", display = display.none)
+plot(parityEvent4P2Time, "CH Parity Event 4 P2 Time", display = display.none)
+plot(parityEvent5ToStage, "CH Parity Event 5 To Stage", display = display.none)
+plot(parityEvent5P1Time, "CH Parity Event 5 P1 Time", display = display.none)
+plot(parityEvent5P2Time, "CH Parity Event 5 P2 Time", display = display.none)
+plot(parityEvent6ToStage, "CH Parity Event 6 To Stage", display = display.none)
+plot(parityEvent6P1Time, "CH Parity Event 6 P1 Time", display = display.none)
+plot(parityEvent6P2Time, "CH Parity Event 6 P2 Time", display = display.none)
+plot(parityEvent7ToStage, "CH Parity Event 7 To Stage", display = display.none)
+plot(parityEvent7P1Time, "CH Parity Event 7 P1 Time", display = display.none)
+plot(parityEvent7P2Time, "CH Parity Event 7 P2 Time", display = display.none)
+plot(parityEventCount, "CH Parity Event Count", display = display.none)
+plot(parityBarIdentity, "CH Parity Bar Identity", display = display.none)
+
+var line cupLeftLine = na
+var line cupRightLine = na
+var line handleTrendLine = na
+var line pivotGuideLine = na
+
+if barstate.islast
+    bool hasPattern = primaryIndex >= 0
+    if showGeometry and hasPattern
+        FamilyState primary = array.get(activeFamilies, primaryIndex)
+        int lastClosedIndex = barstate.isconfirmed ? bar_index : bar_index - 1
+        float lastClosedClose = barstate.isconfirmed ? close : close[1]
+        int displayP3Index = na(primary.p3Index) ? lastClosedIndex : primary.p3Index
+        float displayP3Price = na(primary.p3Price) ? lastClosedClose : primary.p3Price
+        color stageColor = primary.stage == STAGE_RIM_APPROACH ? color.blue : primary.stage == STAGE_HANDLE_FORMING ? color.orange : primary.stage == STAGE_HANDLE_READY ? color.yellow : primary.stage == STAGE_PRICE_BREAKOUT ? color.lime : primary.stage < STAGE_NONE ? color.red : color.gray
+        if na(cupLeftLine)
+            cupLeftLine := line.new(primary.p1Index, primary.p1Price, primary.p2Index, primary.p2Price, xloc = xloc.bar_index, color = stageColor, width = 2)
+        else
+            line.set_xy1(cupLeftLine, primary.p1Index, primary.p1Price)
+            line.set_xy2(cupLeftLine, primary.p2Index, primary.p2Price)
+            line.set_color(cupLeftLine, stageColor)
+        if na(cupRightLine)
+            cupRightLine := line.new(primary.p2Index, primary.p2Price, displayP3Index, displayP3Price, xloc = xloc.bar_index, color = stageColor, width = 2)
+        else
+            line.set_xy1(cupRightLine, primary.p2Index, primary.p2Price)
+            line.set_xy2(cupRightLine, displayP3Index, displayP3Price)
+            line.set_color(cupRightLine, stageColor)
+        if not na(primary.p4Index)
+            float displayPivot = f_lineValue(primary.p3Index, primary.p3Price, primary.p4Index, primary.p4Price, lastClosedIndex)
+            if na(handleTrendLine)
+                handleTrendLine := line.new(primary.p3Index, primary.p3Price, lastClosedIndex, displayPivot, xloc = xloc.bar_index, color = color.yellow, width = 2)
+            else
+                line.set_xy1(handleTrendLine, primary.p3Index, primary.p3Price)
+                line.set_xy2(handleTrendLine, lastClosedIndex, displayPivot)
+            if na(pivotGuideLine)
+                pivotGuideLine := line.new(lastClosedIndex - 1, displayPivot, lastClosedIndex, displayPivot, xloc = xloc.bar_index, extend = extend.right, color = color.new(color.yellow, 50), style = line.style_dotted)
+            else
+                line.set_xy1(pivotGuideLine, lastClosedIndex - 1, displayPivot)
+                line.set_xy2(pivotGuideLine, lastClosedIndex, displayPivot)
+        else
+            if not na(handleTrendLine)
+                line.delete(handleTrendLine)
+                handleTrendLine := na
+            if not na(pivotGuideLine)
+                line.delete(pivotGuideLine)
+                pivotGuideLine := na
+    else
+        if not na(cupLeftLine)
+            line.delete(cupLeftLine)
+            cupLeftLine := na
+        if not na(cupRightLine)
+            line.delete(cupRightLine)
+            cupRightLine := na
+        if not na(handleTrendLine)
+            line.delete(handleTrendLine)
+            handleTrendLine := na
+        if not na(pivotGuideLine)
+            line.delete(pivotGuideLine)
+            pivotGuideLine := na
+
+var label supportWarning = na
+if barstate.islast
+    if not supportedProfile
+        string warningText = not standardChart ? "Cup-and-Handle V1 supports standard OHLC charts only" : not supportedTimeframe ? "Cup-and-Handle V1 supports native 4H, 1D, and 1W charts" : "Cup-and-Handle V1 auto profiles support stock and crypto charts"
+        if na(supportWarning)
+            supportWarning := label.new(bar_index, high, warningText, style = label.style_label_down, color = color.red, textcolor = color.white)
+        else
+            label.set_xy(supportWarning, bar_index, high)
+            label.set_text(supportWarning, warningText)
+    else if not na(supportWarning)
+        label.delete(supportWarning)
+        supportWarning := na

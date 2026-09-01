@@ -5,3 +5,9 @@ temp_*
 *.log
 discovery-log.json
 rules.json
+
+# Local Investment Attention runtime state and acceptance evidence.
+# Keep reusable code/contracts in Git; keep live inventories and screenshots local.
+analysis/runtime/
+analysis/investment-attention-*.json
+analysis/investment-attention-*.png

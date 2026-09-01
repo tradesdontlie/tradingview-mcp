@@ -1,0 +1,76 @@
+{
+  "schema_version": "rsi-attention-source-binding/v1",
+  "status": "LOCAL_ONLY_LIVE_BINDING_UNVERIFIED",
+  "selected_local_source": {
+    "original_path": "contracts/sources/rsi-divergence-selected-v1.pine",
+    "source_sha256": "5c8368f21c3d83fbac517f250b0bb6614924286fecde403701de1e40d722832e",
+    "line_count": 1165,
+    "title": "RSI Divergence",
+    "max_bars_back": 600,
+    "selection_basis": "Frozen protocol binds the vendored source snapshot for ordinary bullish divergence geometry."
+  },
+  "typed_bullish_outputs": {
+    "plotshape": [
+      "Regular Bullish RSI Divergence",
+      "Hidden Bullish RSI Divergence",
+      "Watch Regular Bullish RSI Divergence",
+      "Watch Hidden Bullish RSI Divergence",
+      "New Developing Regular Bullish RSI Divergence",
+      "New Developing Hidden Bullish RSI Divergence"
+    ],
+    "data_window_plot": [
+      "Developing Regular Bullish RSI Divergence",
+      "Developing Hidden Bullish RSI Divergence"
+    ],
+    "alertcondition": [
+      "Regular Bullish RSI Divergence",
+      "Hidden Bullish RSI Divergence",
+      "Developing Regular Bullish RSI Divergence",
+      "Developing Hidden Bullish RSI Divergence"
+    ]
+  },
+  "semantic_inputs_must_be_bound": [
+    "RSI Length",
+    "RSI Source",
+    "Pivot Left Bars",
+    "Pivot Right Bars",
+    "Min Bars Between Pivots",
+    "Max Bars Between Pivots",
+    "Price Low Source",
+    "Price High Source",
+    "Show Watch Signals",
+    "Show Developing Divergences",
+    "Show Regular Bullish",
+    "Show Hidden Bullish",
+    "Require Soft Bounce",
+    "Soft Bounce Bars",
+    "Developing Max Age",
+    "Developing Min RSI Difference",
+    "Developing Min Price Difference %",
+    "Strict Clean Developing Lines",
+    "Strict Local RSI Bars",
+    "Strict RSI Line Tolerance"
+  ],
+  "machine_output_controls_must_also_be_bound": [
+    "Display Mode",
+    "History Lookback Bars",
+    "Show Labels",
+    "Show Developing Labels",
+    "Show Lines",
+    "Show Markers"
+  ],
+  "reproducibility": {
+    "clean_checkout_complete": true,
+    "external_reference_paths_are_evidence_only": true,
+    "vendored_source_snapshot": "contracts/sources/rsi-divergence-selected-v1.pine"
+  },
+  "live_binding": {
+    "verified": false,
+    "script_id": null,
+    "script_version": null,
+    "source_sha256": null,
+    "semantic_inputs_sha256": null,
+    "verification_method": null,
+    "verified_at_utc": null
+  }
+}

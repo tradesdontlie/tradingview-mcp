@@ -139,12 +139,15 @@ async function execute(handler, values, positionals) {
 }
 
 function handleError(err) {
-  const message = err.message || String(err);
+  const message = err?.message || String(err);
+  const payload = { success: false, error: message };
+  if (typeof err?.code === 'string' && err.code) payload.code = err.code;
+  if (err?.partial_result !== undefined) payload.partial_result = err.partial_result;
   // Connection failures get exit code 2
   if (/CDP|connection|ECONNREFUSED|not running/i.test(message)) {
-    console.error(JSON.stringify({ success: false, error: message }, null, 2));
+    console.error(JSON.stringify(payload, null, 2));
     process.exit(2);
   }
-  console.error(JSON.stringify({ success: false, error: message }, null, 2));
+  console.error(JSON.stringify(payload, null, 2));
   process.exit(1);
 }

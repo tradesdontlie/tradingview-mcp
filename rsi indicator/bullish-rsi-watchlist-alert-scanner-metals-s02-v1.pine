@@ -1,0 +1,309 @@
+// MPL-2.0
+//@version=6
+// Definition: rsi-watchlist-alert-scanner/v1
+// Selected RSI source SHA-256: 5c8368f21c3d83fbac517f250b0bb6614924286fecde403701de1e40d722832e
+// Semantic input profile SHA-256: 645911b121a555428202b480401be5ea4e093b7e3b6d8baaed220a43654a603a
+// Delivery status: CURRENT_WATCHLIST_ARTIFACT; bind exact source/version/inputs before alert activation.
+indicator("Investment Attention - Bullish RSI Scanner S2 [Beta 0.1]", overlay=false, max_bars_back=600, dynamic_requests=true)
+
+scannerId = input.string("metals-s02-v1", "Scanner ID", group="Scanner")
+targetProfile = input.string("D", "Target profile", options=["D", "W"], group="Scanner")
+includeProvisional = input.bool(true, "Alert on provisional current D/W bar", group="Scanner")
+
+rsiLength = input.int(14, "RSI Length", minval=2, group="Exact RSI semantic inputs")
+rsiSource = input.source(close, "RSI Source", group="Exact RSI semantic inputs")
+pivotLeft = input.int(5, "Pivot Left Bars", minval=1, maxval=50, group="Exact RSI semantic inputs")
+pivotRight = input.int(5, "Pivot Right Bars", minval=1, maxval=50, group="Exact RSI semantic inputs")
+minBarsBetween = input.int(5, "Min Bars Between Pivots", minval=1, maxval=200, group="Exact RSI semantic inputs")
+maxBarsBetween = input.int(120, "Max Bars Between Pivots", minval=5, maxval=500, group="Exact RSI semantic inputs")
+priceLowSource = input.source(low, "Price Low Source", group="Exact RSI semantic inputs")
+priceHighSource = input.source(high, "Price High Source", group="Exact RSI semantic inputs")
+showWatch = input.bool(true, "Show Watch Signals", group="Exact RSI semantic inputs")
+showDeveloping = input.bool(true, "Show Developing Divergences", group="Exact RSI semantic inputs")
+showRegularBullish = input.bool(true, "Show Regular Bullish", group="Exact RSI semantic inputs")
+showHiddenBullish = input.bool(true, "Show Hidden Bullish", group="Exact RSI semantic inputs")
+requireSoftBounce = input.bool(true, "Require Soft Bounce", group="Exact RSI semantic inputs")
+softBounceBars = input.int(1, "Soft Bounce Bars", minval=0, maxval=10, group="Exact RSI semantic inputs")
+developingMaxAge = input.int(80, "Developing Max Age", minval=5, maxval=300, group="Exact RSI semantic inputs")
+minRsiDifference = input.float(2, "Developing Min RSI Difference", minval=0.0, step=0.1, group="Exact RSI semantic inputs")
+minPriceDifferencePct = input.float(0.5, "Developing Min Price Difference %", minval=0.0, step=0.1, group="Exact RSI semantic inputs")
+strictDevelopingLines = input.bool(true, "Strict Clean Developing Lines", group="Exact RSI semantic inputs")
+strictLocalBars = input.int(2, "Strict Local RSI Bars", minval=1, maxval=10, group="Exact RSI semantic inputs")
+strictRsiLineTolerance = input.float(0.5, "Strict RSI Line Tolerance", minval=0.0, step=0.1, group="Exact RSI semantic inputs")
+
+symbol01 = input.symbol("FX_IDC:XAUUSD", "Symbol 01", group="Scanner symbols")
+symbol02 = input.symbol("FX_IDC:XPDUSD", "Symbol 02", group="Scanner symbols")
+symbol03 = input.symbol("FX_IDC:XPTUSD", "Symbol 03", group="Scanner symbols")
+symbol04 = input.symbol("", "Symbol 04", group="Scanner symbols")
+symbol05 = input.symbol("", "Symbol 05", group="Scanner symbols")
+symbol06 = input.symbol("", "Symbol 06", group="Scanner symbols")
+symbol07 = input.symbol("", "Symbol 07", group="Scanner symbols")
+symbol08 = input.symbol("", "Symbol 08", group="Scanner symbols")
+symbol09 = input.symbol("", "Symbol 09", group="Scanner symbols")
+symbol10 = input.symbol("", "Symbol 10", group="Scanner symbols")
+symbol11 = input.symbol("", "Symbol 11", group="Scanner symbols")
+symbol12 = input.symbol("", "Symbol 12", group="Scanner symbols")
+symbol13 = input.symbol("", "Symbol 13", group="Scanner symbols")
+symbol14 = input.symbol("", "Symbol 14", group="Scanner symbols")
+symbol15 = input.symbol("", "Symbol 15", group="Scanner symbols")
+symbol16 = input.symbol("", "Symbol 16", group="Scanner symbols")
+symbol17 = input.symbol("", "Symbol 17", group="Scanner symbols")
+symbol18 = input.symbol("", "Symbol 18", group="Scanner symbols")
+symbol19 = input.symbol("", "Symbol 19", group="Scanner symbols")
+symbol20 = input.symbol("", "Symbol 20", group="Scanner symbols")
+symbol21 = input.symbol("", "Symbol 21", group="Scanner symbols")
+symbol22 = input.symbol("", "Symbol 22", group="Scanner symbols")
+symbol23 = input.symbol("", "Symbol 23", group="Scanner symbols")
+symbol24 = input.symbol("", "Symbol 24", group="Scanner symbols")
+symbol25 = input.symbol("", "Symbol 25", group="Scanner symbols")
+symbol26 = input.symbol("", "Symbol 26", group="Scanner symbols")
+symbol27 = input.symbol("", "Symbol 27", group="Scanner symbols")
+symbol28 = input.symbol("", "Symbol 28", group="Scanner symbols")
+symbol29 = input.symbol("", "Symbol 29", group="Scanner symbols")
+symbol30 = input.symbol("", "Symbol 30", group="Scanner symbols")
+
+string standardHostSymbol = ticker.standard(syminfo.tickerid)
+bool hostSupported = standardHostSymbol == "BINANCE:BTCUSDT" and chart.is_standard and timeframe.in_seconds() == 3600
+if barstate.isfirst and not hostSupported
+    runtime.error("Use standard BINANCE:BTCUSDT 60-minute candles")
+
+f_rsiLineIsClean(int anchorBar, float anchorRsi, int candidateBar, float candidateRsi, float rsiSeries) =>
+    bool clean = true
+    int span = candidateBar - anchorBar
+    if span > 1 and not na(anchorRsi) and not na(candidateRsi)
+        for step = 1 to math.min(span - 1, maxBarsBetween)
+            int offset = bar_index - (anchorBar + step)
+            if offset >= 0
+                float expectedRsi = anchorRsi + (candidateRsi - anchorRsi) * step / span
+                float actualRsi = rsiSeries[offset]
+                if not na(actualRsi)
+                    clean := actualRsi >= expectedRsi - strictRsiLineTolerance
+                    if not clean
+                        break
+    clean
+
+// Ported ordinary bullish machine candidate from the selected RSI source. Live
+// parity remains unverified. It emits only NEW_DEVELOPING and CONFIRMED bits.
+f_bullEventMask() =>
+    float rsiValue = ta.rsi(rsiSource, rsiLength)
+    float pivotLow = ta.pivotlow(priceLowSource, pivotLeft, pivotRight)
+    bool hasPivotLow = not na(pivotLow)
+    int lowPivotBar = bar_index - pivotRight
+    float lowPivotPrice = pivotLow
+    float lowPivotRsi = rsiValue[pivotRight]
+
+    var int previousLowPivotBar = na
+    var float previousLowPivotPrice = na
+    var float previousLowPivotRsi = na
+    var int regularBullCandidateBar = na
+    var float regularBullCandidatePrice = na
+    var float regularBullCandidateRsi = na
+    var int hiddenBullCandidateBar = na
+    var float hiddenBullCandidatePrice = na
+    var float hiddenBullCandidateRsi = na
+    var bool hiddenBullAnchorBroken = false
+    var int lastBullDevelopingAlertKind = 0
+    var int lastBullDevelopingAlertBar = na
+
+    bool regularBullish = false
+    bool hiddenBullish = false
+    int lowBarsBetween = na(previousLowPivotBar) ? na : lowPivotBar - previousLowPivotBar
+    bool lowInBarRange = not na(lowBarsBetween) and lowBarsBetween >= minBarsBetween and lowBarsBetween <= maxBarsBetween
+
+    if hasPivotLow
+        regularBullish := showRegularBullish and lowInBarRange and lowPivotPrice < previousLowPivotPrice and lowPivotRsi > previousLowPivotRsi
+        hiddenBullish := showHiddenBullish and lowInBarRange and lowPivotPrice > previousLowPivotPrice and lowPivotRsi < previousLowPivotRsi
+        previousLowPivotBar := lowPivotBar
+        previousLowPivotPrice := lowPivotPrice
+        previousLowPivotRsi := lowPivotRsi
+        regularBullCandidateBar := na
+        regularBullCandidatePrice := na
+        regularBullCandidateRsi := na
+        hiddenBullCandidateBar := na
+        hiddenBullCandidatePrice := na
+        hiddenBullCandidateRsi := na
+        hiddenBullAnchorBroken := false
+        lastBullDevelopingAlertKind := 0
+        lastBullDevelopingAlertBar := na
+
+    bool bullAnchorReady = not na(previousLowPivotBar) and not na(previousLowPivotPrice) and math.abs(previousLowPivotPrice) > 0 and not na(previousLowPivotRsi)
+    int bullAgeFromAnchor = bullAnchorReady ? bar_index - previousLowPivotBar : na
+    bool bullDevelopingAgeInRange = bullAnchorReady and bullAgeFromAnchor >= minBarsBetween and bullAgeFromAnchor <= maxBarsBetween and bullAgeFromAnchor <= developingMaxAge
+    float regularBullPriceDiffPct = bullAnchorReady ? (previousLowPivotPrice - priceLowSource) / math.abs(previousLowPivotPrice) * 100.0 : na
+    float hiddenBullPriceDiffPct = bullAnchorReady ? (priceLowSource - previousLowPivotPrice) / math.abs(previousLowPivotPrice) * 100.0 : na
+    float regularBullRsiDiff = bullAnchorReady ? rsiValue - previousLowPivotRsi : na
+    float hiddenBullRsiDiff = bullAnchorReady ? previousLowPivotRsi - rsiValue : na
+    float bullLocalLowest = ta.lowest(rsiValue, strictLocalBars + 1)
+    bool bullStrictLocalOk = not strictDevelopingLines or rsiValue <= bullLocalLowest
+
+    if bullAnchorReady and priceLowSource <= previousLowPivotPrice
+        hiddenBullAnchorBroken := true
+
+    bool regularBullCandidateNow = showRegularBullish and bullDevelopingAgeInRange and regularBullPriceDiffPct >= minPriceDifferencePct and regularBullRsiDiff >= minRsiDifference and bullStrictLocalOk
+    bool hiddenBullCandidateNow = showHiddenBullish and bullDevelopingAgeInRange and hiddenBullPriceDiffPct >= minPriceDifferencePct and hiddenBullRsiDiff >= minRsiDifference and bullStrictLocalOk and (not strictDevelopingLines or not hiddenBullAnchorBroken)
+
+    if bullAnchorReady and not na(regularBullCandidateBar)
+        bool regularBullCandidateExpired = bar_index - regularBullCandidateBar > developingMaxAge or bullAgeFromAnchor > maxBarsBetween
+        bool regularBullCandidateBroken = priceLowSource < regularBullCandidatePrice and regularBullRsiDiff < minRsiDifference
+        if regularBullCandidateExpired or regularBullCandidateBroken
+            regularBullCandidateBar := na
+            regularBullCandidatePrice := na
+            regularBullCandidateRsi := na
+
+    if bullAnchorReady and not na(hiddenBullCandidateBar)
+        bool hiddenBullCandidateExpired = bar_index - hiddenBullCandidateBar > developingMaxAge or bullAgeFromAnchor > maxBarsBetween
+        bool hiddenBullCandidateBroken = priceLowSource <= previousLowPivotPrice
+        if hiddenBullCandidateExpired or hiddenBullCandidateBroken
+            hiddenBullCandidateBar := na
+            hiddenBullCandidatePrice := na
+            hiddenBullCandidateRsi := na
+
+    if regularBullCandidateNow
+        bool regularBullCandidateImproved = na(regularBullCandidateBar) or priceLowSource < regularBullCandidatePrice or (priceLowSource == regularBullCandidatePrice and rsiValue > regularBullCandidateRsi)
+        if regularBullCandidateImproved
+            regularBullCandidateBar := bar_index
+            regularBullCandidatePrice := priceLowSource
+            regularBullCandidateRsi := rsiValue
+
+    if hiddenBullCandidateNow
+        bool hiddenBullCandidateImproved = na(hiddenBullCandidateBar) or rsiValue < hiddenBullCandidateRsi or (rsiValue == hiddenBullCandidateRsi and priceLowSource < hiddenBullCandidatePrice)
+        if hiddenBullCandidateImproved
+            hiddenBullCandidateBar := bar_index
+            hiddenBullCandidatePrice := priceLowSource
+            hiddenBullCandidateRsi := rsiValue
+
+    int regularBullCandidateAge = na(regularBullCandidateBar) ? na : bar_index - regularBullCandidateBar
+    int hiddenBullCandidateAge = na(hiddenBullCandidateBar) ? na : bar_index - hiddenBullCandidateBar
+    bool regularBullSoftBounce = not requireSoftBounce or softBounceBars == 0 or (not na(regularBullCandidateAge) and regularBullCandidateAge >= softBounceBars and close > regularBullCandidatePrice and rsiValue > regularBullCandidateRsi)
+    bool hiddenBullSoftBounce = not requireSoftBounce or softBounceBars == 0 or (not na(hiddenBullCandidateAge) and hiddenBullCandidateAge >= softBounceBars and close > hiddenBullCandidatePrice and rsiValue > hiddenBullCandidateRsi)
+    int safeLowAnchorBar = na(previousLowPivotBar) ? bar_index : previousLowPivotBar
+    float safeLowAnchorRsi = na(previousLowPivotRsi) ? rsiValue : previousLowPivotRsi
+    int safeRegularBullCandidateBar = na(regularBullCandidateBar) ? safeLowAnchorBar : regularBullCandidateBar
+    float safeRegularBullCandidateRsi = na(regularBullCandidateRsi) ? safeLowAnchorRsi : regularBullCandidateRsi
+    int safeHiddenBullCandidateBar = na(hiddenBullCandidateBar) ? safeLowAnchorBar : hiddenBullCandidateBar
+    float safeHiddenBullCandidateRsi = na(hiddenBullCandidateRsi) ? safeLowAnchorRsi : hiddenBullCandidateRsi
+    bool regularBullCleanLineRaw = f_rsiLineIsClean(safeLowAnchorBar, safeLowAnchorRsi, safeRegularBullCandidateBar, safeRegularBullCandidateRsi, rsiValue)
+    bool hiddenBullCleanLineRaw = f_rsiLineIsClean(safeLowAnchorBar, safeLowAnchorRsi, safeHiddenBullCandidateBar, safeHiddenBullCandidateRsi, rsiValue)
+    bool regularBullCleanLine = not strictDevelopingLines or (not na(regularBullCandidateBar) and regularBullCleanLineRaw)
+    bool hiddenBullCleanLine = not strictDevelopingLines or (not na(hiddenBullCandidateBar) and hiddenBullCleanLineRaw)
+    bool developingRegularBullish = showDeveloping and not na(regularBullCandidateBar) and regularBullSoftBounce and regularBullCleanLine
+    bool developingHiddenBullish = showDeveloping and not developingRegularBullish and not na(hiddenBullCandidateBar) and hiddenBullSoftBounce and hiddenBullCleanLine
+    bool developingBullish = developingRegularBullish or developingHiddenBullish
+    bool developingRegularBullSignal = developingRegularBullish and (lastBullDevelopingAlertKind != 1 or lastBullDevelopingAlertBar != regularBullCandidateBar)
+    bool developingHiddenBullSignal = developingHiddenBullish and (lastBullDevelopingAlertKind != 2 or lastBullDevelopingAlertBar != hiddenBullCandidateBar)
+
+    if not developingBullish
+        lastBullDevelopingAlertKind := 0
+        lastBullDevelopingAlertBar := na
+    if developingRegularBullSignal
+        lastBullDevelopingAlertKind := 1
+        lastBullDevelopingAlertBar := regularBullCandidateBar
+    if developingHiddenBullSignal
+        lastBullDevelopingAlertKind := 2
+        lastBullDevelopingAlertBar := hiddenBullCandidateBar
+
+    int eventMask = (developingRegularBullSignal ? 1 : 0) + (developingHiddenBullSignal ? 2 : 0) + (regularBullish ? 4 : 0) + (hiddenBullish ? 8 : 0)
+    eventMask
+
+f_payload() =>
+    int currentMask = f_bullEventMask()
+    [currentMask, time, time_close]
+
+f_eventName(int bitIndex) =>
+    switch bitIndex
+        0 => "NEW_DEVELOPING_REGULAR_BULL"
+        1 => "NEW_DEVELOPING_HIDDEN_BULL"
+        2 => "CONFIRMED_REGULAR_BULL"
+        => "CONFIRMED_HIDDEN_BULL"
+
+f_shortSymbol(string symbolText) =>
+    int separator = str.pos(symbolText, ":")
+    not na(separator) and separator >= 0 ? str.substring(symbolText, separator + 1) : symbolText
+
+f_humanEventName(int bitIndex) =>
+    switch bitIndex
+        0 => "Developing regular bullish RSI divergence"
+        1 => "Developing hidden bullish RSI divergence"
+        2 => "Confirmed regular bullish RSI divergence"
+        => "Confirmed hidden bullish RSI divergence"
+
+f_append(string events, string humanLines, string symbolText, string profile, int mask, int signalTime, bool provisional, int symbolIndex, bool suppressAttachBaseline, int attachedAtMs, array<int> lastEventTimes) =>
+    string nextEvents = events
+    string nextHumanLines = humanLines
+    if mask > 0 and not na(signalTime)
+        for bitIndex = 0 to 3
+            int bit = bitIndex == 0 ? 1 : bitIndex == 1 ? 2 : bitIndex == 2 ? 4 : 8
+            if int(math.floor(mask / bit)) % 2 == 1
+                int slot = symbolIndex * 4 + bitIndex
+                int priorTime = array.get(lastEventTimes, slot)
+                bool unseen = na(priorTime) or priorTime != signalTime
+                array.set(lastEventTimes, slot, signalTime)
+                bool existedAtAttach = signalTime <= attachedAtMs
+                if barstate.isrealtime and unseen and not (suppressAttachBaseline and existedAtAttach)
+                    string prefix = nextEvents == "" ? "" : ","
+                    nextEvents += prefix + "{\"symbol\":\"" + symbolText + "\",\"event\":\"" + f_eventName(bitIndex) + "\",\"data_bar_time_ms\":" + str.tostring(signalTime) + ",\"provisional\":" + str.tostring(provisional) + "}"
+                    string humanPrefix = nextHumanLines == "" ? "" : "\n\n"
+                    string status = provisional ? "WATCH ONLY" : "REVIEW"
+                    string profileLabel = profile == "W" ? "Weekly" : "Daily"
+                    string action = provisional ? "Wait for the " + str.lower(profileLabel) + " close." : "Review the chart."
+                    nextHumanLines += humanPrefix + status + " — " + f_shortSymbol(symbolText) + " (" + profileLabel + ")\n" + f_humanEventName(bitIndex) + ". " + action + " Not a trade signal."
+    [nextEvents, nextHumanLines]
+
+var array<string> scannerSymbols = array.from(symbol01, symbol02, symbol03, symbol04, symbol05, symbol06, symbol07, symbol08, symbol09, symbol10, symbol11, symbol12, symbol13, symbol14, symbol15, symbol16, symbol17, symbol18, symbol19, symbol20, symbol21, symbol22, symbol23, symbol24, symbol25, symbol26, symbol27, symbol28, symbol29, symbol30)
+varip array<int> lastEventTimes = array.new_int(120, na)
+varip bool realtimeBootstrapped = false
+var int attachedAtMs = timenow
+var bool historyBootstrapped = false
+array<string> seenSymbols = array.new_string()
+string eventJson = ""
+string humanLines = ""
+string missingSymbols = ""
+int configuredCount = 0
+int availableCount = 0
+bool suppressAttachBaseline = barstate.isrealtime and not realtimeBootstrapped
+[payloadMask, payloadTime, payloadCloseTime] = f_payload()
+
+for symbolIndex = 0 to array.size(scannerSymbols) - 1
+    string symbolText = array.get(scannerSymbols, symbolIndex)
+    if symbolText != ""
+        if array.includes(seenSymbols, symbolText)
+            runtime.error("Duplicate scanner symbol: " + symbolText)
+        array.push(seenSymbols, symbolText)
+        configuredCount += 1
+        [currentMask, currentSignalTime, currentSignalCloseTime] = request.security(symbolText, targetProfile, [payloadMask, payloadTime, payloadCloseTime], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+        if na(currentSignalTime)
+            missingSymbols += (str.length(missingSymbols) == 0 ? "" : ", ") + symbolText
+        else
+            availableCount += 1
+        // time_close is the scheduled end of the still-open 60m host bar and
+        // can be up to one hour in the future. Use wall-clock time so a target
+        // D/W event is never mislabeled CLOSED before its own close.
+        bool targetBarClosed = not na(currentSignalCloseTime) and timenow >= currentSignalCloseTime
+        bool shouldEvaluate = targetBarClosed or includeProvisional
+        if shouldEvaluate
+            [nextEventJson, nextHumanLines] = f_append(eventJson, humanLines, symbolText, targetProfile, currentMask, currentSignalTime, not targetBarClosed, symbolIndex, suppressAttachBaseline, attachedAtMs, lastEventTimes)
+            eventJson := nextEventJson
+            humanLines := nextHumanLines
+
+if barstate.islastconfirmedhistory
+    historyBootstrapped := true
+
+if barstate.isrealtime
+    realtimeBootstrapped := true
+
+if barstate.isrealtime and historyBootstrapped and eventJson != ""
+    string payload = "{\"schema_version\":\"rsi-watchlist-alert-batch/v1\",\"definition_version\":\"rsi-watchlist-alert-scanner/v1\",\"scanner_id\":\"" + scannerId + "\",\"profile\":\"" + targetProfile + "\",\"source_sha256\":\"5c8368f21c3d83fbac517f250b0bb6614924286fecde403701de1e40d722832e\",\"events\":[" + eventJson + "]}"
+    alert(humanLines + "\n--- DATA ---\n" + payload, alert.freq_all)
+
+plot(float(configuredCount), "RSI Configured Symbols", display=display.data_window)
+plot(float(availableCount), "RSI Available Symbols", display=display.data_window)
+var table healthTable = table.new(position.top_right, 2, 4, border_width=1)
+if barstate.islast
+    table.cell(healthTable, 0, 0, "Bullish RSI Scanner", bgcolor=color.new(color.gray, 20), text_color=color.white)
+    table.cell(healthTable, 1, 0, targetProfile, bgcolor=color.new(color.gray, 20), text_color=color.white)
+    table.cell(healthTable, 0, 1, "Configured / available")
+    table.cell(healthTable, 1, 1, str.tostring(configuredCount) + " / " + str.tostring(availableCount))
+    table.cell(healthTable, 0, 2, "Missing data")
+    table.cell(healthTable, 1, 2, str.length(missingSymbols) == 0 ? "None" : missingSymbols)
+    table.cell(healthTable, 0, 3, "Activation")
+    table.cell(healthTable, 1, 3, "LOCAL ONLY / uncompiled")

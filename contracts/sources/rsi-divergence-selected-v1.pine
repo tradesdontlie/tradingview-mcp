@@ -1,0 +1,1165 @@
+// MPL-2.0
+//@version=6
+indicator("RSI Divergence", overlay=false, max_lines_count=500, max_labels_count=500, max_bars_back=600)
+
+rsiLength = input.int(14, "RSI Length", minval=2)
+rsiSource = input.source(close, "RSI Source")
+rsiMaLength = input.int(14, "RSI MA Length", minval=1)
+pivotLeft = input.int(5, "Pivot Left Bars", minval=1, maxval=50)
+pivotRight = input.int(5, "Pivot Right Bars", minval=1, maxval=50)
+minBarsBetween = input.int(5, "Min Bars Between Pivots", minval=1, maxval=200)
+maxBarsBetween = input.int(120, "Max Bars Between Pivots", minval=5, maxval=500)
+priceLowSource = input.source(low, "Price Low Source")
+priceHighSource = input.source(high, "Price High Source")
+
+displayMode = input.string("Clean", "Display Mode", options=["Clean", "Recent", "All", "Markers Only"])
+historyLookbackBars = input.int(120, "History Lookback Bars", minval=1, maxval=5000)
+showWatch = input.bool(true, "Show Watch Signals")
+showDeveloping = input.bool(true, "Show Developing Divergences")
+showRegularBullish = input.bool(true, "Show Regular Bullish")
+showHiddenBullish = input.bool(true, "Show Hidden Bullish")
+showRegularBearish = input.bool(true, "Show Regular Bearish")
+showHiddenBearish = input.bool(true, "Show Hidden Bearish")
+showLabels = input.bool(true, "Show Labels")
+showConfirmedLabelsInput = input.bool(true, "Show Confirmed Labels")
+confirmedLabelTransparency = input.int(65, "Confirmed Label Transparency", minval=0, maxval=100)
+showDevelopingLabelsInput = input.bool(true, "Show Developing Labels")
+developingLabelTransparency = input.int(0, "Developing Label Transparency", minval=0, maxval=100)
+showLines = input.bool(true, "Show Lines")
+showRsiPaneLines = input.bool(true, "Show RSI Pane Lines")
+showMarkers = input.bool(true, "Show Markers")
+
+requireSoftBounce = input.bool(true, "Require Soft Bounce")
+softBounceBars = input.int(1, "Soft Bounce Bars", minval=0, maxval=10)
+developingMaxAge = input.int(80, "Developing Max Age", minval=5, maxval=300)
+minRsiDifference = input.float(2.0, "Developing Min RSI Difference", minval=0.0, step=0.1)
+minPriceDifferencePct = input.float(0.5, "Developing Min Price Difference %", minval=0.0, step=0.1)
+strictDevelopingLines = input.bool(true, "Strict Clean Developing Lines")
+strictLocalBars = input.int(2, "Strict Local RSI Bars", minval=1, maxval=10)
+strictRsiLineTolerance = input.float(0.5, "Strict RSI Line Tolerance", minval=0.0, step=0.1)
+lineWidth = input.int(2, "Line Width", minval=1, maxval=5)
+labelOffsetAtr = input.float(0.25, "Label Offset ATR", minval=0.0, step=0.05)
+developingTransparency = input.int(55, "Developing Transparency", minval=0, maxval=100)
+watchTransparency = input.int(75, "Watch Transparency", minval=0, maxval=100)
+bearLineTransparency = input.int(50, "Bearish Line Transparency", minval=0, maxval=100)
+
+regularBullColor = input.color(color.lime, "Regular Bullish Color")
+hiddenBullColor = input.color(color.aqua, "Hidden Bullish Color")
+regularBearColor = input.color(color.red, "Regular Bearish Color")
+hiddenBearColor = input.color(color.orange, "Hidden Bearish Color")
+bullLabelTextColor = input.color(color.black, "Bull Label Text Color")
+bearLabelTextColor = input.color(color.white, "Bear Label Text Color")
+regularBearLineColor = color.new(regularBearColor, bearLineTransparency)
+hiddenBearLineColor = color.new(hiddenBearColor, bearLineTransparency)
+regularBullLabelColor = color.new(regularBullColor, confirmedLabelTransparency)
+hiddenBullLabelColor = color.new(hiddenBullColor, confirmedLabelTransparency)
+regularBearLabelColor = color.new(regularBearColor, confirmedLabelTransparency)
+hiddenBearLabelColor = color.new(hiddenBearColor, confirmedLabelTransparency)
+confirmedBullLabelTextColor = color.new(bullLabelTextColor, confirmedLabelTransparency)
+confirmedBearLabelTextColor = color.new(bearLabelTextColor, confirmedLabelTransparency)
+developingBullLabelTextColor = color.new(bullLabelTextColor, developingLabelTransparency)
+developingBearLabelTextColor = color.new(bearLabelTextColor, developingLabelTransparency)
+
+rsiValue = ta.rsi(rsiSource, rsiLength)
+rsiMa = ta.sma(rsiValue, rsiMaLength)
+precisionBullEmaFast = ta.ema(close, 21)
+precisionBullEmaMid = ta.ema(close, 100)
+precisionBullEmaSlow = ta.ema(close, 200)
+precisionBullEmaStack = precisionBullEmaFast > precisionBullEmaMid and precisionBullEmaMid > precisionBullEmaSlow
+precisionTimeframe4H = timeframe.period == "240"
+precisionTimeframe1D = timeframe.period == "1D"
+precisionTimeframe1W = timeframe.period == "1W"
+precisionTimeframeSupported = precisionTimeframe4H or precisionTimeframe1D or precisionTimeframe1W
+precisionTimeframeDailyWeekly = precisionTimeframe1D or precisionTimeframe1W
+precisionBullVolumeContextLookback = 3
+precisionBullResponseWindowBars = 5
+precisionBullSignalInvalidationBars = 5
+precisionBullAnchorInvalidationBars = 10
+precisionBullStructureLookbackBars = 10
+precisionBullStructureBreakBars = 5
+precisionBullMaxActiveSetups = 20
+precisionBullRegularResponseMinScore = 70
+precisionBullHiddenMinSwingBars = 10
+precisionBullVolumeSma20 = ta.sma(volume[1], 20)
+precisionBullVolumeSma50 = ta.sma(volume[1], 50)
+precisionBullVolumeVsSma20 = precisionBullVolumeSma20 > 0 ? volume / precisionBullVolumeSma20 : na
+precisionBullVolumeVsSma50 = precisionBullVolumeSma50 > 0 ? volume / precisionBullVolumeSma50 : na
+precisionBearVolumeContextLookback = 3
+precisionBearResponseWindowBars = 5
+precisionBearSignalInvalidationBars = 5
+precisionBearAnchorInvalidationBars = 10
+precisionBearStructureLookbackBars = 10
+precisionBearStructureBreakBars = 5
+precisionBearShortMaxActiveSetups = 20
+precisionHiddenBearMinRsiDiff = 5.0
+precisionBearVolumeSma20 = ta.sma(volume[1], 20)
+precisionBearVolumeSma50 = ta.sma(volume[1], 50)
+precisionBearVolumeVsSma20 = precisionBearVolumeSma20 > 0 ? volume / precisionBearVolumeSma20 : na
+precisionBearVolumeVsSma50 = precisionBearVolumeSma50 > 0 ? volume / precisionBearVolumeSma50 : na
+precisionBearBbBasis = ta.sma(close, 20)
+precisionBearBbDev = ta.stdev(close, 20)
+precisionBearBbUpper = precisionBearBbBasis + 2.0 * precisionBearBbDev
+precisionBearBbLower = precisionBearBbBasis - 2.0 * precisionBearBbDev
+precisionBearBbPosition = precisionBearBbUpper != precisionBearBbLower ? (close - precisionBearBbLower) / (precisionBearBbUpper - precisionBearBbLower) : na
+precisionBullDailyMaNearPct = 5.0
+precisionBullWeeklyMaNearPct = 10.0
+precisionBull100D = request.security(syminfo.tickerid, "D", ta.sma(close, 100)[1], barmerge.gaps_off, barmerge.lookahead_off)
+precisionBull200D = request.security(syminfo.tickerid, "D", ta.sma(close, 200)[1], barmerge.gaps_off, barmerge.lookahead_off)
+precisionBull100W = request.security(syminfo.tickerid, "W", ta.sma(close, 100)[1], barmerge.gaps_off, barmerge.lookahead_off)
+precisionBull200W = request.security(syminfo.tickerid, "W", ta.sma(close, 200)[1], barmerge.gaps_off, barmerge.lookahead_off)
+
+precisionBullMaDistancePct(float maValue) =>
+    not na(maValue) and maValue != 0.0 ? (close - maValue) / maValue * 100.0 : na
+
+precisionBullSignedPct(float value) =>
+    na(value) ? "n/a" : (value > 0 ? "+" : "") + str.tostring(value, "#.##") + "%"
+
+precisionBullAppendContext(string base, string item) =>
+    base == "" ? item : base + ", " + item
+
+precisionBull100DDistance = precisionBullMaDistancePct(precisionBull100D)
+precisionBull200DDistance = precisionBullMaDistancePct(precisionBull200D)
+precisionBull100WDistance = precisionBullMaDistancePct(precisionBull100W)
+precisionBull200WDistance = precisionBullMaDistancePct(precisionBull200W)
+precisionBullNear100D = not na(precisionBull100DDistance) and math.abs(precisionBull100DDistance) <= precisionBullDailyMaNearPct
+precisionBullNear200D = not na(precisionBull200DDistance) and math.abs(precisionBull200DDistance) <= precisionBullDailyMaNearPct
+precisionBullNear100W = not na(precisionBull100WDistance) and math.abs(precisionBull100WDistance) <= precisionBullWeeklyMaNearPct
+precisionBullNear200W = not na(precisionBull200WDistance) and math.abs(precisionBull200WDistance) <= precisionBullWeeklyMaNearPct
+
+float precisionBullNearestMaDistance = na
+string precisionBullNearestMaText = "n/a"
+if not na(precisionBull100DDistance)
+    precisionBullNearestMaDistance := math.abs(precisionBull100DDistance)
+    precisionBullNearestMaText := "100D " + precisionBullSignedPct(precisionBull100DDistance)
+if not na(precisionBull200DDistance) and (na(precisionBullNearestMaDistance) or math.abs(precisionBull200DDistance) < precisionBullNearestMaDistance)
+    precisionBullNearestMaDistance := math.abs(precisionBull200DDistance)
+    precisionBullNearestMaText := "200D " + precisionBullSignedPct(precisionBull200DDistance)
+if not na(precisionBull100WDistance) and (na(precisionBullNearestMaDistance) or math.abs(precisionBull100WDistance) < precisionBullNearestMaDistance)
+    precisionBullNearestMaDistance := math.abs(precisionBull100WDistance)
+    precisionBullNearestMaText := "100W " + precisionBullSignedPct(precisionBull100WDistance)
+if not na(precisionBull200WDistance) and (na(precisionBullNearestMaDistance) or math.abs(precisionBull200WDistance) < precisionBullNearestMaDistance)
+    precisionBullNearestMaDistance := math.abs(precisionBull200WDistance)
+    precisionBullNearestMaText := "200W " + precisionBullSignedPct(precisionBull200WDistance)
+
+string precisionBullMaContextText = ""
+if precisionBullNear100D
+    precisionBullMaContextText := precisionBullAppendContext(precisionBullMaContextText, "near 100D " + precisionBullSignedPct(precisionBull100DDistance))
+if precisionBullNear200D
+    precisionBullMaContextText := precisionBullAppendContext(precisionBullMaContextText, "near 200D " + precisionBullSignedPct(precisionBull200DDistance))
+if precisionBullNear100W
+    precisionBullMaContextText := precisionBullAppendContext(precisionBullMaContextText, "near 100W " + precisionBullSignedPct(precisionBull100WDistance))
+if precisionBullNear200W
+    precisionBullMaContextText := precisionBullAppendContext(precisionBullMaContextText, "near 200W " + precisionBullSignedPct(precisionBull200WDistance))
+precisionBullMaContextText := precisionBullMaContextText == "" ? "no major MA context; nearest " + precisionBullNearestMaText : precisionBullMaContextText
+
+rsiUpper = hline(70, "RSI Upper Band", color=color.new(color.gray, 45), linestyle=hline.style_dashed)
+rsiMiddle = hline(50, "RSI Middle Band", color=color.new(color.gray, 70), linestyle=hline.style_dashed)
+rsiLower = hline(30, "RSI Lower Band", color=color.new(color.gray, 45), linestyle=hline.style_dashed)
+fill(rsiUpper, rsiLower, color=color.new(color.purple, 92), title="RSI Background")
+
+plot(rsiValue, "RSI", color=color.white, linewidth=1)
+plot(rsiMa, "RSI-based MA", color=color.new(color.white, 35), linewidth=1)
+
+priceLabelAtr = nz(ta.atr(14), high - low)
+isCleanMode = displayMode == "Clean"
+isAllMode = displayMode == "All"
+isMarkersOnlyMode = displayMode == "Markers Only"
+inDisplayHistory = isAllMode or bar_index >= last_bar_index - historyLookbackBars
+showConfirmedLabels = showLabels and showConfirmedLabelsInput and not isCleanMode and not isMarkersOnlyMode and inDisplayHistory
+showConfirmedLines = showLines and not isCleanMode and not isMarkersOnlyMode and inDisplayHistory
+showConfirmedRsiLines = showConfirmedLines and showRsiPaneLines
+showDevelopingLabels = showLabels and showDevelopingLabelsInput and not isMarkersOnlyMode
+showDevelopingLines = showLines and not isMarkersOnlyMode
+showDevelopingRsiLines = showDevelopingLines and showRsiPaneLines
+showDevelopingVisuals = showDevelopingLabels or showDevelopingLines
+showSignalMarkers = showMarkers and inDisplayHistory
+
+rsiLineIsClean(int anchorBar, float anchorRsi, int candidateBar, float candidateRsi, bool isBullishLine) =>
+    clean = true
+    span = candidateBar - anchorBar
+    if span > 1 and not na(anchorRsi) and not na(candidateRsi)
+        for step = 1 to math.min(span - 1, maxBarsBetween)
+            offset = bar_index - (anchorBar + step)
+            if offset >= 0
+                expectedRsi = anchorRsi + (candidateRsi - anchorRsi) * step / span
+                actualRsi = rsiValue[offset]
+                if not na(actualRsi)
+                    clean := isBullishLine ? actualRsi >= expectedRsi - strictRsiLineTolerance : actualRsi <= expectedRsi + strictRsiLineTolerance
+                    if not clean
+                        break
+    clean
+
+precisionBullStructureHigh(int responseAge) =>
+    float structureHigh = na
+    for lookbackIndex = 1 to 70
+        if lookbackIndex <= responseAge + precisionBullStructureLookbackBars
+            structureHigh := na(structureHigh) ? high[lookbackIndex] : math.max(structureHigh, high[lookbackIndex])
+    structureHigh
+
+precisionBearStructureLow(int responseAge) =>
+    float structureLow = na
+    for lookbackIndex = 1 to 70
+        if lookbackIndex <= responseAge + precisionBearStructureLookbackBars
+            structureLow := na(structureLow) ? low[lookbackIndex] : math.min(structureLow, low[lookbackIndex])
+    structureLow
+
+// Confirmed pivot lows for bullish divergence.
+pivotLow = ta.pivotlow(priceLowSource, pivotLeft, pivotRight)
+hasPivotLow = not na(pivotLow)
+lowPivotBar = bar_index - pivotRight
+lowPivotPrice = pivotLow
+lowPivotRsi = rsiValue[pivotRight]
+
+var int previousLowPivotBar = na
+var float previousLowPivotPrice = na
+var float previousLowPivotRsi = na
+
+var int regularBullCandidateBar = na
+var float regularBullCandidatePrice = na
+var float regularBullCandidateRsi = na
+var int hiddenBullCandidateBar = na
+var float hiddenBullCandidatePrice = na
+var float hiddenBullCandidateRsi = na
+var bool hiddenBullAnchorBroken = false
+
+var line developingBullRsiLine = na
+var line developingBullPriceLine = na
+var label developingBullPriceLabel = na
+var int lastBullDevelopingAlertKind = 0
+var int lastBullDevelopingAlertBar = na
+var int precisionHiddenBullSetupBar = na
+var float precisionHiddenBullSignalLow = na
+var float precisionHiddenBullAnchorBodyMid = na
+var float precisionHiddenBullAnchorHigh = na
+var float precisionHiddenBullAnchorLow = na
+var bool precisionHiddenBullInvalidated = false
+var bool precisionHiddenBullResponsePending = false
+var int precisionHiddenBullResponseBar = na
+var float precisionHiddenBullStructureHigh = na
+var bool precisionHiddenBullCompleted = false
+var precisionBullResponseSetupBars = array.new_int()
+var precisionBullResponseSetupKinds = array.new_int()
+var precisionBullResponseSignalLows = array.new_float()
+var precisionBullResponseAnchorBodyMids = array.new_float()
+var precisionBullResponseAnchorHighs = array.new_float()
+var precisionBullResponseAnchorLows = array.new_float()
+var precisionBullResponseBars = array.new_int()
+var precisionBullResponseStructureHighs = array.new_float()
+var precisionBullResponsePendings = array.new_bool()
+var precisionPremiumBullSetupBars = array.new_int()
+var precisionPremiumBullSignalLows = array.new_float()
+var precisionPremiumBullAnchorBodyMids = array.new_float()
+var precisionPremiumBullAnchorHighs = array.new_float()
+var precisionPremiumBullAnchorLows = array.new_float()
+var precisionPremiumBullResponseBars = array.new_int()
+var precisionPremiumBullStructureHighs = array.new_float()
+var precisionPremiumBullResponsePendings = array.new_bool()
+
+regularBullish = false
+hiddenBullish = false
+lowBarsBetween = na(previousLowPivotBar) ? na : lowPivotBar - previousLowPivotBar
+lowInBarRange = not na(lowBarsBetween) and lowBarsBetween >= minBarsBetween and lowBarsBetween <= maxBarsBetween
+
+if hasPivotLow
+    regularBullish := showRegularBullish and lowInBarRange and lowPivotPrice < previousLowPivotPrice and lowPivotRsi > previousLowPivotRsi
+    hiddenBullish := showHiddenBullish and lowInBarRange and lowPivotPrice > previousLowPivotPrice and lowPivotRsi < previousLowPivotRsi
+
+    if regularBullish
+        if showConfirmedRsiLines
+            line.new(previousLowPivotBar, previousLowPivotRsi, lowPivotBar, lowPivotRsi, xloc=xloc.bar_index, extend=extend.none, color=regularBullColor, style=line.style_solid, width=lineWidth)
+        if showConfirmedLines
+            line.new(previousLowPivotBar, previousLowPivotPrice, lowPivotBar, lowPivotPrice, xloc=xloc.bar_index, extend=extend.none, color=regularBullColor, style=line.style_solid, width=lineWidth, force_overlay=true)
+        if showConfirmedLabels
+            label.new(lowPivotBar, lowPivotPrice - priceLabelAtr * labelOffsetAtr, "Bull Div", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_up, color=regularBullLabelColor, textcolor=confirmedBullLabelTextColor, size=size.normal, force_overlay=true)
+
+    if hiddenBullish
+        if showConfirmedRsiLines
+            line.new(previousLowPivotBar, previousLowPivotRsi, lowPivotBar, lowPivotRsi, xloc=xloc.bar_index, extend=extend.none, color=hiddenBullColor, style=line.style_dashed, width=lineWidth)
+        if showConfirmedLines
+            line.new(previousLowPivotBar, previousLowPivotPrice, lowPivotBar, lowPivotPrice, xloc=xloc.bar_index, extend=extend.none, color=hiddenBullColor, style=line.style_dashed, width=lineWidth, force_overlay=true)
+        if showConfirmedLabels
+            label.new(lowPivotBar, lowPivotPrice - priceLabelAtr * labelOffsetAtr, "Hidden Bull", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_up, color=hiddenBullLabelColor, textcolor=confirmedBullLabelTextColor, size=size.normal, force_overlay=true)
+
+    previousLowPivotBar := lowPivotBar
+    previousLowPivotPrice := lowPivotPrice
+    previousLowPivotRsi := lowPivotRsi
+
+    regularBullCandidateBar := na
+    regularBullCandidatePrice := na
+    regularBullCandidateRsi := na
+    hiddenBullCandidateBar := na
+    hiddenBullCandidatePrice := na
+    hiddenBullCandidateRsi := na
+    hiddenBullAnchorBroken := false
+    lastBullDevelopingAlertKind := 0
+    lastBullDevelopingAlertBar := na
+    precisionHiddenBullSetupBar := na
+    precisionHiddenBullSignalLow := na
+    precisionHiddenBullAnchorBodyMid := na
+    precisionHiddenBullAnchorHigh := na
+    precisionHiddenBullAnchorLow := na
+    precisionHiddenBullInvalidated := false
+    precisionHiddenBullResponsePending := false
+    precisionHiddenBullResponseBar := na
+    precisionHiddenBullStructureHigh := na
+    precisionHiddenBullCompleted := false
+    array.clear(precisionBullResponseSetupBars)
+    array.clear(precisionBullResponseSetupKinds)
+    array.clear(precisionBullResponseSignalLows)
+    array.clear(precisionBullResponseAnchorBodyMids)
+    array.clear(precisionBullResponseAnchorHighs)
+    array.clear(precisionBullResponseAnchorLows)
+    array.clear(precisionBullResponseBars)
+    array.clear(precisionBullResponseStructureHighs)
+    array.clear(precisionBullResponsePendings)
+    array.clear(precisionPremiumBullSetupBars)
+    array.clear(precisionPremiumBullSignalLows)
+    array.clear(precisionPremiumBullAnchorBodyMids)
+    array.clear(precisionPremiumBullAnchorHighs)
+    array.clear(precisionPremiumBullAnchorLows)
+    array.clear(precisionPremiumBullResponseBars)
+    array.clear(precisionPremiumBullStructureHighs)
+    array.clear(precisionPremiumBullResponsePendings)
+    if not na(developingBullRsiLine)
+        line.delete(developingBullRsiLine)
+    if not na(developingBullPriceLine)
+        line.delete(developingBullPriceLine)
+    if not na(developingBullPriceLabel)
+        label.delete(developingBullPriceLabel)
+    developingBullRsiLine := na
+    developingBullPriceLine := na
+    developingBullPriceLabel := na
+
+bullAnchorReady = not na(previousLowPivotBar) and not na(previousLowPivotPrice) and math.abs(previousLowPivotPrice) > 0 and not na(previousLowPivotRsi)
+bullAgeFromAnchor = bullAnchorReady ? bar_index - previousLowPivotBar : na
+bullDevelopingAgeInRange = bullAnchorReady and bullAgeFromAnchor >= minBarsBetween and bullAgeFromAnchor <= maxBarsBetween and bullAgeFromAnchor <= developingMaxAge
+regularBullPriceDiffPct = bullAnchorReady ? (previousLowPivotPrice - priceLowSource) / math.abs(previousLowPivotPrice) * 100.0 : na
+hiddenBullPriceDiffPct = bullAnchorReady ? (priceLowSource - previousLowPivotPrice) / math.abs(previousLowPivotPrice) * 100.0 : na
+regularBullRsiDiff = bullAnchorReady ? rsiValue - previousLowPivotRsi : na
+hiddenBullRsiDiff = bullAnchorReady ? previousLowPivotRsi - rsiValue : na
+bullLocalLowest = ta.lowest(rsiValue, strictLocalBars + 1)
+bullStrictLocalOk = not strictDevelopingLines or rsiValue <= bullLocalLowest
+
+if bullAnchorReady and priceLowSource <= previousLowPivotPrice
+    hiddenBullAnchorBroken := true
+
+regularBullCandidateNow = showRegularBullish and bullDevelopingAgeInRange and regularBullPriceDiffPct >= minPriceDifferencePct and regularBullRsiDiff >= minRsiDifference and bullStrictLocalOk
+hiddenBullCandidateNow = showHiddenBullish and bullDevelopingAgeInRange and hiddenBullPriceDiffPct >= minPriceDifferencePct and hiddenBullRsiDiff >= minRsiDifference and bullStrictLocalOk and (not strictDevelopingLines or not hiddenBullAnchorBroken)
+
+if bullAnchorReady and not na(regularBullCandidateBar)
+    regularBullCandidateExpired = bar_index - regularBullCandidateBar > developingMaxAge or bullAgeFromAnchor > maxBarsBetween
+    regularBullCandidateBroken = priceLowSource < regularBullCandidatePrice and regularBullRsiDiff < minRsiDifference
+    if regularBullCandidateExpired or regularBullCandidateBroken
+        regularBullCandidateBar := na
+        regularBullCandidatePrice := na
+        regularBullCandidateRsi := na
+
+if bullAnchorReady and not na(hiddenBullCandidateBar)
+    hiddenBullCandidateExpired = bar_index - hiddenBullCandidateBar > developingMaxAge or bullAgeFromAnchor > maxBarsBetween
+    hiddenBullCandidateBroken = priceLowSource <= previousLowPivotPrice
+    if hiddenBullCandidateExpired or hiddenBullCandidateBroken
+        hiddenBullCandidateBar := na
+        hiddenBullCandidatePrice := na
+        hiddenBullCandidateRsi := na
+
+if regularBullCandidateNow
+    regularBullCandidateImproved = na(regularBullCandidateBar) or priceLowSource < regularBullCandidatePrice or (priceLowSource == regularBullCandidatePrice and rsiValue > regularBullCandidateRsi)
+    if regularBullCandidateImproved
+        regularBullCandidateBar := bar_index
+        regularBullCandidatePrice := priceLowSource
+        regularBullCandidateRsi := rsiValue
+
+if hiddenBullCandidateNow
+    hiddenBullCandidateImproved = na(hiddenBullCandidateBar) or rsiValue < hiddenBullCandidateRsi or (rsiValue == hiddenBullCandidateRsi and priceLowSource < hiddenBullCandidatePrice)
+    if hiddenBullCandidateImproved
+        hiddenBullCandidateBar := bar_index
+        hiddenBullCandidatePrice := priceLowSource
+        hiddenBullCandidateRsi := rsiValue
+
+regularBullCandidateAge = na(regularBullCandidateBar) ? na : bar_index - regularBullCandidateBar
+hiddenBullCandidateAge = na(hiddenBullCandidateBar) ? na : bar_index - hiddenBullCandidateBar
+regularBullSoftBounce = not requireSoftBounce or softBounceBars == 0 or (not na(regularBullCandidateAge) and regularBullCandidateAge >= softBounceBars and close > regularBullCandidatePrice and rsiValue > regularBullCandidateRsi)
+hiddenBullSoftBounce = not requireSoftBounce or softBounceBars == 0 or (not na(hiddenBullCandidateAge) and hiddenBullCandidateAge >= softBounceBars and close > hiddenBullCandidatePrice and rsiValue > hiddenBullCandidateRsi)
+safeLowAnchorBar = na(previousLowPivotBar) ? bar_index : previousLowPivotBar
+safeLowAnchorRsi = na(previousLowPivotRsi) ? rsiValue : previousLowPivotRsi
+safeRegularBullCandidateBar = na(regularBullCandidateBar) ? safeLowAnchorBar : regularBullCandidateBar
+safeRegularBullCandidateRsi = na(regularBullCandidateRsi) ? safeLowAnchorRsi : regularBullCandidateRsi
+safeHiddenBullCandidateBar = na(hiddenBullCandidateBar) ? safeLowAnchorBar : hiddenBullCandidateBar
+safeHiddenBullCandidateRsi = na(hiddenBullCandidateRsi) ? safeLowAnchorRsi : hiddenBullCandidateRsi
+regularBullCleanLineRaw = rsiLineIsClean(safeLowAnchorBar, safeLowAnchorRsi, safeRegularBullCandidateBar, safeRegularBullCandidateRsi, true)
+hiddenBullCleanLineRaw = rsiLineIsClean(safeLowAnchorBar, safeLowAnchorRsi, safeHiddenBullCandidateBar, safeHiddenBullCandidateRsi, true)
+regularBullCleanLine = not strictDevelopingLines ? true : not na(regularBullCandidateBar) and regularBullCleanLineRaw
+hiddenBullCleanLine = not strictDevelopingLines ? true : not na(hiddenBullCandidateBar) and hiddenBullCleanLineRaw
+
+regularWatchBullish = showWatch and not na(regularBullCandidateBar) and not regularBullSoftBounce
+hiddenWatchBullish = showWatch and not na(hiddenBullCandidateBar) and not hiddenBullSoftBounce
+developingRegularBullish = showDeveloping and not na(regularBullCandidateBar) and regularBullSoftBounce and regularBullCleanLine
+developingHiddenBullish = showDeveloping and not developingRegularBullish and not na(hiddenBullCandidateBar) and hiddenBullSoftBounce and hiddenBullCleanLine
+developingBullish = developingRegularBullish or developingHiddenBullish
+
+selectedBullDevelopingKind = developingRegularBullish ? 1 : developingHiddenBullish ? 2 : 0
+selectedBullDevelopingBar = developingRegularBullish ? regularBullCandidateBar : developingHiddenBullish ? hiddenBullCandidateBar : na
+selectedBullDevelopingPrice = developingRegularBullish ? regularBullCandidatePrice : developingHiddenBullish ? hiddenBullCandidatePrice : na
+selectedBullDevelopingRsi = developingRegularBullish ? regularBullCandidateRsi : developingHiddenBullish ? hiddenBullCandidateRsi : na
+selectedBullDevelopingColor = developingRegularBullish ? color.new(regularBullColor, developingTransparency) : developingHiddenBullish ? color.new(hiddenBullColor, developingTransparency) : na
+selectedBullDevelopingLabelColor = developingRegularBullish ? color.new(regularBullColor, developingLabelTransparency) : developingHiddenBullish ? color.new(hiddenBullColor, developingLabelTransparency) : na
+selectedBullDevelopingLabel = developingRegularBullish ? "Dev Bull" : developingHiddenBullish ? "Dev Hidden Bull" : ""
+
+developingRegularBullSignal = developingRegularBullish and (lastBullDevelopingAlertKind != 1 or lastBullDevelopingAlertBar != regularBullCandidateBar)
+developingHiddenBullSignal = developingHiddenBullish and (lastBullDevelopingAlertKind != 2 or lastBullDevelopingAlertBar != hiddenBullCandidateBar)
+
+if developingBullish and showDevelopingVisuals
+    if showDevelopingRsiLines
+        if na(developingBullRsiLine)
+            developingBullRsiLine := line.new(previousLowPivotBar, previousLowPivotRsi, selectedBullDevelopingBar, selectedBullDevelopingRsi, xloc=xloc.bar_index, extend=extend.none, color=selectedBullDevelopingColor, style=line.style_dotted, width=lineWidth)
+        else
+            line.set_xy1(developingBullRsiLine, previousLowPivotBar, previousLowPivotRsi)
+            line.set_xy2(developingBullRsiLine, selectedBullDevelopingBar, selectedBullDevelopingRsi)
+            line.set_color(developingBullRsiLine, selectedBullDevelopingColor)
+            line.set_style(developingBullRsiLine, line.style_dotted)
+            line.set_width(developingBullRsiLine, lineWidth)
+    else if not na(developingBullRsiLine)
+        line.delete(developingBullRsiLine)
+        developingBullRsiLine := na
+
+    if showDevelopingLines
+        if na(developingBullPriceLine)
+            developingBullPriceLine := line.new(previousLowPivotBar, previousLowPivotPrice, selectedBullDevelopingBar, selectedBullDevelopingPrice, xloc=xloc.bar_index, extend=extend.none, color=selectedBullDevelopingColor, style=line.style_dotted, width=lineWidth, force_overlay=true)
+        else
+            line.set_xy1(developingBullPriceLine, previousLowPivotBar, previousLowPivotPrice)
+            line.set_xy2(developingBullPriceLine, selectedBullDevelopingBar, selectedBullDevelopingPrice)
+            line.set_color(developingBullPriceLine, selectedBullDevelopingColor)
+            line.set_style(developingBullPriceLine, line.style_dotted)
+            line.set_width(developingBullPriceLine, lineWidth)
+    else if not na(developingBullPriceLine)
+        line.delete(developingBullPriceLine)
+        developingBullPriceLine := na
+
+    if showDevelopingLabels
+        if na(developingBullPriceLabel)
+            developingBullPriceLabel := label.new(selectedBullDevelopingBar, selectedBullDevelopingPrice - priceLabelAtr * labelOffsetAtr, selectedBullDevelopingLabel, xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_up, color=selectedBullDevelopingLabelColor, textcolor=developingBullLabelTextColor, size=size.normal, force_overlay=true)
+        else
+            label.set_xy(developingBullPriceLabel, selectedBullDevelopingBar, selectedBullDevelopingPrice - priceLabelAtr * labelOffsetAtr)
+            label.set_text(developingBullPriceLabel, selectedBullDevelopingLabel)
+            label.set_color(developingBullPriceLabel, selectedBullDevelopingLabelColor)
+            label.set_textcolor(developingBullPriceLabel, developingBullLabelTextColor)
+    else if not na(developingBullPriceLabel)
+        label.delete(developingBullPriceLabel)
+        developingBullPriceLabel := na
+else
+    if not na(developingBullRsiLine)
+        line.delete(developingBullRsiLine)
+    if not na(developingBullPriceLine)
+        line.delete(developingBullPriceLine)
+    if not na(developingBullPriceLabel)
+        label.delete(developingBullPriceLabel)
+    developingBullRsiLine := na
+    developingBullPriceLine := na
+    developingBullPriceLabel := na
+    lastBullDevelopingAlertKind := 0
+    lastBullDevelopingAlertBar := na
+
+if developingRegularBullSignal
+    lastBullDevelopingAlertKind := 1
+    lastBullDevelopingAlertBar := regularBullCandidateBar
+
+if developingHiddenBullSignal
+    lastBullDevelopingAlertKind := 2
+    lastBullDevelopingAlertBar := hiddenBullCandidateBar
+
+float precisionBullSellAnchorRatio = 0.0
+float precisionBullSellAnchorBodyMid = na
+float precisionBullSellAnchorHigh = na
+float precisionBullSellAnchorLow = na
+for lookbackIndex = 0 to precisionBullVolumeContextLookback
+    precisionBullSellRatio = math.max(nz(precisionBullVolumeVsSma20[lookbackIndex]), nz(precisionBullVolumeVsSma50[lookbackIndex]))
+    if close[lookbackIndex] < open[lookbackIndex] and precisionBullSellRatio > precisionBullSellAnchorRatio
+        precisionBullSellAnchorRatio := precisionBullSellRatio
+        precisionBullSellAnchorBodyMid := (open[lookbackIndex] + close[lookbackIndex]) / 2.0
+        precisionBullSellAnchorHigh := high[lookbackIndex]
+        precisionBullSellAnchorLow := low[lookbackIndex]
+
+float precisionBullSellPressureRecent = 0.0
+float precisionBullSellPressureNormal = 0.0
+float precisionBullDemandNormal = 0.0
+for lookbackIndex = 0 to precisionBullVolumeContextLookback
+    if close[lookbackIndex] < open[lookbackIndex]
+        precisionBullSellPressureRecent := math.max(precisionBullSellPressureRecent, nz(precisionBullVolumeVsSma20[lookbackIndex]))
+        precisionBullSellPressureNormal := math.max(precisionBullSellPressureNormal, nz(precisionBullVolumeVsSma50[lookbackIndex]))
+    if close[lookbackIndex] >= open[lookbackIndex]
+        precisionBullDemandNormal := math.max(precisionBullDemandNormal, nz(precisionBullVolumeVsSma50[lookbackIndex]))
+
+float precisionBullRawScore = na
+if developingBullish
+    precisionBullRawScore := 45.0
+    precisionBullRawScore += developingRegularBullish ? 10.0 : 4.0
+    precisionBullRawScore += close > precisionBullEmaSlow ? 8.0 : -2.0
+    precisionBullRawScore += precisionBullEmaStack ? 6.0 : 0.0
+    precisionBullRawScore += close > precisionBullEmaFast ? 3.0 : 0.0
+    precisionBullRawScore += developingRegularBullish and rsiValue <= 40 ? 9.0 : rsiValue <= 45 ? 5.0 : rsiValue > 65 ? -6.0 : 0.0
+    precisionBullRawScore += not na(precisionBearBbPosition) and precisionBearBbPosition <= 0.4 ? 5.0 : not na(precisionBearBbPosition) and precisionBearBbPosition <= 0.6 ? 2.0 : not na(precisionBearBbPosition) and precisionBearBbPosition > 0.85 ? -8.0 : 0.0
+    precisionBullRawScore += precisionBullSellPressureNormal >= 3.0 ? 11.0 : precisionBullSellPressureNormal >= 2.0 ? 8.0 : precisionBullSellPressureNormal >= 1.5 ? 5.0 : 0.0
+    precisionBullRawScore += precisionBullSellPressureRecent >= 3.0 ? 4.0 : precisionBullSellPressureRecent >= 2.0 ? 2.0 : 0.0
+    precisionBullRawScore += precisionBullDemandNormal >= 5.0 ? 10.0 : precisionBullDemandNormal >= 3.0 ? 7.0 : 0.0
+    precisionBullRawScore += precisionBullSellPressureNormal >= 1.5 and precisionBullDemandNormal >= 3.0 ? 8.0 : 0.0
+    precisionBullRawScore += precisionBullSellPressureNormal < 1.5 and precisionBullDemandNormal < 3.0 and not precisionBullEmaStack ? -5.0 : 0.0
+
+precisionBullResponseScore = developingBullish and not na(precisionBullRawScore) ? math.round(math.max(0.0, math.min(100.0, precisionBullRawScore))) : na
+precisionDevelopingRegularBullResponseSetup = precisionTimeframeSupported and barstate.isconfirmed and developingRegularBullSignal and not na(precisionBullResponseScore) and precisionBullResponseScore >= precisionBullRegularResponseMinScore and rsiValue < rsiMa
+precisionDevelopingHiddenBullResponseSetup = precisionTimeframeSupported and barstate.isconfirmed and developingHiddenBullSignal and bullAgeFromAnchor >= precisionBullHiddenMinSwingBars
+precisionDevelopingBullResponseSetup = precisionDevelopingRegularBullResponseSetup or precisionDevelopingHiddenBullResponseSetup
+precisionDevelopingBullResponseSetupKind = precisionDevelopingRegularBullResponseSetup ? 1 : precisionDevelopingHiddenBullResponseSetup ? 2 : 0
+precisionBullPullbackHigh20 = ta.highest(high, 20)
+precisionBullPullbackDepth20Pct = precisionBullPullbackHigh20 > 0 ? (precisionBullPullbackHigh20 - low) / precisionBullPullbackHigh20 * 100.0 : na
+precisionPremiumBullResponseSetup = precisionTimeframeSupported and barstate.isconfirmed and (developingRegularBullSignal or developingHiddenBullSignal) and not na(precisionBullPullbackDepth20Pct) and precisionBullPullbackDepth20Pct >= 5.0 and rsiValue < rsiMa and not na(precisionBearBbPosition) and precisionBearBbPosition <= 0.6
+
+if precisionDevelopingBullResponseSetup
+    if array.size(precisionBullResponseSetupBars) >= precisionBullMaxActiveSetups
+        array.shift(precisionBullResponseSetupBars)
+        array.shift(precisionBullResponseSetupKinds)
+        array.shift(precisionBullResponseSignalLows)
+        array.shift(precisionBullResponseAnchorBodyMids)
+        array.shift(precisionBullResponseAnchorHighs)
+        array.shift(precisionBullResponseAnchorLows)
+        array.shift(precisionBullResponseBars)
+        array.shift(precisionBullResponseStructureHighs)
+        array.shift(precisionBullResponsePendings)
+    array.push(precisionBullResponseSetupBars, bar_index)
+    array.push(precisionBullResponseSetupKinds, precisionDevelopingBullResponseSetupKind)
+    array.push(precisionBullResponseSignalLows, low)
+    array.push(precisionBullResponseAnchorBodyMids, precisionBullSellAnchorBodyMid)
+    array.push(precisionBullResponseAnchorHighs, precisionBullSellAnchorHigh)
+    array.push(precisionBullResponseAnchorLows, precisionBullSellAnchorLow)
+    array.push(precisionBullResponseBars, na)
+    array.push(precisionBullResponseStructureHighs, na)
+    array.push(precisionBullResponsePendings, false)
+
+if precisionPremiumBullResponseSetup
+    if array.size(precisionPremiumBullSetupBars) >= precisionBullMaxActiveSetups
+        array.shift(precisionPremiumBullSetupBars)
+        array.shift(precisionPremiumBullSignalLows)
+        array.shift(precisionPremiumBullAnchorBodyMids)
+        array.shift(precisionPremiumBullAnchorHighs)
+        array.shift(precisionPremiumBullAnchorLows)
+        array.shift(precisionPremiumBullResponseBars)
+        array.shift(precisionPremiumBullStructureHighs)
+        array.shift(precisionPremiumBullResponsePendings)
+    array.push(precisionPremiumBullSetupBars, bar_index)
+    array.push(precisionPremiumBullSignalLows, low)
+    array.push(precisionPremiumBullAnchorBodyMids, precisionBullSellAnchorBodyMid)
+    array.push(precisionPremiumBullAnchorHighs, precisionBullSellAnchorHigh)
+    array.push(precisionPremiumBullAnchorLows, precisionBullSellAnchorLow)
+    array.push(precisionPremiumBullResponseBars, na)
+    array.push(precisionPremiumBullStructureHighs, na)
+    array.push(precisionPremiumBullResponsePendings, false)
+
+precisionDevelopingBullishResponse = false
+precisionDevelopingBullishResponseKind = 0
+precisionPremiumBullishResponse = false
+precisionBullResponseIndex = array.size(precisionBullResponseSetupBars) - 1
+while precisionBullResponseIndex >= 0
+    precisionBullResponseSetupBar = array.get(precisionBullResponseSetupBars, precisionBullResponseIndex)
+    precisionBullResponseSetupKind = array.get(precisionBullResponseSetupKinds, precisionBullResponseIndex)
+    precisionBullResponseSignalLow = array.get(precisionBullResponseSignalLows, precisionBullResponseIndex)
+    precisionBullResponseAnchorBodyMid = array.get(precisionBullResponseAnchorBodyMids, precisionBullResponseIndex)
+    precisionBullResponseAnchorHigh = array.get(precisionBullResponseAnchorHighs, precisionBullResponseIndex)
+    precisionBullResponseAnchorLow = array.get(precisionBullResponseAnchorLows, precisionBullResponseIndex)
+    precisionBullResponseBar = array.get(precisionBullResponseBars, precisionBullResponseIndex)
+    precisionBullResponseStructureHigh = array.get(precisionBullResponseStructureHighs, precisionBullResponseIndex)
+    precisionBullResponsePending = array.get(precisionBullResponsePendings, precisionBullResponseIndex)
+    precisionBullResponseAge = bar_index - precisionBullResponseSetupBar
+    precisionBullResponseRemove = false
+
+    if precisionBullResponsePending
+        precisionBullPendingAge = bar_index - precisionBullResponseBar
+        precisionBullStructureResponseNow = precisionBullPendingAge >= 0 and precisionBullPendingAge <= precisionBullStructureBreakBars and not na(precisionBullResponseStructureHigh) and close > precisionBullResponseStructureHigh
+        precisionBullStructureResponseExpired = precisionBullPendingAge > precisionBullStructureBreakBars
+        if precisionBullStructureResponseNow
+            precisionDevelopingBullishResponse := true
+            precisionDevelopingBullishResponseKind := precisionBullResponseSetupKind
+            precisionBullResponseRemove := true
+        else if precisionBullStructureResponseExpired
+            precisionBullResponseRemove := true
+    else
+        precisionBullResponseSignalInvalidated = precisionBullResponseAge > 0 and precisionBullResponseAge <= precisionBullSignalInvalidationBars and not na(precisionBullResponseSignalLow) and close < precisionBullResponseSignalLow
+        precisionBullResponseAnchorInvalidated = precisionBullResponseAge > 0 and precisionBullResponseAge <= precisionBullAnchorInvalidationBars and not na(precisionBullResponseAnchorLow) and close < precisionBullResponseAnchorLow
+        precisionBullResponseSetupExpired = precisionBullResponseAge > precisionBullAnchorInvalidationBars
+        precisionBullResponseWindowActive = precisionBullResponseAge > 0 and precisionBullResponseAge <= precisionBullResponseWindowBars
+        precisionBullResponseAnchorBreak = not na(precisionBullResponseAnchorHigh) and close > precisionBullResponseAnchorHigh
+        precisionBullResponseEmaBodyBreak = not na(precisionBullResponseAnchorBodyMid) and close > precisionBullEmaFast and close > precisionBullResponseAnchorBodyMid
+        precisionBullResponseRsiBodyBreak = not na(precisionBullResponseAnchorBodyMid) and rsiValue > 50 and close > precisionBullResponseAnchorBodyMid
+        precisionBullBaseResponse = precisionBullResponseWindowActive and not precisionBullResponseSignalInvalidated and not precisionBullResponseAnchorInvalidated and (precisionBullResponseAnchorBreak or precisionBullResponseEmaBodyBreak or precisionBullResponseRsiBodyBreak)
+        if precisionBullBaseResponse and precisionBullResponseSetupKind == 1
+            precisionDevelopingBullishResponse := true
+            precisionDevelopingBullishResponseKind := precisionBullResponseSetupKind
+            precisionBullResponseRemove := true
+        else if precisionBullBaseResponse
+            array.set(precisionBullResponsePendings, precisionBullResponseIndex, true)
+            array.set(precisionBullResponseBars, precisionBullResponseIndex, bar_index)
+            array.set(precisionBullResponseStructureHighs, precisionBullResponseIndex, precisionBullStructureHigh(precisionBullResponseAge))
+        else if precisionBullResponseSignalInvalidated or precisionBullResponseAnchorInvalidated or precisionBullResponseSetupExpired
+            precisionBullResponseRemove := true
+
+    if precisionBullResponseRemove
+        array.remove(precisionBullResponseSetupBars, precisionBullResponseIndex)
+        array.remove(precisionBullResponseSetupKinds, precisionBullResponseIndex)
+        array.remove(precisionBullResponseSignalLows, precisionBullResponseIndex)
+        array.remove(precisionBullResponseAnchorBodyMids, precisionBullResponseIndex)
+        array.remove(precisionBullResponseAnchorHighs, precisionBullResponseIndex)
+        array.remove(precisionBullResponseAnchorLows, precisionBullResponseIndex)
+        array.remove(precisionBullResponseBars, precisionBullResponseIndex)
+        array.remove(precisionBullResponseStructureHighs, precisionBullResponseIndex)
+        array.remove(precisionBullResponsePendings, precisionBullResponseIndex)
+
+    precisionBullResponseIndex -= 1
+
+precisionPremiumBullIndex = array.size(precisionPremiumBullSetupBars) - 1
+while precisionPremiumBullIndex >= 0
+    precisionPremiumBullSetupBar = array.get(precisionPremiumBullSetupBars, precisionPremiumBullIndex)
+    precisionPremiumBullSignalLow = array.get(precisionPremiumBullSignalLows, precisionPremiumBullIndex)
+    precisionPremiumBullAnchorBodyMid = array.get(precisionPremiumBullAnchorBodyMids, precisionPremiumBullIndex)
+    precisionPremiumBullAnchorHigh = array.get(precisionPremiumBullAnchorHighs, precisionPremiumBullIndex)
+    precisionPremiumBullAnchorLow = array.get(precisionPremiumBullAnchorLows, precisionPremiumBullIndex)
+    precisionPremiumBullResponseBar = array.get(precisionPremiumBullResponseBars, precisionPremiumBullIndex)
+    precisionPremiumBullStructureHigh = array.get(precisionPremiumBullStructureHighs, precisionPremiumBullIndex)
+    precisionPremiumBullResponsePending = array.get(precisionPremiumBullResponsePendings, precisionPremiumBullIndex)
+    precisionPremiumBullAge = bar_index - precisionPremiumBullSetupBar
+    precisionPremiumBullRemove = false
+
+    if precisionPremiumBullResponsePending
+        precisionPremiumBullPendingAge = bar_index - precisionPremiumBullResponseBar
+        precisionPremiumBullStructureResponseNow = precisionPremiumBullPendingAge >= 0 and precisionPremiumBullPendingAge <= precisionBullStructureBreakBars and not na(precisionPremiumBullStructureHigh) and close > precisionPremiumBullStructureHigh
+        precisionPremiumBullStructureResponseExpired = precisionPremiumBullPendingAge > precisionBullStructureBreakBars
+        if precisionPremiumBullStructureResponseNow
+            precisionPremiumBullishResponse := true
+            precisionPremiumBullRemove := true
+        else if precisionPremiumBullStructureResponseExpired
+            precisionPremiumBullRemove := true
+    else
+        precisionPremiumBullSignalInvalidated = precisionPremiumBullAge > 0 and precisionPremiumBullAge <= precisionBullSignalInvalidationBars and not na(precisionPremiumBullSignalLow) and close < precisionPremiumBullSignalLow
+        precisionPremiumBullAnchorInvalidated = precisionPremiumBullAge > 0 and precisionPremiumBullAge <= precisionBullAnchorInvalidationBars and not na(precisionPremiumBullAnchorLow) and close < precisionPremiumBullAnchorLow
+        precisionPremiumBullSetupExpired = precisionPremiumBullAge > precisionBullAnchorInvalidationBars
+        precisionPremiumBullResponseWindowActive = precisionPremiumBullAge > 0 and precisionPremiumBullAge <= precisionBullResponseWindowBars
+        precisionPremiumBullAnchorBreak = not na(precisionPremiumBullAnchorHigh) and close > precisionPremiumBullAnchorHigh
+        precisionPremiumBullEmaBodyBreak = not na(precisionPremiumBullAnchorBodyMid) and close > precisionBullEmaFast and close > precisionPremiumBullAnchorBodyMid
+        precisionPremiumBullRsiBodyBreak = not na(precisionPremiumBullAnchorBodyMid) and rsiValue > 50 and close > precisionPremiumBullAnchorBodyMid
+        precisionPremiumBullBaseResponse = precisionPremiumBullResponseWindowActive and not precisionPremiumBullSignalInvalidated and not precisionPremiumBullAnchorInvalidated and (precisionPremiumBullAnchorBreak or precisionPremiumBullEmaBodyBreak or precisionPremiumBullRsiBodyBreak)
+        if precisionPremiumBullBaseResponse
+            array.set(precisionPremiumBullResponsePendings, precisionPremiumBullIndex, true)
+            array.set(precisionPremiumBullResponseBars, precisionPremiumBullIndex, bar_index)
+            array.set(precisionPremiumBullStructureHighs, precisionPremiumBullIndex, precisionBullStructureHigh(precisionPremiumBullAge))
+        else if precisionPremiumBullSignalInvalidated or precisionPremiumBullAnchorInvalidated or precisionPremiumBullSetupExpired
+            precisionPremiumBullRemove := true
+
+    if precisionPremiumBullRemove
+        array.remove(precisionPremiumBullSetupBars, precisionPremiumBullIndex)
+        array.remove(precisionPremiumBullSignalLows, precisionPremiumBullIndex)
+        array.remove(precisionPremiumBullAnchorBodyMids, precisionPremiumBullIndex)
+        array.remove(precisionPremiumBullAnchorHighs, precisionPremiumBullIndex)
+        array.remove(precisionPremiumBullAnchorLows, precisionPremiumBullIndex)
+        array.remove(precisionPremiumBullResponseBars, precisionPremiumBullIndex)
+        array.remove(precisionPremiumBullStructureHighs, precisionPremiumBullIndex)
+        array.remove(precisionPremiumBullResponsePendings, precisionPremiumBullIndex)
+
+    precisionPremiumBullIndex -= 1
+
+precisionConfirmedHiddenBullSetup = precisionTimeframeDailyWeekly and barstate.isconfirmed and hiddenBullish and precisionBullEmaStack
+
+if precisionConfirmedHiddenBullSetup
+    precisionHiddenBullSetupBar := bar_index
+    precisionHiddenBullSignalLow := low
+    precisionHiddenBullAnchorBodyMid := precisionBullSellAnchorBodyMid
+    precisionHiddenBullAnchorHigh := precisionBullSellAnchorHigh
+    precisionHiddenBullAnchorLow := precisionBullSellAnchorLow
+    precisionHiddenBullInvalidated := false
+    precisionHiddenBullResponsePending := false
+    precisionHiddenBullResponseBar := na
+    precisionHiddenBullStructureHigh := na
+    precisionHiddenBullCompleted := false
+
+precisionHiddenBullAge = na(precisionHiddenBullSetupBar) ? na : bar_index - precisionHiddenBullSetupBar
+precisionHiddenBullSignalInvalidated = not na(precisionHiddenBullAge) and precisionHiddenBullAge > 0 and precisionHiddenBullAge <= precisionBullSignalInvalidationBars and not na(precisionHiddenBullSignalLow) and close < precisionHiddenBullSignalLow
+precisionHiddenBullAnchorInvalidated = not na(precisionHiddenBullAge) and precisionHiddenBullAge > 0 and precisionHiddenBullAge <= precisionBullAnchorInvalidationBars and not na(precisionHiddenBullAnchorLow) and close < precisionHiddenBullAnchorLow
+
+if not precisionHiddenBullResponsePending and not precisionHiddenBullCompleted and not precisionHiddenBullInvalidated and (precisionHiddenBullSignalInvalidated or precisionHiddenBullAnchorInvalidated)
+    precisionHiddenBullInvalidated := true
+
+precisionHiddenBullResponseWindowActive = not na(precisionHiddenBullAge) and precisionHiddenBullAge > 0 and precisionHiddenBullAge <= precisionBullResponseWindowBars
+precisionHiddenBullAnchorBreak = not na(precisionHiddenBullAnchorHigh) and close > precisionHiddenBullAnchorHigh
+precisionHiddenBullEmaBodyBreak = not na(precisionHiddenBullAnchorBodyMid) and close > precisionBullEmaFast and close > precisionHiddenBullAnchorBodyMid
+precisionHiddenBullRsiBodyBreak = not na(precisionHiddenBullAnchorBodyMid) and rsiValue > 50 and close > precisionHiddenBullAnchorBodyMid
+precisionHiddenBullBaseResponse = precisionHiddenBullResponseWindowActive and not precisionHiddenBullInvalidated and not precisionHiddenBullResponsePending and not precisionHiddenBullCompleted and (precisionHiddenBullAnchorBreak or precisionHiddenBullEmaBodyBreak or precisionHiddenBullRsiBodyBreak)
+
+if precisionHiddenBullBaseResponse
+    precisionHiddenBullResponsePending := true
+    precisionHiddenBullResponseBar := bar_index
+    precisionHiddenBullStructureHigh := precisionBullStructureHigh(precisionHiddenBullAge)
+
+precisionHiddenBullResponseAge = na(precisionHiddenBullResponseBar) ? na : bar_index - precisionHiddenBullResponseBar
+precisionHiddenBullishResponse = precisionHiddenBullResponsePending and not precisionHiddenBullInvalidated and not na(precisionHiddenBullResponseAge) and precisionHiddenBullResponseAge >= 0 and precisionHiddenBullResponseAge <= precisionBullStructureBreakBars and not na(precisionHiddenBullStructureHigh) and close > precisionHiddenBullStructureHigh
+precisionHiddenBullResponseExpired = precisionHiddenBullResponsePending and not na(precisionHiddenBullResponseAge) and precisionHiddenBullResponseAge > precisionBullStructureBreakBars
+precisionHiddenBullSetupExpired = not na(precisionHiddenBullAge) and precisionHiddenBullAge > precisionBullAnchorInvalidationBars and not precisionHiddenBullResponsePending
+
+if precisionHiddenBullishResponse
+    precisionHiddenBullResponsePending := false
+    precisionHiddenBullCompleted := true
+
+if precisionHiddenBullResponseExpired or precisionHiddenBullSetupExpired
+    precisionHiddenBullResponsePending := false
+    precisionHiddenBullCompleted := true
+
+// Confirmed pivot highs for bearish divergence.
+pivotHigh = ta.pivothigh(priceHighSource, pivotLeft, pivotRight)
+hasPivotHigh = not na(pivotHigh)
+highPivotBar = bar_index - pivotRight
+highPivotPrice = pivotHigh
+highPivotRsi = rsiValue[pivotRight]
+
+var int previousHighPivotBar = na
+var float previousHighPivotPrice = na
+var float previousHighPivotRsi = na
+
+var int regularBearCandidateBar = na
+var float regularBearCandidatePrice = na
+var float regularBearCandidateRsi = na
+var int hiddenBearCandidateBar = na
+var float hiddenBearCandidatePrice = na
+var float hiddenBearCandidateRsi = na
+var bool hiddenBearAnchorBroken = false
+
+var line developingBearRsiLine = na
+var line developingBearPriceLine = na
+var label developingBearPriceLabel = na
+var int lastBearDevelopingAlertKind = 0
+var int lastBearDevelopingAlertBar = na
+var int precisionHiddenBearSetupBar = na
+var float precisionHiddenBearSignalHigh = na
+var float precisionHiddenBearAnchorBodyMid = na
+var float precisionHiddenBearAnchorHigh = na
+var float precisionHiddenBearAnchorLow = na
+var bool precisionHiddenBearInvalidated = false
+var bool precisionHiddenBearResponsePending = false
+var int precisionHiddenBearResponseBar = na
+var float precisionHiddenBearStructureLow = na
+var bool precisionHiddenBearCompleted = false
+var precisionBearShortSetupBars = array.new_int()
+var precisionBearShortSignalHighs = array.new_float()
+var precisionBearShortAnchorBodyMids = array.new_float()
+var precisionBearShortAnchorHighs = array.new_float()
+var precisionBearShortAnchorLows = array.new_float()
+var precisionBearShortResponseBars = array.new_int()
+var precisionBearShortStructureLows = array.new_float()
+var precisionBearShortResponsePendings = array.new_bool()
+var precisionBearShortPremiumSetups = array.new_bool()
+
+regularBearish = false
+hiddenBearish = false
+highBarsBetween = na(previousHighPivotBar) ? na : highPivotBar - previousHighPivotBar
+highInBarRange = not na(highBarsBetween) and highBarsBetween >= minBarsBetween and highBarsBetween <= maxBarsBetween
+
+if hasPivotHigh
+    regularBearish := showRegularBearish and highInBarRange and highPivotPrice > previousHighPivotPrice and highPivotRsi < previousHighPivotRsi
+    hiddenBearish := showHiddenBearish and highInBarRange and highPivotPrice < previousHighPivotPrice and highPivotRsi > previousHighPivotRsi
+
+    if regularBearish
+        if showConfirmedRsiLines
+            line.new(previousHighPivotBar, previousHighPivotRsi, highPivotBar, highPivotRsi, xloc=xloc.bar_index, extend=extend.none, color=regularBearLineColor, style=line.style_dashed, width=lineWidth)
+        if showConfirmedLines
+            line.new(previousHighPivotBar, previousHighPivotPrice, highPivotBar, highPivotPrice, xloc=xloc.bar_index, extend=extend.none, color=regularBearLineColor, style=line.style_dashed, width=lineWidth, force_overlay=true)
+        if showConfirmedLabels
+            label.new(highPivotBar, highPivotPrice + priceLabelAtr * labelOffsetAtr, "Bear Div", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_down, color=regularBearLabelColor, textcolor=confirmedBearLabelTextColor, size=size.normal, force_overlay=true)
+
+    if hiddenBearish
+        if showConfirmedRsiLines
+            line.new(previousHighPivotBar, previousHighPivotRsi, highPivotBar, highPivotRsi, xloc=xloc.bar_index, extend=extend.none, color=hiddenBearLineColor, style=line.style_dashed, width=lineWidth)
+        if showConfirmedLines
+            line.new(previousHighPivotBar, previousHighPivotPrice, highPivotBar, highPivotPrice, xloc=xloc.bar_index, extend=extend.none, color=hiddenBearLineColor, style=line.style_dashed, width=lineWidth, force_overlay=true)
+        if showConfirmedLabels
+            label.new(highPivotBar, highPivotPrice + priceLabelAtr * labelOffsetAtr, "Hidden Bear", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_down, color=hiddenBearLabelColor, textcolor=confirmedBearLabelTextColor, size=size.normal, force_overlay=true)
+
+    previousHighPivotBar := highPivotBar
+    previousHighPivotPrice := highPivotPrice
+    previousHighPivotRsi := highPivotRsi
+
+    regularBearCandidateBar := na
+    regularBearCandidatePrice := na
+    regularBearCandidateRsi := na
+    hiddenBearCandidateBar := na
+    hiddenBearCandidatePrice := na
+    hiddenBearCandidateRsi := na
+    hiddenBearAnchorBroken := false
+    lastBearDevelopingAlertKind := 0
+    lastBearDevelopingAlertBar := na
+    precisionHiddenBearSetupBar := na
+    precisionHiddenBearSignalHigh := na
+    precisionHiddenBearAnchorBodyMid := na
+    precisionHiddenBearAnchorHigh := na
+    precisionHiddenBearAnchorLow := na
+    precisionHiddenBearInvalidated := false
+    precisionHiddenBearResponsePending := false
+    precisionHiddenBearResponseBar := na
+    precisionHiddenBearStructureLow := na
+    precisionHiddenBearCompleted := false
+    array.clear(precisionBearShortSetupBars)
+    array.clear(precisionBearShortSignalHighs)
+    array.clear(precisionBearShortAnchorBodyMids)
+    array.clear(precisionBearShortAnchorHighs)
+    array.clear(precisionBearShortAnchorLows)
+    array.clear(precisionBearShortResponseBars)
+    array.clear(precisionBearShortStructureLows)
+    array.clear(precisionBearShortResponsePendings)
+    array.clear(precisionBearShortPremiumSetups)
+    if not na(developingBearRsiLine)
+        line.delete(developingBearRsiLine)
+    if not na(developingBearPriceLine)
+        line.delete(developingBearPriceLine)
+    if not na(developingBearPriceLabel)
+        label.delete(developingBearPriceLabel)
+    developingBearRsiLine := na
+    developingBearPriceLine := na
+    developingBearPriceLabel := na
+
+bearAnchorReady = not na(previousHighPivotBar) and not na(previousHighPivotPrice) and math.abs(previousHighPivotPrice) > 0 and not na(previousHighPivotRsi)
+bearAgeFromAnchor = bearAnchorReady ? bar_index - previousHighPivotBar : na
+bearDevelopingAgeInRange = bearAnchorReady and bearAgeFromAnchor >= minBarsBetween and bearAgeFromAnchor <= maxBarsBetween and bearAgeFromAnchor <= developingMaxAge
+regularBearPriceDiffPct = bearAnchorReady ? (priceHighSource - previousHighPivotPrice) / math.abs(previousHighPivotPrice) * 100.0 : na
+hiddenBearPriceDiffPct = bearAnchorReady ? (previousHighPivotPrice - priceHighSource) / math.abs(previousHighPivotPrice) * 100.0 : na
+regularBearRsiDiff = bearAnchorReady ? previousHighPivotRsi - rsiValue : na
+hiddenBearRsiDiff = bearAnchorReady ? rsiValue - previousHighPivotRsi : na
+bearLocalHighest = ta.highest(rsiValue, strictLocalBars + 1)
+bearStrictLocalOk = not strictDevelopingLines or rsiValue >= bearLocalHighest
+
+if bearAnchorReady and priceHighSource >= previousHighPivotPrice
+    hiddenBearAnchorBroken := true
+
+regularBearCandidateNow = showRegularBearish and bearDevelopingAgeInRange and regularBearPriceDiffPct >= minPriceDifferencePct and regularBearRsiDiff >= minRsiDifference and bearStrictLocalOk
+hiddenBearCandidateNow = showHiddenBearish and bearDevelopingAgeInRange and hiddenBearPriceDiffPct >= minPriceDifferencePct and hiddenBearRsiDiff >= minRsiDifference and bearStrictLocalOk and (not strictDevelopingLines or not hiddenBearAnchorBroken)
+
+if bearAnchorReady and not na(regularBearCandidateBar)
+    regularBearCandidateExpired = bar_index - regularBearCandidateBar > developingMaxAge or bearAgeFromAnchor > maxBarsBetween
+    regularBearCandidateBroken = priceHighSource > regularBearCandidatePrice and regularBearRsiDiff < minRsiDifference
+    if regularBearCandidateExpired or regularBearCandidateBroken
+        regularBearCandidateBar := na
+        regularBearCandidatePrice := na
+        regularBearCandidateRsi := na
+
+if bearAnchorReady and not na(hiddenBearCandidateBar)
+    hiddenBearCandidateExpired = bar_index - hiddenBearCandidateBar > developingMaxAge or bearAgeFromAnchor > maxBarsBetween
+    hiddenBearCandidateBroken = priceHighSource >= previousHighPivotPrice
+    if hiddenBearCandidateExpired or hiddenBearCandidateBroken
+        hiddenBearCandidateBar := na
+        hiddenBearCandidatePrice := na
+        hiddenBearCandidateRsi := na
+
+if regularBearCandidateNow
+    regularBearCandidateImproved = na(regularBearCandidateBar) or priceHighSource > regularBearCandidatePrice or (priceHighSource == regularBearCandidatePrice and rsiValue < regularBearCandidateRsi)
+    if regularBearCandidateImproved
+        regularBearCandidateBar := bar_index
+        regularBearCandidatePrice := priceHighSource
+        regularBearCandidateRsi := rsiValue
+
+if hiddenBearCandidateNow
+    hiddenBearCandidateImproved = na(hiddenBearCandidateBar) or rsiValue > hiddenBearCandidateRsi or (rsiValue == hiddenBearCandidateRsi and priceHighSource > hiddenBearCandidatePrice)
+    if hiddenBearCandidateImproved
+        hiddenBearCandidateBar := bar_index
+        hiddenBearCandidatePrice := priceHighSource
+        hiddenBearCandidateRsi := rsiValue
+
+regularBearCandidateAge = na(regularBearCandidateBar) ? na : bar_index - regularBearCandidateBar
+hiddenBearCandidateAge = na(hiddenBearCandidateBar) ? na : bar_index - hiddenBearCandidateBar
+regularBearSoftBounce = not requireSoftBounce or softBounceBars == 0 or (not na(regularBearCandidateAge) and regularBearCandidateAge >= softBounceBars and close < regularBearCandidatePrice and rsiValue < regularBearCandidateRsi)
+hiddenBearSoftBounce = not requireSoftBounce or softBounceBars == 0 or (not na(hiddenBearCandidateAge) and hiddenBearCandidateAge >= softBounceBars and close < hiddenBearCandidatePrice and rsiValue < hiddenBearCandidateRsi)
+safeHighAnchorBar = na(previousHighPivotBar) ? bar_index : previousHighPivotBar
+safeHighAnchorRsi = na(previousHighPivotRsi) ? rsiValue : previousHighPivotRsi
+safeRegularBearCandidateBar = na(regularBearCandidateBar) ? safeHighAnchorBar : regularBearCandidateBar
+safeRegularBearCandidateRsi = na(regularBearCandidateRsi) ? safeHighAnchorRsi : regularBearCandidateRsi
+safeHiddenBearCandidateBar = na(hiddenBearCandidateBar) ? safeHighAnchorBar : hiddenBearCandidateBar
+safeHiddenBearCandidateRsi = na(hiddenBearCandidateRsi) ? safeHighAnchorRsi : hiddenBearCandidateRsi
+regularBearCleanLineRaw = rsiLineIsClean(safeHighAnchorBar, safeHighAnchorRsi, safeRegularBearCandidateBar, safeRegularBearCandidateRsi, false)
+hiddenBearCleanLineRaw = rsiLineIsClean(safeHighAnchorBar, safeHighAnchorRsi, safeHiddenBearCandidateBar, safeHiddenBearCandidateRsi, false)
+regularBearCleanLine = not strictDevelopingLines ? true : not na(regularBearCandidateBar) and regularBearCleanLineRaw
+hiddenBearCleanLine = not strictDevelopingLines ? true : not na(hiddenBearCandidateBar) and hiddenBearCleanLineRaw
+
+regularWatchBearish = showWatch and not na(regularBearCandidateBar) and not regularBearSoftBounce
+hiddenWatchBearish = showWatch and not na(hiddenBearCandidateBar) and not hiddenBearSoftBounce
+developingRegularBearish = showDeveloping and not na(regularBearCandidateBar) and regularBearSoftBounce and regularBearCleanLine
+developingHiddenBearish = showDeveloping and not developingRegularBearish and not na(hiddenBearCandidateBar) and hiddenBearSoftBounce and hiddenBearCleanLine
+developingBearish = developingRegularBearish or developingHiddenBearish
+
+selectedBearDevelopingKind = developingRegularBearish ? 1 : developingHiddenBearish ? 2 : 0
+selectedBearDevelopingBar = developingRegularBearish ? regularBearCandidateBar : developingHiddenBearish ? hiddenBearCandidateBar : na
+selectedBearDevelopingPrice = developingRegularBearish ? regularBearCandidatePrice : developingHiddenBearish ? hiddenBearCandidatePrice : na
+selectedBearDevelopingRsi = developingRegularBearish ? regularBearCandidateRsi : developingHiddenBearish ? hiddenBearCandidateRsi : na
+selectedBearDevelopingColor = developingRegularBearish ? regularBearLineColor : developingHiddenBearish ? hiddenBearLineColor : na
+selectedBearDevelopingLabelColor = developingRegularBearish ? color.new(regularBearColor, developingLabelTransparency) : developingHiddenBearish ? color.new(hiddenBearColor, developingLabelTransparency) : na
+selectedBearDevelopingLabel = developingRegularBearish ? "Dev Bear" : developingHiddenBearish ? "Dev Hidden Bear" : ""
+
+developingRegularBearSignal = developingRegularBearish and (lastBearDevelopingAlertKind != 1 or lastBearDevelopingAlertBar != regularBearCandidateBar)
+developingHiddenBearSignal = developingHiddenBearish and (lastBearDevelopingAlertKind != 2 or lastBearDevelopingAlertBar != hiddenBearCandidateBar)
+
+if developingBearish and showDevelopingVisuals
+    if showDevelopingRsiLines
+        if na(developingBearRsiLine)
+            developingBearRsiLine := line.new(previousHighPivotBar, previousHighPivotRsi, selectedBearDevelopingBar, selectedBearDevelopingRsi, xloc=xloc.bar_index, extend=extend.none, color=selectedBearDevelopingColor, style=line.style_dashed, width=lineWidth)
+        else
+            line.set_xy1(developingBearRsiLine, previousHighPivotBar, previousHighPivotRsi)
+            line.set_xy2(developingBearRsiLine, selectedBearDevelopingBar, selectedBearDevelopingRsi)
+            line.set_color(developingBearRsiLine, selectedBearDevelopingColor)
+            line.set_style(developingBearRsiLine, line.style_dashed)
+            line.set_width(developingBearRsiLine, lineWidth)
+    else if not na(developingBearRsiLine)
+        line.delete(developingBearRsiLine)
+        developingBearRsiLine := na
+
+    if showDevelopingLines
+        if na(developingBearPriceLine)
+            developingBearPriceLine := line.new(previousHighPivotBar, previousHighPivotPrice, selectedBearDevelopingBar, selectedBearDevelopingPrice, xloc=xloc.bar_index, extend=extend.none, color=selectedBearDevelopingColor, style=line.style_dashed, width=lineWidth, force_overlay=true)
+        else
+            line.set_xy1(developingBearPriceLine, previousHighPivotBar, previousHighPivotPrice)
+            line.set_xy2(developingBearPriceLine, selectedBearDevelopingBar, selectedBearDevelopingPrice)
+            line.set_color(developingBearPriceLine, selectedBearDevelopingColor)
+            line.set_style(developingBearPriceLine, line.style_dashed)
+            line.set_width(developingBearPriceLine, lineWidth)
+    else if not na(developingBearPriceLine)
+        line.delete(developingBearPriceLine)
+        developingBearPriceLine := na
+
+    if showDevelopingLabels
+        if na(developingBearPriceLabel)
+            developingBearPriceLabel := label.new(selectedBearDevelopingBar, selectedBearDevelopingPrice + priceLabelAtr * labelOffsetAtr, selectedBearDevelopingLabel, xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_down, color=selectedBearDevelopingLabelColor, textcolor=developingBearLabelTextColor, size=size.normal, force_overlay=true)
+        else
+            label.set_xy(developingBearPriceLabel, selectedBearDevelopingBar, selectedBearDevelopingPrice + priceLabelAtr * labelOffsetAtr)
+            label.set_text(developingBearPriceLabel, selectedBearDevelopingLabel)
+            label.set_color(developingBearPriceLabel, selectedBearDevelopingLabelColor)
+            label.set_textcolor(developingBearPriceLabel, developingBearLabelTextColor)
+    else if not na(developingBearPriceLabel)
+        label.delete(developingBearPriceLabel)
+        developingBearPriceLabel := na
+else
+    if not na(developingBearRsiLine)
+        line.delete(developingBearRsiLine)
+    if not na(developingBearPriceLine)
+        line.delete(developingBearPriceLine)
+    if not na(developingBearPriceLabel)
+        label.delete(developingBearPriceLabel)
+    developingBearRsiLine := na
+    developingBearPriceLine := na
+    developingBearPriceLabel := na
+    lastBearDevelopingAlertKind := 0
+    lastBearDevelopingAlertBar := na
+
+if developingRegularBearSignal
+    lastBearDevelopingAlertKind := 1
+    lastBearDevelopingAlertBar := regularBearCandidateBar
+
+if developingHiddenBearSignal
+    lastBearDevelopingAlertKind := 2
+    lastBearDevelopingAlertBar := hiddenBearCandidateBar
+
+float precisionBearBuyAnchorRatio = 0.0
+float precisionBearBuyAnchorBodyMid = na
+float precisionBearBuyAnchorHigh = na
+float precisionBearBuyAnchorLow = na
+for lookbackIndex = 0 to precisionBearVolumeContextLookback
+    precisionBearBuyRatio = math.max(nz(precisionBearVolumeVsSma20[lookbackIndex]), nz(precisionBearVolumeVsSma50[lookbackIndex]))
+    if close[lookbackIndex] >= open[lookbackIndex] and precisionBearBuyRatio > precisionBearBuyAnchorRatio
+        precisionBearBuyAnchorRatio := precisionBearBuyRatio
+        precisionBearBuyAnchorBodyMid := (open[lookbackIndex] + close[lookbackIndex]) / 2.0
+        precisionBearBuyAnchorHigh := high[lookbackIndex]
+        precisionBearBuyAnchorLow := low[lookbackIndex]
+
+precisionBearShortDevelopingHiddenSetup = precisionTimeframeSupported and barstate.isconfirmed and developingHiddenBearSignal
+precisionBearShortDevelopingRegularSetup = (precisionTimeframe4H or precisionTimeframe1D) and barstate.isconfirmed and developingRegularBearSignal
+precisionBearShortConfirmedHiddenSetup = precisionTimeframeSupported and barstate.isconfirmed and hiddenBearish and not na(precisionBearBbPosition) and precisionBearBbPosition >= 0.4
+precisionBearShortConfirmedRegularSetup = precisionTimeframeSupported and barstate.isconfirmed and regularBearish and not na(precisionBearBbPosition) and precisionBearBbPosition >= 0.6
+precisionBearShortSetup = precisionBearShortDevelopingHiddenSetup or precisionBearShortDevelopingRegularSetup or precisionBearShortConfirmedHiddenSetup or precisionBearShortConfirmedRegularSetup
+precisionBearShortPremiumSetup = precisionBearShortDevelopingRegularSetup or (precisionBearShortDevelopingHiddenSetup and precisionTimeframe1D)
+
+if precisionBearShortSetup
+    if array.size(precisionBearShortSetupBars) >= precisionBearShortMaxActiveSetups
+        array.shift(precisionBearShortSetupBars)
+        array.shift(precisionBearShortSignalHighs)
+        array.shift(precisionBearShortAnchorBodyMids)
+        array.shift(precisionBearShortAnchorHighs)
+        array.shift(precisionBearShortAnchorLows)
+        array.shift(precisionBearShortResponseBars)
+        array.shift(precisionBearShortStructureLows)
+        array.shift(precisionBearShortResponsePendings)
+        array.shift(precisionBearShortPremiumSetups)
+    array.push(precisionBearShortSetupBars, bar_index)
+    array.push(precisionBearShortSignalHighs, high)
+    array.push(precisionBearShortAnchorBodyMids, precisionBearBuyAnchorBodyMid)
+    array.push(precisionBearShortAnchorHighs, precisionBearBuyAnchorHigh)
+    array.push(precisionBearShortAnchorLows, precisionBearBuyAnchorLow)
+    array.push(precisionBearShortResponseBars, na)
+    array.push(precisionBearShortStructureLows, na)
+    array.push(precisionBearShortResponsePendings, false)
+    array.push(precisionBearShortPremiumSetups, precisionBearShortPremiumSetup)
+
+precisionBearShortResponse = false
+precisionPremiumBearShortResponse = false
+precisionBearShortIndex = array.size(precisionBearShortSetupBars) - 1
+while precisionBearShortIndex >= 0
+    precisionBearShortSetupBar = array.get(precisionBearShortSetupBars, precisionBearShortIndex)
+    precisionBearShortSignalHigh = array.get(precisionBearShortSignalHighs, precisionBearShortIndex)
+    precisionBearShortAnchorBodyMid = array.get(precisionBearShortAnchorBodyMids, precisionBearShortIndex)
+    precisionBearShortAnchorHigh = array.get(precisionBearShortAnchorHighs, precisionBearShortIndex)
+    precisionBearShortAnchorLow = array.get(precisionBearShortAnchorLows, precisionBearShortIndex)
+    precisionBearShortResponseBar = array.get(precisionBearShortResponseBars, precisionBearShortIndex)
+    precisionBearShortStructureLow = array.get(precisionBearShortStructureLows, precisionBearShortIndex)
+    precisionBearShortResponsePending = array.get(precisionBearShortResponsePendings, precisionBearShortIndex)
+    precisionBearShortPremium = array.get(precisionBearShortPremiumSetups, precisionBearShortIndex)
+    precisionBearShortAge = bar_index - precisionBearShortSetupBar
+    precisionBearShortRemove = false
+
+    if precisionBearShortResponsePending
+        precisionBearShortResponseAge = bar_index - precisionBearShortResponseBar
+        precisionBearShortResponseNow = precisionBearShortResponseAge >= 0 and precisionBearShortResponseAge <= precisionBearStructureBreakBars and not na(precisionBearShortStructureLow) and close < precisionBearShortStructureLow
+        precisionBearShortExpired = precisionBearShortResponseAge > precisionBearStructureBreakBars
+        if precisionBearShortResponseNow
+            precisionBearShortResponse := true
+            precisionPremiumBearShortResponse := precisionPremiumBearShortResponse or precisionBearShortPremium
+            precisionBearShortRemove := true
+        else if precisionBearShortExpired
+            precisionBearShortRemove := true
+    else
+        precisionBearShortSignalInvalidated = precisionBearShortAge > 0 and precisionBearShortAge <= precisionBearSignalInvalidationBars and not na(precisionBearShortSignalHigh) and close > precisionBearShortSignalHigh
+        precisionBearShortAnchorInvalidated = precisionBearShortAge > 0 and precisionBearShortAge <= precisionBearAnchorInvalidationBars and not na(precisionBearShortAnchorHigh) and close > precisionBearShortAnchorHigh
+        precisionBearShortSetupExpired = precisionBearShortAge > precisionBearAnchorInvalidationBars
+        precisionBearShortResponseWindowActive = precisionBearShortAge > 0 and precisionBearShortAge <= precisionBearResponseWindowBars
+        precisionBearShortAnchorBreak = not na(precisionBearShortAnchorLow) and close < precisionBearShortAnchorLow
+        precisionBearShortEmaBodyBreak = not na(precisionBearShortAnchorBodyMid) and close < precisionBullEmaFast and close < precisionBearShortAnchorBodyMid
+        precisionBearShortRsiBodyBreak = not na(precisionBearShortAnchorBodyMid) and rsiValue < 50 and close < precisionBearShortAnchorBodyMid
+        precisionBearShortBaseResponse = precisionBearShortResponseWindowActive and not precisionBearShortSignalInvalidated and not precisionBearShortAnchorInvalidated and (precisionBearShortAnchorBreak or precisionBearShortEmaBodyBreak or precisionBearShortRsiBodyBreak)
+        if precisionBearShortBaseResponse
+            array.set(precisionBearShortResponsePendings, precisionBearShortIndex, true)
+            array.set(precisionBearShortResponseBars, precisionBearShortIndex, bar_index)
+            array.set(precisionBearShortStructureLows, precisionBearShortIndex, precisionBearStructureLow(precisionBearShortAge))
+        else if precisionBearShortSignalInvalidated or precisionBearShortAnchorInvalidated or precisionBearShortSetupExpired
+            precisionBearShortRemove := true
+
+    if precisionBearShortRemove
+        array.remove(precisionBearShortSetupBars, precisionBearShortIndex)
+        array.remove(precisionBearShortSignalHighs, precisionBearShortIndex)
+        array.remove(precisionBearShortAnchorBodyMids, precisionBearShortIndex)
+        array.remove(precisionBearShortAnchorHighs, precisionBearShortIndex)
+        array.remove(precisionBearShortAnchorLows, precisionBearShortIndex)
+        array.remove(precisionBearShortResponseBars, precisionBearShortIndex)
+        array.remove(precisionBearShortStructureLows, precisionBearShortIndex)
+        array.remove(precisionBearShortResponsePendings, precisionBearShortIndex)
+        array.remove(precisionBearShortPremiumSetups, precisionBearShortIndex)
+
+    precisionBearShortIndex -= 1
+
+precisionHiddenBearRsiDiff = bearAnchorReady and not na(hiddenBearCandidateRsi) ? hiddenBearCandidateRsi - previousHighPivotRsi : na
+precisionHiddenBearSetup = precisionTimeframeSupported and barstate.isconfirmed and developingHiddenBearSignal and not na(precisionHiddenBearRsiDiff) and precisionHiddenBearRsiDiff >= precisionHiddenBearMinRsiDiff and not na(precisionBearBbPosition) and precisionBearBbPosition >= 0.4
+
+if precisionHiddenBearSetup
+    precisionHiddenBearSetupBar := bar_index
+    precisionHiddenBearSignalHigh := high
+    precisionHiddenBearAnchorBodyMid := precisionBearBuyAnchorBodyMid
+    precisionHiddenBearAnchorHigh := precisionBearBuyAnchorHigh
+    precisionHiddenBearAnchorLow := precisionBearBuyAnchorLow
+    precisionHiddenBearInvalidated := false
+    precisionHiddenBearResponsePending := false
+    precisionHiddenBearResponseBar := na
+    precisionHiddenBearStructureLow := na
+    precisionHiddenBearCompleted := false
+
+precisionHiddenBearAge = na(precisionHiddenBearSetupBar) ? na : bar_index - precisionHiddenBearSetupBar
+precisionHiddenBearSignalInvalidated = not na(precisionHiddenBearAge) and precisionHiddenBearAge > 0 and precisionHiddenBearAge <= precisionBearSignalInvalidationBars and not na(precisionHiddenBearSignalHigh) and close > precisionHiddenBearSignalHigh
+precisionHiddenBearAnchorInvalidated = not na(precisionHiddenBearAge) and precisionHiddenBearAge > 0 and precisionHiddenBearAge <= precisionBearAnchorInvalidationBars and not na(precisionHiddenBearAnchorHigh) and close > precisionHiddenBearAnchorHigh
+
+if not precisionHiddenBearResponsePending and not precisionHiddenBearCompleted and not precisionHiddenBearInvalidated and (precisionHiddenBearSignalInvalidated or precisionHiddenBearAnchorInvalidated)
+    precisionHiddenBearInvalidated := true
+
+precisionHiddenBearResponseWindowActive = not na(precisionHiddenBearAge) and precisionHiddenBearAge > 0 and precisionHiddenBearAge <= precisionBearResponseWindowBars
+precisionHiddenBearAnchorBreak = not na(precisionHiddenBearAnchorLow) and close < precisionHiddenBearAnchorLow
+precisionHiddenBearEmaBodyBreak = not na(precisionHiddenBearAnchorBodyMid) and close < precisionBullEmaFast and close < precisionHiddenBearAnchorBodyMid
+precisionHiddenBearRsiBodyBreak = not na(precisionHiddenBearAnchorBodyMid) and rsiValue < 50 and close < precisionHiddenBearAnchorBodyMid
+precisionHiddenBearBaseResponse = precisionHiddenBearResponseWindowActive and not precisionHiddenBearInvalidated and not precisionHiddenBearResponsePending and not precisionHiddenBearCompleted and (precisionHiddenBearAnchorBreak or precisionHiddenBearEmaBodyBreak or precisionHiddenBearRsiBodyBreak)
+
+if precisionHiddenBearBaseResponse
+    precisionHiddenBearResponsePending := true
+    precisionHiddenBearResponseBar := bar_index
+    precisionHiddenBearStructureLow := precisionBearStructureLow(precisionHiddenBearAge)
+
+precisionHiddenBearResponseAge = na(precisionHiddenBearResponseBar) ? na : bar_index - precisionHiddenBearResponseBar
+precisionHiddenBearishResponse = precisionHiddenBearResponsePending and not precisionHiddenBearInvalidated and not na(precisionHiddenBearResponseAge) and precisionHiddenBearResponseAge >= 0 and precisionHiddenBearResponseAge <= precisionBearStructureBreakBars and not na(precisionHiddenBearStructureLow) and close < precisionHiddenBearStructureLow
+precisionHiddenBearResponseExpired = precisionHiddenBearResponsePending and not na(precisionHiddenBearResponseAge) and precisionHiddenBearResponseAge > precisionBearStructureBreakBars
+precisionHiddenBearSetupExpired = not na(precisionHiddenBearAge) and precisionHiddenBearAge > precisionBearAnchorInvalidationBars and not precisionHiddenBearResponsePending
+
+if precisionHiddenBearishResponse
+    precisionHiddenBearResponsePending := false
+    precisionHiddenBearCompleted := true
+
+if precisionHiddenBearResponseExpired or precisionHiddenBearSetupExpired
+    precisionHiddenBearResponsePending := false
+    precisionHiddenBearCompleted := true
+
+plotshape(showSignalMarkers and regularBullish, title="Regular Bullish RSI Divergence", style=shape.triangleup, location=location.bottom, color=regularBullColor, size=size.tiny, offset=-pivotRight)
+plotshape(showSignalMarkers and hiddenBullish, title="Hidden Bullish RSI Divergence", style=shape.triangleup, location=location.bottom, color=hiddenBullColor, size=size.tiny, offset=-pivotRight)
+plotshape(showSignalMarkers and regularWatchBullish, title="Watch Regular Bullish RSI Divergence", style=shape.circle, location=location.bottom, color=color.new(regularBullColor, watchTransparency), size=size.tiny)
+plotshape(showSignalMarkers and hiddenWatchBullish, title="Watch Hidden Bullish RSI Divergence", style=shape.circle, location=location.bottom, color=color.new(hiddenBullColor, watchTransparency), size=size.tiny)
+plotshape(showSignalMarkers and developingRegularBullSignal, title="New Developing Regular Bullish RSI Divergence", style=shape.circle, location=location.bottom, color=color.new(regularBullColor, developingTransparency), size=size.tiny)
+plotshape(showSignalMarkers and developingHiddenBullSignal, title="New Developing Hidden Bullish RSI Divergence", style=shape.circle, location=location.bottom, color=color.new(hiddenBullColor, developingTransparency), size=size.tiny)
+
+plotshape(showSignalMarkers and regularBearish, title="Regular Bearish RSI Divergence", style=shape.triangledown, location=location.top, color=regularBearColor, size=size.tiny, offset=-pivotRight)
+plotshape(showSignalMarkers and hiddenBearish, title="Hidden Bearish RSI Divergence", style=shape.triangledown, location=location.top, color=hiddenBearColor, size=size.tiny, offset=-pivotRight)
+plotshape(showSignalMarkers and regularWatchBearish, title="Watch Regular Bearish RSI Divergence", style=shape.circle, location=location.top, color=color.new(regularBearColor, watchTransparency), size=size.tiny)
+plotshape(showSignalMarkers and hiddenWatchBearish, title="Watch Hidden Bearish RSI Divergence", style=shape.circle, location=location.top, color=color.new(hiddenBearColor, watchTransparency), size=size.tiny)
+plotshape(showSignalMarkers and developingRegularBearSignal, title="New Developing Regular Bearish RSI Divergence", style=shape.circle, location=location.top, color=color.new(regularBearColor, developingTransparency), size=size.tiny)
+plotshape(showSignalMarkers and developingHiddenBearSignal, title="New Developing Hidden Bearish RSI Divergence", style=shape.circle, location=location.top, color=color.new(hiddenBearColor, developingTransparency), size=size.tiny)
+
+bearCautionSignal = regularBearish or hiddenBearish or developingRegularBearSignal or developingHiddenBearSignal
+precisionConfirmedRegularBullish = precisionTimeframe1W and barstate.isconfirmed and regularBullish and close > precisionBullEmaFast and close > precisionBullEmaSlow
+precisionDevelopingBullishResponseClosed = precisionDevelopingBullishResponse and barstate.isconfirmed
+precisionPremiumBullishResponseClosed = precisionPremiumBullishResponse and barstate.isconfirmed
+precisionHiddenBullishResponseClosed = precisionHiddenBullishResponse and barstate.isconfirmed
+precisionHiddenBearishResponseClosed = precisionHiddenBearishResponse and barstate.isconfirmed
+precisionBearShortResponseClosed = precisionBearShortResponse and barstate.isconfirmed
+precisionPremiumBearShortResponseClosed = precisionPremiumBearShortResponse and barstate.isconfirmed
+
+plot(developingRegularBullish ? 1 : 0, "Developing Regular Bullish RSI Divergence", color=color.white, display=display.data_window)
+plot(developingHiddenBullish ? 1 : 0, "Developing Hidden Bullish RSI Divergence", color=color.white, display=display.data_window)
+plot(developingRegularBearish ? 1 : 0, "Developing Regular Bearish RSI Divergence", color=color.white, display=display.data_window)
+plot(developingHiddenBearish ? 1 : 0, "Developing Hidden Bearish RSI Divergence", color=color.white, display=display.data_window)
+plot(precisionConfirmedRegularBullish ? 1 : 0, "Precision Confirmed Regular Bullish RSI Divergence", color=color.white, display=display.data_window)
+plot(precisionDevelopingBullishResponseClosed ? 1 : 0, "Precision Developing Bullish RSI Response", color=color.white, display=display.data_window)
+plot(precisionPremiumBullishResponseClosed ? 1 : 0, "Precision Premium Bullish RSI Response", color=color.white, display=display.data_window)
+plot(precisionHiddenBullishResponseClosed ? 1 : 0, "Precision Hidden Bullish RSI Response", color=color.white, display=display.data_window)
+plot(precisionHiddenBearishResponseClosed ? 1 : 0, "Precision Hidden Bearish RSI Response", color=color.white, display=display.data_window)
+plot(precisionBearShortResponseClosed ? 1 : 0, "Precision Bearish Short-Horizon RSI Response", color=color.white, display=display.data_window)
+plot(precisionPremiumBearShortResponseClosed ? 1 : 0, "Precision Premium Bearish Short-Horizon RSI Response", color=color.white, display=display.data_window)
+plot(bearCautionSignal ? 1 : 0, "Tier 4 Bear Caution Alert", color=color.white, display=display.data_window)
+
+if precisionPremiumBullishResponseClosed
+    alert("Precision premium bullish RSI response on " + syminfo.tickerid + " " + timeframe.period + ". MA context: " + precisionBullMaContextText + ". Daily near <=5%; weekly near <=10%. RESEARCH/SHADOW: historical performance is under actual-alert-bar revalidation by timeframe; no validated live probability is claimed.", alert.freq_once_per_bar_close)
+
+alertcondition(regularBullish, title="Regular Bullish RSI Divergence", message="Regular bullish RSI divergence confirmed on {{ticker}} {{interval}}")
+alertcondition(precisionConfirmedRegularBullish, title="Precision Confirmed Regular Bullish RSI Divergence", message="Precision confirmed regular bullish RSI divergence on {{ticker}} {{interval}}. Research rule: 1W regular bull divergence with close above EMA21 and EMA200. No validated live probability is claimed.")
+alertcondition(hiddenBullish, title="Hidden Bullish RSI Divergence", message="Hidden bullish RSI divergence confirmed on {{ticker}} {{interval}}")
+alertcondition(regularBullish or hiddenBullish, title="Any Confirmed Bullish RSI Divergence", message="Bullish RSI divergence confirmed on {{ticker}} {{interval}}")
+alertcondition(precisionDevelopingBullishResponseClosed, title="Precision Developing Bullish RSI Response", message="Precision developing bullish RSI response on {{ticker}} {{interval}}. Research rule on exact 4H/1D/1W: regular score>=70 and RSI below RSI MA; hidden prior swing>=10 and upside 10-bar structure break after response. No validated live probability is claimed; evaluate from this closed alert bar.")
+alertcondition(precisionPremiumBullishResponseClosed, title="Precision Premium Bullish RSI Response", message="Precision premium bullish RSI response on {{ticker}} {{interval}}. Research rule on exact 4H/1D/1W: developing bullish response before invalidation, upside 10-bar structure break, pullback depth >=5%, RSI below RSI MA, and BB position <=0.6. No validated live probability is claimed; evaluate from this closed alert bar.")
+alertcondition(precisionHiddenBullishResponseClosed, title="Precision Hidden Bullish RSI Response", message="Precision hidden bullish RSI response on {{ticker}} {{interval}}. Research rule on exact 1D/1W: confirmed hidden bull on an EMA bull stack with upside 10-bar structure break. No validated live probability is claimed; evaluate from this closed alert bar.")
+alertcondition(developingRegularBullSignal, title="Developing Regular Bullish RSI Divergence", message="Developing regular bullish RSI divergence on {{ticker}} {{interval}}")
+alertcondition(developingHiddenBullSignal, title="Developing Hidden Bullish RSI Divergence", message="Developing hidden bullish RSI divergence on {{ticker}} {{interval}}")
+alertcondition(developingRegularBullSignal or developingHiddenBullSignal, title="Any Developing Bullish RSI Divergence", message="Developing bullish RSI divergence on {{ticker}} {{interval}}")
+alertcondition(regularBullish or hiddenBullish or developingRegularBullSignal or developingHiddenBullSignal, title="Any Bullish RSI Divergence", message="Bullish RSI divergence, developing or confirmed, on {{ticker}} {{interval}}")
+
+alertcondition(regularBearish, title="Regular Bearish RSI Divergence", message="Regular bearish RSI divergence confirmed on {{ticker}} {{interval}}")
+alertcondition(hiddenBearish, title="Hidden Bearish RSI Divergence", message="Hidden bearish RSI divergence confirmed on {{ticker}} {{interval}}")
+alertcondition(regularBearish or hiddenBearish, title="Any Confirmed Bearish RSI Divergence", message="Bearish RSI divergence confirmed on {{ticker}} {{interval}}")
+alertcondition(developingRegularBearSignal, title="Developing Regular Bearish RSI Divergence", message="Developing regular bearish RSI divergence on {{ticker}} {{interval}}")
+alertcondition(developingHiddenBearSignal, title="Developing Hidden Bearish RSI Divergence", message="Developing hidden bearish RSI divergence on {{ticker}} {{interval}}")
+alertcondition(precisionHiddenBearishResponseClosed, title="Precision Hidden Bearish RSI Response", message="Precision hidden bearish RSI response on {{ticker}} {{interval}}. Research rule on exact 4H/1D/1W: BB position >=0.4, pivot RSI +5, and downside 10-bar structure break. No validated live probability is claimed; evaluate from this closed alert bar.")
+alertcondition(precisionBearShortResponseClosed, title="Precision Bearish Short-Horizon RSI Response", message="Precision bearish short-horizon RSI response on {{ticker}} {{interval}}. Research rule on exact 4H/1D/1W: bearish response before invalidation with downside 10-bar structure break; developing regular is limited to 4H/1D, confirmed hidden needs BB>=0.4, and confirmed regular needs BB>=0.6. No validated live probability is claimed; evaluate from this closed alert bar.")
+alertcondition(precisionPremiumBearShortResponseClosed, title="Precision Premium Bearish Short-Horizon RSI Response", message="Precision premium bearish short-horizon RSI response on {{ticker}} {{interval}}. Research rule: developing regular bearish on exact 4H/1D or developing hidden bearish on exact 1D, response before invalidation, and downside 10-bar structure break. No validated live probability is claimed; evaluate from this closed alert bar.")
+alertcondition(developingRegularBearSignal or developingHiddenBearSignal, title="Any Developing Bearish RSI Divergence", message="Developing bearish RSI divergence on {{ticker}} {{interval}}")
+alertcondition(regularBearish or hiddenBearish or developingRegularBearSignal or developingHiddenBearSignal, title="Any Bearish RSI Divergence", message="Bearish RSI divergence, developing or confirmed, on {{ticker}} {{interval}}")
+alertcondition(bearCautionSignal, title="Tier 4 Caution: Bearish RSI Divergence", message="Tier 4 CAUTION: bearish RSI divergence on {{ticker}} {{interval}}. Action: reduce confidence in bullish setups and review chart context.")
+
+alertcondition(regularBullish or hiddenBullish or regularBearish or hiddenBearish, title="Any Confirmed RSI Divergence", message="RSI divergence confirmed on {{ticker}} {{interval}}")
+alertcondition(developingRegularBullSignal or developingHiddenBullSignal or developingRegularBearSignal or developingHiddenBearSignal, title="Any Developing RSI Divergence", message="Developing RSI divergence on {{ticker}} {{interval}}")
+alertcondition(regularBullish or hiddenBullish or developingRegularBullSignal or developingHiddenBullSignal or regularBearish or hiddenBearish or developingRegularBearSignal or developingHiddenBearSignal, title="Any RSI Divergence", message="RSI divergence, developing or confirmed, on {{ticker}} {{interval}}")

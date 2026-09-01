@@ -1,0 +1,411 @@
+import {
+  SMA_FIB_ALERT_MAX_SYMBOLS_PER_SHARD,
+  normalizeScannerUniverse,
+  partitionScannerUniverse,
+} from './sma-fib-alert-scanner.js';
+
+function pineString(value) {
+  return `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
+}
+
+function pineArray(symbols) {
+  return `array.from(${symbols.map(pineString).join(', ')})`;
+}
+
+function numberLiteral(value, label) {
+  const result = Number(value);
+  if (!Number.isFinite(result) || result < 0) {
+    throw new TypeError(`${label} must be a finite, non-negative number.`);
+  }
+  return Number.isInteger(result) ? `${result}.0` : String(result);
+}
+
+export function renderSmaFibAlertScannerPine({
+  symbols,
+  title = 'SMA/Fib Watchlist Alert Scanner [Local V1]',
+  maBufferPct = 5,
+  fibBufferPct = 5,
+} = {}) {
+  const universe = normalizeScannerUniverse(symbols);
+  const shards = partitionScannerUniverse(universe);
+  const shardBranches = shards.map((shard, index) => {
+    const prefix = index === 0 ? 'if' : 'else if';
+    return `${prefix} shard == ${index + 1}\n    symbols := ${pineArray(shard)}`;
+  }).join('\n');
+  const titleLiteral = pineString(title);
+  const maBuffer = numberLiteral(maBufferPct, 'maBufferPct');
+  const fibBuffer = numberLiteral(fibBufferPct, 'fibBufferPct');
+
+  return `// MPL-2.0
+//@version=6
+indicator(${titleLiteral}, overlay=false, max_bars_back=1200, dynamic_requests=true)
+
+// LOCAL_ONLY_UNCOMPILED. Creating TradingView alerts from this source is not authorized.
+// One alert instance selects one target profile and one <=30-symbol shard. Run only on
+// standard BINANCE:BTCUSDT 60-minute candles. Confluence annotates independent events.
+string targetProfile = input.string("1D", "Target profile", options=["1D", "1W"], group="Scanner")
+int shard = input.int(1, "Universe shard", minval=1, maxval=${shards.length}, group="Scanner")
+
+int MA_LENGTH = 200
+int PIVOT_LEFT = 5
+int PIVOT_RIGHT = 5
+float MA_BUFFER_PCT = ${maBuffer}
+float FIB_BUFFER_PCT = ${fibBuffer}
+float GOLDEN_MIN = 0.618
+float GOLDEN_MAX = 0.650
+int MA_APPROACH = 1
+int MA_TOUCH = 2
+int MA_CROSS_UP = 4
+int MA_CROSS_DOWN = 8
+int FIB_APPROACH = 16
+int FIB_TOUCH = 32
+int FIB_INSIDE = 64
+
+round8(float value) => math.round(value * 100000000.0) / 100000000.0
+round12(float value) => math.round(value * 1000000000000.0) / 1000000000000.0
+hasBit(int mask, int bit) => int(math.floor(mask / bit)) % 2 == 1
+setBit(int mask, bool active, int bit) => active ? mask + bit : mask
+rangeDistancePct(float firstLow, float firstHigh, float secondLow, float secondHigh) =>
+    float distance = na
+    if not na(firstLow) and not na(firstHigh) and not na(secondLow) and not na(secondHigh)
+        float aLow = math.min(firstLow, firstHigh)
+        float aHigh = math.max(firstLow, firstHigh)
+        float bLow = math.min(secondLow, secondHigh)
+        float bHigh = math.max(secondLow, secondHigh)
+        distance := aHigh >= bLow and aLow <= bHigh ? 0.0 : aHigh < bLow ? (bLow - aHigh) / bLow * 100.0 : (aLow - bHigh) / bHigh * 100.0
+    distance
+priceText(float value) =>
+    string result = na(value) ? "na" : str.tostring(value, "#.########")
+    str.length(result) > 24 ? str.substring(result, 0, 24) : result
+pairText(int lowTime, int highTime) => na(lowTime) or na(highTime) ? "na" : str.tostring(lowTime) + "-" + str.tostring(highTime)
+
+eventText(int mask) =>
+    string result = ""
+    result += hasBit(mask, MA_APPROACH) ? "MA_APPROACH" : ""
+    result += hasBit(mask, MA_TOUCH) ? (str.length(result) == 0 ? "" : "+") + "MA_TOUCH" : ""
+    result += hasBit(mask, MA_CROSS_UP) ? (str.length(result) == 0 ? "" : "+") + "MA_CROSS_UP" : ""
+    result += hasBit(mask, MA_CROSS_DOWN) ? (str.length(result) == 0 ? "" : "+") + "MA_CROSS_DOWN" : ""
+    result += hasBit(mask, FIB_APPROACH) ? (str.length(result) == 0 ? "" : "+") + "FIB_APPROACH" : ""
+    result += hasBit(mask, FIB_TOUCH) ? (str.length(result) == 0 ? "" : "+") + "FIB_TOUCH" : ""
+    result += hasBit(mask, FIB_INSIDE) ? (str.length(result) == 0 ? "" : "+") + "FIB_INSIDE" : ""
+    result
+
+shortSymbol(string symbol) =>
+    int separator = str.pos(symbol, ":")
+    not na(separator) and separator >= 0 ? str.substring(symbol, separator + 1) : symbol
+
+humanEventText(int mask) =>
+    string result = ""
+    result += hasBit(mask, MA_APPROACH) ? "Approaching the 200-period SMA" : ""
+    result += hasBit(mask, MA_TOUCH) ? (str.length(result) == 0 ? "" : "; ") + "Touching the 200-period SMA" : ""
+    result += hasBit(mask, MA_CROSS_UP) ? (str.length(result) == 0 ? "" : "; ") + "Crossed above the 200-period SMA" : ""
+    result += hasBit(mask, MA_CROSS_DOWN) ? (str.length(result) == 0 ? "" : "; ") + "Crossed below the 200-period SMA" : ""
+    result += hasBit(mask, FIB_APPROACH) ? (str.length(result) == 0 ? "" : "; ") + "Approaching the golden Fib zone" : ""
+    result += hasBit(mask, FIB_TOUCH) ? (str.length(result) == 0 ? "" : "; ") + "Touched the golden Fib zone" : ""
+    result += hasBit(mask, FIB_INSIDE) ? (str.length(result) == 0 ? "" : "; ") + "Inside the golden Fib zone" : ""
+    result
+
+humanLine(string symbol, string path, int mask, bool confluence) =>
+    string profileText = targetProfile == "1D" ? "Daily" : "Weekly"
+    string statusText = path == "PROVISIONAL" ? "WATCH ONLY" : confluence ? "REVIEW" : "LOW PRIORITY"
+    string actionText = path == "PROVISIONAL" ? "Wait for the " + str.lower(profileText) + " close" : confluence ? "SMA/Fib overlap—review the chart" : "No action needed unless it fits your plan"
+    statusText + " — " + shortSymbol(symbol) + " (" + profileText + ")\\n" + humanEventText(mask) + ". " + actionText + ". Not a trade signal."
+
+strictPivotLow() =>
+    bool result = bar_index >= PIVOT_LEFT + PIVOT_RIGHT
+    float candidate = low[PIVOT_RIGHT]
+    if result
+        for offset = 0 to PIVOT_LEFT + PIVOT_RIGHT
+            if offset != PIVOT_RIGHT and not (candidate < low[offset])
+                result := false
+    result
+
+strictPivotHigh() =>
+    bool result = bar_index >= PIVOT_LEFT + PIVOT_RIGHT
+    float candidate = high[PIVOT_RIGHT]
+    if result
+        for offset = 0 to PIVOT_LEFT + PIVOT_RIGHT
+            if offset != PIVOT_RIGHT and not (candidate > high[offset])
+                result := false
+    result
+
+// This state machine is evaluated independently in each requested symbol/profile context.
+scanSignal() =>
+    // Shift the input before ta.sma so the open target bar uses the latest 200
+    // fully closed target closes. This remains stable while that bar develops.
+    float priorSma = ta.sma(close[1], MA_LENGTH)
+
+    var float eligibleLowPrice = na
+    var int eligibleLowPivotBar = na
+    var int eligibleLowPivotTime = na
+    var float pendingLowPrice = na
+    var int pendingLowPivotBar = na
+    var int pendingLowPivotTime = na
+    var bool pairActive = false
+    var float pairLowPrice = na
+    var int pairLowPivotBar = na
+    var int pairLowPivotTime = na
+    var float pairHighPrice = na
+    var int pairHighPivotBar = na
+    var int pairHighPivotTime = na
+    var int pairHighConfirmationBar = na
+
+    if not na(pendingLowPrice) and low < pendingLowPrice
+        pendingLowPrice := na
+        pendingLowPivotBar := na
+        pendingLowPivotTime := na
+    if pairActive and low < pairLowPrice
+        pairActive := false
+        eligibleLowPrice := na
+        pendingLowPrice := na
+    else if pairActive and bar_index > pairHighPivotBar and high > pairHighPrice
+        if not na(pendingLowPrice)
+            eligibleLowPrice := pendingLowPrice
+            eligibleLowPivotBar := pendingLowPivotBar
+            eligibleLowPivotTime := pendingLowPivotTime
+        else
+            eligibleLowPrice := pairLowPrice
+            eligibleLowPivotBar := pairLowPivotBar
+            eligibleLowPivotTime := pairLowPivotTime
+        pairActive := false
+        pendingLowPrice := na
+    else if not pairActive and not na(eligibleLowPrice) and low < eligibleLowPrice
+        eligibleLowPrice := na
+
+    int candidatePivotBar = bar_index - PIVOT_RIGHT
+    if strictPivotLow()
+        float confirmedLowPrice = low[PIVOT_RIGHT]
+        int confirmedLowTime = time[PIVOT_RIGHT]
+        if pairActive and candidatePivotBar > pairHighPivotBar
+            pendingLowPrice := confirmedLowPrice
+            pendingLowPivotBar := candidatePivotBar
+            pendingLowPivotTime := confirmedLowTime
+        else if not pairActive
+            eligibleLowPrice := confirmedLowPrice
+            eligibleLowPivotBar := candidatePivotBar
+            eligibleLowPivotTime := confirmedLowTime
+    if strictPivotHigh() and not pairActive and not na(eligibleLowPrice) and candidatePivotBar > eligibleLowPivotBar and high[PIVOT_RIGHT] > eligibleLowPrice
+        pairLowPrice := eligibleLowPrice
+        pairLowPivotBar := eligibleLowPivotBar
+        pairLowPivotTime := eligibleLowPivotTime
+        pairHighPrice := high[PIVOT_RIGHT]
+        pairHighPivotBar := candidatePivotBar
+        pairHighPivotTime := time[PIVOT_RIGHT]
+        pairHighConfirmationBar := bar_index
+        pairActive := true
+        pendingLowPrice := na
+
+    bool pairEligible = pairActive and pairHighConfirmationBar < bar_index
+    float pairRange = pairEligible ? pairHighPrice - pairLowPrice : na
+    float pocketHigh = pairEligible ? round8(pairHighPrice - GOLDEN_MIN * pairRange) : na
+    float pocketLow = pairEligible ? round8(pairHighPrice - GOLDEN_MAX * pairRange) : na
+    bool samePair = pairEligible and pairEligible[1] and pairLowPivotTime == pairLowPivotTime[1] and pairHighPivotTime == pairHighPivotTime[1]
+
+    float maDistance = not na(priorSma) ? rangeDistancePct(low, high, priorSma, priorSma) : na
+    bool maNear = not na(maDistance) and maDistance <= MA_BUFFER_PCT
+    bool maTouched = not na(priorSma) and low <= priorSma and high >= priorSma
+    bool maCrossUp = not na(priorSma) and not na(priorSma[1]) and close[1] < priorSma[1] and close >= priorSma
+    bool maCrossDown = not na(priorSma) and not na(priorSma[1]) and close[1] > priorSma[1] and close <= priorSma
+    float fibDistance = pairEligible ? rangeDistancePct(low, high, pocketLow, pocketHigh) : na
+    bool fibNear = pairEligible and not na(fibDistance) and fibDistance <= FIB_BUFFER_PCT
+    bool fibTouched = pairEligible and low <= pocketHigh and high >= pocketLow
+    bool fibInside = pairEligible and close >= pocketLow and close <= pocketHigh
+    bool previousFibNear = samePair and fibNear[1]
+    bool previousFibTouched = samePair and fibTouched[1]
+    bool previousFibInside = samePair and fibInside[1]
+    var int maEpisodeStartTime = na
+    if maNear and not maNear[1]
+        maEpisodeStartTime := time
+    else if not maNear
+        maEpisodeStartTime := na
+    if (maTouched or maCrossUp or maCrossDown) and na(maEpisodeStartTime)
+        maEpisodeStartTime := time
+
+    int eventMask = 0
+    eventMask := setBit(eventMask, maNear and not maNear[1], MA_APPROACH)
+    eventMask := setBit(eventMask, maTouched and not maTouched[1], MA_TOUCH)
+    eventMask := setBit(eventMask, maCrossUp, MA_CROSS_UP)
+    eventMask := setBit(eventMask, maCrossDown, MA_CROSS_DOWN)
+    eventMask := setBit(eventMask, fibNear and not previousFibNear, FIB_APPROACH)
+    eventMask := setBit(eventMask, fibTouched and not previousFibTouched, FIB_TOUCH)
+    eventMask := setBit(eventMask, fibInside and not previousFibInside, FIB_INSIDE)
+    bool confluence = maNear and fibNear
+    [eventMask, close, priorSma, pocketLow, pocketHigh, pairEligible, pairLowPrice, pairHighPrice, pairLowPivotTime, pairHighPivotTime, confluence, maNear, maTouched, fibNear, fibTouched, fibInside, previousFibNear, previousFibTouched, previousFibInside, maEpisodeStartTime]
+
+// CLOSED fields are all shifted [1]. Unshifted OHLC, priorSma, and current causal
+// Fib identity are used only for the explicitly PROVISIONAL realtime path.
+pollSignal() =>
+    [eventMask, signalClose, priorSma, pocketLow, pocketHigh, pairEligible, pairLow, pairHigh, pairLowTime, pairHighTime, confluence, maNear, maTouched, fibNear, fibTouched, fibInside, previousFibNear, previousFibTouched, previousFibInside, maEpisodeStartTime] = scanSignal()
+    [eventMask[1], signalClose[1], priorSma[1], pocketLow[1], pocketHigh[1], pairEligible[1], pairLowTime[1], pairHighTime[1], confluence[1], maEpisodeStartTime[1], time[1], time_close[1], high, low, close, time, time_close, priorSma, close[1], priorSma[1], pairEligible, pairLow, pairHigh, pairLowTime, pairHighTime, maNear[1], maTouched[1], previousFibNear, previousFibTouched, previousFibInside, maEpisodeStartTime[1]]
+
+string targetTimeframe = targetProfile == "1D" ? "1D" : "1W"
+string standardHostSymbol = ticker.standard(syminfo.tickerid)
+bool hostSupported = standardHostSymbol == "BINANCE:BTCUSDT" and chart.is_standard and timeframe.in_seconds() == 3600
+if barstate.isfirst and not hostSupported
+    runtime.error("Use standard BINANCE:BTCUSDT 60-minute candles")
+
+array<string> symbols = array.new_string()
+${shardBranches}
+if array.size(symbols) > ${SMA_FIB_ALERT_MAX_SYMBOLS_PER_SHARD}
+    runtime.error("A scanner shard cannot exceed ${SMA_FIB_ALERT_MAX_SYMBOLS_PER_SHARD} symbols")
+
+array<string> seenSymbols = array.new_string()
+var array<bool> initializedSlots = array.new_bool(${SMA_FIB_ALERT_MAX_SYMBOLS_PER_SHARD}, false)
+var array<int> lastClosedTargetTimes = array.new_int(${SMA_FIB_ALERT_MAX_SYMBOLS_PER_SHARD}, na)
+var array<int> provisionalTargetTimes = array.new_int(${SMA_FIB_ALERT_MAX_SYMBOLS_PER_SHARD}, na)
+var array<int> provisionalSeenMasks = array.new_int(${SMA_FIB_ALERT_MAX_SYMBOLS_PER_SHARD}, 0)
+var int attachedAtMs = timenow
+string eventLines = ""
+string humanLines = ""
+string missingSymbols = ""
+string warmingSymbols = ""
+int availableCount = 0
+int warmCount = 0
+[pollClosedMask, pollClosedClose, pollClosedSma, pollClosedPocketLow, pollClosedPocketHigh, pollClosedPairEligible, pollClosedPairLowTime, pollClosedPairHighTime, pollClosedConfluence, pollClosedMaEpisodeStartTime, pollClosedTime, pollClosedCloseTime, pollDevelopingHigh, pollDevelopingLow, pollDevelopingClose, pollDevelopingTime, pollDevelopingCloseTime, pollFrozenSma, pollPreviousClose, pollPreviousSma, pollFrozenPairEligible, pollFrozenPairLow, pollFrozenPairHigh, pollFrozenPairLowTime, pollFrozenPairHighTime, pollPreviousMaNear, pollPreviousMaTouch, pollPreviousFibNear, pollPreviousFibTouch, pollPreviousFibInside, pollFrozenMaEpisodeStartTime] = pollSignal()
+
+if hostSupported
+    for slot = 0 to array.size(symbols) - 1
+        string symbol = array.get(symbols, slot)
+        if array.includes(seenSymbols, symbol)
+            runtime.error("Duplicate scanner symbol: " + symbol)
+        array.push(seenSymbols, symbol)
+        [closedMask, closedClose, closedSma, closedPocketLow, closedPocketHigh, closedPairEligible, closedPairLowTime, closedPairHighTime, closedConfluence, closedMaEpisodeStartTime, closedTime, closedCloseTime, developingHigh, developingLow, developingClose, developingTime, developingCloseTime, frozenSma, previousClose, previousSma, frozenPairEligible, frozenPairLow, frozenPairHigh, frozenPairLowTime, frozenPairHighTime, previousMaNear, previousMaTouch, previousFibNear, previousFibTouch, previousFibInside, frozenMaEpisodeStartTime] = request.security(symbol, targetTimeframe, [pollClosedMask, pollClosedClose, pollClosedSma, pollClosedPocketLow, pollClosedPocketHigh, pollClosedPairEligible, pollClosedPairLowTime, pollClosedPairHighTime, pollClosedConfluence, pollClosedMaEpisodeStartTime, pollClosedTime, pollClosedCloseTime, pollDevelopingHigh, pollDevelopingLow, pollDevelopingClose, pollDevelopingTime, pollDevelopingCloseTime, pollFrozenSma, pollPreviousClose, pollPreviousSma, pollFrozenPairEligible, pollFrozenPairLow, pollFrozenPairHigh, pollFrozenPairLowTime, pollFrozenPairHighTime, pollPreviousMaNear, pollPreviousMaTouch, pollPreviousFibNear, pollPreviousFibTouch, pollPreviousFibInside, pollFrozenMaEpisodeStartTime], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on, ignore_invalid_symbol=true)
+
+        if na(closedTime)
+            missingSymbols += (str.length(missingSymbols) == 0 ? "" : ", ") + symbol
+        else
+            availableCount += 1
+            if na(closedSma)
+                warmingSymbols += (str.length(warmingSymbols) == 0 ? "" : ", ") + symbol
+            else
+                warmCount += 1
+
+        bool initialized = array.get(initializedSlots, slot)
+        if not initialized and not na(closedTime)
+            // Bootstrap suppresses every condition that existed before this instance began.
+            array.set(initializedSlots, slot, true)
+            array.set(lastClosedTargetTimes, slot, closedTime)
+            array.set(provisionalTargetTimes, slot, developingTime)
+
+            bool bootstrapPairEligible = frozenPairEligible and developingLow >= frozenPairLow and developingHigh <= frozenPairHigh
+            float bootstrapPairRange = bootstrapPairEligible ? frozenPairHigh - frozenPairLow : na
+            float bootstrapPocketHigh = bootstrapPairEligible ? round8(frozenPairHigh - GOLDEN_MIN * bootstrapPairRange) : na
+            float bootstrapPocketLow = bootstrapPairEligible ? round8(frozenPairHigh - GOLDEN_MAX * bootstrapPairRange) : na
+            float bootstrapMaDistance = not na(frozenSma) ? rangeDistancePct(developingLow, developingHigh, frozenSma, frozenSma) : na
+            bool bootstrapMaNear = not na(bootstrapMaDistance) and bootstrapMaDistance <= MA_BUFFER_PCT
+            bool bootstrapMaTouch = not na(frozenSma) and developingLow <= frozenSma and developingHigh >= frozenSma
+            float bootstrapFibDistance = bootstrapPairEligible ? rangeDistancePct(developingLow, developingHigh, bootstrapPocketLow, bootstrapPocketHigh) : na
+            bool bootstrapFibNear = bootstrapPairEligible and not na(bootstrapFibDistance) and bootstrapFibDistance <= FIB_BUFFER_PCT
+            bool bootstrapFibTouch = bootstrapPairEligible and developingLow <= bootstrapPocketHigh and developingHigh >= bootstrapPocketLow
+            bool bootstrapFibInside = bootstrapPairEligible and developingClose >= bootstrapPocketLow and developingClose <= bootstrapPocketHigh
+            int bootstrapMask = 0
+            bootstrapMask := setBit(bootstrapMask, bootstrapMaNear and not previousMaNear, MA_APPROACH)
+            bootstrapMask := setBit(bootstrapMask, bootstrapMaTouch and not previousMaTouch, MA_TOUCH)
+            bootstrapMask := setBit(bootstrapMask, not na(frozenSma) and not na(previousSma) and previousClose < previousSma and developingClose >= frozenSma, MA_CROSS_UP)
+            bootstrapMask := setBit(bootstrapMask, not na(frozenSma) and not na(previousSma) and previousClose > previousSma and developingClose <= frozenSma, MA_CROSS_DOWN)
+            bootstrapMask := setBit(bootstrapMask, bootstrapFibNear and not previousFibNear, FIB_APPROACH)
+            bootstrapMask := setBit(bootstrapMask, bootstrapFibTouch and not previousFibTouch, FIB_TOUCH)
+            bootstrapMask := setBit(bootstrapMask, bootstrapFibInside and not previousFibInside, FIB_INSIDE)
+            array.set(provisionalSeenMasks, slot, bootstrapMask)
+        else if initialized
+            int savedClosedTime = array.get(lastClosedTargetTimes, slot)
+            bool freshClosedTarget = barstate.isconfirmed and not na(closedTime) and (na(savedClosedTime) or closedTime > savedClosedTime)
+            if freshClosedTarget
+                array.set(lastClosedTargetTimes, slot, closedTime)
+                bool closedExistedAtAttach = not na(closedCloseTime) and closedCloseTime <= attachedAtMs
+                int savedProvisionalTimeForClose = array.get(provisionalTargetTimes, slot)
+                int savedProvisionalMaskForClose = array.get(provisionalSeenMasks, slot)
+                bool sameTargetWasProvisional = not na(savedProvisionalTimeForClose) and savedProvisionalTimeForClose == closedTime
+                int closedFreshMask = closedMask - (sameTargetWasProvisional and hasBit(closedMask, MA_APPROACH) and hasBit(savedProvisionalMaskForClose, MA_APPROACH) ? MA_APPROACH : 0) - (sameTargetWasProvisional and hasBit(closedMask, MA_TOUCH) and hasBit(savedProvisionalMaskForClose, MA_TOUCH) ? MA_TOUCH : 0) - (sameTargetWasProvisional and hasBit(closedMask, MA_CROSS_UP) and hasBit(savedProvisionalMaskForClose, MA_CROSS_UP) ? MA_CROSS_UP : 0) - (sameTargetWasProvisional and hasBit(closedMask, MA_CROSS_DOWN) and hasBit(savedProvisionalMaskForClose, MA_CROSS_DOWN) ? MA_CROSS_DOWN : 0) - (sameTargetWasProvisional and hasBit(closedMask, FIB_APPROACH) and hasBit(savedProvisionalMaskForClose, FIB_APPROACH) ? FIB_APPROACH : 0) - (sameTargetWasProvisional and hasBit(closedMask, FIB_TOUCH) and hasBit(savedProvisionalMaskForClose, FIB_TOUCH) ? FIB_TOUCH : 0) - (sameTargetWasProvisional and hasBit(closedMask, FIB_INSIDE) and hasBit(savedProvisionalMaskForClose, FIB_INSIDE) ? FIB_INSIDE : 0)
+                if closedFreshMask > 0 and not closedExistedAtAttach
+                    bool closedHasMa = hasBit(closedFreshMask, MA_APPROACH) or hasBit(closedFreshMask, MA_TOUCH) or hasBit(closedFreshMask, MA_CROSS_UP) or hasBit(closedFreshMask, MA_CROSS_DOWN)
+                    bool closedHasFib = hasBit(closedFreshMask, FIB_APPROACH) or hasBit(closedFreshMask, FIB_TOUCH) or hasBit(closedFreshMask, FIB_INSIDE)
+                    string closedMaEpisode = closedHasMa and not na(closedMaEpisodeStartTime) ? str.tostring(closedMaEpisodeStartTime) : "na"
+                    string closedPair = closedHasFib and closedPairEligible ? pairText(closedPairLowTime, closedPairHighTime) : "na"
+                    string closedKey = symbol + ":" + targetProfile + ":CLOSED:" + closedMaEpisode + ":" + closedPair + ":" + str.tostring(closedTime) + ":" + str.tostring(closedFreshMask)
+                    string closedLine = symbol + "|CLOSED|EVENTS=" + eventText(closedFreshMask) + "|MASK=" + str.tostring(closedFreshMask) + "|KEY=" + closedKey + "|MA_EP=" + closedMaEpisode + "|PAIR=" + closedPair + "|STAGE_TIME=" + str.tostring(closedTime) + "|CONF=" + (closedConfluence ? "1" : "0") + "|TARGET_CLOSE_UTC=" + str.format_time(closedCloseTime, "yyyy-MM-dd HH:mm", "UTC") + "|C=" + priceText(closedClose) + "|SMA=" + priceText(closedSma) + "|GP=" + priceText(closedPocketLow) + "-" + priceText(closedPocketHigh)
+                    eventLines += (str.length(eventLines) == 0 ? "" : "\\n") + closedLine
+                    humanLines += (str.length(humanLines) == 0 ? "" : "\\n") + humanLine(symbol, "CLOSED", closedFreshMask, closedConfluence)
+
+            bool developingPairEligible = frozenPairEligible and developingLow >= frozenPairLow and developingHigh <= frozenPairHigh
+            float frozenPairRange = developingPairEligible ? frozenPairHigh - frozenPairLow : na
+            float provisionalPocketHigh = developingPairEligible ? round8(frozenPairHigh - GOLDEN_MIN * frozenPairRange) : na
+            float provisionalPocketLow = developingPairEligible ? round8(frozenPairHigh - GOLDEN_MAX * frozenPairRange) : na
+            float provisionalMaDistance = not na(frozenSma) ? rangeDistancePct(developingLow, developingHigh, frozenSma, frozenSma) : na
+            bool provisionalMaNear = not na(provisionalMaDistance) and provisionalMaDistance <= MA_BUFFER_PCT
+            bool provisionalMaTouch = not na(frozenSma) and developingLow <= frozenSma and developingHigh >= frozenSma
+            float provisionalFibDistance = developingPairEligible ? rangeDistancePct(developingLow, developingHigh, provisionalPocketLow, provisionalPocketHigh) : na
+            bool provisionalFibNear = developingPairEligible and not na(provisionalFibDistance) and provisionalFibDistance <= FIB_BUFFER_PCT
+            bool provisionalFibTouch = developingPairEligible and developingLow <= provisionalPocketHigh and developingHigh >= provisionalPocketLow
+            bool provisionalFibInside = developingPairEligible and developingClose >= provisionalPocketLow and developingClose <= provisionalPocketHigh
+            int provisionalMask = 0
+            provisionalMask := setBit(provisionalMask, provisionalMaNear and not previousMaNear, MA_APPROACH)
+            provisionalMask := setBit(provisionalMask, provisionalMaTouch and not previousMaTouch, MA_TOUCH)
+            provisionalMask := setBit(provisionalMask, not na(frozenSma) and not na(previousSma) and previousClose < previousSma and developingClose >= frozenSma, MA_CROSS_UP)
+            provisionalMask := setBit(provisionalMask, not na(frozenSma) and not na(previousSma) and previousClose > previousSma and developingClose <= frozenSma, MA_CROSS_DOWN)
+            provisionalMask := setBit(provisionalMask, provisionalFibNear and not previousFibNear, FIB_APPROACH)
+            provisionalMask := setBit(provisionalMask, provisionalFibTouch and not previousFibTouch, FIB_TOUCH)
+            provisionalMask := setBit(provisionalMask, provisionalFibInside and not previousFibInside, FIB_INSIDE)
+
+            bool realtimeHostClose = barstate.isrealtime and barstate.isconfirmed
+            bool currentTargetJustClosed = realtimeHostClose and not na(developingCloseTime) and time_close >= developingCloseTime and time_close <= developingCloseTime + 3600000
+            if currentTargetJustClosed
+                int savedCurrentClosedTime = array.get(lastClosedTargetTimes, slot)
+                if developingTime != savedCurrentClosedTime
+                    array.set(lastClosedTargetTimes, slot, developingTime)
+                    bool currentClosedExistedAtAttach = developingCloseTime <= attachedAtMs
+                    int savedProvisionalTimeForCurrentClose = array.get(provisionalTargetTimes, slot)
+                    int savedProvisionalMaskForCurrentClose = array.get(provisionalSeenMasks, slot)
+                    bool sameCurrentTargetWasProvisional = not na(savedProvisionalTimeForCurrentClose) and savedProvisionalTimeForCurrentClose == developingTime
+                    int currentClosedFreshMask = provisionalMask - (sameCurrentTargetWasProvisional and hasBit(provisionalMask, MA_APPROACH) and hasBit(savedProvisionalMaskForCurrentClose, MA_APPROACH) ? MA_APPROACH : 0) - (sameCurrentTargetWasProvisional and hasBit(provisionalMask, MA_TOUCH) and hasBit(savedProvisionalMaskForCurrentClose, MA_TOUCH) ? MA_TOUCH : 0) - (sameCurrentTargetWasProvisional and hasBit(provisionalMask, MA_CROSS_UP) and hasBit(savedProvisionalMaskForCurrentClose, MA_CROSS_UP) ? MA_CROSS_UP : 0) - (sameCurrentTargetWasProvisional and hasBit(provisionalMask, MA_CROSS_DOWN) and hasBit(savedProvisionalMaskForCurrentClose, MA_CROSS_DOWN) ? MA_CROSS_DOWN : 0) - (sameCurrentTargetWasProvisional and hasBit(provisionalMask, FIB_APPROACH) and hasBit(savedProvisionalMaskForCurrentClose, FIB_APPROACH) ? FIB_APPROACH : 0) - (sameCurrentTargetWasProvisional and hasBit(provisionalMask, FIB_TOUCH) and hasBit(savedProvisionalMaskForCurrentClose, FIB_TOUCH) ? FIB_TOUCH : 0) - (sameCurrentTargetWasProvisional and hasBit(provisionalMask, FIB_INSIDE) and hasBit(savedProvisionalMaskForCurrentClose, FIB_INSIDE) ? FIB_INSIDE : 0)
+                    if currentClosedFreshMask > 0 and not currentClosedExistedAtAttach
+                        bool currentClosedHasMa = hasBit(currentClosedFreshMask, MA_APPROACH) or hasBit(currentClosedFreshMask, MA_TOUCH) or hasBit(currentClosedFreshMask, MA_CROSS_UP) or hasBit(currentClosedFreshMask, MA_CROSS_DOWN)
+                        bool currentClosedHasFib = hasBit(currentClosedFreshMask, FIB_APPROACH) or hasBit(currentClosedFreshMask, FIB_TOUCH) or hasBit(currentClosedFreshMask, FIB_INSIDE)
+                        string currentClosedMaEpisode = currentClosedHasMa ? (previousMaNear and not na(frozenMaEpisodeStartTime) ? str.tostring(frozenMaEpisodeStartTime) : str.tostring(developingTime)) : "na"
+                        string currentClosedPair = currentClosedHasFib and developingPairEligible ? pairText(frozenPairLowTime, frozenPairHighTime) : "na"
+                        string currentClosedKey = symbol + ":" + targetProfile + ":CLOSED:" + currentClosedMaEpisode + ":" + currentClosedPair + ":" + str.tostring(developingTime) + ":" + str.tostring(currentClosedFreshMask)
+                        string currentClosedLine = symbol + "|CLOSED|EVENTS=" + eventText(currentClosedFreshMask) + "|MASK=" + str.tostring(currentClosedFreshMask) + "|KEY=" + currentClosedKey + "|MA_EP=" + currentClosedMaEpisode + "|PAIR=" + currentClosedPair + "|STAGE_TIME=" + str.tostring(developingTime) + "|CONF=" + (provisionalMaNear and provisionalFibNear ? "1" : "0") + "|TARGET_CLOSE_UTC=" + str.format_time(developingCloseTime, "yyyy-MM-dd HH:mm", "UTC") + "|C=" + priceText(developingClose) + "|SMA=" + priceText(frozenSma) + "|GP=" + priceText(provisionalPocketLow) + "-" + priceText(provisionalPocketHigh)
+                        eventLines += (str.length(eventLines) == 0 ? "" : "\\n") + currentClosedLine
+                        humanLines += (str.length(humanLines) == 0 ? "" : "\\n") + humanLine(symbol, "CLOSED", currentClosedFreshMask, provisionalMaNear and provisionalFibNear)
+
+            bool developingFresh = not na(developingTime) and time_close > developingTime and time_close < developingCloseTime
+            if realtimeHostClose and developingFresh
+                int savedProvisionalTime = array.get(provisionalTargetTimes, slot)
+                if developingTime != savedProvisionalTime
+                    array.set(provisionalTargetTimes, slot, developingTime)
+                    bool targetExistedAtAttach = developingTime <= attachedAtMs
+                    array.set(provisionalSeenMasks, slot, targetExistedAtAttach ? provisionalMask : 0)
+                int seenMask = array.get(provisionalSeenMasks, slot)
+                int freshMask = provisionalMask - (hasBit(provisionalMask, MA_APPROACH) and hasBit(seenMask, MA_APPROACH) ? MA_APPROACH : 0) - (hasBit(provisionalMask, MA_TOUCH) and hasBit(seenMask, MA_TOUCH) ? MA_TOUCH : 0) - (hasBit(provisionalMask, MA_CROSS_UP) and hasBit(seenMask, MA_CROSS_UP) ? MA_CROSS_UP : 0) - (hasBit(provisionalMask, MA_CROSS_DOWN) and hasBit(seenMask, MA_CROSS_DOWN) ? MA_CROSS_DOWN : 0) - (hasBit(provisionalMask, FIB_APPROACH) and hasBit(seenMask, FIB_APPROACH) ? FIB_APPROACH : 0) - (hasBit(provisionalMask, FIB_TOUCH) and hasBit(seenMask, FIB_TOUCH) ? FIB_TOUCH : 0) - (hasBit(provisionalMask, FIB_INSIDE) and hasBit(seenMask, FIB_INSIDE) ? FIB_INSIDE : 0)
+                if freshMask > 0
+                    array.set(provisionalSeenMasks, slot, seenMask + freshMask)
+                    bool provisionalConfluence = provisionalMaNear and provisionalFibNear
+                    bool provisionalHasMa = hasBit(freshMask, MA_APPROACH) or hasBit(freshMask, MA_TOUCH) or hasBit(freshMask, MA_CROSS_UP) or hasBit(freshMask, MA_CROSS_DOWN)
+                    bool provisionalHasFib = hasBit(freshMask, FIB_APPROACH) or hasBit(freshMask, FIB_TOUCH) or hasBit(freshMask, FIB_INSIDE)
+                    string provisionalMaEpisode = provisionalHasMa ? (previousMaNear and not na(frozenMaEpisodeStartTime) ? str.tostring(frozenMaEpisodeStartTime) : str.tostring(developingTime)) : "na"
+                    string provisionalPair = provisionalHasFib and developingPairEligible ? pairText(frozenPairLowTime, frozenPairHighTime) : "na"
+                    string provisionalKey = symbol + ":" + targetProfile + ":PROVISIONAL:" + provisionalMaEpisode + ":" + provisionalPair + ":" + str.tostring(developingTime) + ":" + str.tostring(freshMask)
+                    string provisionalLine = symbol + "|PROVISIONAL|EVENTS=" + eventText(freshMask) + "|MASK=" + str.tostring(freshMask) + "|KEY=" + provisionalKey + "|MA_EP=" + provisionalMaEpisode + "|PAIR=" + provisionalPair + "|STAGE_TIME=" + str.tostring(developingTime) + "|CONF=" + (provisionalConfluence ? "1" : "0") + "|TARGET_CLOSE_UTC=" + str.format_time(developingCloseTime, "yyyy-MM-dd HH:mm", "UTC") + "|C=" + priceText(developingClose) + "|SMA=" + priceText(frozenSma) + "|GP=" + priceText(provisionalPocketLow) + "-" + priceText(provisionalPocketHigh)
+                    eventLines += (str.length(eventLines) == 0 ? "" : "\\n") + provisionalLine
+                    humanLines += (str.length(humanLines) == 0 ? "" : "\\n") + humanLine(symbol, "PROVISIONAL", freshMask, provisionalConfluence)
+
+if hostSupported and barstate.isconfirmed and str.length(eventLines) > 0
+    alert(humanLines + "\\n--- DATA ---\\nSMA_FIB_ATTENTION|V1|PROFILE=" + targetProfile + "|SHARD=" + str.tostring(shard) + "\\n" + eventLines, alert.freq_once_per_bar_close)
+
+plot(float(array.size(symbols)), "SFA Configured Symbols", display=display.data_window)
+plot(float(availableCount), "SFA Available Symbols", display=display.data_window)
+plot(float(warmCount), "SFA SMA-Warm Symbols", display=display.data_window)
+var table healthTable = table.new(position.top_right, 2, 5, border_width=1)
+if barstate.islast
+    table.cell(healthTable, 0, 0, "SMA/Fib Attention", bgcolor=color.new(color.gray, 20), text_color=color.white)
+    table.cell(healthTable, 1, 0, targetProfile + " / shard " + str.tostring(shard), bgcolor=color.new(color.gray, 20), text_color=color.white)
+    table.cell(healthTable, 0, 1, "Configured / available / warm")
+    table.cell(healthTable, 1, 1, str.tostring(array.size(symbols)) + " / " + str.tostring(availableCount) + " / " + str.tostring(warmCount))
+    table.cell(healthTable, 0, 2, "Missing data")
+    table.cell(healthTable, 1, 2, str.length(missingSymbols) == 0 ? "None" : missingSymbols)
+    table.cell(healthTable, 0, 3, "SMA warming")
+    table.cell(healthTable, 1, 3, str.length(warmingSymbols) == 0 ? "None" : warmingSymbols)
+    table.cell(healthTable, 0, 4, "Activation")
+    table.cell(healthTable, 1, 4, "LOCAL ONLY / uncompiled")
+`;
+}

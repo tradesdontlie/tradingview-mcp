@@ -1,0 +1,23 @@
+{
+  "schema_version": "sma-fib-attention-source-binding/v1",
+  "status": "LIVE_BINDING_UNVERIFIED",
+  "selected_local_source": {
+    "title": "SMA/Fib Confluence Alerts + Anchor [200D/200W]",
+    "path": "contracts/sources/sma-fib-confluence-selected-v2.pine",
+    "source_sha256": "a6157850ff55cce7c4c539ab59d0b337a1db553327a8cc8f3ef0147aa9d12ec0"
+  },
+  "live_binding": {
+    "verified": false,
+    "script_id": null,
+    "script_version": null,
+    "source_sha256": null,
+    "verification_method": null,
+    "verified_at_utc": null
+  },
+  "scope": "The binding gates Fib machine-output claims only; independent prior-200 SMA queries use validated standard-candle bars.",
+  "required_before_fib_query_claims": [
+    "read the exact applied script ID and version without changing TradingView",
+    "bind those applied bytes to the selected local source SHA-256",
+    "record the verified identity in this versioned contract"
+  ]
+}

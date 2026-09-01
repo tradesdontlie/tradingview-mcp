@@ -11,6 +11,9 @@ import { registerBatchTools } from './tools/batch.js';
 import { registerReplayTools } from './tools/replay.js';
 import { registerIndicatorTools } from './tools/indicators.js';
 import { registerWatchlistTools } from './tools/watchlist.js';
+import { registerSmaFibWatchlistScanTools } from './tools/sma-fib-watchlist-scan.js';
+import { registerUnifiedAttentionScanTools } from './tools/unified-attention-scan.js';
+import { registerInvestmentAttentionTools } from './tools/investment-attention.js';
 import { registerUiTools } from './tools/ui.js';
 import { registerPaneTools } from './tools/pane.js';
 import { registerTabTools } from './tools/tab.js';
@@ -22,7 +25,7 @@ const server = new McpServer(
     description: 'AI-assisted TradingView chart analysis and Pine Script development via Chrome DevTools Protocol',
   },
   {
-    instructions: `TradingView MCP — 84 tools for reading and controlling a live TradingView Desktop chart.
+    instructions: `TradingView MCP — 86 tools for reading and controlling a live TradingView Desktop chart.
 
 TOOL SELECTION GUIDE — use this to pick the right tool:
 
@@ -31,6 +34,8 @@ Reading your chart:
 - data_get_study_values → get current numeric values from ALL visible indicators (RSI, MACD, BB, EMA, etc.)
 - quote_get → get real-time price snapshot (last, OHLC, volume)
 - data_get_ohlcv → get price bars. ALWAYS pass summary=true unless you need individual bars
+- watchlist_scan_sma_fib_confluence → independent prior-200 MA and causal golden-pocket Fib scan for the active watchlist or explicit symbols; requires exclusive_chart_use_confirmed=true before chart access, keeps MA usable while Fib fails closed until the exact applied V2 binding is verified, and never modifies alerts
+- watchlist_scan_investment_attention → unified MA/Fib/bullish-RSI Daily/Weekly scan with AND/OR filters and overlap ranking; requires exclusive_chart_use_confirmed=true before chart access; MA is independent, Fib requires exact applied V2 binding, and RSI requires exact applied-source/input binding
 
 Reading custom Pine indicator output (line.new/label.new/table.new/box.new drawings):
 - data_get_pine_lines → horizontal price levels from custom indicators (deduplicated, sorted)
@@ -81,6 +86,9 @@ registerBatchTools(server);
 registerReplayTools(server);
 registerIndicatorTools(server);
 registerWatchlistTools(server);
+registerSmaFibWatchlistScanTools(server);
+registerUnifiedAttentionScanTools(server);
+registerInvestmentAttentionTools(server);
 registerUiTools(server);
 registerPaneTools(server);
 registerTabTools(server);
