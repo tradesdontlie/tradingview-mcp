@@ -43,6 +43,16 @@ if "%TV_EXE%"=="" (
 )
 
 echo Found TradingView at: %TV_EXE%
+
+REM Clear ELECTRON_RUN_AS_NODE before launching.
+REM VS Code sets this to 1 for extension-host child processes, and it is
+REM inherited by any terminal or agent spawned from the editor. With it set,
+REM an Electron binary boots as plain Node: TradingView.exe then prints Node's
+REM help text and rejects the Chromium flag with
+REM   "bad option: --remote-debugging-port=9222"  (exit code 9)
+REM which looks like an MSIX/permissions failure but is purely environmental.
+set "ELECTRON_RUN_AS_NODE="
+
 echo Starting with --remote-debugging-port=%PORT%...
 start "" "%TV_EXE%" --remote-debugging-port=%PORT%
 
