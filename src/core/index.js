@@ -24,6 +24,8 @@ export * as investmentAttentionConfig from './investment-attention-config.js';
 export * as investmentAttentionHealth from './investment-attention-health.js';
 export * as investmentAttentionQuery from './investment-attention-query.js';
 export * as investmentAttentionLiveSnapshot from './investment-attention-live-snapshot.js';
+export * as tradingviewAlertLog from './tradingview-alert-log.js';
+export * as tradingviewAlertQc from './tradingview-alert-qc.js';
 export * as rsiAttention from './rsi-attention.js';
 export * as rsiStudyAdapter from './rsi-study-adapter.js';
 export * as rsiAlertScanner from './rsi-alert-scanner.js';

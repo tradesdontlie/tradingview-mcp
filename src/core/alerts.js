@@ -78,6 +78,7 @@ export async function list() {
               alert_id: a.alert_id,
               symbol: sym,
               type: a.type,
+              name: a.name ?? null,
               message: a.message,
               active: a.active,
               condition: a.condition,
@@ -85,6 +86,22 @@ export async function list() {
               created: a.create_time,
               last_fired: a.last_fire_time,
               expiration: a.expiration,
+              popup: a.popup ?? null,
+              mobile_push: a.mobile_push ?? null,
+              web_hook: a.web_hook ?? null,
+              email: a.email ?? null,
+              sms_over_email: a.sms_over_email ?? null,
+              auto_deactivate: a.auto_deactivate ?? null,
+              source_sha256: a.source_sha256 ?? null,
+              definition_version: a.definition_version ?? null,
+              notification_field_presence: {
+                popup: Object.hasOwn(a, 'popup'),
+                mobile_push: Object.hasOwn(a, 'mobile_push'),
+                web_hook: Object.hasOwn(a, 'web_hook'),
+                email: Object.hasOwn(a, 'email'),
+                sms_over_email: Object.hasOwn(a, 'sms_over_email'),
+                auto_deactivate: Object.hasOwn(a, 'auto_deactivate'),
+              },
             };
           })
         };

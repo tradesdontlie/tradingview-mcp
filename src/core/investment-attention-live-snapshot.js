@@ -144,11 +144,16 @@ export function normalizeInvestmentAttentionLiveAlert(alert, {
 } = {}) {
   const classification = classifyInvestmentAttentionAlert(alert);
   if (!classification) return null;
-  const binding = bindingForClassification(classification);
   const input = classification.inputs;
   const semanticInputs = semanticInputValues(classification, input);
-  const actualSourceSha = sourceShaByScriptId[classification.script.script_id] ?? binding.source_sha256;
-  const actualDefinition = definitionByScriptId[classification.script.script_id] ?? binding.definition_version;
+  // A live alert-list row exposes script identity and inputs, but does not
+  // prove the deployed source text. Keep absent source evidence absent so a
+  // reconciler can report the boundary instead of silently substituting the
+  // expected release binding.
+  const hasObservedSourceSha = Object.hasOwn(sourceShaByScriptId, classification.script.script_id);
+  const hasObservedDefinition = Object.hasOwn(definitionByScriptId, classification.script.script_id);
+  const actualSourceSha = hasObservedSourceSha ? sourceShaByScriptId[classification.script.script_id] : null;
+  const actualDefinition = hasObservedDefinition ? definitionByScriptId[classification.script.script_id] : null;
   const routeSymbol = classification.symbol ?? alert.symbol;
   const routeTimeframe = classification.profile ?? classification.timeframe;
   const key = expectedKeyOverride ?? expectedKey(classification);
@@ -170,6 +175,8 @@ export function normalizeInvestmentAttentionLiveAlert(alert, {
     target_id: classification.target_id ?? null,
     script_id: classification.script.script_id,
     script_version: classification.script.script_version,
+    source_hash_status: actualSourceSha ? 'observed' : 'unverified',
+    definition_status: actualDefinition ? 'observed' : 'unverified',
   };
 }
 
