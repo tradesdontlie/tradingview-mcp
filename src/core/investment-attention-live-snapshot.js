@@ -20,9 +20,9 @@ function inputHash(values) {
   return sha256(canonicalJson(values));
 }
 
-function semanticInputValues(classification, inputs) {
+function semanticInputValues(classification, inputs, { includeAllRsiSlots = false } = {}) {
   const limit = classification.family === 'sma_fib' ? 1
-    : classification.family === 'rsi' ? 23 : 6;
+    : classification.family === 'rsi' ? (includeAllRsiSlots ? 52 : 23) : 6;
   return Object.fromEntries(Object.entries(inputs)
     .filter(([key]) => /^in_\d+$/u.test(key) && Number(key.slice(3)) <= limit)
     .sort(([left], [right]) => Number(left.slice(3)) - Number(right.slice(3))));
@@ -141,11 +141,12 @@ export function normalizeInvestmentAttentionLiveAlert(alert, {
   sourceShaByScriptId = {},
   definitionByScriptId = {},
   expectedKeyOverride = null,
+  includeAllRsiSlots = false,
 } = {}) {
   const classification = classifyInvestmentAttentionAlert(alert);
   if (!classification) return null;
   const input = classification.inputs;
-  const semanticInputs = semanticInputValues(classification, input);
+  const semanticInputs = semanticInputValues(classification, input, { includeAllRsiSlots });
   // A live alert-list row exposes script identity and inputs, but does not
   // prove the deployed source text. Keep absent source evidence absent so a
   // reconciler can report the boundary instead of silently substituting the

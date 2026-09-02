@@ -21,7 +21,7 @@ The CSV `Time` field is the source firing time. The collector's `imported_at` is
 
 The export path and six-column schema are proven against the currently authenticated open TradingView Desktop session. Retention horizon, pagination/completeness, and restart recovery are not yet proven, so every report marks history completeness as `unproven`. `last_fired` from the alert inventory is metadata only and is never treated as firing history.
 
-The expected file is frozen and is never rebuilt from a live observation. Script ID/version and input identity are compared when visible. Missing deployed source hash or definition proof remains `unverified`; expected hashes are never substituted as observed hashes.
+The expected file is frozen and is never rebuilt from a live observation. It contains the reviewed 34-alert baseline (4 SMA/Fib, 24 RSI, and 6 Cup pilots); each RSI row retains semantic inputs through `in_52`, including scanner slots `in_23..in_52`. The reviewed mapping covers 33 unique non-empty feed symbols on each of the D and W timeframes, with no duplicate or extra mapping and no alert rollout performed. Script ID/version and input identity are compared when visible. Missing deployed source hash or definition proof remains `unverified`; expected hashes are never substituted as observed hashes.
 
 An RSI miss sample is classified only when the optional `/Users/odin/.codex/tradingview-alert-qc/runtime/independent-rsi-reference.json` is explicitly marked independent and verified and matches source, input, and route identity. No chart rotation or four-canary weekly gate is part of this daily monitor.
 

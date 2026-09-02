@@ -58,25 +58,25 @@ async function main() {
   let exportResult = null;
   let inventoryResult = null;
   try {
-    inventoryResult = await collectTradingViewAlertQcInventory();
-    exportResult = fixturePath
-      ? {
-        success: true,
-        source: 'TradingView Alerts Log CSV fixture',
-        csv_path: absoluteOption(fixturePath, 'fixture CSV'),
-        started_at: startedAt,
-        completed_at: new Date().toISOString(),
-        target_url: 'fixture://TradingView Alerts Log CSV',
-        ui_log_state: null,
-      }
-      : await exportTradingViewAlertsLogCsv();
-    const referencePath = rsiReferencePath
-      ? absoluteOption(rsiReferencePath, 'RSI reference')
-      : join(paths.runtime_dir, 'independent-rsi-reference.json');
-    const rsiReference = rsiReferencePath || existsSync(referencePath)
-      ? optionalJson(referencePath, 'RSI reference file')
-      : null;
     const result = await withTradingViewAlertQcWriterLock(home, async lockedPaths => {
+      inventoryResult = await collectTradingViewAlertQcInventory();
+      exportResult = fixturePath
+        ? {
+          success: true,
+          source: 'TradingView Alerts Log CSV fixture',
+          csv_path: absoluteOption(fixturePath, 'fixture CSV'),
+          started_at: startedAt,
+          completed_at: new Date().toISOString(),
+          target_url: 'fixture://TradingView Alerts Log CSV',
+          ui_log_state: null,
+        }
+        : await exportTradingViewAlertsLogCsv();
+      const referencePath = rsiReferencePath
+        ? absoluteOption(rsiReferencePath, 'RSI reference')
+        : join(lockedPaths.runtime_dir, 'independent-rsi-reference.json');
+      const rsiReference = rsiReferencePath || existsSync(referencePath)
+        ? optionalJson(referencePath, 'RSI reference file')
+        : null;
       const importResult = importTradingViewAlertsLogCsv({
         csvPath: exportResult.csv_path,
         paths: lockedPaths,
@@ -139,7 +139,6 @@ async function main() {
       finding_counts: result.report.findings,
       rsi_miss_sampling: result.report.rsi_miss_sampling.status,
     }, null, 2));
-    cleanupDownloadedCsv(exportResult, fixturePath);
   } catch (error) {
     let failureReport = buildTradingViewAlertQcFailureReport({
       error,
@@ -165,6 +164,7 @@ async function main() {
     }, null, 2));
     process.exitCode = 1;
   } finally {
+    cleanupDownloadedCsv(exportResult, fixturePath);
     await disconnect();
   }
 }

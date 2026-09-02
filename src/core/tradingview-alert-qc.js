@@ -224,6 +224,7 @@ export function normalizeTradingViewAlertInventory(alerts) {
     const normalized = normalizeInvestmentAttentionLiveAlert(alert, {
       sourceShaByScriptId,
       definitionByScriptId,
+      includeAllRsiSlots: true,
     });
     if (!normalized) {
       unmanaged.push(clone(alert));
@@ -514,62 +515,98 @@ function occurrenceWindowSummary(occurrences, generatedAt, days) {
   };
 }
 
-function assessRsiMissSampling({ reference, expectedConfig, observedInventory, generatedAt }) {
+function assessRsiMissSampling({ reference, expectedConfig, observedInventory, occurrences, collection, generatedAt }) {
+  const emptyCounts = () => ({ expected_silence: 0, possible_miss: 0, confirmed_miss: 0, confirmed_firing: 0, not_verified: 0 });
   if (!reference) return {
     status: 'not_verified',
     reason: 'No independent verified RSI reference file was supplied.',
     outcomes: [],
-    counts: { expected_silence: 0, possible: 0, confirmed: 0, not_verified: 0 },
+    counts: emptyCounts(),
   };
   if (reference.verified !== true || reference.reference_kind !== 'independent_verified_reference' || !Array.isArray(reference.samples) || reference.samples.length === 0) return {
     status: 'not_verified',
     reason: 'Reference evidence is absent, not explicitly independent and verified, or has no samples.',
     outcomes: [],
-    counts: { expected_silence: 0, possible: 0, confirmed: 0, not_verified: reference.samples?.length ?? 0 },
+    counts: { ...emptyCounts(), not_verified: reference.samples?.length ?? 0 },
   };
   const expectedByKey = alertMaps(expectedConfig).by_key;
   const observedByKey = new Map((observedInventory?.managed ?? []).map(row => [row.expected_key, row]));
-  const counts = { expected_silence: 0, possible: 0, confirmed: 0, not_verified: 0 };
+  const counts = emptyCounts();
   const outcomes = reference.samples.map(sample => {
     const key = nonempty(sample.expected_key);
     const expected = key ? expectedByKey.get(key) : null;
     const observed = key ? observedByKey.get(key) : null;
     const expectedSource = stableObject(expected?.source_identity);
     const source = stableObject(sample.source_identity);
+    const coverage = { ...stableObject(reference.coverage), ...stableObject(sample.coverage) };
+    const eventTimeRaw = sample.event_time ?? sample.reference_time;
+    const eventTimeMs = new Date(eventTimeRaw ?? '').valueOf();
+    const coverageStartMs = new Date(coverage.window_start ?? '').valueOf();
+    const coverageEndMs = new Date(coverage.window_end ?? '').valueOf();
+    const routeSymbol = nonempty(sample.route_symbol ?? sample.symbol);
+    const routeTimeframe = nonempty(sample.route_timeframe ?? sample.timeframe);
+    const matchingOccurrence = (occurrences ?? []).some(row => row.identity?.expected_key === key
+      && row.source_fired_at_ms === eventTimeMs);
     const checks = {
       expected_route: !!expected,
-      source_identity: !!expected && source.script_id === expectedSource.script_id
+      current_route: !!observed && !!routeSymbol && !!routeTimeframe
+        && String(observed.route_symbol ?? '').toUpperCase() === routeSymbol.toUpperCase()
+        && String(observed.route_timeframe ?? '').toUpperCase() === routeTimeframe.toUpperCase(),
+      current_source_identity: !!observed && !!expected && source.script_id === observed.script_id
+        && String(source.script_version ?? '') === String(observed.script_version ?? '')
+        && source.source_sha256 === observed.source_sha256
+        && source.script_id === expectedSource.script_id
         && String(source.script_version ?? '') === String(expectedSource.script_version ?? '')
         && source.source_sha256 === expectedSource.source_sha256,
-      input_identity: !!expected && sample.input_sha256 === expected.input_identity?.sha256,
+      current_input_identity: !!observed && !!expected && sample.input_sha256 === observed.input_sha256
+        && sample.input_sha256 === expected.input_identity?.sha256,
       independent_observation: sample.independent_observation === true,
       expected_event_field: typeof sample.expected_event === 'boolean',
       fired_field: typeof sample.alert_fired === 'boolean',
+      source_time: Number.isFinite(eventTimeMs) && eventTimeMs > 0,
+      source_time_in_coverage: Number.isFinite(eventTimeMs) && Number.isFinite(coverageStartMs)
+        && Number.isFinite(coverageEndMs) && eventTimeMs >= coverageStartMs && eventTimeMs < coverageEndMs,
+      coverage_evidence: coverage.evidence_present === true
+        && !!nonempty(coverage.evidence_ref)
+        && nonempty(coverage.source) === 'TradingView Alerts Log CSV',
+      collection_success: collection?.success === true,
+      current_log_match: typeof sample.alert_fired === 'boolean' && matchingOccurrence === sample.alert_fired,
     };
     let outcome = 'not_verified';
-    if (Object.values(checks).every(Boolean)) outcome = sample.expected_event
-      ? (sample.alert_fired ? 'confirmed' : 'possible')
-      : (sample.alert_fired ? 'not_verified' : 'expected_silence');
+    if (Object.values(checks).every(Boolean)) {
+      if (sample.alert_fired) outcome = 'confirmed_firing';
+      else if (!sample.expected_event) outcome = 'expected_silence';
+      else outcome = coverage.complete_for_window === true ? 'confirmed_miss' : 'possible_miss';
+    }
     counts[outcome] += 1;
     return {
       expected_key: key,
       expected_event: sample.expected_event ?? null,
       alert_fired: sample.alert_fired ?? null,
       observed_alert_id: observed?.alert_id ?? null,
+      event_time: Number.isFinite(eventTimeMs) ? new Date(eventTimeMs).toISOString() : null,
+      coverage: {
+        window_start: Number.isFinite(coverageStartMs) ? new Date(coverageStartMs).toISOString() : null,
+        window_end: Number.isFinite(coverageEndMs) ? new Date(coverageEndMs).toISOString() : null,
+        complete_for_window: coverage.complete_for_window === true,
+        evidence_ref: coverage.evidence_ref ?? null,
+      },
       outcome,
       checks,
     };
   });
   const status = counts.not_verified > 0
     ? 'not_verified'
-    : counts.confirmed > 0
-      ? 'confirmed'
-      : counts.possible > 0
-        ? 'possible'
+    : counts.confirmed_miss > 0
+      ? 'confirmed_miss'
+      : counts.possible_miss > 0
+        ? 'possible_miss'
+        : counts.confirmed_firing > 0
+          ? 'confirmed_firing'
         : 'expected_silence';
   return {
     status,
-    reason: 'Outcomes are bounded to explicitly independent, verified reference samples and current alert identity.',
+    reason: 'Miss outcomes require current route/source/input identity, an event time, independent evidence, successful collection, and explicit Alerts Log coverage evidence.',
     sample_count: outcomes.length,
     outcomes,
     counts,
@@ -730,6 +767,8 @@ export function buildTradingViewAlertQcReport({
     reference: rsiReference,
     expectedConfig,
     observedInventory,
+    occurrences,
+    collection: collectionReport,
     generatedAt: timestamp,
   });
   const trends = {
@@ -906,19 +945,82 @@ export function renderTradingViewAlertQcMarkdown(report) {
   return lines.filter((line, index) => line !== '' || lines[index - 1] !== '').join('\n');
 }
 
-function extractBacklogStatuses(content) {
-  const statuses = new Map();
-  const pattern = /^###\s+(TV-QC-\d+)\b[\s\S]*?^-\s*Status:\s*([a-z_-]+)/gim;
-  let match;
-  while ((match = pattern.exec(content)) !== null) {
-    const status = match[2].toLowerCase();
-    if (REVIEW_STATUSES.has(status)) statuses.set(match[1], status);
-  }
-  return statuses;
+function backlogGeneratedBody(content) {
+  const start = content.indexOf(GENERATED_START);
+  const end = content.indexOf(GENERATED_END);
+  if (start < 0 || end < start) return content;
+  return content.slice(start + GENERATED_START.length, end);
 }
 
-function renderBacklogItem(item, status) {
-  return [
+function backlogField(raw, field) {
+  const match = raw.match(new RegExp(`^-\\s*${field}:\\s*(.*)$`, 'imu'));
+  return match ? match[1].trim() : null;
+}
+
+function parseBacklogItems(content) {
+  const body = backlogGeneratedBody(content);
+  const headings = [];
+  const headingPattern = /^###\s+(TV-QC-\d+)\s+—\s+(.+)$/gim;
+  let heading;
+  while ((heading = headingPattern.exec(body)) !== null) headings.push({ ...heading, index: heading.index });
+  const items = new Map();
+  for (const [index, current] of headings.entries()) {
+    const end = headings[index + 1]?.index ?? body.length;
+    const raw = body.slice(current.index, end).trim();
+    const recurrenceText = backlogField(raw, 'Recurrence');
+    let recurrence = {};
+    if (recurrenceText) {
+      try { recurrence = JSON.parse(recurrenceText); } catch { recurrence = { unparsed: recurrenceText }; }
+    }
+    const known = /^(?:###\s+TV-QC-\d+\s+—|Generated:|-\s*(?:Evidence refs|First seen|Last seen|Recurrence|Affected alerts|Proposed change|Benefit|Risk|Test|Status):|####\s+Reviewer notes)/iu;
+    const notes = raw.split(/\r?\n/u)
+      .map(line => line.trimEnd())
+      .filter(line => line.trim() && !known.test(line));
+    const status = backlogField(raw, 'Status');
+    items.set(current[1], {
+      id: current[1],
+      title: current[2].trim(),
+      raw,
+      first_seen_at: backlogField(raw, 'First seen'),
+      last_seen_at: backlogField(raw, 'Last seen'),
+      recurrence,
+      status: status && REVIEW_STATUSES.has(status.toLowerCase()) ? status.toLowerCase() : 'proposed',
+      notes,
+    });
+  }
+  return items;
+}
+
+function earlierTimestamp(left, right) {
+  if (!left) return right ?? null;
+  if (!right) return left;
+  const leftMs = new Date(left).valueOf();
+  const rightMs = new Date(right).valueOf();
+  if (Number.isNaN(leftMs)) return right;
+  if (Number.isNaN(rightMs)) return left;
+  return leftMs <= rightMs ? left : right;
+}
+
+function mergeBacklogItem(item, previous) {
+  if (!previous) return { ...item, notes: [] };
+  const previousRuns = Number(previous.recurrence?.runs_observed ?? 0);
+  const currentRuns = Number(item.recurrence?.runs_observed ?? 1);
+  return {
+    ...item,
+    status: previous.status ?? item.status ?? 'proposed',
+    first_seen_at: earlierTimestamp(previous.first_seen_at, item.first_seen_at),
+    last_seen_at: item.last_seen_at ?? previous.last_seen_at,
+    recurrence: {
+      ...stableObject(previous.recurrence),
+      ...stableObject(item.recurrence),
+      runs_observed: (Number.isFinite(previousRuns) ? previousRuns : 0) + (Number.isFinite(currentRuns) ? currentRuns : 1),
+    },
+    notes: previous.notes ?? [],
+  };
+}
+
+function renderBacklogItem(item, status, notes = []) {
+  const lines = [
     `### ${item.id} — ${item.title}`,
     '',
     `- Evidence refs: ${listMarkdown(item.evidence_refs)}`,
@@ -932,7 +1034,9 @@ function renderBacklogItem(item, status) {
     `- Test: ${markdownValue(item.test)}`,
     `- Status: ${status}`,
     '',
-  ].join('\n');
+  ];
+  if (notes.length) lines.push('#### Reviewer notes', '', ...notes, '');
+  return lines.join('\n');
 }
 
 export function writeTradingViewAlertQcBacklog(suggestions, {
@@ -942,7 +1046,10 @@ export function writeTradingViewAlertQcBacklog(suggestions, {
   if (!Array.isArray(suggestions)) throw new TypeError('suggestions must be an array');
   const target = safePath(backlogPath, 'TradingView alert QC backlog');
   const existing = existsSync(target) ? readRegularText(target, 'TradingView alert QC backlog') : '';
-  const statuses = extractBacklogStatuses(existing);
+  const previousItems = parseBacklogItems(existing);
+  const currentItems = new Map(suggestions.map(item => [item.id, mergeBacklogItem(item, previousItems.get(item.id))]));
+  const allItems = new Map(previousItems);
+  for (const [id, item] of currentItems.entries()) allItems.set(id, item);
   const header = existing && !existing.includes(GENERATED_START)
     ? existing.trimEnd() + '\n\n'
     : existing.includes(GENERATED_START)
@@ -951,10 +1058,11 @@ export function writeTradingViewAlertQcBacklog(suggestions, {
   const suffix = existing.includes(GENERATED_END)
     ? existing.slice(existing.indexOf(GENERATED_END) + GENERATED_END.length).trimStart()
     : '';
-  const body = suggestions
-    .slice()
+  const body = [...allItems.values()]
     .sort((left, right) => left.id.localeCompare(right.id))
-    .map(item => renderBacklogItem(item, statuses.get(item.id) ?? item.status ?? 'proposed'))
+    .map(item => currentItems.has(item.id)
+      ? renderBacklogItem(item, item.status ?? 'proposed', item.notes ?? [])
+      : `${item.raw}\n`)
     .join('\n');
   const generated = [
     GENERATED_START,
@@ -967,8 +1075,11 @@ export function writeTradingViewAlertQcBacklog(suggestions, {
   atomicWrite(target, `${header}${generated}`.replace(/\n{3,}/gu, '\n\n'), { mode: 0o644, label: 'TradingView alert QC backlog', parentMode: 0o755 });
   return {
     path: target,
-    item_ids: suggestions.map(item => item.id),
-    preserved_statuses: Object.fromEntries(statuses),
+    item_ids: [...allItems.keys()].sort(),
+    active_item_ids: suggestions.map(item => item.id).sort(),
+    retained_historical_item_ids: [...allItems.keys()].filter(id => !currentItems.has(id)).sort(),
+    preserved_statuses: Object.fromEntries([...previousItems.entries()].map(([id, item]) => [id, item.status])),
+    preserved_history_count: [...allItems.keys()].filter(id => !currentItems.has(id)).length,
     generated_at: asIso(generatedAt),
   };
 }
@@ -986,11 +1097,6 @@ const ENSURE_LOG_EXPRESSION = `(function() {
   }
   var actions = firstVisible('[data-name="alerts-log-actions-button"]');
   if (actions) return { ready: true, action: 'log_actions_ready' };
-  var alertButton = firstVisible('[data-name="alerts-button"]') || firstVisible('[data-name="alerts"]') || firstVisible('[aria-label="Alerts"]');
-  if (alertButton) {
-    alertButton.click();
-    return { ready: false, action: 'alerts_panel_requested' };
-  }
   var candidates = document.querySelectorAll('button, a, [role="button"], [role="tab"]');
   for (var j = 0; j < candidates.length; j++) {
     if (!visible(candidates[j])) continue;
@@ -999,6 +1105,11 @@ const ENSURE_LOG_EXPRESSION = `(function() {
       candidates[j].click();
       return { ready: false, action: 'log_tab_requested', log_tab_text: candidates[j].textContent || '' };
     }
+  }
+  var alertButton = firstVisible('[data-name="alerts-button"]') || firstVisible('[data-name="alerts"]') || firstVisible('[aria-label="Alerts"]');
+  if (alertButton) {
+    alertButton.click();
+    return { ready: false, action: 'alerts_panel_requested' };
   }
   return { ready: false, action: 'alerts_log_controls_not_found' };
 })()`;
@@ -1019,6 +1130,33 @@ const EXPORT_MENU_EXPRESSION = `(function() {
   }
   return { action: 'export_controls_not_found' };
 })()`;
+
+export function tradingViewAlertQcUiExpressions() {
+  return { ensure_log: ENSURE_LOG_EXPRESSION, export_menu: EXPORT_MENU_EXPRESSION };
+}
+
+export async function withTradingViewAlertQcDownloadBehavior(client, downloadPath, operation) {
+  if (!client?.Page || typeof client.Page.setDownloadBehavior !== 'function') throw new Error('CDP Page.setDownloadBehavior is unavailable; CSV capture cannot be proven');
+  if (typeof operation !== 'function') throw new TypeError('operation must be a function');
+  let operationError = null;
+  let configured = false;
+  try {
+    await client.Page.setDownloadBehavior({ behavior: 'allow', downloadPath });
+    configured = true;
+    return await operation();
+  } catch (error) {
+    operationError = error;
+    throw error;
+  } finally {
+    if (configured) {
+      try {
+        await client.Page.setDownloadBehavior({ behavior: 'default' });
+      } catch (restoreError) {
+        if (!operationError) throw new Error(`could not restore CDP download behavior: ${restoreError.message}`);
+      }
+    }
+  }
+}
 
 function downloadedCsv(downloadDir, beforeNames) {
   return readdirSync(downloadDir)
@@ -1043,48 +1181,48 @@ export async function exportTradingViewAlertsLogCsv({ downloadDir = null, timeou
   chmodSync(destination, 0o700);
   const beforeNames = new Set(readdirSync(destination));
   const client = await getClient();
-  if (!client.Page?.setDownloadBehavior) throw new Error('CDP Page.setDownloadBehavior is unavailable; CSV capture cannot be proven');
-  await client.Page.setDownloadBehavior({ behavior: 'allow', downloadPath: destination });
-  let uiState = null;
-  const startedAt = new Date().toISOString();
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    uiState = await evaluate(ENSURE_LOG_EXPRESSION);
-    if (uiState?.ready) break;
-    await sleep(250);
-  }
-  if (!uiState?.ready) throw new Error(`TradingView Alerts Log controls were not found: ${JSON.stringify(uiState)}`);
-  let menuState = null;
-  while (Date.now() < deadline) {
-    menuState = await evaluate(EXPORT_MENU_EXPRESSION);
-    if (menuState?.action === 'export_clicked') break;
-    if (menuState?.action === 'export_controls_not_found') throw new Error('TradingView Alerts Log export controls were not found');
-    await sleep(250);
-  }
-  if (menuState?.action !== 'export_clicked') throw new Error('TradingView Alerts Log CSV export timed out');
-  let downloaded = null;
-  let previousSize = -1;
-  let stableReads = 0;
-  while (Date.now() < deadline) {
-    downloaded = downloadedCsv(destination, beforeNames);
-    if (downloaded && downloaded.stat.size === previousSize) stableReads += 1;
-    else stableReads = 0;
-    previousSize = downloaded?.stat.size ?? -1;
-    if (downloaded && stableReads >= 1) break;
-    await sleep(250);
-  }
-  if (!downloaded) throw new Error('TradingView Alerts Log CSV did not download before timeout');
-  return {
-    success: true,
-    source: 'TradingView Alerts Log CSV',
-    csv_path: downloaded.path,
-    csv_size: downloaded.stat.size,
-    started_at: startedAt,
-    completed_at: new Date().toISOString(),
-    target_url: target.url,
-    ui_log_state: uiState,
-    download_dir: destination,
-  };
+  return withTradingViewAlertQcDownloadBehavior(client, destination, async () => {
+    let uiState = null;
+    const startedAt = new Date().toISOString();
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      uiState = await evaluate(ENSURE_LOG_EXPRESSION);
+      if (uiState?.ready) break;
+      await sleep(250);
+    }
+    if (!uiState?.ready) throw new Error(`TradingView Alerts Log controls were not found: ${JSON.stringify(uiState)}`);
+    let menuState = null;
+    while (Date.now() < deadline) {
+      menuState = await evaluate(EXPORT_MENU_EXPRESSION);
+      if (menuState?.action === 'export_clicked') break;
+      if (menuState?.action === 'export_controls_not_found') throw new Error('TradingView Alerts Log export controls were not found');
+      await sleep(250);
+    }
+    if (menuState?.action !== 'export_clicked') throw new Error('TradingView Alerts Log CSV export timed out');
+    let downloaded = null;
+    let previousSize = -1;
+    let stableReads = 0;
+    while (Date.now() < deadline) {
+      downloaded = downloadedCsv(destination, beforeNames);
+      if (downloaded && downloaded.stat.size === previousSize) stableReads += 1;
+      else stableReads = 0;
+      previousSize = downloaded?.stat.size ?? -1;
+      if (downloaded && stableReads >= 1) break;
+      await sleep(250);
+    }
+    if (!downloaded) throw new Error('TradingView Alerts Log CSV did not download before timeout');
+    return {
+      success: true,
+      source: 'TradingView Alerts Log CSV',
+      csv_path: downloaded.path,
+      csv_size: downloaded.stat.size,
+      started_at: startedAt,
+      completed_at: new Date().toISOString(),
+      target_url: target.url,
+      ui_log_state: uiState,
+      download_dir: destination,
+    };
+  });
 }
 
 function appendOccurrenceRows(path, rows) {
@@ -1140,7 +1278,12 @@ export function importTradingViewAlertsLogCsv({
   }
   const existing = readOccurrenceRows(resolvedPaths.occurrences_path);
   const existingIds = new Set(existing.map(row => row.occurrence_id));
-  const newRows = normalized.filter(row => !existingIds.has(row.occurrence_id));
+  const seenIds = new Set(existingIds);
+  const newRows = normalized.filter(row => {
+    if (seenIds.has(row.occurrence_id)) return false;
+    seenIds.add(row.occurrence_id);
+    return true;
+  });
   appendOccurrenceRows(resolvedPaths.occurrences_path, newRows);
   const allRows = existing.concat(newRows);
   const sourceValues = allRows.map(row => row.source_fired_at_ms).filter(Number.isSafeInteger).sort((left, right) => left - right);
