@@ -25,8 +25,12 @@ The expected file is frozen and is never rebuilt from a live observation. It con
 
 An RSI miss sample is classified only when the optional `/Users/odin/.codex/tradingview-alert-qc/runtime/independent-rsi-reference.json` is explicitly marked independent and verified and matches source, input, and route identity. No chart rotation or four-canary weekly gate is part of this daily monitor.
 
+## Scheduled execution
+
+The planner-accepted standalone Codex automation is `daily-tradingview-alert-quality-check` (ACTIVE). It runs daily, including weekends, at 09:00 Europe/Rome with model `gpt-5.6-sol` and reasoning `medium`, using the saved Tradingview project only as context. Each run calls the retained worktree command above once and leaves the saved checkout untouched. It stays quiet for unchanged results and known evidence limits and notifies only for new or materially changed actionable findings, collection failures, or a required decision.
+
 ## Workspace boundaries
 
 This worktree is the retained implementation location. The saved project `/Users/odin/projects/Tradingview` was dirty with unrelated user changes and was not edited. The live release worktree `/Users/odin/.codex/worktrees/ac77/Tradingview` and its existing `com.viktor.tradingview.investment-attention` 15-minute LaunchAgent were preserved. Historical runtime files and the prior monitoring loop remain separate.
 
-The daily Codex automation is intentionally not created until the planner reviews the first real report. When approved, it should call the command above once per day at 09:00 Europe/Rome and notify only for new actionable/material findings or collection failures; unchanged evidence limits stay quiet.
+The automation was created only after review of the first real report. Its persisted settings are recorded in `/Users/odin/.codex/automations/daily-tradingview-alert-quality-check/automation.toml`; the existing 15-minute LaunchAgent remains separate and unchanged.
