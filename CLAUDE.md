@@ -127,3 +127,71 @@ Claude Code ←→ MCP Server (stdio) ←→ CDP (localhost:9222) ←→ Trading
 ```
 
 Pine graphics path: `study._graphics._primitivesCollection.dwglines.get('lines').get(false)._primitivesDataById`
+
+## Windows Gotchas (MSIX / Store build)
+
+### `ELECTRON_RUN_AS_NODE` breaks the debug port
+If Claude Code is running inside VS Code, the environment inherits
+`ELECTRON_RUN_AS_NODE=1` from the extension host. Any Electron binary launched
+from that environment boots as **plain Node**, so `TradingView.exe` prints
+Node's help text and rejects the Chromium flag:
+
+```
+TradingView.exe: bad option: --remote-debugging-port=9222   (exit code 9)
+```
+
+This looks like an MSIX or permissions failure but is purely environmental.
+Clear it before launching (`scripts/launch_tv_debug.bat` now does this):
+
+```powershell
+$env:ELECTRON_RUN_AS_NODE = $null   # NOT Remove-Item — sandbox guards may block that form
+Start-Process "$((Get-AppxPackage TradingView.Desktop).InstallLocation)\TradingView.exe" `
+  -ArgumentList "--remote-debugging-port=9222"
+```
+
+### Single-instance lock
+Electron forwards a second launch to the running instance and exits, so the
+flag is silently dropped. TradingView must be **fully quit** before relaunching
+with CDP — the port cannot be added to a live instance.
+
+### The exe path is version-pinned
+`...\WindowsApps\TradingView.Desktop_<version>_x64__n534cwy3pjxzj\` changes on
+every update. Resolve it at runtime with
+`(Get-AppxPackage TradingView.Desktop).InstallLocation`, never hard-code it.
+
+### Launching direct from WindowsApps drops package identity
+The app runs, but Store-managed behaviour (auto-update, protocol handlers) may
+misbehave. The identity-preserving launch
+(`explorer.exe shell:AppsFolder\TradingView.Desktop_n534cwy3pjxzj!TradingView.Desktop`)
+cannot pass arguments at all — that tradeoff is unavoidable.
+
+## Pine Editor Gotchas
+
+### `pine_new` needs the editor open
+It fails with "Could not open Pine Editor" unless
+`ui_open_panel { panel: "pine-editor", action: "open" }` ran first.
+
+### `pine_smart_compile` saves but does not apply
+It clicks **Pine Save**, so the script compiles and persists but never reaches
+the chart — `chart_get_state` still shows the old studies and the result says
+`study_added: false`. The **Add to chart** button carries no `data-name` or
+`aria-label`; match it by title:
+
+```js
+document.querySelector('[title="Add to chart"]')
+```
+
+Synthetic `.click()` and dispatched PointerEvents do **not** work — TradingView
+requires trusted input. Use `ui_mouse_click` at the element's
+`getBoundingClientRect()` centre.
+
+### Indicator-slot limit silently blocks the add
+On a **Basic** plan the cap is 2 indicators (Volume does not count). When full,
+"Add to chart" opens an upsell modal instead of applying the script, and
+`chart_get_state` is simply unchanged — there is no error anywhere. Free a slot
+with `chart_manage_indicator { action: "remove", entity_id }` first, then
+dismiss the modal with Escape.
+
+### `shorttitle` is capped at 10 characters
+Longer values fail compilation with a non-obvious marker on the `indicator()`
+line.
