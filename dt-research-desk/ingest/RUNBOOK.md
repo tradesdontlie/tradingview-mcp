@@ -1,8 +1,16 @@
 # Weekly ingestion runbook
 
 Rebuilds the **Dual Trend Desk** dashboard from a market-research analyst's Slack output.
-Run automatically by the scheduled task `dt-weekly-ingest` (Mondays 21:40 local).
-Everything here is incremental — a missed week just catches up on the next run.
+Run automatically by two scheduled tasks against a **shared watermark**, so whichever fires first
+processes whatever is new:
+
+| Task | When | Covers |
+|---|---|---|
+| `dt-friday-brief` | Fri 21:12 local | the Weekly Brief — performance pair, cash level, call outcomes |
+| `dt-weekly-ingest` | Mon 21:40 local | the S&P 1500 ranking report and its workbook |
+
+Both run the same incremental sweep; the split exists so the performance series lands the same evening
+rather than waiting until Monday. Everything is incremental — a missed run just catches up on the next.
 
 ## Layout
 
