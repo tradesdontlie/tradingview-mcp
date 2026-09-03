@@ -4,3 +4,12 @@ scripts/current.pine
 temp_*
 *.log
 discovery-log.json
+
+# Dual Trend Desk — licensed third-party research and everything derived from it.
+# Only the pipeline code is tracked; sources, extracted text, curated data and the
+# built dashboard stay local.
+dt-research-desk/index.html
+dt-research-desk/ingest/corpus/
+dt-research-desk/ingest/txt/
+dt-research-desk/ingest/data/*.json
+dt-research-desk/ingest/state.json

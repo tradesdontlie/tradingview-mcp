@@ -1,0 +1,136 @@
+<header class="mast">
+  <div class="wrap mast-in">
+    <div>
+      <div class="brandline"><span class="tag"></span><span class="lbl" id="brandline"></span></div>
+      <h1>Dual Trend Desk</h1>
+      <p class="sub">Every portfolio action, research call and S&amp;P 1500 ranking snapshot published to the
+      two source Slack channels, reconstructed from <span id="kCoverage">—</span></p>
+    </div>
+    <div class="kpis">
+      <div class="kpi"><span class="lbl">DT vs SPX</span><span class="v up" id="kExcess">—</span><span class="d" id="kExcessD">—</span></div>
+      <div class="kpi"><span class="lbl">Cash</span><span class="v" id="kCash">—</span><span class="d" id="kCashD">—</span></div>
+      <div class="kpi"><span class="lbl">Breadth</span><span class="v dn" id="kBreadth">—</span><span class="d" id="kBreadthD">—</span></div>
+      <div class="kpi"><span class="lbl">Open</span><span class="v" id="kpiOpen">—</span><span class="d">positions</span></div>
+      <div class="kpi"><span class="lbl">Actions</span><span class="v" id="kActions">—</span><span class="d" id="kActionsD">—</span></div>
+    </div>
+  </div>
+</header>
+
+<nav class="nav"><div class="wrap nav-in" role="tablist">
+  <button role="tab" aria-selected="true" data-v="summary">Executive summary</button>
+  <button role="tab" aria-selected="false" data-v="timeline">Regime timeline</button>
+  <button role="tab" aria-selected="false" data-v="db">Signal database</button>
+  <button role="tab" aria-selected="false" data-v="weekly">Weekly 1500 review</button>
+  <button role="tab" aria-selected="false" data-v="charts">Charts</button>
+  <button role="tab" aria-selected="false" data-v="active">Active book</button>
+  <button role="tab" aria-selected="false" data-v="workflow">Update workflow</button>
+</div></nav>
+
+<main class="wrap">
+
+<!-- ============ SUMMARY ============ -->
+<section id="v-summary">
+  <div class="panel">
+    <div class="ph"><h2>What mattered since inception</h2><span class="lbl" id="sumRange"></span></div>
+    <div class="pb" id="sumBody"></div>
+  </div>
+</section>
+
+<!-- ============ TIMELINE ============ -->
+<section id="v-timeline" class="hide">
+  <div class="panel"><div class="ph"><h2>Regime timeline</h2>
+    <span class="ph note">Each entry is a dated research call or a regime shift visible in the ranking data.</span></div>
+    <div class="pb"><div class="tl" id="tlList"></div></div>
+  </div>
+</section>
+
+<!-- ============ DATABASE ============ -->
+<section id="v-db" class="hide">
+  <div class="panel">
+    <div class="ph"><h2>Signal &amp; trade database</h2>
+      <span class="ph note">Every portfolio action and research call, with its source document. Filters compose.</span></div>
+    <div class="filters">
+      <div class="fg"><span class="lbl">Search</span><input id="fq" type="search" placeholder="ticker, thesis, theme…"></div>
+      <div class="fg"><span class="lbl">Record</span><select id="fkind">
+        <option value="">All records</option><option value="trade">Portfolio actions</option><option value="call">Research calls</option></select></div>
+      <div class="fg"><span class="lbl">Sector</span><select id="fsector"></select></div>
+      <div class="fg"><span class="lbl">Asset</span><select id="fasset"></select></div>
+      <div class="fg"><span class="lbl">Direction</span><select id="fdir"></select></div>
+      <div class="fg"><span class="lbl">Conviction</span><select id="fconv"></select></div>
+      <div class="fg"><span class="lbl">Source</span><select id="fsrc"></select></div>
+      <div class="fg"><span class="lbl">From</span><input id="fd1" type="date" value="2026-07-15" style="min-width:140px"></div>
+      <div class="fg"><span class="lbl">To</span><input id="fd2" type="date" value="2026-09-03" style="min-width:140px"></div>
+      <div class="fg"><span class="lbl">State</span><div class="seg" id="fstate">
+        <button aria-pressed="true" data-s="">All</button><button aria-pressed="false" data-s="open">Open</button><button aria-pressed="false" data-s="closed">Closed</button></div></div>
+      <button class="btn" id="freset">Reset</button>
+      <span class="count" id="fcount"></span>
+    </div>
+    <div class="pb tight"><div class="tscroll"><table id="dbTable">
+      <thead><tr><th>Date</th><th>Record</th><th>Subject</th><th>Action</th><th class="num">Size</th>
+        <th>Sector</th><th>Theme</th><th>Conviction</th><th>Rationale / evidence</th><th>Source</th></tr></thead>
+      <tbody id="dbBody"></tbody></table></div></div>
+  </div>
+</section>
+
+<!-- ============ WEEKLY 1500 ============ -->
+<section id="v-weekly" class="hide">
+  <div class="panel"><div class="ph"><h2>Weekly 1500 review — what changed, week over week</h2>
+    <span class="ph note">Six ranking snapshots. Report dates run three days after the data date (Monday report on Friday data).</span></div>
+    <div class="pb">
+      <div id="wkCards" class="grid2"></div>
+    </div>
+  </div>
+  <div class="panel"><div class="ph"><h3>Sector rank, by snapshot</h3>
+    <span class="ph note">1 = strongest. Colour shows week-over-week direction.</span></div>
+    <div class="pb tight"><div class="tscroll"><table id="rankTable"></table></div></div>
+  </div>
+  <div class="panel"><div class="ph"><h3>Average composite score</h3>
+    <span class="ph note">The score behind the rank — shows whether a rank change reflects real strength or just relative movement.</span></div>
+    <div class="pb tight"><div class="tscroll"><table id="scoreTable"></table></div></div>
+  </div>
+  <div class="panel"><div class="ph"><h3>Call persistence</h3>
+    <span class="ph note">Which research calls survived the following weeks, and which reversed.</span></div>
+    <div class="pb tight"><div class="tscroll"><table id="persistTable"></table></div></div>
+  </div>
+</section>
+
+<!-- ============ CHARTS ============ -->
+<section id="v-charts" class="hide">
+  <div class="panel"><div class="ph"><h2>Sector rotation</h2>
+    <span class="ph note">Rank path of all 11 S&amp;P 1500 sectors across the six snapshots. Hover a line to isolate it.</span></div>
+    <div class="pb" id="cBump"></div></div>
+  <div class="grid2">
+    <div class="panel"><div class="ph"><h3>Signal breadth</h3><span class="ph note">Share of the 1,450-stock universe dual-bullish.</span></div>
+      <div class="pb" id="cBreadth"></div></div>
+    <div class="panel"><div class="ph"><h3>Portfolio vs S&amp;P 500</h3><span class="ph note">Year-to-date return as reported each Friday.</span></div>
+      <div class="pb" id="cPerf"></div></div>
+  </div>
+  <div class="panel"><div class="ph"><h3>Signal-state composition by sector</h3>
+    <span class="ph note">Stacked share of each sector's constituents in the four Dual Trend states, at the latest snapshot.</span></div>
+    <div class="pb" id="cStack"></div></div>
+  <div class="grid2">
+    <div class="panel"><div class="ph"><h3>Recurring themes</h3><span class="ph note">Portfolio actions by theme.</span></div>
+      <div class="pb" id="cThemes"></div></div>
+    <div class="panel"><div class="ph"><h3>Trade cadence</h3><span class="ph note">Buys, adds, trims and exits per week.</span></div>
+      <div class="pb" id="cCadence"></div></div>
+  </div>
+</section>
+
+<!-- ============ ACTIVE ============ -->
+<section id="v-active" class="hide">
+  <div class="panel"><div class="ph"><h2>Active book</h2>
+    <span class="ph note"><span id="bookNote"></span></span></div>
+    <div class="pb tight"><div class="tscroll"><table id="openTable"></table></div></div></div>
+  <div class="panel"><div class="ph"><h3>Closed</h3><span class="ph note">Round trips, with holding period where both legs are in the record.</span></div>
+    <div class="pb tight"><div class="tscroll"><table id="closedTable"></table></div></div></div>
+</section>
+
+<!-- ============ WORKFLOW ============ -->
+<section id="v-workflow" class="hide">
+  <div class="panel"><div class="ph"><h2>Keeping this current</h2>
+    <span class="ph note">What to re-run, when, and what each step produces.</span></div>
+    <div class="pb" id="wf"></div></div>
+</section>
+
+</main>
+<footer><div class="wrap" id="footBody"></div></footer>
