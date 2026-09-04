@@ -360,12 +360,25 @@ export async function launch({ port, kill_existing, _deps } = {}) {
   if (killFirst) await killExisting();
 
   const cdpArgs = [`--remote-debugging-port=${cdpPort}`];
-  let child = _spawnDetached(deps.spawn, tvPath, cdpArgs);
+  const isWindowsApps = platform === 'win32' && WINDOWS_APPS_RE.test(tvPath);
+
+  // Blocked MSIX launches can surface either way: spawn throws EPERM synchronously
+  // on some builds, or emits 'error'/exits on others. Capture the sync throw so both
+  // paths reach the local-copy fallback below.
+  let child = null;
+  let spawnThrew = null;
+  try {
+    child = _spawnDetached(deps.spawn, tvPath, cdpArgs);
+  } catch (e) {
+    if (!isWindowsApps) throw e;
+    spawnThrew = e.code || e.message || 'spawn error';
+  }
+
   let info = null;
   let usedLocalCopy = false;
 
-  if (platform === 'win32' && WINDOWS_APPS_RE.test(tvPath)) {
-    const earlyFailure = await _spawnFailedEarly(child);
+  if (isWindowsApps) {
+    const earlyFailure = spawnThrew || await _spawnFailedEarly(child);
     if (!earlyFailure) {
       info = await _waitForCdp({ cdpPort, attempts: 15, delay: deps.delay, probeCdp: deps.probeCdp });
     }
