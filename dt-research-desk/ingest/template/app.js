@@ -95,6 +95,12 @@ opts('#fdir','All directions',[...new Set(RECS.map(r=>r.direction))].sort());
 opts('#fconv','All conviction',['high','med','low']);
 opts('#fsrc','All sources',[...new Set(RECS.map(r=>r.src))].sort());
 
+// default the date filter to the full span of the data — a hardcoded end date
+// silently hides every record added after the build that baked it in
+const ALLD = RECS.map(r=>r.date).sort();
+const DMIN = ALLD[0], DMAX = ALLD[ALLD.length-1];
+$('#fd1').value = DMIN; $('#fd2').value = DMAX;
+
 let STATE='';
 $$('#fstate button').forEach(b=>b.addEventListener('click',()=>{
   $$('#fstate button').forEach(x=>x.setAttribute('aria-pressed',x===b)); STATE=b.dataset.s; render();
@@ -103,7 +109,7 @@ $$('#fstate button').forEach(b=>b.addEventListener('click',()=>{
   .forEach(s=>$(s).addEventListener('input',render));
 $('#freset').addEventListener('click',()=>{
   ['#fq','#fkind','#fsector','#fasset','#fdir','#fconv','#fsrc'].forEach(s=>$(s).value='');
-  $('#fd1').value='2026-07-15'; $('#fd2').value='2026-09-03';
+  $('#fd1').value=DMIN; $('#fd2').value=DMAX;
   STATE=''; $$('#fstate button').forEach((x,i)=>x.setAttribute('aria-pressed', i===0)); render();
 });
 
