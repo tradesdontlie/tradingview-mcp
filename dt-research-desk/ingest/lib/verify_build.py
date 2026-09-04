@@ -85,7 +85,14 @@ if not re.search(r'<meta\s+charset', html[:600], re.I):
     E("no <meta charset> in the first 600 bytes — non-ASCII text will mangle "
       "when the file is opened directly rather than through the artifact wrapper")
 
-# --- 7. both themes must define their tokens ------------------------------
+# --- 7. no hardcoded dates in the markup ----------------------------------
+# A baked-in filter end-date silently hides every record added after the build
+# that introduced it — the table looks fine and is simply short.
+_body = open(os.path.join(ROOT, "template", "body.html"), encoding="utf-8").read()
+for m in re.finditer(r'value=["\'](\d{4}-\d{2}-\d{2})["\']', _body):
+    E(f"hardcoded date {m.group(1)} in body.html — derive it from the data instead")
+
+# --- 8. both themes must define their tokens ------------------------------
 for probe in (":root{", "prefers-color-scheme:dark", 'data-theme="dark"'):
     if probe not in html:
         E(f"theme block missing: {probe}")
