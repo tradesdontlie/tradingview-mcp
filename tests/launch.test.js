@@ -25,11 +25,12 @@ function mockChild({ failWith } = {}) {
 /**
  * Build a _deps bundle simulating a win32 MSIX environment.
  * @param {object} opts
- *   spawnFailures — spawn paths (substring) that emit EACCES
+ *   spawnFailures — spawn paths (substring) that emit EACCES asynchronously
+ *   spawnThrows   — spawn paths (substring) that throw EPERM synchronously
  *   cdpBindsFor  — spawn paths (substring) after which probeCdp starts succeeding
  *   copyExists   — local copy already present
  */
-function msixDeps({ spawnFailures = [], cdpBindsFor = [], copyExists = false } = {}) {
+function msixDeps({ spawnFailures = [], spawnThrows = [], cdpBindsFor = [], copyExists = false } = {}) {
   const state = { spawned: [], copies: [], removed: [], killed: 0, cdpUp: false };
   const deps = {
     existsSync: (p) => {
@@ -46,6 +47,9 @@ function msixDeps({ spawnFailures = [], cdpBindsFor = [], copyExists = false } =
     },
     spawn: (exe) => {
       state.spawned.push(exe);
+      if (spawnThrows.some((s) => exe.includes(s))) {
+        throw Object.assign(new Error('spawn EPERM'), { code: 'EPERM' });
+      }
       const fail = spawnFailures.some((s) => exe.includes(s));
       if (!fail && cdpBindsFor.some((s) => exe.includes(s))) state.cdpUp = true;
       return mockChild(fail ? { failWith: 'EACCES' } : {});
@@ -86,6 +90,19 @@ describe('launch() — MSIX WindowsApps handling', { skip: !onWindows }, () => {
     assert.match(state.removed[0], /3\.0\.0\.7652/);
     // the CDP-less direct instance is killed before relaunching from the copy
     assert.ok(state.killed >= 2);
+  });
+
+  // Regression: on some Windows builds spawn() throws EPERM synchronously rather
+  // than emitting 'error', which escaped launch() entirely and skipped the fallback.
+  it('synchronous EPERM throw on direct spawn falls back to local copy', async () => {
+    const { deps, state } = msixDeps({ spawnThrows: ['WindowsApps'], cdpBindsFor: ['tradingview-mcp'] });
+    const result = await launch({ _deps: deps });
+    assert.equal(result.success, true);
+    assert.equal(result.msix_local_copy, true);
+    assert.equal(result.binary, LOCAL_COPY_EXE);
+    assert.equal(result.pid, 12345);
+    assert.equal(state.copies.length, 1);
+    assert.deepEqual(state.spawned.map((e) => (e.includes('WindowsApps') ? 'msix' : 'copy')), ['msix', 'copy']);
   });
 
   it('CDP never binding on direct spawn falls back to local copy', async () => {
@@ -135,6 +152,19 @@ describe('launch() — classic install path', { skip: !onWindows }, () => {
     assert.equal(result.binary, classicExe);
     assert.equal(result.msix_local_copy, undefined);
     assert.deepEqual(state.spawned, [classicExe]);
+  });
+
+  it('propagates a synchronous spawn error instead of copying', async () => {
+    const classicExe = `${process.env.LOCALAPPDATA}\\TradingView\\TradingView.exe`;
+    const deps = {
+      existsSync: (p) => p === classicExe,
+      execSync: (cmd) => { if (cmd.includes('taskkill')) return ''; throw new Error(`unexpected: ${cmd}`); },
+      spawn: () => { throw Object.assign(new Error('spawn EPERM'), { code: 'EPERM' }); },
+      cpSync: () => { throw new Error('should not copy'); },
+      rmSync: () => {}, readdirSync: () => [],
+      delay: async () => {}, probeCdp: async () => null,
+    };
+    await assert.rejects(() => launch({ _deps: deps }), /spawn EPERM/);
   });
 
   it('throws a helpful error when TradingView is not found', async () => {
