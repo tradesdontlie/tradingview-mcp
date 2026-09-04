@@ -10,7 +10,10 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const REPO_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
 let dir;
 before(() => { dir = mkdtempSync(join(tmpdir(), 'tv-mcp-log-')); });
@@ -25,7 +28,7 @@ function run(script, logFile) {
 
   const stdout = execFileSync(process.execPath, ['--input-type=module', '-e', script], {
     env,
-    cwd: new URL('..', import.meta.url).pathname,
+    cwd: REPO_ROOT,
     encoding: 'utf8',
   });
 
@@ -95,6 +98,22 @@ describe('tool_log', () => {
     assert.equal(lines[0].result.chars, 50000);
     assert.ok(lines[0].result.text.length < 2100);
     assert.ok(lines[0].result.text.endsWith('…[truncated]'));
+  });
+
+  it('truncates long argument strings so a pasted script cannot bloat the log', () => {
+    const logFile = join(dir, 'bigargs.jsonl');
+    const { lines } = run(`
+      import { instrument } from './src/core/tool_log.js';
+      const server = { tool: (n, d, s, h) => { server._h = h; } };
+      instrument(server);
+      server.tool('pine_set_source', 'd', {}, async () => ({ content: [{ type: 'text', text: 'ok' }] }));
+      await server._h({ source: 'x'.repeat(200000), verbose: true, nested: { deep: 'y'.repeat(9000) } });
+    `, logFile);
+
+    assert.ok(lines[0].args.source.endsWith('…[truncated 200000 chars]'));
+    assert.ok(lines[0].args.source.length < 2100);
+    assert.equal(lines[0].args.verbose, true, 'non-string args pass through');
+    assert.ok(lines[0].args.nested.deep.endsWith('…[truncated 9000 chars]'), 'nested strings too');
   });
 
   it('creates the log directory if it does not exist', () => {

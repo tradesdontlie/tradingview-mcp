@@ -11,10 +11,27 @@ const LOG_PATH = RAW_PATH
   ? resolve(RAW_PATH.startsWith('~') ? RAW_PATH.replace(/^~/, homedir()) : RAW_PATH)
   : null;
 
-// Results can be enormous (screenshots are base64). Keep the log greppable.
+// Results can be enormous (screenshots are base64) and so can arguments
+// (pine_set_source carries a whole script). Keep the log greppable.
 const MAX_RESULT_CHARS = 2000;
+const MAX_ARG_CHARS = 2000;
 
 export const enabled = LOG_PATH !== null;
+
+// Truncate long strings anywhere in the argument object. Structure is kept so
+// the log still shows which arguments were passed, just not all of their bytes.
+function trimArgs(value, depth = 0) {
+  if (typeof value === 'string') {
+    return value.length > MAX_ARG_CHARS
+      ? `${value.slice(0, MAX_ARG_CHARS)}…[truncated ${value.length} chars]`
+      : value;
+  }
+  if (depth >= 4 || value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.map((v) => trimArgs(v, depth + 1));
+  return Object.fromEntries(
+    Object.entries(value).map(([k, v]) => [k, trimArgs(v, depth + 1)])
+  );
+}
 
 function summarize(result) {
   if (result == null) return null;
@@ -34,7 +51,7 @@ export function logCall(tool, args, result, durationMs, error) {
   const entry = {
     ts: new Date().toISOString(),
     tool,
-    args: args ?? {},
+    args: trimArgs(args ?? {}),
     duration_ms: Math.round(durationMs * 100) / 100,
   };
   if (error) entry.threw = String(error?.message || error);

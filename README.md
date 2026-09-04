@@ -347,8 +347,9 @@ arguments, truncated result, and duration. Unset (the default) it is a no-op.
 }
 ```
 
-Results are truncated to 2000 characters so screenshots don't bloat the log, and
-a logging failure never breaks a tool call.
+Both arguments and results are truncated to 2000 characters per string, so a
+pasted Pine script or a screenshot payload can't bloat the log, and a logging
+failure never breaks a tool call.
 
 ## Finding TradingView on Your System
 

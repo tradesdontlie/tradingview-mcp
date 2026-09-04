@@ -132,7 +132,8 @@ jq -s 'group_by(.tool) | map({tool: .[0].tool, n: length,
        p95: (sort_by(.duration_ms) | .[(length * 0.95 | floor)].duration_ms)})' calls.jsonl
 ```
 
-Results are truncated at 2000 chars so screenshots do not bloat the file.
+Arguments and results are truncated at 2000 chars per string, so a pasted Pine
+script or a screenshot payload does not bloat the file.
 
 ## Architecture
 
