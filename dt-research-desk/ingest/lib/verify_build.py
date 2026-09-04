@@ -77,7 +77,15 @@ if payload:
     if payload.get("meta", {}).get("n_pdf", 0) < 1:
         E("meta.n_pdf is zero — corpus not found at build time")
 
-# --- 6. both themes must define their tokens ------------------------------
+# --- 6. the local file must declare its own charset -----------------------
+# The artifact wrapper supplies one, but index.html is also opened directly
+# via file://, where nothing else declares it and the non-ASCII punctuation
+# in the copy renders as mojibake.
+if not re.search(r'<meta\s+charset', html[:600], re.I):
+    E("no <meta charset> in the first 600 bytes — non-ASCII text will mangle "
+      "when the file is opened directly rather than through the artifact wrapper")
+
+# --- 7. both themes must define their tokens ------------------------------
 for probe in (":root{", "prefers-color-scheme:dark", 'data-theme="dark"'):
     if probe not in html:
         E(f"theme block missing: {probe}")
