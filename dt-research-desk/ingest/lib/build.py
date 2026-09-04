@@ -56,6 +56,15 @@ with pipeline_lock(OWNER):
     write_atomic(os.path.join(ROOT, "build-manifest.json"),
                  json.dumps(stamp, indent=1) + "\n")
 
+# structural verification of the OUTPUT — browser-independent, so it keeps
+# working if the working copy ever moves outside the session's project folder
+vb = subprocess.run([sys.executable, os.path.join(LIB, "verify_build.py")],
+                    capture_output=True, text=True)
+sys.stdout.write(vb.stdout)
+if vb.returncode != 0:
+    sys.stderr.write(vb.stderr)
+    raise SystemExit("build aborted: output failed structural verification")
+
 print("built %s  %d bytes  payload=%s" % (OUTP, len(html), digest))
 print("  snapshots=%d trades=%d calls=%d perf=%d pdf=%d xlsx=%d asof=%s owner=%s"
       % (stamp["snapshots"], stamp["trades"], stamp["calls"], stamp["perf"],

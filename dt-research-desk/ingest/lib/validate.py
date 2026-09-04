@@ -112,7 +112,19 @@ for k in ("breadth", "perf", "themes", "cadence"):
     if not copy.get("chartNotes", {}).get(k):
         E(f"copy.json chartNotes.{k} missing")
 
-# --- 10. watermarks must not run ahead of ingested records ----------------
+# --- 10. this must be the pipeline state.json says it is ------------------
+# Scheduled-task definitions are GLOBAL, not per-session: another session can
+# silently repoint a task at a different copy of this project. A run in the
+# wrong tree should be loud, not invisible.
+want = state.get("pipeline_id")
+here = os.path.basename(os.path.dirname(ROOT))
+if want and want != here:
+    E(f"pipeline_id is {want!r} but this tree is {here!r} — "
+      f"a task may have been repointed at the wrong copy")
+if state.get("canonical") is False:
+    W("this tree is marked non-canonical; publishing from it is probably wrong")
+
+# --- 11. watermarks must not run ahead of ingested records ----------------
 for name, ch in state["channels"].items():
     if not re.match(r"^\d+\.\d+$", str(ch.get("last_ts", ""))):
         E(f"state.json {name}: last_ts {ch.get('last_ts')!r} is not a Slack ts")
