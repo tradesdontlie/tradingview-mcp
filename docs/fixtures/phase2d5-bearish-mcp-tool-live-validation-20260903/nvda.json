@@ -1,0 +1,1757 @@
+{
+  "analysis_type": "DIRECTIONAL_OPTIONS",
+  "analysis_snapshot_id": "997884de179dca08",
+  "analysis_as_of_utc": "2026-09-03T18:24:17.980Z",
+  "symbol": "NASDAQ:NVDA",
+  "underlying_price": 229.76,
+  "direction": "bearish",
+  "horizon_days": 30,
+  "max_loss": 1000,
+  "thesis": {
+    "base_target_price": 218,
+    "expected_move_absolute": -11.76,
+    "expected_move_pct": -5.12
+  },
+  "input_echo": {
+    "symbol": "NASDAQ:NVDA",
+    "direction": "bearish",
+    "horizon_days": 30,
+    "max_loss": 1000,
+    "base_target_price": 218,
+    "downside_target_price": null,
+    "upside_target_price": null,
+    "downside_iv_change_points": 0,
+    "base_iv_change_points": 0,
+    "upside_iv_change_points": 0,
+    "min_dte": null,
+    "max_dte": null,
+    "include_crr_hybrid_diagnostics": true,
+    "execution_model": "conservative",
+    "commission_per_contract": 0,
+    "contract_multiplier": 100,
+    "max_spread_pct": 15,
+    "max_ranked_results": 10
+  },
+  "scenario_definitions": {
+    "downside": {
+      "scenario_id": "DOWNSIDE",
+      "underlying_price": 235.64,
+      "iv_change_points": 0,
+      "days_forward": 30,
+      "scenario_source": "DETERMINISTIC_HELPER"
+    },
+    "base": {
+      "scenario_id": "BASE",
+      "underlying_price": 218,
+      "iv_change_points": 0,
+      "days_forward": 30,
+      "scenario_source": "USER_EXPLICIT"
+    },
+    "upside": {
+      "scenario_id": "UPSIDE",
+      "underlying_price": 212.12,
+      "iv_change_points": 0,
+      "days_forward": 30,
+      "scenario_source": "DETERMINISTIC_HELPER"
+    }
+  },
+  "data_source": {
+    "provider": "TradingView Options Scanner",
+    "endpoint": "/options/scan2",
+    "options_retrieved_at_utc": "2026-09-03T18:24:17.973Z",
+    "chain_completeness": "COMPLETE",
+    "warnings": []
+  },
+  "candidate_generation": {
+    "input_contract_count": 380,
+    "eligible_contract_count": 190,
+    "candidate_count": 59,
+    "rejected_count": 183,
+    "rejection_summary": {
+      "WIDE_SPREAD": 56,
+      "DELTA_OUT_OF_RANGE": 117,
+      "MAX_LOSS_EXCEEDED": 10
+    }
+  },
+  "ranking": {
+    "model": "RANKING_MODEL_V1",
+    "disclaimer": "Comparative heuristic score under user-supplied scenarios; not probability or expected return.",
+    "decision_state": "NO_TRADE_BASELINE_ONLY",
+    "top_trade_candidate_id": null,
+    "fallback_baseline": "NO_TRADE",
+    "thresholds": {
+      "minimum_score_for_consideration": 60,
+      "minimum_confidence_for_consideration": "MEDIUM",
+      "min_capped_reward_risk": null,
+      "configured_max_spread_pct": 15
+    }
+  },
+  "scenario_quality_summary": {
+    "HIGH_CONFIDENCE_CANDIDATES": 0,
+    "MEDIUM_CONFIDENCE_CANDIDATES": 0,
+    "LOW_CONFIDENCE_CANDIDATES": 58
+  },
+  "diagnostics": {
+    "crr_hybrid_policy": {
+      "status": "AVAILABLE",
+      "mode": "DIAGNOSTIC_ONLY_NO_RANKING_CHANGE",
+      "market_inputs": [
+        {
+          "expiration": "2026-10-09",
+          "days_to_expiry": 36,
+          "mode": "PARTIAL_EXTERNAL_INPUTS",
+          "overall_confidence": "LOW",
+          "discount_rate_source": "TREASURY_BILL_COUPON_EQUIVALENT_NORMALIZED",
+          "dividend_mode": "TRAILING_DIVIDEND_YIELD_APPROXIMATION",
+          "borrow_source": "NOT_CONNECTED",
+          "warnings": [
+            "TREASURY_RATE_FROZEN_FALLBACK_NOT_LIVE",
+            "CONTINUOUS_DIVIDEND_APPROXIMATION",
+            "TRAILING_NOT_FORWARD",
+            "BORROW_DATA_UNAVAILABLE"
+          ]
+        },
+        {
+          "expiration": "2026-10-16",
+          "days_to_expiry": 43,
+          "mode": "PARTIAL_EXTERNAL_INPUTS",
+          "overall_confidence": "LOW",
+          "discount_rate_source": "TREASURY_BILL_COUPON_EQUIVALENT_NORMALIZED",
+          "dividend_mode": "TRAILING_DIVIDEND_YIELD_APPROXIMATION",
+          "borrow_source": "NOT_CONNECTED",
+          "warnings": [
+            "TREASURY_RATE_FROZEN_FALLBACK_NOT_LIVE",
+            "CONTINUOUS_DIVIDEND_APPROXIMATION",
+            "TRAILING_NOT_FORWARD",
+            "BORROW_DATA_UNAVAILABLE"
+          ]
+        },
+        {
+          "expiration": "2026-10-23",
+          "days_to_expiry": 50,
+          "mode": "PARTIAL_EXTERNAL_INPUTS",
+          "overall_confidence": "LOW",
+          "discount_rate_source": "TREASURY_BILL_COUPON_EQUIVALENT_NORMALIZED",
+          "dividend_mode": "TRAILING_DIVIDEND_YIELD_APPROXIMATION",
+          "borrow_source": "NOT_CONNECTED",
+          "warnings": [
+            "TREASURY_RATE_FROZEN_FALLBACK_NOT_LIVE",
+            "CONTINUOUS_DIVIDEND_APPROXIMATION",
+            "TRAILING_NOT_FORWARD",
+            "BORROW_DATA_UNAVAILABLE"
+          ]
+        }
+      ],
+      "summary": {
+        "total_candidates": 59,
+        "by_action": {
+          "HYBRID_REPRICE_CANDIDATE": 45,
+          "CRR_SHADOW_REVIEW": 13,
+          "NO_ACTION": 1
+        },
+        "crr_shadow_available_count": 59,
+        "local_warning_count": 58
+      },
+      "candidates": [
+        {
+          "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-09::OPRA:NVDA261009P225.0::OPRA:NVDA261009P230.0::conservative",
+          "strategy_type": "BEAR_PUT_SPREAD",
+          "action": "HYBRID_REPRICE_CANDIDATE",
+          "reasons": [
+            "LOCAL_WARNINGS_MAJOR",
+            "LOCAL_WARNINGS_MODERATE",
+            "MODEL_DISAGREEMENT_HIGH"
+          ],
+          "local_warnings": [
+            "LARGE_TIME_STEP",
+            "INTRINSIC_FLOOR_APPLIED"
+          ],
+          "max_model_disagreement_level": "MODEL_DISAGREEMENT_HIGH",
+          "crr_shadow_available": true
+        },
+        {
+          "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-09::OPRA:NVDA261009P220.0::OPRA:NVDA261009P235.0::conservative",
+          "strategy_type": "BEAR_PUT_SPREAD",
+          "action": "HYBRID_REPRICE_CANDIDATE",
+          "reasons": [
+            "LOCAL_WARNINGS_MAJOR",
+            "LOCAL_WARNINGS_MODERATE",
+            "MODEL_DISAGREEMENT_HIGH"
+          ],
+          "local_warnings": [
+            "LARGE_TIME_STEP",
+            "INTRINSIC_FLOOR_APPLIED"
+          ],
+          "max_model_disagreement_level": "MODEL_DISAGREEMENT_HIGH",
+          "crr_shadow_available": true
+        },
+        {
+          "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-09::OPRA:NVDA261009P225.0::OPRA:NVDA261009P235.0::conservative",
+          "strategy_type": "BEAR_PUT_SPREAD",
+          "action": "HYBRID_REPRICE_CANDIDATE",
+          "reasons": [
+            "LOCAL_WARNINGS_MAJOR",
+            "LOCAL_WARNINGS_MODERATE",
+            "MODEL_DISAGREEMENT_HIGH"
+          ],
+          "local_warnings": [
+            "LARGE_TIME_STEP",
+            "INTRINSIC_FLOOR_APPLIED"
+          ],
+          "max_model_disagreement_level": "MODEL_DISAGREEMENT_HIGH",
+          "crr_shadow_available": true
+        },
+        {
+          "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-09::OPRA:NVDA261009P225.0::OPRA:NVDA261009P240.0::conservative",
+          "strategy_type": "BEAR_PUT_SPREAD",
+          "action": "HYBRID_REPRICE_CANDIDATE",
+          "reasons": [
+            "LOCAL_WARNINGS_MAJOR",
+            "LOCAL_WARNINGS_MODERATE",
+            "MODEL_DISAGREEMENT_MEDIUM"
+          ],
+          "local_warnings": [
+            "LARGE_TIME_STEP",
+            "INTRINSIC_FLOOR_APPLIED"
+          ],
+          "max_model_disagreement_level": "MODEL_DISAGREEMENT_MEDIUM",
+          "crr_shadow_available": true
+        },
+        {
+          "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-09::OPRA:NVDA261009P230.0::OPRA:NVDA261009P240.0::conservative",
+          "strategy_type": "BEAR_PUT_SPREAD",
+          "action": "CRR_SHADOW_REVIEW",
+          "reasons": [
+            "LOCAL_WARNINGS_MAJOR",
+            "LOCAL_WARNINGS_MODERATE"
+          ],
+          "local_warnings": [
+            "LARGE_TIME_STEP",
+            "INTRINSIC_FLOOR_APPLIED"
+          ],
+          "max_model_disagreement_level": "MODEL_DISAGREEMENT_LOW",
+          "crr_shadow_available": true
+        },
+        {
+          "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-16::OPRA:NVDA261016P225.0::OPRA:NVDA261016P240.0::conservative",
+          "strategy_type": "BEAR_PUT_SPREAD",
+          "action": "HYBRID_REPRICE_CANDIDATE",
+          "reasons": [
+            "LOCAL_WARNINGS_MAJOR",
+            "LOCAL_WARNINGS_MODERATE",
+            "MODEL_DISAGREEMENT_MEDIUM"
+          ],
+          "local_warnings": [
+            "LARGE_TIME_STEP",
+            "INTRINSIC_FLOOR_APPLIED"
+          ],
+          "max_model_disagreement_level": "MODEL_DISAGREEMENT_MEDIUM",
+          "crr_shadow_available": true
+        },
+        {
+          "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-16::OPRA:NVDA261016P230.0::OPRA:NVDA261016P240.0::conservative",
+          "strategy_type": "BEAR_PUT_SPREAD",
+          "action": "CRR_SHADOW_REVIEW",
+          "reasons": [
+            "LOCAL_WARNINGS_MAJOR",
+            "LOCAL_WARNINGS_MODERATE"
+          ],
+          "local_warnings": [
+            "LARGE_TIME_STEP",
+            "INTRINSIC_FLOOR_APPLIED"
+          ],
+          "max_model_disagreement_level": "MODEL_DISAGREEMENT_LOW",
+          "crr_shadow_available": true
+        },
+        {
+          "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-16::OPRA:NVDA261016P230.0::OPRA:NVDA261016P245.0::conservative",
+          "strategy_type": "BEAR_PUT_SPREAD",
+          "action": "CRR_SHADOW_REVIEW",
+          "reasons": [
+            "LOCAL_WARNINGS_MAJOR",
+            "LOCAL_WARNINGS_MODERATE"
+          ],
+          "local_warnings": [
+            "LARGE_TIME_STEP",
+            "INTRINSIC_FLOOR_APPLIED"
+          ],
+          "max_model_disagreement_level": "MODEL_DISAGREEMENT_LOW",
+          "crr_shadow_available": true
+        },
+        {
+          "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-16::OPRA:NVDA261016P235.0::OPRA:NVDA261016P245.0::conservative",
+          "strategy_type": "BEAR_PUT_SPREAD",
+          "action": "CRR_SHADOW_REVIEW",
+          "reasons": [
+            "LOCAL_WARNINGS_MAJOR",
+            "LOCAL_WARNINGS_MODERATE"
+          ],
+          "local_warnings": [
+            "LARGE_TIME_STEP",
+            "INTRINSIC_FLOOR_APPLIED"
+          ],
+          "max_model_disagreement_level": "MODEL_DISAGREEMENT_LOW",
+          "crr_shadow_available": true
+        },
+        {
+          "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-16::OPRA:NVDA261016P240.0::OPRA:NVDA261016P245.0::conservative",
+          "strategy_type": "BEAR_PUT_SPREAD",
+          "action": "CRR_SHADOW_REVIEW",
+          "reasons": [
+            "LOCAL_WARNINGS_MAJOR",
+            "LOCAL_WARNINGS_MODERATE"
+          ],
+          "local_warnings": [
+            "LARGE_TIME_STEP",
+            "INTRINSIC_FLOOR_APPLIED"
+          ],
+          "max_model_disagreement_level": "MODEL_DISAGREEMENT_LOW",
+          "crr_shadow_available": true
+        }
+      ]
+    }
+  },
+  "top_candidates": [
+    {
+      "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-09::OPRA:NVDA261009P225.0::OPRA:NVDA261009P230.0::conservative",
+      "rank": 1,
+      "strategy_type": "BEAR_PUT_SPREAD",
+      "ranking_class": "TRADE",
+      "expiration": "2026-10-09",
+      "days_to_expiry": 36,
+      "legs": [
+        {
+          "contract": "OPRA:NVDA261009P230.0",
+          "action": "BUY",
+          "option_type": "put",
+          "strike": 230,
+          "fill_price": 9.25,
+          "bid": 9.15,
+          "ask": 9.25,
+          "spread_pct": 1.09,
+          "iv": 34.03,
+          "delta": -0.4783296988913643,
+          "gamma": 0.016205660503627442,
+          "theta": -0.13246545546192046,
+          "vega": 0.287752564635429
+        },
+        {
+          "contract": "OPRA:NVDA261009P225.0",
+          "action": "SELL",
+          "option_type": "put",
+          "strike": 225,
+          "fill_price": 7,
+          "bid": 7,
+          "ask": 7.1,
+          "spread_pct": 1.42,
+          "iv": 32.69,
+          "delta": -0.39505939293749115,
+          "gamma": 0.01630608131209893,
+          "theta": -0.12337518353709634,
+          "vega": 0.2781493238108296
+        }
+      ],
+      "entry_debit": 225,
+      "capital_required": 225,
+      "max_loss": 225,
+      "max_profit": 275,
+      "max_profit_type": "DEFINED",
+      "breakeven": 227.75,
+      "reward_risk_ratio": 1.22,
+      "reward_risk_type": "DEFINED",
+      "score": 77.21,
+      "grade": "B",
+      "confidence": "LOW",
+      "confidence_reasons": [
+        "LARGE_TIME_STEP (downside)",
+        "LARGE_TIME_STEP (base)",
+        "INTRINSIC_FLOOR_APPLIED (upside)",
+        "LARGE_TIME_STEP (upside)"
+      ],
+      "consideration_eligible": false,
+      "consideration_reasons": [
+        "CONFIDENCE_BELOW_THRESHOLD"
+      ],
+      "component_scores": {
+        "base": 77.78,
+        "downside": 90.22,
+        "upside": 61.11,
+        "breakeven": 71.22,
+        "execution": 90.53
+      },
+      "raw_metrics": {
+        "downside_pnl": -22,
+        "base_pnl": 125,
+        "upside_pnl": 275,
+        "downside_return_on_risk_pct": -9.78,
+        "base_return_on_risk_pct": 55.56,
+        "upside_return_on_risk_pct": 122.22,
+        "max_loss": 225,
+        "capital_required": 225,
+        "breakeven": 227.75,
+        "reward_risk_ratio": 1.22,
+        "reward_risk_type": "DEFINED",
+        "scenario_asymmetry_ratio": 12.5,
+        "breakeven_margin_pct": 4.24,
+        "max_leg_spread_pct": 1.42
+      },
+      "scenario_results": {
+        "downside": {
+          "underlying_price": 235.64,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": -22,
+          "scenario_return_on_risk_pct": -9.78,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "base": {
+          "underlying_price": 218,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 125,
+          "scenario_return_on_risk_pct": 55.56,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "upside": {
+          "underlying_price": 212.12,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 275,
+          "scenario_return_on_risk_pct": 122.22,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "INTRINSIC_FLOOR_APPLIED",
+            "LARGE_TIME_STEP"
+          ]
+        }
+      }
+    },
+    {
+      "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-09::OPRA:NVDA261009P225.0::OPRA:NVDA261009P240.0::conservative",
+      "rank": 2,
+      "strategy_type": "BEAR_PUT_SPREAD",
+      "ranking_class": "TRADE",
+      "expiration": "2026-10-09",
+      "days_to_expiry": 36,
+      "legs": [
+        {
+          "contract": "OPRA:NVDA261009P240.0",
+          "action": "BUY",
+          "option_type": "put",
+          "strike": 240,
+          "fill_price": 15.1,
+          "bid": 14.85,
+          "ask": 15.1,
+          "spread_pct": 1.67,
+          "iv": 33.21,
+          "delta": -0.638574846089536,
+          "gamma": 0.01561814749359853,
+          "theta": -0.12012529200319423,
+          "vega": 0.270612710821682
+        },
+        {
+          "contract": "OPRA:NVDA261009P225.0",
+          "action": "SELL",
+          "option_type": "put",
+          "strike": 225,
+          "fill_price": 7,
+          "bid": 7,
+          "ask": 7.1,
+          "spread_pct": 1.42,
+          "iv": 32.69,
+          "delta": -0.39505939293749115,
+          "gamma": 0.01630608131209893,
+          "theta": -0.12337518353709634,
+          "vega": 0.2781493238108296
+        }
+      ],
+      "entry_debit": 810,
+      "capital_required": 810,
+      "max_loss": 810,
+      "max_profit": 690,
+      "max_profit_type": "DEFINED",
+      "breakeven": 231.9,
+      "reward_risk_ratio": 0.85,
+      "reward_risk_type": "DEFINED",
+      "score": 75.16,
+      "grade": "B",
+      "confidence": "LOW",
+      "confidence_reasons": [
+        "LARGE_TIME_STEP (downside)",
+        "INTRINSIC_FLOOR_APPLIED (base)",
+        "LARGE_TIME_STEP (base)",
+        "INTRINSIC_FLOOR_APPLIED (upside)",
+        "LARGE_TIME_STEP (upside)"
+      ],
+      "consideration_eligible": false,
+      "consideration_reasons": [
+        "CONFIDENCE_BELOW_THRESHOLD"
+      ],
+      "component_scores": {
+        "base": 79.82,
+        "downside": 88.89,
+        "upside": 42.6,
+        "breakeven": 80.25,
+        "execution": 88.87
+      },
+      "raw_metrics": {
+        "downside_pnl": -90,
+        "base_pnl": 483,
+        "upside_pnl": 690,
+        "downside_return_on_risk_pct": -11.11,
+        "base_return_on_risk_pct": 59.63,
+        "upside_return_on_risk_pct": 85.19,
+        "max_loss": 810,
+        "capital_required": 810,
+        "breakeven": 231.9,
+        "reward_risk_ratio": 0.85,
+        "reward_risk_type": "DEFINED",
+        "scenario_asymmetry_ratio": 7.67,
+        "breakeven_margin_pct": 6.05,
+        "max_leg_spread_pct": 1.67
+      },
+      "scenario_results": {
+        "downside": {
+          "underlying_price": 235.64,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": -90,
+          "scenario_return_on_risk_pct": -11.11,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "base": {
+          "underlying_price": 218,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 483,
+          "scenario_return_on_risk_pct": 59.63,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "INTRINSIC_FLOOR_APPLIED",
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "upside": {
+          "underlying_price": 212.12,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 690,
+          "scenario_return_on_risk_pct": 85.19,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "INTRINSIC_FLOOR_APPLIED",
+            "LARGE_TIME_STEP"
+          ]
+        }
+      }
+    },
+    {
+      "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-09::OPRA:NVDA261009P225.0::OPRA:NVDA261009P235.0::conservative",
+      "rank": 3,
+      "strategy_type": "BEAR_PUT_SPREAD",
+      "ranking_class": "TRADE",
+      "expiration": "2026-10-09",
+      "days_to_expiry": 36,
+      "legs": [
+        {
+          "contract": "OPRA:NVDA261009P235.0",
+          "action": "BUY",
+          "option_type": "put",
+          "strike": 235,
+          "fill_price": 12,
+          "bid": 11.75,
+          "ask": 12,
+          "spread_pct": 2.11,
+          "iv": 33.53,
+          "delta": -0.5598157696788262,
+          "gamma": 0.016287968483171208,
+          "theta": -0.12855937072057036,
+          "vega": 0.2849324867914718
+        },
+        {
+          "contract": "OPRA:NVDA261009P225.0",
+          "action": "SELL",
+          "option_type": "put",
+          "strike": 225,
+          "fill_price": 7,
+          "bid": 7,
+          "ask": 7.1,
+          "spread_pct": 1.42,
+          "iv": 32.69,
+          "delta": -0.39505939293749115,
+          "gamma": 0.01630608131209893,
+          "theta": -0.12337518353709634,
+          "vega": 0.2781493238108296
+        }
+      ],
+      "entry_debit": 500,
+      "capital_required": 500,
+      "max_loss": 500,
+      "max_profit": 500,
+      "max_profit_type": "DEFINED",
+      "breakeven": 230,
+      "reward_risk_ratio": 1,
+      "reward_risk_type": "DEFINED",
+      "score": 75.07,
+      "grade": "B",
+      "confidence": "LOW",
+      "confidence_reasons": [
+        "LARGE_TIME_STEP (downside)",
+        "INTRINSIC_FLOOR_APPLIED (base)",
+        "LARGE_TIME_STEP (base)",
+        "INTRINSIC_FLOOR_APPLIED (upside)",
+        "LARGE_TIME_STEP (upside)"
+      ],
+      "consideration_eligible": false,
+      "consideration_reasons": [
+        "CONFIDENCE_BELOW_THRESHOLD"
+      ],
+      "component_scores": {
+        "base": 79.3,
+        "downside": 86.4,
+        "upside": 50,
+        "breakeven": 76.11,
+        "execution": 85.93
+      },
+      "raw_metrics": {
+        "downside_pnl": -68,
+        "base_pnl": 293,
+        "upside_pnl": 500,
+        "downside_return_on_risk_pct": -13.6,
+        "base_return_on_risk_pct": 58.6,
+        "upside_return_on_risk_pct": 100,
+        "max_loss": 500,
+        "capital_required": 500,
+        "breakeven": 230,
+        "reward_risk_ratio": 1,
+        "reward_risk_type": "DEFINED",
+        "scenario_asymmetry_ratio": 7.35,
+        "breakeven_margin_pct": 5.22,
+        "max_leg_spread_pct": 2.11
+      },
+      "scenario_results": {
+        "downside": {
+          "underlying_price": 235.64,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": -68,
+          "scenario_return_on_risk_pct": -13.6,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "base": {
+          "underlying_price": 218,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 293,
+          "scenario_return_on_risk_pct": 58.6,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "INTRINSIC_FLOOR_APPLIED",
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "upside": {
+          "underlying_price": 212.12,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 500,
+          "scenario_return_on_risk_pct": 100,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "INTRINSIC_FLOOR_APPLIED",
+            "LARGE_TIME_STEP"
+          ]
+        }
+      }
+    },
+    {
+      "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-09::OPRA:NVDA261009P230.0::OPRA:NVDA261009P240.0::conservative",
+      "rank": 4,
+      "strategy_type": "BEAR_PUT_SPREAD",
+      "ranking_class": "TRADE",
+      "expiration": "2026-10-09",
+      "days_to_expiry": 36,
+      "legs": [
+        {
+          "contract": "OPRA:NVDA261009P240.0",
+          "action": "BUY",
+          "option_type": "put",
+          "strike": 240,
+          "fill_price": 15.1,
+          "bid": 14.85,
+          "ask": 15.1,
+          "spread_pct": 1.67,
+          "iv": 33.21,
+          "delta": -0.638574846089536,
+          "gamma": 0.01561814749359853,
+          "theta": -0.12012529200319423,
+          "vega": 0.270612710821682
+        },
+        {
+          "contract": "OPRA:NVDA261009P230.0",
+          "action": "SELL",
+          "option_type": "put",
+          "strike": 230,
+          "fill_price": 9.15,
+          "bid": 9.15,
+          "ask": 9.25,
+          "spread_pct": 1.09,
+          "iv": 34.03,
+          "delta": -0.4783296988913643,
+          "gamma": 0.016205660503627442,
+          "theta": -0.13246545546192046,
+          "vega": 0.287752564635429
+        }
+      ],
+      "entry_debit": 595,
+      "capital_required": 595,
+      "max_loss": 595,
+      "max_profit": 405,
+      "max_profit_type": "DEFINED",
+      "breakeven": 234.05,
+      "reward_risk_ratio": 0.68,
+      "reward_risk_type": "DEFINED",
+      "score": 73.45,
+      "grade": "B",
+      "confidence": "LOW",
+      "confidence_reasons": [
+        "LARGE_TIME_STEP (downside)",
+        "INTRINSIC_FLOOR_APPLIED (base)",
+        "LARGE_TIME_STEP (base)",
+        "INTRINSIC_FLOOR_APPLIED (upside)",
+        "LARGE_TIME_STEP (upside)"
+      ],
+      "consideration_eligible": false,
+      "consideration_reasons": [
+        "CONFIDENCE_BELOW_THRESHOLD"
+      ],
+      "component_scores": {
+        "base": 79.25,
+        "downside": 86.89,
+        "upside": 34.03,
+        "breakeven": 84.93,
+        "execution": 88.87
+      },
+      "raw_metrics": {
+        "downside_pnl": -78,
+        "base_pnl": 348,
+        "upside_pnl": 405,
+        "downside_return_on_risk_pct": -13.11,
+        "base_return_on_risk_pct": 58.49,
+        "upside_return_on_risk_pct": 68.07,
+        "max_loss": 595,
+        "capital_required": 595,
+        "breakeven": 234.05,
+        "reward_risk_ratio": 0.68,
+        "reward_risk_type": "DEFINED",
+        "scenario_asymmetry_ratio": 5.19,
+        "breakeven_margin_pct": 6.99,
+        "max_leg_spread_pct": 1.67
+      },
+      "scenario_results": {
+        "downside": {
+          "underlying_price": 235.64,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": -78,
+          "scenario_return_on_risk_pct": -13.11,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "base": {
+          "underlying_price": 218,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 348,
+          "scenario_return_on_risk_pct": 58.49,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "INTRINSIC_FLOOR_APPLIED",
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "upside": {
+          "underlying_price": 212.12,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 405,
+          "scenario_return_on_risk_pct": 68.07,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "INTRINSIC_FLOOR_APPLIED",
+            "LARGE_TIME_STEP"
+          ]
+        }
+      }
+    },
+    {
+      "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-16::OPRA:NVDA261016P230.0::OPRA:NVDA261016P245.0::conservative",
+      "rank": 5,
+      "strategy_type": "BEAR_PUT_SPREAD",
+      "ranking_class": "TRADE",
+      "expiration": "2026-10-16",
+      "days_to_expiry": 43,
+      "legs": [
+        {
+          "contract": "OPRA:NVDA261016P245.0",
+          "action": "BUY",
+          "option_type": "put",
+          "strike": 245,
+          "fill_price": 19.35,
+          "bid": 19.2,
+          "ask": 19.35,
+          "spread_pct": 0.78,
+          "iv": 33.63,
+          "delta": -0.6872340551925917,
+          "gamma": 0.013344396436927407,
+          "theta": -0.10424726941367991,
+          "vega": 0.27950809249514713
+        },
+        {
+          "contract": "OPRA:NVDA261016P230.0",
+          "action": "SELL",
+          "option_type": "put",
+          "strike": 230,
+          "fill_price": 10.2,
+          "bid": 10.2,
+          "ask": 10.3,
+          "spread_pct": 0.98,
+          "iv": 34.59,
+          "delta": -0.47585650974818033,
+          "gamma": 0.01458596535211418,
+          "theta": -0.12292279483824967,
+          "vega": 0.314279310601007
+        }
+      ],
+      "entry_debit": 915,
+      "capital_required": 915,
+      "max_loss": 915,
+      "max_profit": 585,
+      "max_profit_type": "DEFINED",
+      "breakeven": 235.85,
+      "reward_risk_ratio": 0.64,
+      "reward_risk_type": "DEFINED",
+      "score": 72.76,
+      "grade": "B",
+      "confidence": "LOW",
+      "confidence_reasons": [
+        "LARGE_TIME_STEP (downside)",
+        "INTRINSIC_FLOOR_APPLIED (base)",
+        "LARGE_TIME_STEP (base)",
+        "INTRINSIC_FLOOR_APPLIED (upside)",
+        "LARGE_TIME_STEP (upside)"
+      ],
+      "consideration_eligible": false,
+      "consideration_reasons": [
+        "CONFIDENCE_BELOW_THRESHOLD"
+      ],
+      "component_scores": {
+        "base": 72.3,
+        "downside": 92.24,
+        "upside": 31.97,
+        "breakeven": 88.84,
+        "execution": 93.47
+      },
+      "raw_metrics": {
+        "downside_pnl": -71,
+        "base_pnl": 408,
+        "upside_pnl": 585,
+        "downside_return_on_risk_pct": -7.76,
+        "base_return_on_risk_pct": 44.59,
+        "upside_return_on_risk_pct": 63.93,
+        "max_loss": 915,
+        "capital_required": 915,
+        "breakeven": 235.85,
+        "reward_risk_ratio": 0.64,
+        "reward_risk_type": "DEFINED",
+        "scenario_asymmetry_ratio": 8.24,
+        "breakeven_margin_pct": 7.77,
+        "max_leg_spread_pct": 0.98
+      },
+      "scenario_results": {
+        "downside": {
+          "underlying_price": 235.64,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": -71,
+          "scenario_return_on_risk_pct": -7.76,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "base": {
+          "underlying_price": 218,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 408,
+          "scenario_return_on_risk_pct": 44.59,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "INTRINSIC_FLOOR_APPLIED",
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "upside": {
+          "underlying_price": 212.12,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 585,
+          "scenario_return_on_risk_pct": 63.93,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "INTRINSIC_FLOOR_APPLIED",
+            "LARGE_TIME_STEP"
+          ]
+        }
+      }
+    },
+    {
+      "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-16::OPRA:NVDA261016P240.0::OPRA:NVDA261016P245.0::conservative",
+      "rank": 6,
+      "strategy_type": "BEAR_PUT_SPREAD",
+      "ranking_class": "TRADE",
+      "expiration": "2026-10-16",
+      "days_to_expiry": 43,
+      "legs": [
+        {
+          "contract": "OPRA:NVDA261016P245.0",
+          "action": "BUY",
+          "option_type": "put",
+          "strike": 245,
+          "fill_price": 19.35,
+          "bid": 19.2,
+          "ask": 19.35,
+          "spread_pct": 0.78,
+          "iv": 33.63,
+          "delta": -0.6872340551925917,
+          "gamma": 0.013344396436927407,
+          "theta": -0.10424726941367991,
+          "vega": 0.27950809249514713
+        },
+        {
+          "contract": "OPRA:NVDA261016P240.0",
+          "action": "SELL",
+          "option_type": "put",
+          "strike": 240,
+          "fill_price": 15.85,
+          "bid": 15.85,
+          "ask": 16,
+          "spread_pct": 0.94,
+          "iv": 33.87,
+          "delta": -0.6203871975377231,
+          "gamma": 0.014240426908626142,
+          "theta": -0.11375984390456653,
+          "vega": 0.3004090791920783
+        }
+      ],
+      "entry_debit": 350,
+      "capital_required": 350,
+      "max_loss": 350,
+      "max_profit": 150,
+      "max_profit_type": "DEFINED",
+      "breakeven": 241.5,
+      "reward_risk_ratio": 0.43,
+      "reward_risk_type": "DEFINED",
+      "score": 72.33,
+      "grade": "B",
+      "confidence": "LOW",
+      "confidence_reasons": [
+        "LARGE_TIME_STEP (downside)",
+        "INTRINSIC_FLOOR_APPLIED (base)",
+        "LARGE_TIME_STEP (base)",
+        "INTRINSIC_FLOOR_APPLIED (upside)",
+        "LARGE_TIME_STEP (upside)"
+      ],
+      "consideration_eligible": false,
+      "consideration_reasons": [
+        "CONFIDENCE_BELOW_THRESHOLD"
+      ],
+      "component_scores": {
+        "base": 71.43,
+        "downside": 93.43,
+        "upside": 21.43,
+        "breakeven": 100,
+        "execution": 93.73
+      },
+      "raw_metrics": {
+        "downside_pnl": -23,
+        "base_pnl": 150,
+        "upside_pnl": 150,
+        "downside_return_on_risk_pct": -6.57,
+        "base_return_on_risk_pct": 42.86,
+        "upside_return_on_risk_pct": 42.86,
+        "max_loss": 350,
+        "capital_required": 350,
+        "breakeven": 241.5,
+        "reward_risk_ratio": 0.43,
+        "reward_risk_type": "DEFINED",
+        "scenario_asymmetry_ratio": 6.52,
+        "breakeven_margin_pct": 10.23,
+        "max_leg_spread_pct": 0.94
+      },
+      "scenario_results": {
+        "downside": {
+          "underlying_price": 235.64,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": -23,
+          "scenario_return_on_risk_pct": -6.57,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "base": {
+          "underlying_price": 218,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 150,
+          "scenario_return_on_risk_pct": 42.86,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "INTRINSIC_FLOOR_APPLIED",
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "upside": {
+          "underlying_price": 212.12,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 150,
+          "scenario_return_on_risk_pct": 42.86,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "INTRINSIC_FLOOR_APPLIED",
+            "LARGE_TIME_STEP"
+          ]
+        }
+      }
+    },
+    {
+      "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-16::OPRA:NVDA261016P235.0::OPRA:NVDA261016P245.0::conservative",
+      "rank": 7,
+      "strategy_type": "BEAR_PUT_SPREAD",
+      "ranking_class": "TRADE",
+      "expiration": "2026-10-16",
+      "days_to_expiry": 43,
+      "legs": [
+        {
+          "contract": "OPRA:NVDA261016P245.0",
+          "action": "BUY",
+          "option_type": "put",
+          "strike": 245,
+          "fill_price": 19.35,
+          "bid": 19.2,
+          "ask": 19.35,
+          "spread_pct": 0.78,
+          "iv": 33.63,
+          "delta": -0.6872340551925917,
+          "gamma": 0.013344396436927407,
+          "theta": -0.10424726941367991,
+          "vega": 0.27950809249514713
+        },
+        {
+          "contract": "OPRA:NVDA261016P235.0",
+          "action": "SELL",
+          "option_type": "put",
+          "strike": 235,
+          "fill_price": 12.75,
+          "bid": 12.75,
+          "ask": 12.95,
+          "spread_pct": 1.56,
+          "iv": 34.17,
+          "delta": -0.5491006429493499,
+          "gamma": 0.014681453258857021,
+          "theta": -0.12012697656899753,
+          "vega": 0.31246833502924776
+        }
+      ],
+      "entry_debit": 660,
+      "capital_required": 660,
+      "max_loss": 660,
+      "max_profit": 340,
+      "max_profit_type": "DEFINED",
+      "breakeven": 238.4,
+      "reward_risk_ratio": 0.52,
+      "reward_risk_type": "DEFINED",
+      "score": 72.26,
+      "grade": "B",
+      "confidence": "LOW",
+      "confidence_reasons": [
+        "LARGE_TIME_STEP (downside)",
+        "INTRINSIC_FLOOR_APPLIED (base)",
+        "LARGE_TIME_STEP (base)",
+        "INTRINSIC_FLOOR_APPLIED (upside)",
+        "LARGE_TIME_STEP (upside)"
+      ],
+      "consideration_eligible": false,
+      "consideration_reasons": [
+        "CONFIDENCE_BELOW_THRESHOLD"
+      ],
+      "component_scores": {
+        "base": 72.58,
+        "downside": 92.27,
+        "upside": 25.76,
+        "breakeven": 94.39,
+        "execution": 89.6
+      },
+      "raw_metrics": {
+        "downside_pnl": -51,
+        "base_pnl": 298,
+        "upside_pnl": 340,
+        "downside_return_on_risk_pct": -7.73,
+        "base_return_on_risk_pct": 45.15,
+        "upside_return_on_risk_pct": 51.52,
+        "max_loss": 660,
+        "capital_required": 660,
+        "breakeven": 238.4,
+        "reward_risk_ratio": 0.52,
+        "reward_risk_type": "DEFINED",
+        "scenario_asymmetry_ratio": 6.67,
+        "breakeven_margin_pct": 8.88,
+        "max_leg_spread_pct": 1.56
+      },
+      "scenario_results": {
+        "downside": {
+          "underlying_price": 235.64,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": -51,
+          "scenario_return_on_risk_pct": -7.73,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "base": {
+          "underlying_price": 218,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 298,
+          "scenario_return_on_risk_pct": 45.15,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "INTRINSIC_FLOOR_APPLIED",
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "upside": {
+          "underlying_price": 212.12,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 340,
+          "scenario_return_on_risk_pct": 51.52,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "INTRINSIC_FLOOR_APPLIED",
+            "LARGE_TIME_STEP"
+          ]
+        }
+      }
+    },
+    {
+      "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-09::OPRA:NVDA261009P220.0::OPRA:NVDA261009P235.0::conservative",
+      "rank": 8,
+      "strategy_type": "BEAR_PUT_SPREAD",
+      "ranking_class": "TRADE",
+      "expiration": "2026-10-09",
+      "days_to_expiry": 36,
+      "legs": [
+        {
+          "contract": "OPRA:NVDA261009P235.0",
+          "action": "BUY",
+          "option_type": "put",
+          "strike": 235,
+          "fill_price": 12,
+          "bid": 11.75,
+          "ask": 12,
+          "spread_pct": 2.11,
+          "iv": 33.53,
+          "delta": -0.5598157696788262,
+          "gamma": 0.016287968483171208,
+          "theta": -0.12855937072057036,
+          "vega": 0.2849324867914718
+        },
+        {
+          "contract": "OPRA:NVDA261009P220.0",
+          "action": "SELL",
+          "option_type": "put",
+          "strike": 220,
+          "fill_price": 5.2,
+          "bid": 5.2,
+          "ask": 5.3,
+          "spread_pct": 1.9,
+          "iv": 33.25,
+          "delta": -0.3161636017184847,
+          "gamma": 0.014814411499992379,
+          "theta": -0.11632696681659237,
+          "vega": 0.2570109422549532
+        }
+      ],
+      "entry_debit": 680,
+      "capital_required": 680,
+      "max_loss": 680,
+      "max_profit": 820,
+      "max_profit_type": "DEFINED",
+      "breakeven": 228.2,
+      "reward_risk_ratio": 1.21,
+      "reward_risk_type": "DEFINED",
+      "score": 71.93,
+      "grade": "B",
+      "confidence": "LOW",
+      "confidence_reasons": [
+        "LARGE_TIME_STEP (downside)",
+        "INTRINSIC_FLOOR_APPLIED (base)",
+        "LARGE_TIME_STEP (base)",
+        "INTRINSIC_FLOOR_APPLIED (upside)",
+        "LARGE_TIME_STEP (upside)"
+      ],
+      "consideration_eligible": false,
+      "consideration_reasons": [
+        "CONFIDENCE_BELOW_THRESHOLD"
+      ],
+      "component_scores": {
+        "base": 77.58,
+        "downside": 80.44,
+        "upside": 47.72,
+        "breakeven": 72.2,
+        "execution": 85.93
+      },
+      "raw_metrics": {
+        "downside_pnl": -133,
+        "base_pnl": 375,
+        "upside_pnl": 649,
+        "downside_return_on_risk_pct": -19.56,
+        "base_return_on_risk_pct": 55.15,
+        "upside_return_on_risk_pct": 95.44,
+        "max_loss": 680,
+        "capital_required": 680,
+        "breakeven": 228.2,
+        "reward_risk_ratio": 1.21,
+        "reward_risk_type": "DEFINED",
+        "scenario_asymmetry_ratio": 4.88,
+        "breakeven_margin_pct": 4.44,
+        "max_leg_spread_pct": 2.11
+      },
+      "scenario_results": {
+        "downside": {
+          "underlying_price": 235.64,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": -133,
+          "scenario_return_on_risk_pct": -19.56,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "base": {
+          "underlying_price": 218,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 375,
+          "scenario_return_on_risk_pct": 55.15,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "INTRINSIC_FLOOR_APPLIED",
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "upside": {
+          "underlying_price": 212.12,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 649,
+          "scenario_return_on_risk_pct": 95.44,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "INTRINSIC_FLOOR_APPLIED",
+            "LARGE_TIME_STEP"
+          ]
+        }
+      }
+    },
+    {
+      "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-16::OPRA:NVDA261016P230.0::OPRA:NVDA261016P240.0::conservative",
+      "rank": 9,
+      "strategy_type": "BEAR_PUT_SPREAD",
+      "ranking_class": "TRADE",
+      "expiration": "2026-10-16",
+      "days_to_expiry": 43,
+      "legs": [
+        {
+          "contract": "OPRA:NVDA261016P240.0",
+          "action": "BUY",
+          "option_type": "put",
+          "strike": 240,
+          "fill_price": 16,
+          "bid": 15.85,
+          "ask": 16,
+          "spread_pct": 0.94,
+          "iv": 33.87,
+          "delta": -0.6203871975377231,
+          "gamma": 0.014240426908626142,
+          "theta": -0.11375984390456653,
+          "vega": 0.3004090791920783
+        },
+        {
+          "contract": "OPRA:NVDA261016P230.0",
+          "action": "SELL",
+          "option_type": "put",
+          "strike": 230,
+          "fill_price": 10.2,
+          "bid": 10.2,
+          "ask": 10.3,
+          "spread_pct": 0.98,
+          "iv": 34.59,
+          "delta": -0.47585650974818033,
+          "gamma": 0.01458596535211418,
+          "theta": -0.12292279483824967,
+          "vega": 0.314279310601007
+        }
+      ],
+      "entry_debit": 580,
+      "capital_required": 580,
+      "max_loss": 580,
+      "max_profit": 420,
+      "max_profit_type": "DEFINED",
+      "breakeven": 234.2,
+      "reward_risk_ratio": 0.72,
+      "reward_risk_type": "DEFINED",
+      "score": 71.82,
+      "grade": "B",
+      "confidence": "LOW",
+      "confidence_reasons": [
+        "LARGE_TIME_STEP (downside)",
+        "INTRINSIC_FLOOR_APPLIED (base)",
+        "LARGE_TIME_STEP (base)",
+        "INTRINSIC_FLOOR_APPLIED (upside)",
+        "LARGE_TIME_STEP (upside)"
+      ],
+      "consideration_eligible": false,
+      "consideration_reasons": [
+        "CONFIDENCE_BELOW_THRESHOLD"
+      ],
+      "component_scores": {
+        "base": 70.95,
+        "downside": 89.14,
+        "upside": 36.21,
+        "breakeven": 85.25,
+        "execution": 93.47
+      },
+      "raw_metrics": {
+        "downside_pnl": -63,
+        "base_pnl": 243,
+        "upside_pnl": 420,
+        "downside_return_on_risk_pct": -10.86,
+        "base_return_on_risk_pct": 41.9,
+        "upside_return_on_risk_pct": 72.41,
+        "max_loss": 580,
+        "capital_required": 580,
+        "breakeven": 234.2,
+        "reward_risk_ratio": 0.72,
+        "reward_risk_type": "DEFINED",
+        "scenario_asymmetry_ratio": 6.67,
+        "breakeven_margin_pct": 7.05,
+        "max_leg_spread_pct": 0.98
+      },
+      "scenario_results": {
+        "downside": {
+          "underlying_price": 235.64,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": -63,
+          "scenario_return_on_risk_pct": -10.86,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "base": {
+          "underlying_price": 218,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 243,
+          "scenario_return_on_risk_pct": 41.9,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "INTRINSIC_FLOOR_APPLIED",
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "upside": {
+          "underlying_price": 212.12,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 420,
+          "scenario_return_on_risk_pct": 72.41,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "INTRINSIC_FLOOR_APPLIED",
+            "LARGE_TIME_STEP"
+          ]
+        }
+      }
+    },
+    {
+      "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-16::OPRA:NVDA261016P225.0::OPRA:NVDA261016P240.0::conservative",
+      "rank": 10,
+      "strategy_type": "BEAR_PUT_SPREAD",
+      "ranking_class": "TRADE",
+      "expiration": "2026-10-16",
+      "days_to_expiry": 43,
+      "legs": [
+        {
+          "contract": "OPRA:NVDA261016P240.0",
+          "action": "BUY",
+          "option_type": "put",
+          "strike": 240,
+          "fill_price": 16,
+          "bid": 15.85,
+          "ask": 16,
+          "spread_pct": 0.94,
+          "iv": 33.87,
+          "delta": -0.6203871975377231,
+          "gamma": 0.014240426908626142,
+          "theta": -0.11375984390456653,
+          "vega": 0.3004090791920783
+        },
+        {
+          "contract": "OPRA:NVDA261016P225.0",
+          "action": "SELL",
+          "option_type": "put",
+          "strike": 225,
+          "fill_price": 7.85,
+          "bid": 7.85,
+          "ask": 7.95,
+          "spread_pct": 1.27,
+          "iv": 32.99,
+          "delta": -0.4005927560453514,
+          "gamma": 0.014844247304870255,
+          "theta": -0.1140881221646647,
+          "vega": 0.30503016975114683
+        }
+      ],
+      "entry_debit": 815,
+      "capital_required": 815,
+      "max_loss": 815,
+      "max_profit": 685,
+      "max_profit_type": "DEFINED",
+      "breakeven": 231.85,
+      "reward_risk_ratio": 0.84,
+      "reward_risk_type": "DEFINED",
+      "score": 71.54,
+      "grade": "B",
+      "confidence": "LOW",
+      "confidence_reasons": [
+        "LARGE_TIME_STEP (downside)",
+        "INTRINSIC_FLOOR_APPLIED (base)",
+        "LARGE_TIME_STEP (base)",
+        "INTRINSIC_FLOOR_APPLIED (upside)",
+        "LARGE_TIME_STEP (upside)"
+      ],
+      "consideration_eligible": false,
+      "consideration_reasons": [
+        "CONFIDENCE_BELOW_THRESHOLD"
+      ],
+      "component_scores": {
+        "base": 72.03,
+        "downside": 90.31,
+        "upside": 35.77,
+        "breakeven": 80.14,
+        "execution": 91.53
+      },
+      "raw_metrics": {
+        "downside_pnl": -79,
+        "base_pnl": 359,
+        "upside_pnl": 583,
+        "downside_return_on_risk_pct": -9.69,
+        "base_return_on_risk_pct": 44.05,
+        "upside_return_on_risk_pct": 71.53,
+        "max_loss": 815,
+        "capital_required": 815,
+        "breakeven": 231.85,
+        "reward_risk_ratio": 0.84,
+        "reward_risk_type": "DEFINED",
+        "scenario_asymmetry_ratio": 7.38,
+        "breakeven_margin_pct": 6.03,
+        "max_leg_spread_pct": 1.27
+      },
+      "scenario_results": {
+        "downside": {
+          "underlying_price": 235.64,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": -79,
+          "scenario_return_on_risk_pct": -9.69,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "base": {
+          "underlying_price": 218,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 359,
+          "scenario_return_on_risk_pct": 44.05,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "INTRINSIC_FLOOR_APPLIED",
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "upside": {
+          "underlying_price": 212.12,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 583,
+          "scenario_return_on_risk_pct": 71.53,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "INTRINSIC_FLOOR_APPLIED",
+            "LARGE_TIME_STEP"
+          ]
+        }
+      }
+    }
+  ],
+  "near_miss_candidates": [
+    {
+      "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-09::OPRA:NVDA261009P225.0::OPRA:NVDA261009P230.0::conservative",
+      "strategy_type": "BEAR_PUT_SPREAD",
+      "score": 77.21,
+      "confidence": "LOW",
+      "consideration_eligible": false,
+      "consideration_reasons": [
+        "CONFIDENCE_BELOW_THRESHOLD"
+      ]
+    },
+    {
+      "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-09::OPRA:NVDA261009P225.0::OPRA:NVDA261009P240.0::conservative",
+      "strategy_type": "BEAR_PUT_SPREAD",
+      "score": 75.16,
+      "confidence": "LOW",
+      "consideration_eligible": false,
+      "consideration_reasons": [
+        "CONFIDENCE_BELOW_THRESHOLD"
+      ]
+    },
+    {
+      "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-09::OPRA:NVDA261009P225.0::OPRA:NVDA261009P235.0::conservative",
+      "strategy_type": "BEAR_PUT_SPREAD",
+      "score": 75.07,
+      "confidence": "LOW",
+      "consideration_eligible": false,
+      "consideration_reasons": [
+        "CONFIDENCE_BELOW_THRESHOLD"
+      ]
+    },
+    {
+      "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-09::OPRA:NVDA261009P230.0::OPRA:NVDA261009P240.0::conservative",
+      "strategy_type": "BEAR_PUT_SPREAD",
+      "score": 73.45,
+      "confidence": "LOW",
+      "consideration_eligible": false,
+      "consideration_reasons": [
+        "CONFIDENCE_BELOW_THRESHOLD"
+      ]
+    },
+    {
+      "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-16::OPRA:NVDA261016P230.0::OPRA:NVDA261016P245.0::conservative",
+      "strategy_type": "BEAR_PUT_SPREAD",
+      "score": 72.76,
+      "confidence": "LOW",
+      "consideration_eligible": false,
+      "consideration_reasons": [
+        "CONFIDENCE_BELOW_THRESHOLD"
+      ]
+    }
+  ],
+  "baselines": [
+    {
+      "candidate_id": "NO_TRADE::NASDAQ:NVDA",
+      "strategy_type": "NO_TRADE",
+      "ranking_class": "BASELINE",
+      "score": null,
+      "grade": null,
+      "confidence": "HIGH",
+      "consideration_eligible": true
+    }
+  ],
+  "field_provenance": {
+    "MARKET_NATIVE": [
+      "bid",
+      "ask",
+      "iv",
+      "bid_iv",
+      "ask_iv",
+      "delta",
+      "gamma",
+      "theta",
+      "vega",
+      "rho",
+      "theoretical_price",
+      "underlying_price"
+    ],
+    "MARKET_DERIVED": [
+      "spread_pct",
+      "mid",
+      "spread",
+      "iv_spread",
+      "fill_price"
+    ],
+    "ENGINE_CALCULATED": [
+      "entry_debit",
+      "capital_required",
+      "max_loss",
+      "max_profit",
+      "breakeven",
+      "reward_risk_ratio",
+      "scenario_pnl",
+      "scenario_return_on_risk_pct",
+      "estimated_value",
+      "score",
+      "grade",
+      "confidence",
+      "component_scores",
+      "analysis_snapshot_id",
+      "diagnostics.crr_hybrid_policy"
+    ],
+    "USER_INPUT": [
+      "symbol",
+      "direction",
+      "horizon_days",
+      "max_loss (constraint)",
+      "base_target_price"
+    ],
+    "DETERMINISTIC_ASSUMPTION": [
+      "contract_multiplier (assumed 100 for standard US equity options)",
+      "downside_target_price (helper-derived)",
+      "upside_target_price (helper-derived)"
+    ]
+  },
+  "ai_contract": {
+    "allowed_candidate_ids": [
+      "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-09::OPRA:NVDA261009P225.0::OPRA:NVDA261009P230.0::conservative",
+      "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-09::OPRA:NVDA261009P225.0::OPRA:NVDA261009P240.0::conservative",
+      "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-09::OPRA:NVDA261009P225.0::OPRA:NVDA261009P235.0::conservative",
+      "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-09::OPRA:NVDA261009P230.0::OPRA:NVDA261009P240.0::conservative",
+      "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-16::OPRA:NVDA261016P230.0::OPRA:NVDA261016P245.0::conservative",
+      "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-16::OPRA:NVDA261016P240.0::OPRA:NVDA261016P245.0::conservative",
+      "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-16::OPRA:NVDA261016P235.0::OPRA:NVDA261016P245.0::conservative",
+      "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-09::OPRA:NVDA261009P220.0::OPRA:NVDA261009P235.0::conservative",
+      "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-16::OPRA:NVDA261016P230.0::OPRA:NVDA261016P240.0::conservative",
+      "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-16::OPRA:NVDA261016P225.0::OPRA:NVDA261016P240.0::conservative",
+      "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-09::OPRA:NVDA261009P225.0::OPRA:NVDA261009P230.0::conservative",
+      "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-09::OPRA:NVDA261009P225.0::OPRA:NVDA261009P240.0::conservative",
+      "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-09::OPRA:NVDA261009P225.0::OPRA:NVDA261009P235.0::conservative",
+      "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-09::OPRA:NVDA261009P230.0::OPRA:NVDA261009P240.0::conservative",
+      "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-10-16::OPRA:NVDA261016P230.0::OPRA:NVDA261016P245.0::conservative",
+      "NO_TRADE::NASDAQ:NVDA"
+    ],
+    "numeric_source_of_truth": "THIS_ANALYSIS_PACKET",
+    "rules": [
+      "Do not invent option contracts.",
+      "Do not invent prices.",
+      "Do not recalculate Greeks.",
+      "Do not recalculate max loss/profit.",
+      "Do not alter scenario P&L.",
+      "Do not state score as probability.",
+      "Do not state delta as probability of profit.",
+      "Do not claim consideration_eligible means recommendation.",
+      "If no candidate is eligible, preserve that result — do not promote a near-miss into a recommendation.",
+      "Explicitly mention LOW confidence when discussing a candidate.",
+      "Mention important scenario warnings (e.g. LARGE_TIME_STEP, NEAR_EXPIRATION) when present.",
+      "Do not treat crr_hybrid_policy diagnostics as a recommendation, score override, or production pricing switch.",
+      "Do not infer volume or open interest. Open interest is currently unavailable. Volume is not used by this analysis (not a filtering/scoring/ranking input) even where it may be technically obtainable elsewhere as optional live enrichment."
+    ]
+  },
+  "limitations": [
+    "Score is a heuristic comparative metric (RANKING_MODEL_V1), not a probability or expected return.",
+    "Scenario repricing (LOCAL_GREEK_APPROXIMATION) is a local approximation, not a full option pricing model — see Phase 0B limitations.",
+    "Ranking depends entirely on the user-supplied scenario prices; different assumptions produce different rankings.",
+    "Open interest is currently unavailable. Volume (technically obtainable via TradingView WebSocket subscription, but UI/subscription-dependent and event-driven, not a guaranteed initial snapshot) is not a dependency of this tool — neither volume nor open interest is used in filtering, scoring, or ranking.",
+    "No historical calibration of scoring weights or thresholds.",
+    "No earnings/event-driven volatility model — IV shocks default to 0 unless explicitly supplied.",
+    "No portfolio-level risk (correlation, margin, concentration) is modeled.",
+    "No early-exercise/assignment or dividend/ex-dividend modeling.",
+    "The scan2 request may be capped by TradingView at 4000 rows for very large chains; chain_completeness/warnings surface this, but the DTE window does not currently reduce the underlying request size.",
+    "No AI/LLM reasoning is performed by this tool — it returns structured, deterministic data only."
+  ]
+}

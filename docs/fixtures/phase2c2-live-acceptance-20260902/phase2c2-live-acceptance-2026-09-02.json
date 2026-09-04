@@ -1,0 +1,565 @@
+{
+  "phase": "Phase 2C.2 Active-Market Live Acceptance",
+  "status": "DIAGNOSTIC_ONLY_NO_PRODUCTION_SWITCH",
+  "started_at_utc": "2026-09-02T18:00:38.050Z",
+  "completed_at_utc": "2026-09-02T18:01:46.166Z",
+  "active_market_assumption": "Run at 2026-09-02 19:49-20:00 Europe/Istanbul, during U.S. regular session.",
+  "treasury": {
+    "asOfDate": "2026-09-01",
+    "source": "U.S. Treasury Daily Treasury Bill Rates, latest published row available during run",
+    "billRates": {
+      "fourWeek": 0.0375,
+      "sixWeek": 0.0381,
+      "eightWeek": 0.0382,
+      "thirteenWeek": 0.0387,
+      "seventeenWeek": 0.0393,
+      "twentySixWeek": 0.0403,
+      "fiftyTwoWeek": 0.0418
+    }
+  },
+  "symbols": [
+    {
+      "symbol": "NASDAQ:NVDA",
+      "root": "NVDA",
+      "quote": {
+        "last": 224.59,
+        "exchange": "Cboe One",
+        "time": 1788355800
+      },
+      "key_stats": {
+        "price": 224.655,
+        "dividend_yield_pct": 0.126823081800888,
+        "volume": 109316653,
+        "next_earnings_date": "2026-11-25"
+      },
+      "option_chain": {
+        "retrieved_at_utc": {
+          "calls": "2026-09-02T18:00:39.424Z",
+          "puts": "2026-09-02T18:00:39.441Z"
+        },
+        "returned_contracts": 218,
+        "matched_contracts": {
+          "calls": 106,
+          "puts": 112
+        },
+        "scanned": {
+          "calls": 3820,
+          "puts": 3820
+        },
+        "completeness": "COMPLETE",
+        "data_quality": {
+          "calls": {
+            "zero_bid_count": 0,
+            "crossed_market_count": 0,
+            "missing_iv_count": 0,
+            "missing_greeks_count": 0,
+            "missing_theoretical_price_count": 0,
+            "wide_spread_count": 1
+          },
+          "puts": {
+            "zero_bid_count": 0,
+            "crossed_market_count": 0,
+            "missing_iv_count": 0,
+            "missing_greeks_count": 0,
+            "missing_theoretical_price_count": 0,
+            "wide_spread_count": 0
+          }
+        }
+      },
+      "ibkr": {
+        "probed_base_url": "https://localhost:5000/v1/api",
+        "connection_status": "UNAVAILABLE",
+        "warnings": [
+          "IBKR_UNAVAILABLE"
+        ],
+        "fee_rate": null,
+        "expected_12m_dividend_per_share": null,
+        "market_data_availability": "UNKNOWN"
+      },
+      "candidates": 66,
+      "market_inputs": [
+        {
+          "expiration": "2026-10-02",
+          "dte": 30,
+          "mode": "PARTIAL_EXTERNAL_INPUTS",
+          "confidence": "LOW",
+          "shadow_input_confidence": "LOW",
+          "discount_rate_pct": 3.7446,
+          "dividend_mode": "TRAILING_DIVIDEND_YIELD_APPROXIMATION",
+          "dividend_yield_pct": 0.1268,
+          "borrow_fee_rate_pct": null,
+          "warnings": [
+            "CONTINUOUS_DIVIDEND_APPROXIMATION",
+            "TRAILING_NOT_FORWARD",
+            "BORROW_DATA_UNAVAILABLE"
+          ]
+        },
+        {
+          "expiration": "2026-10-09",
+          "dte": 37,
+          "mode": "PARTIAL_EXTERNAL_INPUTS",
+          "confidence": "LOW",
+          "shadow_input_confidence": "LOW",
+          "discount_rate_pct": 3.8017,
+          "dividend_mode": "TRAILING_DIVIDEND_YIELD_APPROXIMATION",
+          "dividend_yield_pct": 0.1268,
+          "borrow_fee_rate_pct": null,
+          "warnings": [
+            "CONTINUOUS_DIVIDEND_APPROXIMATION",
+            "TRAILING_NOT_FORWARD",
+            "BORROW_DATA_UNAVAILABLE"
+          ]
+        },
+        {
+          "expiration": "2026-10-16",
+          "dte": 44,
+          "mode": "PARTIAL_EXTERNAL_INPUTS",
+          "confidence": "LOW",
+          "shadow_input_confidence": "LOW",
+          "discount_rate_pct": 3.8017,
+          "dividend_mode": "TRAILING_DIVIDEND_YIELD_APPROXIMATION",
+          "dividend_yield_pct": 0.1268,
+          "borrow_fee_rate_pct": null,
+          "warnings": [
+            "CONTINUOUS_DIVIDEND_APPROXIMATION",
+            "TRAILING_NOT_FORWARD",
+            "BORROW_DATA_UNAVAILABLE"
+          ]
+        }
+      ],
+      "shadow_snapshot_id": "c2c7b2651085a6d2",
+      "horizons": {
+        "LOCAL_5D": {
+          "n": 198,
+          "median": 2.03,
+          "p75": 2.79,
+          "p95": 4,
+          "max": 5.37,
+          "mean": 2.01
+        },
+        "MODERATE_15D": {
+          "n": 198,
+          "median": 4.48,
+          "p75": 7.88,
+          "p95": 13.41,
+          "max": 18.24,
+          "mean": 5.01
+        },
+        "STRESS_30D": {
+          "n": 198,
+          "median": 1.92,
+          "p75": 9.29,
+          "p95": 35.28,
+          "max": 61.57,
+          "mean": 8.14
+        },
+        "PHASE2C_ORIGINAL_30D": {
+          "n": 198,
+          "median": 1.76,
+          "p75": 12.78,
+          "p95": 35.28,
+          "max": 61.57,
+          "mean": 8.76
+        }
+      },
+      "warning_correlation": {
+        "warned": {
+          "n": 280,
+          "median": 6.83,
+          "p75": 19.29,
+          "p95": 36.19,
+          "max": 61.57,
+          "mean": 12.38
+        },
+        "unwarned": {
+          "n": 512,
+          "median": 1.76,
+          "p75": 3.33,
+          "p95": 8.96,
+          "max": 15.26,
+          "mean": 2.48
+        }
+      },
+      "ranking": {
+        "STRESS_30D": {
+          "top5_overlap": "5/5",
+          "largestMove": {
+            "candidate_id": "LONG_CALL::NASDAQ:NVDA::2026-10-09::OPRA:NVDA261009C225.0::conservative",
+            "ranks": 14,
+            "from": 32,
+            "to": 46
+          }
+        },
+        "PHASE2C_ORIGINAL_30D": {
+          "top5_overlap": "5/5",
+          "largestMove": {
+            "candidate_id": "LONG_CALL::NASDAQ:NVDA::2026-10-09::OPRA:NVDA261009C235.0::conservative",
+            "ranks": 44,
+            "from": 17,
+            "to": 61
+          }
+        }
+      }
+    },
+    {
+      "symbol": "NASDAQ:AAPL",
+      "root": "AAPL",
+      "quote": {
+        "last": 325.75,
+        "exchange": "Cboe One",
+        "time": 1788355800
+      },
+      "key_stats": {
+        "price": 325.83,
+        "dividend_yield_pct": 0.334543159223607,
+        "volume": 20911248,
+        "next_earnings_date": "2026-10-29"
+      },
+      "option_chain": {
+        "retrieved_at_utc": {
+          "calls": "2026-09-02T18:01:01.926Z",
+          "puts": "2026-09-02T18:01:01.874Z"
+        },
+        "returned_contracts": 244,
+        "matched_contracts": {
+          "calls": 118,
+          "puts": 126
+        },
+        "scanned": {
+          "calls": 3276,
+          "puts": 3276
+        },
+        "completeness": "COMPLETE",
+        "data_quality": {
+          "calls": {
+            "zero_bid_count": 0,
+            "crossed_market_count": 0,
+            "missing_iv_count": 0,
+            "missing_greeks_count": 0,
+            "missing_theoretical_price_count": 0,
+            "wide_spread_count": 9
+          },
+          "puts": {
+            "zero_bid_count": 0,
+            "crossed_market_count": 0,
+            "missing_iv_count": 0,
+            "missing_greeks_count": 0,
+            "missing_theoretical_price_count": 0,
+            "wide_spread_count": 9
+          }
+        }
+      },
+      "ibkr": {
+        "probed_base_url": "https://localhost:5000/v1/api",
+        "connection_status": "UNAVAILABLE",
+        "warnings": [
+          "IBKR_UNAVAILABLE"
+        ],
+        "fee_rate": null,
+        "expected_12m_dividend_per_share": null,
+        "market_data_availability": "UNKNOWN"
+      },
+      "candidates": 66,
+      "market_inputs": [
+        {
+          "expiration": "2026-10-02",
+          "dte": 30,
+          "mode": "PARTIAL_EXTERNAL_INPUTS",
+          "confidence": "LOW",
+          "shadow_input_confidence": "LOW",
+          "discount_rate_pct": 3.7446,
+          "dividend_mode": "TRAILING_DIVIDEND_YIELD_APPROXIMATION",
+          "dividend_yield_pct": 0.3345,
+          "borrow_fee_rate_pct": null,
+          "warnings": [
+            "CONTINUOUS_DIVIDEND_APPROXIMATION",
+            "TRAILING_NOT_FORWARD",
+            "BORROW_DATA_UNAVAILABLE"
+          ]
+        },
+        {
+          "expiration": "2026-10-09",
+          "dte": 37,
+          "mode": "PARTIAL_EXTERNAL_INPUTS",
+          "confidence": "LOW",
+          "shadow_input_confidence": "LOW",
+          "discount_rate_pct": 3.8017,
+          "dividend_mode": "TRAILING_DIVIDEND_YIELD_APPROXIMATION",
+          "dividend_yield_pct": 0.3345,
+          "borrow_fee_rate_pct": null,
+          "warnings": [
+            "CONTINUOUS_DIVIDEND_APPROXIMATION",
+            "TRAILING_NOT_FORWARD",
+            "BORROW_DATA_UNAVAILABLE"
+          ]
+        },
+        {
+          "expiration": "2026-10-16",
+          "dte": 44,
+          "mode": "PARTIAL_EXTERNAL_INPUTS",
+          "confidence": "LOW",
+          "shadow_input_confidence": "LOW",
+          "discount_rate_pct": 3.8017,
+          "dividend_mode": "TRAILING_DIVIDEND_YIELD_APPROXIMATION",
+          "dividend_yield_pct": 0.3345,
+          "borrow_fee_rate_pct": null,
+          "warnings": [
+            "CONTINUOUS_DIVIDEND_APPROXIMATION",
+            "TRAILING_NOT_FORWARD",
+            "BORROW_DATA_UNAVAILABLE"
+          ]
+        }
+      ],
+      "shadow_snapshot_id": "c2c7b2651085a6d2",
+      "horizons": {
+        "LOCAL_5D": {
+          "n": 198,
+          "median": 1.95,
+          "p75": 2.82,
+          "p95": 4.17,
+          "max": 5.45,
+          "mean": 1.96
+        },
+        "MODERATE_15D": {
+          "n": 198,
+          "median": 4.07,
+          "p75": 8.55,
+          "p95": 13.94,
+          "max": 15.56,
+          "mean": 5.21
+        },
+        "STRESS_30D": {
+          "n": 198,
+          "median": 0.88,
+          "p75": 7.32,
+          "p95": 31.34,
+          "max": 71.51,
+          "mean": 6.35
+        },
+        "PHASE2C_ORIGINAL_30D": {
+          "n": 198,
+          "median": 0.96,
+          "p75": 9.63,
+          "p95": 38.25,
+          "max": 71.51,
+          "mean": 7.79
+        }
+      },
+      "warning_correlation": {
+        "warned": {
+          "n": 314,
+          "median": 3.4,
+          "p75": 14.14,
+          "p95": 38.25,
+          "max": 71.51,
+          "mean": 9.56
+        },
+        "unwarned": {
+          "n": 478,
+          "median": 1.52,
+          "p75": 3.22,
+          "p95": 10.17,
+          "max": 15.56,
+          "mean": 2.55
+        }
+      },
+      "ranking": {
+        "STRESS_30D": {
+          "top5_overlap": "2/5",
+          "largestMove": {
+            "candidate_id": "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-09::OPRA:AAPL261009C330.0::OPRA:AAPL261009C340.0::conservative",
+            "ranks": 31,
+            "from": 3,
+            "to": 34
+          }
+        },
+        "PHASE2C_ORIGINAL_30D": {
+          "top5_overlap": "5/5",
+          "largestMove": {
+            "candidate_id": "LONG_CALL::NASDAQ:AAPL::2026-10-09::OPRA:AAPL261009C340.0::conservative",
+            "ranks": 34,
+            "from": 16,
+            "to": 50
+          }
+        }
+      }
+    },
+    {
+      "symbol": "NASDAQ:PANW",
+      "root": "PANW",
+      "quote": {
+        "last": 322.79,
+        "exchange": "Cboe One",
+        "time": 1788355800
+      },
+      "key_stats": {
+        "price": 322.67,
+        "dividend_yield_pct": 0,
+        "volume": 8814794,
+        "next_earnings_date": "2026-11-12"
+      },
+      "option_chain": {
+        "retrieved_at_utc": {
+          "calls": "2026-09-02T18:01:24.371Z",
+          "puts": "2026-09-02T18:01:24.079Z"
+        },
+        "returned_contracts": 289,
+        "matched_contracts": {
+          "calls": 157,
+          "puts": 132
+        },
+        "scanned": {
+          "calls": 3628,
+          "puts": 3628
+        },
+        "completeness": "COMPLETE",
+        "data_quality": {
+          "calls": {
+            "zero_bid_count": 0,
+            "crossed_market_count": 0,
+            "missing_iv_count": 0,
+            "missing_greeks_count": 0,
+            "missing_theoretical_price_count": 0,
+            "wide_spread_count": 86
+          },
+          "puts": {
+            "zero_bid_count": 0,
+            "crossed_market_count": 0,
+            "missing_iv_count": 0,
+            "missing_greeks_count": 0,
+            "missing_theoretical_price_count": 0,
+            "wide_spread_count": 30
+          }
+        }
+      },
+      "ibkr": {
+        "probed_base_url": "https://localhost:5000/v1/api",
+        "connection_status": "UNAVAILABLE",
+        "warnings": [
+          "IBKR_UNAVAILABLE"
+        ],
+        "fee_rate": null,
+        "expected_12m_dividend_per_share": null,
+        "market_data_availability": "UNKNOWN"
+      },
+      "candidates": 102,
+      "market_inputs": [
+        {
+          "expiration": "2026-10-02",
+          "dte": 30,
+          "mode": "PARTIAL_EXTERNAL_INPUTS",
+          "confidence": "MEDIUM",
+          "shadow_input_confidence": "MEDIUM",
+          "discount_rate_pct": 3.7446,
+          "dividend_mode": "ZERO_DIVIDEND_CONFIRMED",
+          "dividend_yield_pct": 0,
+          "borrow_fee_rate_pct": null,
+          "warnings": [
+            "BORROW_DATA_UNAVAILABLE"
+          ]
+        },
+        {
+          "expiration": "2026-10-09",
+          "dte": 37,
+          "mode": "PARTIAL_EXTERNAL_INPUTS",
+          "confidence": "MEDIUM",
+          "shadow_input_confidence": "MEDIUM",
+          "discount_rate_pct": 3.8017,
+          "dividend_mode": "ZERO_DIVIDEND_CONFIRMED",
+          "dividend_yield_pct": 0,
+          "borrow_fee_rate_pct": null,
+          "warnings": [
+            "BORROW_DATA_UNAVAILABLE"
+          ]
+        },
+        {
+          "expiration": "2026-10-16",
+          "dte": 44,
+          "mode": "PARTIAL_EXTERNAL_INPUTS",
+          "confidence": "MEDIUM",
+          "shadow_input_confidence": "MEDIUM",
+          "discount_rate_pct": 3.8017,
+          "dividend_mode": "ZERO_DIVIDEND_CONFIRMED",
+          "dividend_yield_pct": 0,
+          "borrow_fee_rate_pct": null,
+          "warnings": [
+            "BORROW_DATA_UNAVAILABLE"
+          ]
+        }
+      ],
+      "shadow_snapshot_id": "c2c7b2651085a6d2",
+      "horizons": {
+        "LOCAL_5D": {
+          "n": 306,
+          "median": 0.76,
+          "p75": 1.18,
+          "p95": 2.12,
+          "max": 3.24,
+          "mean": 0.87
+        },
+        "MODERATE_15D": {
+          "n": 306,
+          "median": 3.83,
+          "p75": 5.71,
+          "p95": 10.1,
+          "max": 16.67,
+          "mean": 4.13
+        },
+        "STRESS_30D": {
+          "n": 306,
+          "median": 1.58,
+          "p75": 12.69,
+          "p95": 28.33,
+          "max": 45.51,
+          "mean": 7.28
+        },
+        "PHASE2C_ORIGINAL_30D": {
+          "n": 306,
+          "median": 1.38,
+          "p75": 13.94,
+          "p95": 30.49,
+          "max": 45.51,
+          "mean": 7.64
+        }
+      },
+      "warning_correlation": {
+        "warned": {
+          "n": 366,
+          "median": 10.1,
+          "p75": 19.64,
+          "p95": 35.63,
+          "max": 45.51,
+          "mean": 12.6
+        },
+        "unwarned": {
+          "n": 858,
+          "median": 0.73,
+          "p75": 2.19,
+          "p95": 7.07,
+          "max": 16.52,
+          "mean": 1.73
+        }
+      },
+      "ranking": {
+        "STRESS_30D": {
+          "top5_overlap": "4/5",
+          "largestMove": {
+            "candidate_id": "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-09::OPRA:PANW261009C310.0::OPRA:PANW261009C315.0::conservative",
+            "ranks": 16,
+            "from": 28,
+            "to": 44
+          }
+        },
+        "PHASE2C_ORIGINAL_30D": {
+          "top5_overlap": "5/5",
+          "largestMove": {
+            "candidate_id": "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-09::OPRA:PANW261009C320.0::OPRA:PANW261009C330.0::conservative",
+            "ranks": 28,
+            "from": 61,
+            "to": 33
+          }
+        }
+      }
+    }
+  ]
+}

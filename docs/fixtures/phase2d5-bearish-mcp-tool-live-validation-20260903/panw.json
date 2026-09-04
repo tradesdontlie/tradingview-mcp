@@ -1,0 +1,1735 @@
+{
+  "analysis_type": "DIRECTIONAL_OPTIONS",
+  "analysis_snapshot_id": "f0cf659a9165b059",
+  "analysis_as_of_utc": "2026-09-03T18:24:24.398Z",
+  "symbol": "NASDAQ:PANW",
+  "underlying_price": 330,
+  "direction": "bearish",
+  "horizon_days": 30,
+  "max_loss": 1000,
+  "thesis": {
+    "base_target_price": 314,
+    "expected_move_absolute": -16,
+    "expected_move_pct": -4.85
+  },
+  "input_echo": {
+    "symbol": "NASDAQ:PANW",
+    "direction": "bearish",
+    "horizon_days": 30,
+    "max_loss": 1000,
+    "base_target_price": 314,
+    "downside_target_price": null,
+    "upside_target_price": null,
+    "downside_iv_change_points": 0,
+    "base_iv_change_points": 0,
+    "upside_iv_change_points": 0,
+    "min_dte": null,
+    "max_dte": null,
+    "include_crr_hybrid_diagnostics": true,
+    "execution_model": "conservative",
+    "commission_per_contract": 0,
+    "contract_multiplier": 100,
+    "max_spread_pct": 15,
+    "max_ranked_results": 10
+  },
+  "scenario_definitions": {
+    "downside": {
+      "scenario_id": "DOWNSIDE",
+      "underlying_price": 338,
+      "iv_change_points": 0,
+      "days_forward": 30,
+      "scenario_source": "DETERMINISTIC_HELPER"
+    },
+    "base": {
+      "scenario_id": "BASE",
+      "underlying_price": 314,
+      "iv_change_points": 0,
+      "days_forward": 30,
+      "scenario_source": "USER_EXPLICIT"
+    },
+    "upside": {
+      "scenario_id": "UPSIDE",
+      "underlying_price": 306,
+      "iv_change_points": 0,
+      "days_forward": 30,
+      "scenario_source": "DETERMINISTIC_HELPER"
+    }
+  },
+  "data_source": {
+    "provider": "TradingView Options Scanner",
+    "endpoint": "/options/scan2",
+    "options_retrieved_at_utc": "2026-09-03T18:24:24.394Z",
+    "chain_completeness": "COMPLETE",
+    "warnings": []
+  },
+  "candidate_generation": {
+    "input_contract_count": 434,
+    "eligible_contract_count": 217,
+    "candidate_count": 27,
+    "rejected_count": 239,
+    "rejection_summary": {
+      "WIDE_SPREAD": 96,
+      "DELTA_OUT_OF_RANGE": 101,
+      "MAX_LOSS_EXCEEDED": 42
+    }
+  },
+  "ranking": {
+    "model": "RANKING_MODEL_V1",
+    "disclaimer": "Comparative heuristic score under user-supplied scenarios; not probability or expected return.",
+    "decision_state": "NO_TRADE_BASELINE_ONLY",
+    "top_trade_candidate_id": null,
+    "fallback_baseline": "NO_TRADE",
+    "thresholds": {
+      "minimum_score_for_consideration": 60,
+      "minimum_confidence_for_consideration": "MEDIUM",
+      "min_capped_reward_risk": null,
+      "configured_max_spread_pct": 15
+    }
+  },
+  "scenario_quality_summary": {
+    "HIGH_CONFIDENCE_CANDIDATES": 0,
+    "MEDIUM_CONFIDENCE_CANDIDATES": 0,
+    "LOW_CONFIDENCE_CANDIDATES": 26
+  },
+  "diagnostics": {
+    "crr_hybrid_policy": {
+      "status": "AVAILABLE",
+      "mode": "DIAGNOSTIC_ONLY_NO_RANKING_CHANGE",
+      "market_inputs": [
+        {
+          "expiration": "2026-10-09",
+          "days_to_expiry": 36,
+          "mode": "PARTIAL_EXTERNAL_INPUTS",
+          "overall_confidence": "MEDIUM",
+          "discount_rate_source": "TREASURY_BILL_COUPON_EQUIVALENT_NORMALIZED",
+          "dividend_mode": "ZERO_DIVIDEND_CONFIRMED",
+          "borrow_source": "NOT_CONNECTED",
+          "warnings": [
+            "TREASURY_RATE_FROZEN_FALLBACK_NOT_LIVE",
+            "BORROW_DATA_UNAVAILABLE"
+          ]
+        },
+        {
+          "expiration": "2026-10-16",
+          "days_to_expiry": 43,
+          "mode": "PARTIAL_EXTERNAL_INPUTS",
+          "overall_confidence": "MEDIUM",
+          "discount_rate_source": "TREASURY_BILL_COUPON_EQUIVALENT_NORMALIZED",
+          "dividend_mode": "ZERO_DIVIDEND_CONFIRMED",
+          "borrow_source": "NOT_CONNECTED",
+          "warnings": [
+            "TREASURY_RATE_FROZEN_FALLBACK_NOT_LIVE",
+            "BORROW_DATA_UNAVAILABLE"
+          ]
+        },
+        {
+          "expiration": "2026-10-23",
+          "days_to_expiry": 50,
+          "mode": "PARTIAL_EXTERNAL_INPUTS",
+          "overall_confidence": "MEDIUM",
+          "discount_rate_source": "TREASURY_BILL_COUPON_EQUIVALENT_NORMALIZED",
+          "dividend_mode": "ZERO_DIVIDEND_CONFIRMED",
+          "borrow_source": "NOT_CONNECTED",
+          "warnings": [
+            "TREASURY_RATE_FROZEN_FALLBACK_NOT_LIVE",
+            "BORROW_DATA_UNAVAILABLE"
+          ]
+        }
+      ],
+      "summary": {
+        "total_candidates": 27,
+        "by_action": {
+          "HYBRID_REPRICE_CANDIDATE": 18,
+          "CRR_SHADOW_REVIEW": 8,
+          "NO_ACTION": 1
+        },
+        "crr_shadow_available_count": 27,
+        "local_warning_count": 26
+      },
+      "candidates": [
+        {
+          "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-09::OPRA:PANW261009P330.0::OPRA:PANW261009P340.0::conservative",
+          "strategy_type": "BEAR_PUT_SPREAD",
+          "action": "HYBRID_REPRICE_CANDIDATE",
+          "reasons": [
+            "LOCAL_WARNINGS_MAJOR",
+            "LOCAL_WARNINGS_MODERATE",
+            "MODEL_DISAGREEMENT_MEDIUM"
+          ],
+          "local_warnings": [
+            "LARGE_TIME_STEP",
+            "INTRINSIC_FLOOR_APPLIED"
+          ],
+          "max_model_disagreement_level": "MODEL_DISAGREEMENT_MEDIUM",
+          "crr_shadow_available": true
+        },
+        {
+          "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-09::OPRA:PANW261009P335.0::OPRA:PANW261009P345.0::conservative",
+          "strategy_type": "BEAR_PUT_SPREAD",
+          "action": "HYBRID_REPRICE_CANDIDATE",
+          "reasons": [
+            "LOCAL_WARNINGS_MAJOR",
+            "LOCAL_WARNINGS_MODERATE",
+            "MODEL_DISAGREEMENT_MEDIUM"
+          ],
+          "local_warnings": [
+            "LARGE_TIME_STEP",
+            "INTRINSIC_FLOOR_APPLIED"
+          ],
+          "max_model_disagreement_level": "MODEL_DISAGREEMENT_MEDIUM",
+          "crr_shadow_available": true
+        },
+        {
+          "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016P290.0::OPRA:PANW261016P320.0::conservative",
+          "strategy_type": "BEAR_PUT_SPREAD",
+          "action": "HYBRID_REPRICE_CANDIDATE",
+          "reasons": [
+            "LOCAL_WARNINGS_MAJOR",
+            "LOCAL_WARNINGS_MODERATE",
+            "MODEL_DISAGREEMENT_MEDIUM"
+          ],
+          "local_warnings": [
+            "LARGE_TIME_STEP",
+            "INTRINSIC_FLOOR_APPLIED"
+          ],
+          "max_model_disagreement_level": "MODEL_DISAGREEMENT_MEDIUM",
+          "crr_shadow_available": true
+        },
+        {
+          "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016P300.0::OPRA:PANW261016P320.0::conservative",
+          "strategy_type": "BEAR_PUT_SPREAD",
+          "action": "HYBRID_REPRICE_CANDIDATE",
+          "reasons": [
+            "LOCAL_WARNINGS_MAJOR",
+            "MODEL_DISAGREEMENT_MEDIUM"
+          ],
+          "local_warnings": [
+            "LARGE_TIME_STEP"
+          ],
+          "max_model_disagreement_level": "MODEL_DISAGREEMENT_MEDIUM",
+          "crr_shadow_available": true
+        },
+        {
+          "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016P310.0::OPRA:PANW261016P320.0::conservative",
+          "strategy_type": "BEAR_PUT_SPREAD",
+          "action": "HYBRID_REPRICE_CANDIDATE",
+          "reasons": [
+            "LOCAL_WARNINGS_MAJOR",
+            "MODEL_DISAGREEMENT_MEDIUM"
+          ],
+          "local_warnings": [
+            "LARGE_TIME_STEP"
+          ],
+          "max_model_disagreement_level": "MODEL_DISAGREEMENT_MEDIUM",
+          "crr_shadow_available": true
+        },
+        {
+          "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016P310.0::OPRA:PANW261016P330.0::conservative",
+          "strategy_type": "BEAR_PUT_SPREAD",
+          "action": "HYBRID_REPRICE_CANDIDATE",
+          "reasons": [
+            "LOCAL_WARNINGS_MAJOR",
+            "MODEL_DISAGREEMENT_MEDIUM"
+          ],
+          "local_warnings": [
+            "LARGE_TIME_STEP"
+          ],
+          "max_model_disagreement_level": "MODEL_DISAGREEMENT_MEDIUM",
+          "crr_shadow_available": true
+        },
+        {
+          "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016P320.0::OPRA:PANW261016P330.0::conservative",
+          "strategy_type": "BEAR_PUT_SPREAD",
+          "action": "HYBRID_REPRICE_CANDIDATE",
+          "reasons": [
+            "LOCAL_WARNINGS_MAJOR",
+            "MODEL_DISAGREEMENT_MEDIUM"
+          ],
+          "local_warnings": [
+            "LARGE_TIME_STEP"
+          ],
+          "max_model_disagreement_level": "MODEL_DISAGREEMENT_MEDIUM",
+          "crr_shadow_available": true
+        },
+        {
+          "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016P330.0::OPRA:PANW261016P340.0::conservative",
+          "strategy_type": "BEAR_PUT_SPREAD",
+          "action": "HYBRID_REPRICE_CANDIDATE",
+          "reasons": [
+            "LOCAL_WARNINGS_MAJOR",
+            "MODEL_DISAGREEMENT_MEDIUM"
+          ],
+          "local_warnings": [
+            "LARGE_TIME_STEP"
+          ],
+          "max_model_disagreement_level": "MODEL_DISAGREEMENT_MEDIUM",
+          "crr_shadow_available": true
+        },
+        {
+          "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016P340.0::OPRA:PANW261016P350.0::conservative",
+          "strategy_type": "BEAR_PUT_SPREAD",
+          "action": "HYBRID_REPRICE_CANDIDATE",
+          "reasons": [
+            "LOCAL_WARNINGS_MAJOR",
+            "LOCAL_WARNINGS_MODERATE",
+            "MODEL_DISAGREEMENT_MEDIUM"
+          ],
+          "local_warnings": [
+            "LARGE_TIME_STEP",
+            "INTRINSIC_FLOOR_APPLIED"
+          ],
+          "max_model_disagreement_level": "MODEL_DISAGREEMENT_MEDIUM",
+          "crr_shadow_available": true
+        },
+        {
+          "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016P350.0::OPRA:PANW261016P360.0::conservative",
+          "strategy_type": "BEAR_PUT_SPREAD",
+          "action": "CRR_SHADOW_REVIEW",
+          "reasons": [
+            "LOCAL_WARNINGS_MAJOR",
+            "LOCAL_WARNINGS_MODERATE"
+          ],
+          "local_warnings": [
+            "LARGE_TIME_STEP",
+            "INTRINSIC_FLOOR_APPLIED"
+          ],
+          "max_model_disagreement_level": "MODEL_DISAGREEMENT_LOW",
+          "crr_shadow_available": true
+        }
+      ]
+    }
+  },
+  "top_candidates": [
+    {
+      "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016P320.0::OPRA:PANW261016P330.0::conservative",
+      "rank": 1,
+      "strategy_type": "BEAR_PUT_SPREAD",
+      "ranking_class": "TRADE",
+      "expiration": "2026-10-16",
+      "days_to_expiry": 43,
+      "legs": [
+        {
+          "contract": "OPRA:PANW261016P330.0",
+          "action": "BUY",
+          "option_type": "put",
+          "strike": 330,
+          "fill_price": 19.45,
+          "bid": 19.35,
+          "ask": 19.45,
+          "spread_pct": 0.52,
+          "iv": 46.25,
+          "delta": -0.46614575550776227,
+          "gamma": 0.007583556313562997,
+          "theta": -0.23711517939012364,
+          "vega": 0.4504585215151991
+        },
+        {
+          "contract": "OPRA:PANW261016P320.0",
+          "action": "SELL",
+          "option_type": "put",
+          "strike": 320,
+          "fill_price": 14.4,
+          "bid": 14.4,
+          "ask": 15,
+          "spread_pct": 4.08,
+          "iv": 44.01,
+          "delta": -0.3878486949168834,
+          "gamma": 0.007680598859302349,
+          "theta": -0.21789892261659952,
+          "vega": 0.4341033270996745
+        }
+      ],
+      "entry_debit": 505,
+      "capital_required": 505,
+      "max_loss": 505,
+      "max_profit": 495,
+      "max_profit_type": "DEFINED",
+      "breakeven": 324.95,
+      "reward_risk_ratio": 0.98,
+      "reward_risk_type": "DEFINED",
+      "score": 63.83,
+      "grade": "C",
+      "confidence": "LOW",
+      "confidence_reasons": [
+        "LARGE_TIME_STEP (downside)",
+        "LARGE_TIME_STEP (base)",
+        "LARGE_TIME_STEP (upside)"
+      ],
+      "consideration_eligible": false,
+      "consideration_reasons": [
+        "CONFIDENCE_BELOW_THRESHOLD"
+      ],
+      "component_scores": {
+        "base": 65.05,
+        "downside": 92.87,
+        "upside": 21.09,
+        "breakeven": 66.59,
+        "execution": 72.8
+      },
+      "raw_metrics": {
+        "downside_pnl": -36,
+        "base_pnl": 152,
+        "upside_pnl": 213,
+        "downside_return_on_risk_pct": -7.13,
+        "base_return_on_risk_pct": 30.1,
+        "upside_return_on_risk_pct": 42.18,
+        "max_loss": 505,
+        "capital_required": 505,
+        "breakeven": 324.95,
+        "reward_risk_ratio": 0.98,
+        "reward_risk_type": "DEFINED",
+        "scenario_asymmetry_ratio": 5.92,
+        "breakeven_margin_pct": 3.32,
+        "max_leg_spread_pct": 4.08
+      },
+      "scenario_results": {
+        "downside": {
+          "underlying_price": 338,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": -36,
+          "scenario_return_on_risk_pct": -7.13,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "base": {
+          "underlying_price": 314,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 152,
+          "scenario_return_on_risk_pct": 30.1,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "upside": {
+          "underlying_price": 306,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 213,
+          "scenario_return_on_risk_pct": 42.18,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "LARGE_TIME_STEP"
+          ]
+        }
+      }
+    },
+    {
+      "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016P330.0::OPRA:PANW261016P340.0::conservative",
+      "rank": 2,
+      "strategy_type": "BEAR_PUT_SPREAD",
+      "ranking_class": "TRADE",
+      "expiration": "2026-10-16",
+      "days_to_expiry": 43,
+      "legs": [
+        {
+          "contract": "OPRA:PANW261016P340.0",
+          "action": "BUY",
+          "option_type": "put",
+          "strike": 340,
+          "fill_price": 25.1,
+          "bid": 24.9,
+          "ask": 25.1,
+          "spread_pct": 0.8,
+          "iv": 46.15,
+          "delta": -0.5412227334284498,
+          "gamma": 0.007587331158090377,
+          "theta": -0.23531850125066203,
+          "vega": 0.4496716460571672
+        },
+        {
+          "contract": "OPRA:PANW261016P330.0",
+          "action": "SELL",
+          "option_type": "put",
+          "strike": 330,
+          "fill_price": 19.35,
+          "bid": 19.35,
+          "ask": 19.45,
+          "spread_pct": 0.52,
+          "iv": 46.25,
+          "delta": -0.46614575550776227,
+          "gamma": 0.007583556313562997,
+          "theta": -0.23711517939012364,
+          "vega": 0.4504585215151991
+        }
+      ],
+      "entry_debit": 575,
+      "capital_required": 575,
+      "max_loss": 575,
+      "max_profit": 425,
+      "max_profit_type": "DEFINED",
+      "breakeven": 334.25,
+      "reward_risk_ratio": 0.74,
+      "reward_risk_type": "DEFINED",
+      "score": 62.6,
+      "grade": "C",
+      "confidence": "LOW",
+      "confidence_reasons": [
+        "LARGE_TIME_STEP (downside)",
+        "LARGE_TIME_STEP (base)",
+        "LARGE_TIME_STEP (upside)"
+      ],
+      "consideration_eligible": false,
+      "consideration_reasons": [
+        "CONFIDENCE_BELOW_THRESHOLD"
+      ],
+      "component_scores": {
+        "base": 59.57,
+        "downside": 87.83,
+        "upside": 14.79,
+        "breakeven": 80.68,
+        "execution": 94.67
+      },
+      "raw_metrics": {
+        "downside_pnl": -70,
+        "base_pnl": 110,
+        "upside_pnl": 170,
+        "downside_return_on_risk_pct": -12.17,
+        "base_return_on_risk_pct": 19.13,
+        "upside_return_on_risk_pct": 29.57,
+        "max_loss": 575,
+        "capital_required": 575,
+        "breakeven": 334.25,
+        "reward_risk_ratio": 0.74,
+        "reward_risk_type": "DEFINED",
+        "scenario_asymmetry_ratio": 2.43,
+        "breakeven_margin_pct": 6.14,
+        "max_leg_spread_pct": 0.8
+      },
+      "scenario_results": {
+        "downside": {
+          "underlying_price": 338,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": -70,
+          "scenario_return_on_risk_pct": -12.17,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "base": {
+          "underlying_price": 314,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 110,
+          "scenario_return_on_risk_pct": 19.13,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "upside": {
+          "underlying_price": 306,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 170,
+          "scenario_return_on_risk_pct": 29.57,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "LARGE_TIME_STEP"
+          ]
+        }
+      }
+    },
+    {
+      "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016P310.0::OPRA:PANW261016P330.0::conservative",
+      "rank": 3,
+      "strategy_type": "BEAR_PUT_SPREAD",
+      "ranking_class": "TRADE",
+      "expiration": "2026-10-16",
+      "days_to_expiry": 43,
+      "legs": [
+        {
+          "contract": "OPRA:PANW261016P330.0",
+          "action": "BUY",
+          "option_type": "put",
+          "strike": 330,
+          "fill_price": 19.45,
+          "bid": 19.35,
+          "ask": 19.45,
+          "spread_pct": 0.52,
+          "iv": 46.25,
+          "delta": -0.46614575550776227,
+          "gamma": 0.007583556313562997,
+          "theta": -0.23711517939012364,
+          "vega": 0.4504585215151991
+        },
+        {
+          "contract": "OPRA:PANW261016P310.0",
+          "action": "SELL",
+          "option_type": "put",
+          "strike": 310,
+          "fill_price": 10.75,
+          "bid": 10.75,
+          "ask": 11.2,
+          "spread_pct": 4.1,
+          "iv": 44.46,
+          "delta": -0.311531381049262,
+          "gamma": 0.0070180293823508145,
+          "theta": -0.20366070361269875,
+          "vega": 0.4006475617498237
+        }
+      ],
+      "entry_debit": 870,
+      "capital_required": 870,
+      "max_loss": 870,
+      "max_profit": 1130,
+      "max_profit_type": "DEFINED",
+      "breakeven": 321.3,
+      "reward_risk_ratio": 1.3,
+      "reward_risk_type": "DEFINED",
+      "score": 61.67,
+      "grade": "C",
+      "confidence": "LOW",
+      "confidence_reasons": [
+        "LARGE_TIME_STEP (downside)",
+        "LARGE_TIME_STEP (base)",
+        "LARGE_TIME_STEP (upside)"
+      ],
+      "consideration_eligible": false,
+      "consideration_reasons": [
+        "CONFIDENCE_BELOW_THRESHOLD"
+      ],
+      "component_scores": {
+        "base": 64.94,
+        "downside": 86.55,
+        "upside": 22.53,
+        "breakeven": 61.06,
+        "execution": 72.67
+      },
+      "raw_metrics": {
+        "downside_pnl": -117,
+        "base_pnl": 260,
+        "upside_pnl": 392,
+        "downside_return_on_risk_pct": -13.45,
+        "base_return_on_risk_pct": 29.89,
+        "upside_return_on_risk_pct": 45.06,
+        "max_loss": 870,
+        "capital_required": 870,
+        "breakeven": 321.3,
+        "reward_risk_ratio": 1.3,
+        "reward_risk_type": "DEFINED",
+        "scenario_asymmetry_ratio": 3.35,
+        "breakeven_margin_pct": 2.21,
+        "max_leg_spread_pct": 4.1
+      },
+      "scenario_results": {
+        "downside": {
+          "underlying_price": 338,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": -117,
+          "scenario_return_on_risk_pct": -13.45,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "base": {
+          "underlying_price": 314,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 260,
+          "scenario_return_on_risk_pct": 29.89,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "upside": {
+          "underlying_price": 306,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 392,
+          "scenario_return_on_risk_pct": 45.06,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "LARGE_TIME_STEP"
+          ]
+        }
+      }
+    },
+    {
+      "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016P340.0::OPRA:PANW261016P350.0::conservative",
+      "rank": 4,
+      "strategy_type": "BEAR_PUT_SPREAD",
+      "ranking_class": "TRADE",
+      "expiration": "2026-10-16",
+      "days_to_expiry": 43,
+      "legs": [
+        {
+          "contract": "OPRA:PANW261016P350.0",
+          "action": "BUY",
+          "option_type": "put",
+          "strike": 350,
+          "fill_price": 32.65,
+          "bid": 31.2,
+          "ask": 32.65,
+          "spread_pct": 4.54,
+          "iv": 45.85,
+          "delta": -0.6138239023748799,
+          "gamma": 0.007363747697780214,
+          "theta": -0.22433508460812748,
+          "vega": 0.433559126757102
+        },
+        {
+          "contract": "OPRA:PANW261016P340.0",
+          "action": "SELL",
+          "option_type": "put",
+          "strike": 340,
+          "fill_price": 24.9,
+          "bid": 24.9,
+          "ask": 25.1,
+          "spread_pct": 0.8,
+          "iv": 46.15,
+          "delta": -0.5412227334284498,
+          "gamma": 0.007587331158090377,
+          "theta": -0.23531850125066203,
+          "vega": 0.4496716460571672
+        }
+      ],
+      "entry_debit": 775,
+      "capital_required": 775,
+      "max_loss": 775,
+      "max_profit": 225,
+      "max_profit_type": "DEFINED",
+      "breakeven": 342.25,
+      "reward_risk_ratio": 0.29,
+      "reward_risk_type": "DEFINED",
+      "score": 56.45,
+      "grade": "D",
+      "confidence": "LOW",
+      "confidence_reasons": [
+        "LARGE_TIME_STEP (downside)",
+        "LARGE_TIME_STEP (base)",
+        "INTRINSIC_FLOOR_APPLIED (upside)",
+        "LARGE_TIME_STEP (upside)"
+      ],
+      "consideration_eligible": false,
+      "consideration_reasons": [
+        "SCORE_BELOW_THRESHOLD",
+        "CONFIDENCE_BELOW_THRESHOLD"
+      ],
+      "component_scores": {
+        "base": 49.74,
+        "downside": 77.29,
+        "upside": 11.55,
+        "breakeven": 92.8,
+        "execution": 69.73
+      },
+      "raw_metrics": {
+        "downside_pnl": -176,
+        "base_pnl": -4,
+        "upside_pnl": 179,
+        "downside_return_on_risk_pct": -22.71,
+        "base_return_on_risk_pct": -0.52,
+        "upside_return_on_risk_pct": 23.1,
+        "max_loss": 775,
+        "capital_required": 775,
+        "breakeven": 342.25,
+        "reward_risk_ratio": 0.29,
+        "reward_risk_type": "DEFINED",
+        "scenario_asymmetry_ratio": 1.02,
+        "breakeven_margin_pct": 8.56,
+        "max_leg_spread_pct": 4.54
+      },
+      "scenario_results": {
+        "downside": {
+          "underlying_price": 338,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": -176,
+          "scenario_return_on_risk_pct": -22.71,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "base": {
+          "underlying_price": 314,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": -4,
+          "scenario_return_on_risk_pct": -0.52,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "upside": {
+          "underlying_price": 306,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 179,
+          "scenario_return_on_risk_pct": 23.1,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "INTRINSIC_FLOOR_APPLIED",
+            "LARGE_TIME_STEP"
+          ]
+        }
+      }
+    },
+    {
+      "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016P350.0::OPRA:PANW261016P360.0::conservative",
+      "rank": 5,
+      "strategy_type": "BEAR_PUT_SPREAD",
+      "ranking_class": "TRADE",
+      "expiration": "2026-10-16",
+      "days_to_expiry": 43,
+      "legs": [
+        {
+          "contract": "OPRA:PANW261016P360.0",
+          "action": "BUY",
+          "option_type": "put",
+          "strike": 360,
+          "fill_price": 40.5,
+          "bid": 37.7,
+          "ask": 40.5,
+          "spread_pct": 7.16,
+          "iv": 45.54,
+          "delta": -0.6816652530572462,
+          "gamma": 0.0069138759056845064,
+          "theta": -0.2065598343858374,
+          "vega": 0.40436302867236856
+        },
+        {
+          "contract": "OPRA:PANW261016P350.0",
+          "action": "SELL",
+          "option_type": "put",
+          "strike": 350,
+          "fill_price": 31.2,
+          "bid": 31.2,
+          "ask": 32.65,
+          "spread_pct": 4.54,
+          "iv": 45.85,
+          "delta": -0.6138239023748799,
+          "gamma": 0.007363747697780214,
+          "theta": -0.22433508460812748,
+          "vega": 0.433559126757102
+        }
+      ],
+      "entry_debit": 930,
+      "capital_required": 930,
+      "max_loss": 930,
+      "max_profit": 70,
+      "max_profit_type": "DEFINED",
+      "breakeven": 350.7,
+      "reward_risk_ratio": 0.08,
+      "reward_risk_type": "DEFINED",
+      "score": 54.49,
+      "grade": "D",
+      "confidence": "LOW",
+      "confidence_reasons": [
+        "LARGE_TIME_STEP (downside)",
+        "INTRINSIC_FLOOR_APPLIED (base)",
+        "LARGE_TIME_STEP (base)",
+        "INTRINSIC_FLOOR_APPLIED (upside)",
+        "LARGE_TIME_STEP (upside)",
+        "max_leg_spread_pct=7.16"
+      ],
+      "consideration_eligible": false,
+      "consideration_reasons": [
+        "SCORE_BELOW_THRESHOLD",
+        "CONFIDENCE_BELOW_THRESHOLD"
+      ],
+      "component_scores": {
+        "base": 50.38,
+        "downside": 73.98,
+        "upside": 3.77,
+        "breakeven": 100,
+        "execution": 52.27
+      },
+      "raw_metrics": {
+        "downside_pnl": -242,
+        "base_pnl": 7,
+        "upside_pnl": 70,
+        "downside_return_on_risk_pct": -26.02,
+        "base_return_on_risk_pct": 0.75,
+        "upside_return_on_risk_pct": 7.53,
+        "max_loss": 930,
+        "capital_required": 930,
+        "breakeven": 350.7,
+        "reward_risk_ratio": 0.08,
+        "reward_risk_type": "DEFINED",
+        "scenario_asymmetry_ratio": 0.29,
+        "breakeven_margin_pct": 11.12,
+        "max_leg_spread_pct": 7.16
+      },
+      "scenario_results": {
+        "downside": {
+          "underlying_price": 338,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": -242,
+          "scenario_return_on_risk_pct": -26.02,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "base": {
+          "underlying_price": 314,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 7,
+          "scenario_return_on_risk_pct": 0.75,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "INTRINSIC_FLOOR_APPLIED",
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "upside": {
+          "underlying_price": 306,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 70,
+          "scenario_return_on_risk_pct": 7.53,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "INTRINSIC_FLOOR_APPLIED",
+            "LARGE_TIME_STEP"
+          ]
+        }
+      }
+    },
+    {
+      "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016P310.0::OPRA:PANW261016P320.0::conservative",
+      "rank": 6,
+      "strategy_type": "BEAR_PUT_SPREAD",
+      "ranking_class": "TRADE",
+      "expiration": "2026-10-16",
+      "days_to_expiry": 43,
+      "legs": [
+        {
+          "contract": "OPRA:PANW261016P320.0",
+          "action": "BUY",
+          "option_type": "put",
+          "strike": 320,
+          "fill_price": 15,
+          "bid": 14.4,
+          "ask": 15,
+          "spread_pct": 4.08,
+          "iv": 44.01,
+          "delta": -0.3878486949168834,
+          "gamma": 0.007680598859302349,
+          "theta": -0.21789892261659952,
+          "vega": 0.4341033270996745
+        },
+        {
+          "contract": "OPRA:PANW261016P310.0",
+          "action": "SELL",
+          "option_type": "put",
+          "strike": 310,
+          "fill_price": 10.75,
+          "bid": 10.75,
+          "ask": 11.2,
+          "spread_pct": 4.1,
+          "iv": 44.46,
+          "delta": -0.311531381049262,
+          "gamma": 0.0070180293823508145,
+          "theta": -0.20366070361269875,
+          "vega": 0.4006475617498237
+        }
+      ],
+      "entry_debit": 425,
+      "capital_required": 425,
+      "max_loss": 425,
+      "max_profit": 575,
+      "max_profit_type": "DEFINED",
+      "breakeven": 315.75,
+      "reward_risk_ratio": 1.35,
+      "reward_risk_type": "DEFINED",
+      "score": 50.51,
+      "grade": "D",
+      "confidence": "LOW",
+      "confidence_reasons": [
+        "LARGE_TIME_STEP (downside)",
+        "LARGE_TIME_STEP (base)",
+        "LARGE_TIME_STEP (upside)"
+      ],
+      "consideration_eligible": false,
+      "consideration_reasons": [
+        "SCORE_BELOW_THRESHOLD",
+        "CONFIDENCE_BELOW_THRESHOLD"
+      ],
+      "component_scores": {
+        "base": 55.65,
+        "downside": 66.82,
+        "upside": 14,
+        "breakeven": 52.65,
+        "execution": 72.67
+      },
+      "raw_metrics": {
+        "downside_pnl": -141,
+        "base_pnl": 48,
+        "upside_pnl": 119,
+        "downside_return_on_risk_pct": -33.18,
+        "base_return_on_risk_pct": 11.29,
+        "upside_return_on_risk_pct": 28,
+        "max_loss": 425,
+        "capital_required": 425,
+        "breakeven": 315.75,
+        "reward_risk_ratio": 1.35,
+        "reward_risk_type": "DEFINED",
+        "scenario_asymmetry_ratio": 0.84,
+        "breakeven_margin_pct": 0.53,
+        "max_leg_spread_pct": 4.1
+      },
+      "scenario_results": {
+        "downside": {
+          "underlying_price": 338,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": -141,
+          "scenario_return_on_risk_pct": -33.18,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "base": {
+          "underlying_price": 314,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 48,
+          "scenario_return_on_risk_pct": 11.29,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "upside": {
+          "underlying_price": 306,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 119,
+          "scenario_return_on_risk_pct": 28,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "LARGE_TIME_STEP"
+          ]
+        }
+      }
+    },
+    {
+      "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016P300.0::OPRA:PANW261016P320.0::conservative",
+      "rank": 7,
+      "strategy_type": "BEAR_PUT_SPREAD",
+      "ranking_class": "TRADE",
+      "expiration": "2026-10-16",
+      "days_to_expiry": 43,
+      "legs": [
+        {
+          "contract": "OPRA:PANW261016P320.0",
+          "action": "BUY",
+          "option_type": "put",
+          "strike": 320,
+          "fill_price": 15,
+          "bid": 14.4,
+          "ask": 15,
+          "spread_pct": 4.08,
+          "iv": 44.01,
+          "delta": -0.3878486949168834,
+          "gamma": 0.007680598859302349,
+          "theta": -0.21789892261659952,
+          "vega": 0.4341033270996745
+        },
+        {
+          "contract": "OPRA:PANW261016P300.0",
+          "action": "SELL",
+          "option_type": "put",
+          "strike": 300,
+          "fill_price": 7.65,
+          "bid": 7.65,
+          "ask": 8.1,
+          "spread_pct": 5.71,
+          "iv": 44.86,
+          "delta": -0.2415697150542303,
+          "gamma": 0.006137051555758157,
+          "theta": -0.18172358112551681,
+          "vega": 0.35353800122502466
+        }
+      ],
+      "entry_debit": 735,
+      "capital_required": 735,
+      "max_loss": 735,
+      "max_profit": 1265,
+      "max_profit_type": "DEFINED",
+      "breakeven": 312.65,
+      "reward_risk_ratio": 1.72,
+      "reward_risk_type": "DEFINED",
+      "score": 50.17,
+      "grade": "D",
+      "confidence": "LOW",
+      "confidence_reasons": [
+        "LARGE_TIME_STEP (downside)",
+        "LARGE_TIME_STEP (base)",
+        "LARGE_TIME_STEP (upside)",
+        "max_leg_spread_pct=5.71"
+      ],
+      "consideration_eligible": false,
+      "consideration_reasons": [
+        "SCORE_BELOW_THRESHOLD",
+        "CONFIDENCE_BELOW_THRESHOLD"
+      ],
+      "component_scores": {
+        "base": 57.49,
+        "downside": 65.31,
+        "upside": 17.15,
+        "breakeven": 47.95,
+        "execution": 61.93
+      },
+      "raw_metrics": {
+        "downside_pnl": -255,
+        "base_pnl": 110,
+        "upside_pnl": 252,
+        "downside_return_on_risk_pct": -34.69,
+        "base_return_on_risk_pct": 14.97,
+        "upside_return_on_risk_pct": 34.29,
+        "max_loss": 735,
+        "capital_required": 735,
+        "breakeven": 312.65,
+        "reward_risk_ratio": 1.72,
+        "reward_risk_type": "DEFINED",
+        "scenario_asymmetry_ratio": 0.99,
+        "breakeven_margin_pct": -0.41,
+        "max_leg_spread_pct": 5.71
+      },
+      "scenario_results": {
+        "downside": {
+          "underlying_price": 338,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": -255,
+          "scenario_return_on_risk_pct": -34.69,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "base": {
+          "underlying_price": 314,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 110,
+          "scenario_return_on_risk_pct": 14.97,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "upside": {
+          "underlying_price": 306,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 252,
+          "scenario_return_on_risk_pct": 34.29,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "LARGE_TIME_STEP"
+          ]
+        }
+      }
+    },
+    {
+      "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016P290.0::OPRA:PANW261016P320.0::conservative",
+      "rank": 8,
+      "strategy_type": "BEAR_PUT_SPREAD",
+      "ranking_class": "TRADE",
+      "expiration": "2026-10-16",
+      "days_to_expiry": 43,
+      "legs": [
+        {
+          "contract": "OPRA:PANW261016P320.0",
+          "action": "BUY",
+          "option_type": "put",
+          "strike": 320,
+          "fill_price": 15,
+          "bid": 14.4,
+          "ask": 15,
+          "spread_pct": 4.08,
+          "iv": 44.01,
+          "delta": -0.3878486949168834,
+          "gamma": 0.007680598859302349,
+          "theta": -0.21789892261659952,
+          "vega": 0.4341033270996745
+        },
+        {
+          "contract": "OPRA:PANW261016P290.0",
+          "action": "SELL",
+          "option_type": "put",
+          "strike": 290,
+          "fill_price": 5.3,
+          "bid": 5.3,
+          "ask": 5.6,
+          "spread_pct": 5.5,
+          "iv": 45.34,
+          "delta": -0.180564560252895,
+          "gamma": 0.005117582036783851,
+          "theta": -0.1550342004784941,
+          "vega": 0.29794051271906524
+        }
+      ],
+      "entry_debit": 970,
+      "capital_required": 970,
+      "max_loss": 970,
+      "max_profit": 2030,
+      "max_profit_type": "DEFINED",
+      "breakeven": 310.3,
+      "reward_risk_ratio": 2.09,
+      "reward_risk_type": "DEFINED",
+      "score": 47.66,
+      "grade": "F",
+      "confidence": "LOW",
+      "confidence_reasons": [
+        "LARGE_TIME_STEP (downside)",
+        "INTRINSIC_FLOOR_APPLIED (downside)",
+        "LARGE_TIME_STEP (base)",
+        "LARGE_TIME_STEP (upside)",
+        "max_leg_spread_pct=5.5"
+      ],
+      "consideration_eligible": false,
+      "consideration_reasons": [
+        "SCORE_BELOW_THRESHOLD",
+        "CONFIDENCE_BELOW_THRESHOLD"
+      ],
+      "component_scores": {
+        "base": 57.53,
+        "downside": 56.29,
+        "upside": 18.15,
+        "breakeven": 44.39,
+        "execution": 63.33
+      },
+      "raw_metrics": {
+        "downside_pnl": -424,
+        "base_pnl": 146,
+        "upside_pnl": 352,
+        "downside_return_on_risk_pct": -43.71,
+        "base_return_on_risk_pct": 15.05,
+        "upside_return_on_risk_pct": 36.29,
+        "max_loss": 970,
+        "capital_required": 970,
+        "breakeven": 310.3,
+        "reward_risk_ratio": 2.09,
+        "reward_risk_type": "DEFINED",
+        "scenario_asymmetry_ratio": 0.83,
+        "breakeven_margin_pct": -1.12,
+        "max_leg_spread_pct": 5.5
+      },
+      "scenario_results": {
+        "downside": {
+          "underlying_price": 338,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": -424,
+          "scenario_return_on_risk_pct": -43.71,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "LARGE_TIME_STEP",
+            "INTRINSIC_FLOOR_APPLIED"
+          ]
+        },
+        "base": {
+          "underlying_price": 314,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 146,
+          "scenario_return_on_risk_pct": 15.05,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "upside": {
+          "underlying_price": 306,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 352,
+          "scenario_return_on_risk_pct": 36.29,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "LARGE_TIME_STEP"
+          ]
+        }
+      }
+    },
+    {
+      "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-09::OPRA:PANW261009P335.0::OPRA:PANW261009P345.0::conservative",
+      "rank": 9,
+      "strategy_type": "BEAR_PUT_SPREAD",
+      "ranking_class": "TRADE",
+      "expiration": "2026-10-09",
+      "days_to_expiry": 36,
+      "legs": [
+        {
+          "contract": "OPRA:PANW261009P345.0",
+          "action": "BUY",
+          "option_type": "put",
+          "strike": 345,
+          "fill_price": 29.2,
+          "bid": 26.3,
+          "ask": 29.2,
+          "spread_pct": 10.45,
+          "iv": 45.9,
+          "delta": -0.5942816582396044,
+          "gamma": 0.008155210175541371,
+          "theta": -0.24944152135911798,
+          "vega": 0.4016873730955659
+        },
+        {
+          "contract": "OPRA:PANW261009P335.0",
+          "action": "SELL",
+          "option_type": "put",
+          "strike": 335,
+          "fill_price": 20.35,
+          "bid": 20.35,
+          "ask": 22.8,
+          "spread_pct": 11.36,
+          "iv": 45.77,
+          "delta": -0.514038476942104,
+          "gamma": 0.00840868769410945,
+          "theta": -0.25682269572647676,
+          "vega": 0.4130271190652155
+        }
+      ],
+      "entry_debit": 885,
+      "capital_required": 885,
+      "max_loss": 885,
+      "max_profit": 115,
+      "max_profit_type": "DEFINED",
+      "breakeven": 336.15,
+      "reward_risk_ratio": 0.13,
+      "reward_risk_type": "DEFINED",
+      "score": 46.43,
+      "grade": "F",
+      "confidence": "LOW",
+      "confidence_reasons": [
+        "LARGE_TIME_STEP (downside)",
+        "INTRINSIC_FLOOR_APPLIED (base)",
+        "LARGE_TIME_STEP (base)",
+        "INTRINSIC_FLOOR_APPLIED (upside)",
+        "LARGE_TIME_STEP (upside)",
+        "max_leg_spread_pct=11.36 exceeds 10%"
+      ],
+      "consideration_eligible": false,
+      "consideration_reasons": [
+        "SCORE_BELOW_THRESHOLD",
+        "CONFIDENCE_BELOW_THRESHOLD"
+      ],
+      "component_scores": {
+        "base": 43.51,
+        "downside": 64.63,
+        "upside": 6.5,
+        "breakeven": 83.56,
+        "execution": 24.27
+      },
+      "raw_metrics": {
+        "downside_pnl": -313,
+        "base_pnl": -115,
+        "upside_pnl": 115,
+        "downside_return_on_risk_pct": -35.37,
+        "base_return_on_risk_pct": -12.99,
+        "upside_return_on_risk_pct": 12.99,
+        "max_loss": 885,
+        "capital_required": 885,
+        "breakeven": 336.15,
+        "reward_risk_ratio": 0.13,
+        "reward_risk_type": "DEFINED",
+        "scenario_asymmetry_ratio": 0.37,
+        "breakeven_margin_pct": 6.71,
+        "max_leg_spread_pct": 11.36
+      },
+      "scenario_results": {
+        "downside": {
+          "underlying_price": 338,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": -313,
+          "scenario_return_on_risk_pct": -35.37,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "base": {
+          "underlying_price": 314,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": -115,
+          "scenario_return_on_risk_pct": -12.99,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "INTRINSIC_FLOOR_APPLIED",
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "upside": {
+          "underlying_price": 306,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 115,
+          "scenario_return_on_risk_pct": 12.99,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "INTRINSIC_FLOOR_APPLIED",
+            "LARGE_TIME_STEP"
+          ]
+        }
+      }
+    },
+    {
+      "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-09::OPRA:PANW261009P330.0::OPRA:PANW261009P340.0::conservative",
+      "rank": 10,
+      "strategy_type": "BEAR_PUT_SPREAD",
+      "ranking_class": "TRADE",
+      "expiration": "2026-10-09",
+      "days_to_expiry": 36,
+      "legs": [
+        {
+          "contract": "OPRA:PANW261009P340.0",
+          "action": "BUY",
+          "option_type": "put",
+          "strike": 340,
+          "fill_price": 25.6,
+          "bid": 22.95,
+          "ask": 25.6,
+          "spread_pct": 10.92,
+          "iv": 45.83,
+          "delta": -0.5548013094233721,
+          "gamma": 0.008323589947684838,
+          "theta": -0.25439454166057585,
+          "vega": 0.4093776334263611
+        },
+        {
+          "contract": "OPRA:PANW261009P330.0",
+          "action": "SELL",
+          "option_type": "put",
+          "strike": 330,
+          "fill_price": 17.75,
+          "bid": 17.75,
+          "ask": 20.2,
+          "spread_pct": 12.91,
+          "iv": 45.72,
+          "delta": -0.4724007032527298,
+          "gamma": 0.008403445950026994,
+          "theta": -0.25650750941954154,
+          "vega": 0.4122936376464718
+        }
+      ],
+      "entry_debit": 785,
+      "capital_required": 785,
+      "max_loss": 785,
+      "max_profit": 215,
+      "max_profit_type": "DEFINED",
+      "breakeven": 332.15,
+      "reward_risk_ratio": 0.27,
+      "reward_risk_type": "DEFINED",
+      "score": 46.08,
+      "grade": "F",
+      "confidence": "LOW",
+      "confidence_reasons": [
+        "LARGE_TIME_STEP (downside)",
+        "LARGE_TIME_STEP (base)",
+        "INTRINSIC_FLOOR_APPLIED (upside)",
+        "LARGE_TIME_STEP (upside)",
+        "max_leg_spread_pct=12.91 exceeds 10%"
+      ],
+      "consideration_eligible": false,
+      "consideration_reasons": [
+        "SCORE_BELOW_THRESHOLD",
+        "CONFIDENCE_BELOW_THRESHOLD"
+      ],
+      "component_scores": {
+        "base": 45.35,
+        "downside": 65.73,
+        "upside": 7.26,
+        "breakeven": 77.5,
+        "execution": 13.93
+      },
+      "raw_metrics": {
+        "downside_pnl": -269,
+        "base_pnl": -73,
+        "upside_pnl": 114,
+        "downside_return_on_risk_pct": -34.27,
+        "base_return_on_risk_pct": -9.3,
+        "upside_return_on_risk_pct": 14.52,
+        "max_loss": 785,
+        "capital_required": 785,
+        "breakeven": 332.15,
+        "reward_risk_ratio": 0.27,
+        "reward_risk_type": "DEFINED",
+        "scenario_asymmetry_ratio": 0.42,
+        "breakeven_margin_pct": 5.5,
+        "max_leg_spread_pct": 12.91
+      },
+      "scenario_results": {
+        "downside": {
+          "underlying_price": 338,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": -269,
+          "scenario_return_on_risk_pct": -34.27,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "base": {
+          "underlying_price": 314,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": -73,
+          "scenario_return_on_risk_pct": -9.3,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "LARGE_TIME_STEP"
+          ]
+        },
+        "upside": {
+          "underlying_price": 306,
+          "iv_change_points_requested": 0,
+          "available": true,
+          "scenario_pnl": 114,
+          "scenario_return_on_risk_pct": 14.52,
+          "pricing_models_used": [
+            "LOCAL_GREEK_APPROXIMATION"
+          ],
+          "warnings": [
+            "INTRINSIC_FLOOR_APPLIED",
+            "LARGE_TIME_STEP"
+          ]
+        }
+      }
+    }
+  ],
+  "near_miss_candidates": [
+    {
+      "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016P320.0::OPRA:PANW261016P330.0::conservative",
+      "strategy_type": "BEAR_PUT_SPREAD",
+      "score": 63.83,
+      "confidence": "LOW",
+      "consideration_eligible": false,
+      "consideration_reasons": [
+        "CONFIDENCE_BELOW_THRESHOLD"
+      ]
+    },
+    {
+      "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016P330.0::OPRA:PANW261016P340.0::conservative",
+      "strategy_type": "BEAR_PUT_SPREAD",
+      "score": 62.6,
+      "confidence": "LOW",
+      "consideration_eligible": false,
+      "consideration_reasons": [
+        "CONFIDENCE_BELOW_THRESHOLD"
+      ]
+    },
+    {
+      "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016P310.0::OPRA:PANW261016P330.0::conservative",
+      "strategy_type": "BEAR_PUT_SPREAD",
+      "score": 61.67,
+      "confidence": "LOW",
+      "consideration_eligible": false,
+      "consideration_reasons": [
+        "CONFIDENCE_BELOW_THRESHOLD"
+      ]
+    },
+    {
+      "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016P340.0::OPRA:PANW261016P350.0::conservative",
+      "strategy_type": "BEAR_PUT_SPREAD",
+      "score": 56.45,
+      "confidence": "LOW",
+      "consideration_eligible": false,
+      "consideration_reasons": [
+        "SCORE_BELOW_THRESHOLD",
+        "CONFIDENCE_BELOW_THRESHOLD"
+      ]
+    },
+    {
+      "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016P350.0::OPRA:PANW261016P360.0::conservative",
+      "strategy_type": "BEAR_PUT_SPREAD",
+      "score": 54.49,
+      "confidence": "LOW",
+      "consideration_eligible": false,
+      "consideration_reasons": [
+        "SCORE_BELOW_THRESHOLD",
+        "CONFIDENCE_BELOW_THRESHOLD"
+      ]
+    }
+  ],
+  "baselines": [
+    {
+      "candidate_id": "NO_TRADE::NASDAQ:PANW",
+      "strategy_type": "NO_TRADE",
+      "ranking_class": "BASELINE",
+      "score": null,
+      "grade": null,
+      "confidence": "HIGH",
+      "consideration_eligible": true
+    }
+  ],
+  "field_provenance": {
+    "MARKET_NATIVE": [
+      "bid",
+      "ask",
+      "iv",
+      "bid_iv",
+      "ask_iv",
+      "delta",
+      "gamma",
+      "theta",
+      "vega",
+      "rho",
+      "theoretical_price",
+      "underlying_price"
+    ],
+    "MARKET_DERIVED": [
+      "spread_pct",
+      "mid",
+      "spread",
+      "iv_spread",
+      "fill_price"
+    ],
+    "ENGINE_CALCULATED": [
+      "entry_debit",
+      "capital_required",
+      "max_loss",
+      "max_profit",
+      "breakeven",
+      "reward_risk_ratio",
+      "scenario_pnl",
+      "scenario_return_on_risk_pct",
+      "estimated_value",
+      "score",
+      "grade",
+      "confidence",
+      "component_scores",
+      "analysis_snapshot_id",
+      "diagnostics.crr_hybrid_policy"
+    ],
+    "USER_INPUT": [
+      "symbol",
+      "direction",
+      "horizon_days",
+      "max_loss (constraint)",
+      "base_target_price"
+    ],
+    "DETERMINISTIC_ASSUMPTION": [
+      "contract_multiplier (assumed 100 for standard US equity options)",
+      "downside_target_price (helper-derived)",
+      "upside_target_price (helper-derived)"
+    ]
+  },
+  "ai_contract": {
+    "allowed_candidate_ids": [
+      "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016P320.0::OPRA:PANW261016P330.0::conservative",
+      "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016P330.0::OPRA:PANW261016P340.0::conservative",
+      "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016P310.0::OPRA:PANW261016P330.0::conservative",
+      "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016P340.0::OPRA:PANW261016P350.0::conservative",
+      "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016P350.0::OPRA:PANW261016P360.0::conservative",
+      "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016P310.0::OPRA:PANW261016P320.0::conservative",
+      "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016P300.0::OPRA:PANW261016P320.0::conservative",
+      "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016P290.0::OPRA:PANW261016P320.0::conservative",
+      "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-09::OPRA:PANW261009P335.0::OPRA:PANW261009P345.0::conservative",
+      "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-09::OPRA:PANW261009P330.0::OPRA:PANW261009P340.0::conservative",
+      "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016P320.0::OPRA:PANW261016P330.0::conservative",
+      "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016P330.0::OPRA:PANW261016P340.0::conservative",
+      "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016P310.0::OPRA:PANW261016P330.0::conservative",
+      "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016P340.0::OPRA:PANW261016P350.0::conservative",
+      "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016P350.0::OPRA:PANW261016P360.0::conservative",
+      "NO_TRADE::NASDAQ:PANW"
+    ],
+    "numeric_source_of_truth": "THIS_ANALYSIS_PACKET",
+    "rules": [
+      "Do not invent option contracts.",
+      "Do not invent prices.",
+      "Do not recalculate Greeks.",
+      "Do not recalculate max loss/profit.",
+      "Do not alter scenario P&L.",
+      "Do not state score as probability.",
+      "Do not state delta as probability of profit.",
+      "Do not claim consideration_eligible means recommendation.",
+      "If no candidate is eligible, preserve that result — do not promote a near-miss into a recommendation.",
+      "Explicitly mention LOW confidence when discussing a candidate.",
+      "Mention important scenario warnings (e.g. LARGE_TIME_STEP, NEAR_EXPIRATION) when present.",
+      "Do not treat crr_hybrid_policy diagnostics as a recommendation, score override, or production pricing switch.",
+      "Do not infer volume or open interest. Open interest is currently unavailable. Volume is not used by this analysis (not a filtering/scoring/ranking input) even where it may be technically obtainable elsewhere as optional live enrichment."
+    ]
+  },
+  "limitations": [
+    "Score is a heuristic comparative metric (RANKING_MODEL_V1), not a probability or expected return.",
+    "Scenario repricing (LOCAL_GREEK_APPROXIMATION) is a local approximation, not a full option pricing model — see Phase 0B limitations.",
+    "Ranking depends entirely on the user-supplied scenario prices; different assumptions produce different rankings.",
+    "Open interest is currently unavailable. Volume (technically obtainable via TradingView WebSocket subscription, but UI/subscription-dependent and event-driven, not a guaranteed initial snapshot) is not a dependency of this tool — neither volume nor open interest is used in filtering, scoring, or ranking.",
+    "No historical calibration of scoring weights or thresholds.",
+    "No earnings/event-driven volatility model — IV shocks default to 0 unless explicitly supplied.",
+    "No portfolio-level risk (correlation, margin, concentration) is modeled.",
+    "No early-exercise/assignment or dividend/ex-dividend modeling.",
+    "The scan2 request may be capped by TradingView at 4000 rows for very large chains; chain_completeness/warnings surface this, but the DTE window does not currently reduce the underlying request size.",
+    "No AI/LLM reasoning is performed by this tool — it returns structured, deterministic data only."
+  ]
+}

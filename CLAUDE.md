@@ -1,6 +1,6 @@
 # TradingView MCP — Claude Instructions
 
-84 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
+93 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
 
 ## Decision Tree — Which Tool When
 
@@ -32,6 +32,28 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 5. `data_get_pine_tables` → session stats, analytics tables
 6. `data_get_ohlcv` with `summary: true` → price action summary
 7. `capture_screenshot` → visual confirmation
+
+### "What do analysts / fundamentals / news say?" (symbol data panels)
+These read the sections of TradingView's symbol sidebar. They render to `<canvas>`, so they are
+read via TradingView's own data requests from page context — not DOM scraping. All default to the
+chart symbol; pass `symbol` (exchange-qualified, e.g. `"NASDAQ:AMZN"`) to read another instrument
+without touching the chart.
+
+- `data_get_key_stats` → market cap, next earnings date, volume, avg volume, dividend yield, P/E, EPS, beta
+- `data_get_technicals` → consensus gauges (Summary / Moving Averages / Oscillators) + raw indicator values; `timeframe` accepts 1, 5, 15, 30, 60, 120, 240, 1D, 1W, 1M
+- `data_get_forecast` → analyst price target low/average/high, upside %, consensus rating, buy/hold/sell counts
+- `data_get_financials` → revenue, net income, EPS, EBITDA, FCF, margins; `period: "annual"|"quarterly"`
+- `data_get_seasonals` → average return + win rate per calendar month (chart symbol only)
+- `data_get_news` → recent headlines with source, date, link
+- `data_get_options` → ATM implied-volatility term structure per expiry
+- `data_get_etf_profile` / `data_get_bond_info` → fund and bond specifics; error clearly on the wrong instrument type
+
+**Important:** the chart's display ticker is often the *feed* venue (`BATS:AMZN`), which the data
+service rejects. These tools resolve the listing venue (`NASDAQ:AMZN`) automatically — but if you
+pass `symbol` yourself, pass the listing venue.
+
+**Note:** `data_get_seasonals` briefly switches the chart to the 1M resolution and restores the
+original — it is the only symbol-data tool that touches chart state.
 
 ### "Change the chart"
 - `chart_set_symbol` → switch ticker (e.g., "AAPL", "ES1!", "NYMEX:CL1!")
@@ -109,6 +131,13 @@ These tools can return large payloads. Follow these rules to avoid context bloat
 | `data_get_ohlcv` (summary) | ~500 bytes |
 | `data_get_ohlcv` (100 bars) | ~8 KB |
 | `capture_screenshot` | ~300 bytes (returns file path, not image data) |
+| `data_get_key_stats` | ~600 bytes |
+| `data_get_technicals` | ~1 KB |
+| `data_get_forecast` | ~500 bytes |
+| `data_get_financials` | ~700 bytes per period (default 8) |
+| `data_get_seasonals` | ~2 KB |
+| `data_get_news` | ~300 bytes per headline (default 15) |
+| `data_get_options` | ~1 KB (default 10 expiries) |
 
 ## Tool Conventions
 
@@ -119,6 +148,105 @@ These tools can return large payloads. Follow these rules to avoid context bloat
 - Screenshots save to `screenshots/` directory with timestamps
 - OHLCV capped at 500 bars, trades at 20 per request
 - Pine labels capped at 50 per study by default (pass `max_labels` to override)
+
+## OPTIONS COPILOT OPERATING STANDARD
+
+This section applies whenever the user asks for **directional US options analysis
+or strategy comparison** (e.g. "I think NVDA hits $250 in 30 days, what can I do
+with options?"). It does not change any other instruction in this file.
+
+### Tool selection policy
+- Prefer `options_analyze_directional` as the primary, high-level tool. It already
+  orchestrates `options_get_chain` -> candidate generation -> scenario repricing -> ranking.
+- Do not manually call `options_get_chain` or reimplement strategy/scenario/ranking
+  logic yourself, unless `options_analyze_directional` fails or the user explicitly
+  asks to inspect a lower-level component.
+
+### Required inputs
+`symbol`, `direction`, `horizon_days`, `max_loss`, `base_target_price` are required.
+If one is genuinely missing from the conversation, ask only for that missing value.
+Never invent a target price and never infer the user's thesis from analyst targets,
+technicals, or your own market opinion — the target must come from the user.
+
+### User thesis vs. model output
+Always distinguish the user's supplied target/scenario prices from anything the
+engine calculates. E.g. "$250 is your assumed base target, not a forecast generated
+by the engine."
+
+### Numeric discipline
+Once `options_analyze_directional` returns, its `ai_contract.numeric_source_of_truth`
+is binding. Do not independently calculate option price, max loss/profit, breakeven,
+Greeks, scenario P&L, return on risk, score, or ranking — only trivial display
+rounding is allowed. Discuss only candidates in `ai_contract.allowed_candidate_ids`;
+never invent a strike, expiration, contract, or spread leg. If a desired candidate
+isn't in the packet, say the analysis didn't return it.
+
+### Score / confidence / eligibility language
+- Score and grade are a **comparative heuristic under the supplied scenarios**, not
+  a probability, win rate, or expected return. Never turn "score 77" into "77%
+  probability."
+- Delta is a Greek, not a probability of profit — never describe it as one.
+- `consideration_eligible` means "passes the deterministic consideration gates," not
+  "recommended" / "buy" / "best trade" / "safe trade." In Turkish, prefer
+  "motorun değerlendirmeye uygun bulduğu aday" — avoid "almanız gereken",
+  "kesinlikle alın", "en iyi işlem." Stay analytical unless the user explicitly asks
+  for personal decision support and a future policy permits it.
+- Treat confidence independently from score: a high-score/LOW-confidence candidate
+  must be described as economically attractive under the assumed scenarios but not
+  consideration-eligible because the scenario/pricing model isn't reliable in that
+  region — never silently upgrade a LOW-confidence candidate to eligible.
+
+### Baselines
+- `NO_TRADE` is a real baseline. If `decision_state` is `NO_TRADE_BASELINE_ONLY`,
+  preserve it exactly — do not promote a near-miss candidate into a recommendation.
+  Near-miss candidates may only be explained as "why they failed."
+- `BUY_STOCK` is a baseline for "would buying the underlying be cleaner than an
+  option?" Don't assume an options strategy must beat it — report faithfully if
+  `BUY_STOCK` ranks highest or is the only eligible position.
+
+### IV assumption
+If `IV_SCENARIO_NOT_SPECIFIED` appears, state clearly that the user supplied no IV
+view, so the engine held IV unchanged as an *analysis assumption* — not a forecast
+that IV will actually stay flat.
+
+### Volume / open interest
+Open interest is currently unavailable and must never be inferred. Volume is
+technically obtainable via TradingView WebSocket subscription, but it is
+UI/subscription-dependent, event-driven, and not a guaranteed initial snapshot — it
+is **not** a dependency of `options_analyze_directional`. For this analysis packet,
+treat volume as "not used / optional live enrichment," not as categorically
+unavailable from TradingView.
+
+### Model limitations to surface when relevant
+Mention `LOCAL_GREEK_APPROXIMATION` and any warnings actually present in the packet
+(e.g. `LARGE_TIME_STEP`, `NEAR_EXPIRATION`, `LARGE_SPOT_MOVE`, `LARGE_IV_CHANGE`,
+`INTRINSIC_FLOOR_APPLIED`). Don't mechanically list warnings that aren't present.
+
+### Default Turkish explanation format
+For Turkish-language requests, default to this structure, educational in tone, with
+the top 3–5 most relevant candidates plus baselines (not every returned candidate):
+
+1. SENİN VARSAYIMIN
+2. MOTORUN SONUCU
+3. DEĞERLENDİRMEYE UYGUN ADAYLAR
+4. YÜKSEK PUANLI AMA ELENEN ADAYLAR
+5. BUY STOCK / NO TRADE KARŞILAŞTIRMASI
+6. OPSİYON EĞİTİMİ
+7. KRİTİK RİSKLER
+
+A compact per-candidate table (strategy, expiration, max loss, max profit,
+breakeven, score, confidence, eligible, downside/base/upside P&L) is preferred over
+prose when comparing multiple candidates — populate it only with packet values.
+
+### Internal self-check (not normally shown to the user)
+Before finalizing, verify: every mentioned candidate ID is in `allowed_candidate_ids`;
+no contract/value was invented or recalculated; no score was called a probability;
+no delta was called probability-of-profit; no volume/OI was inferred; LOW confidence
+was surfaced where present; `NO_TRADE` was preserved when applicable; the user's
+target was clearly identified as user input. Print this audit only when testing,
+debugging, or explicitly requested — not in normal use.
+
+Behavioral fixtures illustrating these rules: `docs/options-copilot-fixtures.md`.
 
 ## Architecture
 

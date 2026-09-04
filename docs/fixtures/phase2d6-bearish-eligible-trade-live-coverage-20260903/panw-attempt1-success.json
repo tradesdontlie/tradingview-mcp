@@ -1,0 +1,84 @@
+{
+  "analysis_type": "DIRECTIONAL_OPTIONS",
+  "analysis_snapshot_id": "4b1ff2bd9c702a9c",
+  "analysis_as_of_utc": "2026-09-03T19:38:52.869Z",
+  "symbol": "NASDAQ:PANW",
+  "underlying_price": 329.655,
+  "direction": "bearish",
+  "horizon_days": 30,
+  "max_loss": 2500,
+  "thesis": { "base_target_price": 303, "expected_move_absolute": -26.65, "expected_move_pct": -8.09 },
+  "input_echo": {
+    "symbol": "NASDAQ:PANW", "direction": "bearish", "horizon_days": 30, "max_loss": 2500, "base_target_price": 303,
+    "downside_target_price": null, "upside_target_price": null,
+    "downside_iv_change_points": 0, "base_iv_change_points": 0, "upside_iv_change_points": 0,
+    "min_dte": 60, "max_dte": 90, "include_crr_hybrid_diagnostics": true,
+    "execution_model": "conservative", "commission_per_contract": 0, "contract_multiplier": 100,
+    "max_spread_pct": 25, "max_ranked_results": 10
+  },
+  "scenario_definitions": {
+    "downside": { "scenario_id": "DOWNSIDE", "underlying_price": 342.98, "iv_change_points": 0, "days_forward": 30, "scenario_source": "DETERMINISTIC_HELPER" },
+    "base": { "scenario_id": "BASE", "underlying_price": 303, "iv_change_points": 0, "days_forward": 30, "scenario_source": "USER_EXPLICIT" },
+    "upside": { "scenario_id": "UPSIDE", "underlying_price": 289.67, "iv_change_points": 0, "days_forward": 30, "scenario_source": "DETERMINISTIC_HELPER" }
+  },
+  "data_source": {
+    "provider": "TradingView Options Scanner", "endpoint": "/options/scan2",
+    "options_retrieved_at_utc": "2026-09-03T19:38:52.869Z", "chain_completeness": "COMPLETE", "warnings": []
+  },
+  "candidate_generation": {
+    "input_contract_count": 184, "eligible_contract_count": 92, "candidate_count": 27, "rejected_count": 90,
+    "rejection_summary": { "WIDE_SPREAD": 40, "DELTA_OUT_OF_RANGE": 44, "MAX_LOSS_EXCEEDED": 6 }
+  },
+  "ranking": {
+    "model": "RANKING_MODEL_V1",
+    "disclaimer": "Comparative heuristic score under user-supplied scenarios; not probability or expected return.",
+    "decision_state": "TRADE_CANDIDATES_AVAILABLE",
+    "top_trade_candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-11-20::OPRA:PANW261120P310.0::OPRA:PANW261120P330.0::conservative",
+    "fallback_baseline": "NO_TRADE",
+    "thresholds": { "minimum_score_for_consideration": 60, "minimum_confidence_for_consideration": "MEDIUM", "min_capped_reward_risk": null, "configured_max_spread_pct": 25 }
+  },
+  "scenario_quality_summary": { "HIGH_CONFIDENCE_CANDIDATES": 0, "MEDIUM_CONFIDENCE_CANDIDATES": 26, "LOW_CONFIDENCE_CANDIDATES": 0 },
+  "diagnostics": {
+    "crr_hybrid_policy": {
+      "status": "AVAILABLE",
+      "mode": "DIAGNOSTIC_ONLY_NO_RANKING_CHANGE",
+      "market_inputs": [
+        {
+          "expiration": "2026-11-20", "days_to_expiry": 78, "mode": "PARTIAL_EXTERNAL_INPUTS", "overall_confidence": "MEDIUM",
+          "discount_rate_source": "TREASURY_BILL_COUPON_EQUIVALENT_NORMALIZED",
+          "dividend_mode": "ZERO_DIVIDEND_CONFIRMED", "borrow_source": "NOT_CONNECTED",
+          "warnings": ["TREASURY_RATE_FROZEN_FALLBACK_NOT_LIVE", "BORROW_DATA_UNAVAILABLE"]
+        }
+      ],
+      "summary": { "total_candidates": 27, "by_action": { "LOCAL_ONLY": 23, "CRR_SHADOW_REVIEW": 3, "NO_ACTION": 1 }, "crr_shadow_available_count": 27, "local_warning_count": 3 },
+      "candidates": [
+        { "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-11-20::OPRA:PANW261120P300.0::OPRA:PANW261120P330.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "action": "LOCAL_ONLY", "reasons": ["LOCAL_CLEAN_AND_CRR_AGREES"], "local_warnings": [], "max_model_disagreement_level": "MODEL_DISAGREEMENT_LOW", "crr_shadow_available": true },
+        { "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-11-20::OPRA:PANW261120P310.0::OPRA:PANW261120P330.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "action": "LOCAL_ONLY", "reasons": ["LOCAL_CLEAN_AND_CRR_AGREES"], "local_warnings": [], "max_model_disagreement_level": "MODEL_DISAGREEMENT_LOW", "crr_shadow_available": true },
+        { "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-11-20::OPRA:PANW261120P320.0::OPRA:PANW261120P330.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "action": "LOCAL_ONLY", "reasons": ["LOCAL_CLEAN_AND_CRR_AGREES"], "local_warnings": [], "max_model_disagreement_level": "MODEL_DISAGREEMENT_LOW", "crr_shadow_available": true },
+        { "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-11-20::OPRA:PANW261120P310.0::OPRA:PANW261120P340.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "action": "LOCAL_ONLY", "reasons": ["LOCAL_CLEAN_AND_CRR_AGREES"], "local_warnings": [], "max_model_disagreement_level": "MODEL_DISAGREEMENT_LOW", "crr_shadow_available": true },
+        { "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-11-20::OPRA:PANW261120P320.0::OPRA:PANW261120P340.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "action": "LOCAL_ONLY", "reasons": ["LOCAL_CLEAN_AND_CRR_AGREES"], "local_warnings": [], "max_model_disagreement_level": "MODEL_DISAGREEMENT_LOW", "crr_shadow_available": true },
+        { "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-11-20::OPRA:PANW261120P320.0::OPRA:PANW261120P350.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "action": "LOCAL_ONLY", "reasons": ["LOCAL_CLEAN_AND_CRR_AGREES"], "local_warnings": [], "max_model_disagreement_level": "MODEL_DISAGREEMENT_LOW", "crr_shadow_available": true },
+        { "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-11-20::OPRA:PANW261120P330.0::OPRA:PANW261120P360.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "action": "LOCAL_ONLY", "reasons": ["LOCAL_CLEAN_AND_CRR_AGREES"], "local_warnings": [], "max_model_disagreement_level": "MODEL_DISAGREEMENT_LOW", "crr_shadow_available": true },
+        { "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-11-20::OPRA:PANW261120P340.0::OPRA:PANW261120P360.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "action": "LOCAL_ONLY", "reasons": ["LOCAL_CLEAN_AND_CRR_AGREES"], "local_warnings": [], "max_model_disagreement_level": "MODEL_DISAGREEMENT_LOW", "crr_shadow_available": true },
+        { "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-11-20::OPRA:PANW261120P340.0::OPRA:PANW261120P370.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "action": "LOCAL_ONLY", "reasons": ["LOCAL_CLEAN_AND_CRR_AGREES"], "local_warnings": [], "max_model_disagreement_level": "MODEL_DISAGREEMENT_LOW", "crr_shadow_available": true },
+        { "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-11-20::OPRA:PANW261120P350.0::OPRA:PANW261120P380.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "action": "CRR_SHADOW_REVIEW", "reasons": ["LOCAL_WARNINGS_MODERATE"], "local_warnings": ["INTRINSIC_FLOOR_APPLIED"], "max_model_disagreement_level": "MODEL_DISAGREEMENT_LOW", "crr_shadow_available": true }
+      ]
+    }
+  },
+  "top_candidates_summary": [
+    { "rank": 1, "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-11-20::OPRA:PANW261120P310.0::OPRA:PANW261120P330.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "score": 65.95, "confidence": "MEDIUM", "consideration_eligible": true },
+    { "rank": 2, "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-11-20::OPRA:PANW261120P310.0::OPRA:PANW261120P340.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "score": 65.3, "confidence": "MEDIUM", "consideration_eligible": true },
+    { "rank": 3, "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-11-20::OPRA:PANW261120P300.0::OPRA:PANW261120P330.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "score": 65.05, "confidence": "MEDIUM", "consideration_eligible": true },
+    { "rank": 4, "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-11-20::OPRA:PANW261120P320.0::OPRA:PANW261120P340.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "score": 63.4, "confidence": "MEDIUM", "consideration_eligible": true },
+    { "rank": 5, "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-11-20::OPRA:PANW261120P320.0::OPRA:PANW261120P330.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "score": 63.26, "confidence": "MEDIUM", "consideration_eligible": true },
+    { "rank": 6, "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-11-20::OPRA:PANW261120P330.0::OPRA:PANW261120P360.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "score": 60.84, "confidence": "MEDIUM", "consideration_eligible": true },
+    { "rank": 7, "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-11-20::OPRA:PANW261120P320.0::OPRA:PANW261120P350.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "score": 60.43, "confidence": "MEDIUM", "consideration_eligible": true },
+    { "rank": 8, "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-11-20::OPRA:PANW261120P340.0::OPRA:PANW261120P370.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "score": 58.83, "confidence": "MEDIUM", "consideration_eligible": false, "consideration_reasons": ["SCORE_BELOW_THRESHOLD"] },
+    { "rank": 9, "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-11-20::OPRA:PANW261120P350.0::OPRA:PANW261120P380.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "score": 57.85, "confidence": "MEDIUM", "consideration_eligible": false, "consideration_reasons": ["SCORE_BELOW_THRESHOLD"] },
+    { "rank": 10, "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:PANW::2026-11-20::OPRA:PANW261120P340.0::OPRA:PANW261120P360.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "score": 56.68, "confidence": "MEDIUM", "consideration_eligible": false, "consideration_reasons": ["SCORE_BELOW_THRESHOLD"] }
+  ],
+  "near_miss_candidates": [],
+  "baselines": [
+    { "candidate_id": "NO_TRADE::NASDAQ:PANW", "strategy_type": "NO_TRADE", "ranking_class": "BASELINE", "score": null, "grade": null, "confidence": "HIGH", "consideration_eligible": true }
+  ]
+}

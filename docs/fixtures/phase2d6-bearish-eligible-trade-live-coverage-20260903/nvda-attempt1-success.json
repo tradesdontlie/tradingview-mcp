@@ -1,0 +1,113 @@
+{
+  "analysis_type": "DIRECTIONAL_OPTIONS",
+  "analysis_snapshot_id": "9e06071af631212f",
+  "analysis_as_of_utc": "2026-09-03T19:38:04.769Z",
+  "symbol": "NASDAQ:NVDA",
+  "underlying_price": 229.255,
+  "direction": "bearish",
+  "horizon_days": 30,
+  "max_loss": 2500,
+  "thesis": {
+    "base_target_price": 211,
+    "expected_move_absolute": -18.25,
+    "expected_move_pct": -7.96
+  },
+  "input_echo": {
+    "symbol": "NASDAQ:NVDA",
+    "direction": "bearish",
+    "horizon_days": 30,
+    "max_loss": 2500,
+    "base_target_price": 211,
+    "downside_target_price": null,
+    "upside_target_price": null,
+    "downside_iv_change_points": 0,
+    "base_iv_change_points": 0,
+    "upside_iv_change_points": 0,
+    "min_dte": 60,
+    "max_dte": 90,
+    "include_crr_hybrid_diagnostics": true,
+    "execution_model": "conservative",
+    "commission_per_contract": 0,
+    "contract_multiplier": 100,
+    "max_spread_pct": 25,
+    "max_ranked_results": 10
+  },
+  "scenario_definitions": {
+    "downside": { "scenario_id": "DOWNSIDE", "underlying_price": 238.38, "iv_change_points": 0, "days_forward": 30, "scenario_source": "DETERMINISTIC_HELPER" },
+    "base": { "scenario_id": "BASE", "underlying_price": 211, "iv_change_points": 0, "days_forward": 30, "scenario_source": "USER_EXPLICIT" },
+    "upside": { "scenario_id": "UPSIDE", "underlying_price": 201.87, "iv_change_points": 0, "days_forward": 30, "scenario_source": "DETERMINISTIC_HELPER" }
+  },
+  "data_source": {
+    "provider": "TradingView Options Scanner",
+    "endpoint": "/options/scan2",
+    "options_retrieved_at_utc": "2026-09-03T19:38:04.768Z",
+    "chain_completeness": "COMPLETE",
+    "warnings": []
+  },
+  "candidate_generation": {
+    "input_contract_count": 136,
+    "eligible_contract_count": 68,
+    "candidate_count": 35,
+    "rejected_count": 61,
+    "rejection_summary": { "WIDE_SPREAD": 13, "DELTA_OUT_OF_RANGE": 46, "MAX_LOSS_EXCEEDED": 2 }
+  },
+  "ranking": {
+    "model": "RANKING_MODEL_V1",
+    "disclaimer": "Comparative heuristic score under user-supplied scenarios; not probability or expected return.",
+    "decision_state": "TRADE_CANDIDATES_AVAILABLE",
+    "top_trade_candidate_id": "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-11-20::OPRA:NVDA261120P225.0::OPRA:NVDA261120P230.0::conservative",
+    "fallback_baseline": "NO_TRADE",
+    "thresholds": {
+      "minimum_score_for_consideration": 60,
+      "minimum_confidence_for_consideration": "MEDIUM",
+      "min_capped_reward_risk": null,
+      "configured_max_spread_pct": 25
+    }
+  },
+  "scenario_quality_summary": {
+    "HIGH_CONFIDENCE_CANDIDATES": 24,
+    "MEDIUM_CONFIDENCE_CANDIDATES": 10,
+    "LOW_CONFIDENCE_CANDIDATES": 0
+  },
+  "diagnostics": {
+    "crr_hybrid_policy": {
+      "status": "AVAILABLE",
+      "mode": "DIAGNOSTIC_ONLY_NO_RANKING_CHANGE",
+      "market_inputs": [
+        {
+          "expiration": "2026-11-20",
+          "days_to_expiry": 78,
+          "mode": "PARTIAL_EXTERNAL_INPUTS",
+          "overall_confidence": "LOW",
+          "discount_rate_source": "TREASURY_BILL_COUPON_EQUIVALENT_NORMALIZED",
+          "dividend_mode": "TRAILING_DIVIDEND_YIELD_APPROXIMATION",
+          "borrow_source": "NOT_CONNECTED",
+          "warnings": ["TREASURY_RATE_FROZEN_FALLBACK_NOT_LIVE", "CONTINUOUS_DIVIDEND_APPROXIMATION", "TRAILING_NOT_FORWARD", "BORROW_DATA_UNAVAILABLE"]
+        }
+      ],
+      "summary": {
+        "total_candidates": 35,
+        "by_action": { "CRR_SHADOW_REVIEW": 18, "LOCAL_ONLY": 16, "NO_ACTION": 1 },
+        "crr_shadow_available_count": 35,
+        "local_warning_count": 10
+      },
+      "candidates_sample_note": "Top-10/near-miss-scoped candidates list omitted from this compact evidence file for brevity; see full tool response captured in the Phase 2D.6 report body for representative entries (all LOCAL_ONLY / CRR_SHADOW_REVIEW, max_model_disagreement_level LOW, local_warnings [] or [INTRINSIC_FLOOR_APPLIED])."
+    }
+  },
+  "top_candidates_summary": [
+    { "rank": 1, "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-11-20::OPRA:NVDA261120P225.0::OPRA:NVDA261120P230.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "score": 80.02, "confidence": "HIGH", "consideration_eligible": true },
+    { "rank": 2, "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-11-20::OPRA:NVDA261120P220.0::OPRA:NVDA261120P230.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "score": 77.63, "confidence": "HIGH", "consideration_eligible": true },
+    { "rank": 3, "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-11-20::OPRA:NVDA261120P225.0::OPRA:NVDA261120P235.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "score": 76.38, "confidence": "HIGH", "consideration_eligible": true },
+    { "rank": 4, "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-11-20::OPRA:NVDA261120P220.0::OPRA:NVDA261120P235.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "score": 74.53, "confidence": "HIGH", "consideration_eligible": true },
+    { "rank": 5, "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-11-20::OPRA:NVDA261120P215.0::OPRA:NVDA261120P230.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "score": 74.33, "confidence": "HIGH", "consideration_eligible": true },
+    { "rank": 6, "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-11-20::OPRA:NVDA261120P225.0::OPRA:NVDA261120P240.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "score": 73.88, "confidence": "HIGH", "consideration_eligible": true },
+    { "rank": 7, "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-11-20::OPRA:NVDA261120P230.0::OPRA:NVDA261120P245.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "score": 68.21, "confidence": "MEDIUM", "consideration_eligible": true },
+    { "rank": 8, "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-11-20::OPRA:NVDA261120P235.0::OPRA:NVDA261120P250.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "score": 67.78, "confidence": "MEDIUM", "consideration_eligible": true },
+    { "rank": 9, "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-11-20::OPRA:NVDA261120P235.0::OPRA:NVDA261120P245.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "score": 67.18, "confidence": "MEDIUM", "consideration_eligible": true },
+    { "rank": 10, "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:NVDA::2026-11-20::OPRA:NVDA261120P230.0::OPRA:NVDA261120P240.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "score": 66.92, "confidence": "HIGH", "consideration_eligible": true }
+  ],
+  "near_miss_candidates": [],
+  "baselines": [
+    { "candidate_id": "NO_TRADE::NASDAQ:NVDA", "strategy_type": "NO_TRADE", "ranking_class": "BASELINE", "score": null, "grade": null, "confidence": "HIGH", "consideration_eligible": true }
+  ]
+}

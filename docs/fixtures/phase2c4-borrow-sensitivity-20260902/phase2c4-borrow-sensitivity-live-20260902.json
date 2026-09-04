@@ -1,0 +1,1536 @@
+{
+  "phase": "Phase 2C.4 Active-Market Synthetic Borrow Sensitivity",
+  "status": "DIAGNOSTIC_ONLY_NO_PRODUCTION_SWITCH",
+  "warning": "Synthetic fee rates are not live borrow data and cannot satisfy FULL_EXTERNAL_INPUTS.",
+  "started_at_utc": "2026-09-02T19:22:36.683Z",
+  "completed_at_utc": "2026-09-02T19:23:46.977Z",
+  "treasury": {
+    "asOfDate": "2026-09-01",
+    "source": "U.S. Treasury Daily Treasury Bill Rates, latest published row available during run",
+    "billRates": {
+      "fourWeek": 0.0375,
+      "sixWeek": 0.0381,
+      "eightWeek": 0.0382,
+      "thirteenWeek": 0.0387,
+      "seventeenWeek": 0.0393,
+      "twentySixWeek": 0.0403,
+      "fiftyTwoWeek": 0.0418
+    }
+  },
+  "fee_grid": [
+    {
+      "label": "25BP",
+      "feeRate": 0.0025
+    },
+    {
+      "label": "75BP",
+      "feeRate": 0.0075
+    },
+    {
+      "label": "250BP",
+      "feeRate": 0.025
+    },
+    {
+      "label": "1000BP",
+      "feeRate": 0.1
+    }
+  ],
+  "symbols": [
+    {
+      "symbol": "NASDAQ:NVDA",
+      "root": "NVDA",
+      "quote": {
+        "last": 224.72,
+        "exchange": "Cboe One",
+        "time": 1788355800
+      },
+      "key_stats": {
+        "price": 224.71,
+        "dividend_yield_pct": 0.126823081800888,
+        "volume": 123098161,
+        "next_earnings_date": "2026-11-25"
+      },
+      "option_chain": {
+        "retrieved_at_utc": {
+          "calls": "2026-09-02T19:22:37.592Z",
+          "puts": "2026-09-02T19:22:38.062Z"
+        },
+        "returned_contracts": 217,
+        "matched_contracts": {
+          "calls": 104,
+          "puts": 113
+        },
+        "scanned": {
+          "calls": 3820,
+          "puts": 3820
+        },
+        "completeness": "COMPLETE",
+        "data_quality": {
+          "calls": {
+            "zero_bid_count": 0,
+            "crossed_market_count": 0,
+            "missing_iv_count": 0,
+            "missing_greeks_count": 0,
+            "missing_theoretical_price_count": 0,
+            "wide_spread_count": 0
+          },
+          "puts": {
+            "zero_bid_count": 0,
+            "crossed_market_count": 0,
+            "missing_iv_count": 0,
+            "missing_greeks_count": 0,
+            "missing_theoretical_price_count": 0,
+            "wide_spread_count": 0
+          }
+        }
+      },
+      "candidates": 66,
+      "scenarios": {
+        "STRESS_30D": {
+          "25BP": {
+            "synthetic_fee_rate_pct": 0.25,
+            "top5": {
+              "overlap": 5,
+              "no_borrow_top5": [
+                "BUY_STOCK::NASDAQ:NVDA::224.71::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C220.0::OPRA:NVDA261002C225.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C215.0::OPRA:NVDA261002C225.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-16::OPRA:NVDA261016C215.0::OPRA:NVDA261016C220.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C215.0::OPRA:NVDA261002C220.0::conservative"
+              ],
+              "borrow_top5": [
+                "BUY_STOCK::NASDAQ:NVDA::224.71::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C220.0::OPRA:NVDA261002C225.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C215.0::OPRA:NVDA261002C225.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-16::OPRA:NVDA261016C215.0::OPRA:NVDA261016C220.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C215.0::OPRA:NVDA261002C220.0::conservative"
+              ],
+              "entered_top5": [],
+              "left_top5": []
+            },
+            "largest_move": {
+              "candidate_id": "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-16::OPRA:NVDA261016C225.0::OPRA:NVDA261016C230.0::conservative",
+              "strategy_type": "BULL_CALL_SPREAD",
+              "expiration": "2026-10-16",
+              "no_borrow_rank": 13,
+              "borrow_rank": 14,
+              "abs_rank_move": 1,
+              "no_borrow_score": 37.77,
+              "borrow_score": 37.77,
+              "score_delta": 0,
+              "scenario_deltas": [
+                {
+                  "scenario_id": "STRESS_30D_DOWN",
+                  "no_borrow_pnl": -223,
+                  "borrow_pnl": -223,
+                  "delta": 0
+                },
+                {
+                  "scenario_id": "STRESS_30D_BASE",
+                  "no_borrow_pnl": -25,
+                  "borrow_pnl": -25,
+                  "delta": 0
+                },
+                {
+                  "scenario_id": "STRESS_30D_UP",
+                  "no_borrow_pnl": 203,
+                  "borrow_pnl": 203,
+                  "delta": 0
+                }
+              ]
+            },
+            "mean_abs_pnl_delta": 0.28,
+            "max_abs_pnl_delta": 3
+          },
+          "75BP": {
+            "synthetic_fee_rate_pct": 0.75,
+            "top5": {
+              "overlap": 5,
+              "no_borrow_top5": [
+                "BUY_STOCK::NASDAQ:NVDA::224.71::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C220.0::OPRA:NVDA261002C225.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C215.0::OPRA:NVDA261002C225.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-16::OPRA:NVDA261016C215.0::OPRA:NVDA261016C220.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C215.0::OPRA:NVDA261002C220.0::conservative"
+              ],
+              "borrow_top5": [
+                "BUY_STOCK::NASDAQ:NVDA::224.71::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C220.0::OPRA:NVDA261002C225.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C215.0::OPRA:NVDA261002C225.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-16::OPRA:NVDA261016C215.0::OPRA:NVDA261016C220.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C215.0::OPRA:NVDA261002C220.0::conservative"
+              ],
+              "entered_top5": [],
+              "left_top5": []
+            },
+            "largest_move": {
+              "candidate_id": "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-09::OPRA:NVDA261009C230.0::OPRA:NVDA261009C235.0::conservative",
+              "strategy_type": "BULL_CALL_SPREAD",
+              "expiration": "2026-10-09",
+              "no_borrow_rank": 34,
+              "borrow_rank": 32,
+              "abs_rank_move": 2,
+              "no_borrow_score": 32.38,
+              "borrow_score": 32.38,
+              "score_delta": 0,
+              "scenario_deltas": [
+                {
+                  "scenario_id": "STRESS_30D_DOWN",
+                  "no_borrow_pnl": -204,
+                  "borrow_pnl": -204,
+                  "delta": 0
+                },
+                {
+                  "scenario_id": "STRESS_30D_BASE",
+                  "no_borrow_pnl": -86,
+                  "borrow_pnl": -86,
+                  "delta": 0
+                },
+                {
+                  "scenario_id": "STRESS_30D_UP",
+                  "no_borrow_pnl": 249,
+                  "borrow_pnl": 249,
+                  "delta": 0
+                }
+              ]
+            },
+            "mean_abs_pnl_delta": 0.76,
+            "max_abs_pnl_delta": 7
+          },
+          "250BP": {
+            "synthetic_fee_rate_pct": 2.5,
+            "top5": {
+              "overlap": 5,
+              "no_borrow_top5": [
+                "BUY_STOCK::NASDAQ:NVDA::224.71::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C220.0::OPRA:NVDA261002C225.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C215.0::OPRA:NVDA261002C225.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-16::OPRA:NVDA261016C215.0::OPRA:NVDA261016C220.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C215.0::OPRA:NVDA261002C220.0::conservative"
+              ],
+              "borrow_top5": [
+                "BUY_STOCK::NASDAQ:NVDA::224.71::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C220.0::OPRA:NVDA261002C225.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C215.0::OPRA:NVDA261002C225.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-16::OPRA:NVDA261016C215.0::OPRA:NVDA261016C220.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C215.0::OPRA:NVDA261002C220.0::conservative"
+              ],
+              "entered_top5": [],
+              "left_top5": []
+            },
+            "largest_move": {
+              "candidate_id": "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C220.0::OPRA:NVDA261002C230.0::conservative",
+              "strategy_type": "BULL_CALL_SPREAD",
+              "expiration": "2026-10-02",
+              "no_borrow_rank": 17,
+              "borrow_rank": 15,
+              "abs_rank_move": 2,
+              "no_borrow_score": 37.34,
+              "borrow_score": 37.34,
+              "score_delta": 0,
+              "scenario_deltas": [
+                {
+                  "scenario_id": "STRESS_30D_DOWN",
+                  "no_borrow_pnl": -520,
+                  "borrow_pnl": -520,
+                  "delta": 0
+                },
+                {
+                  "scenario_id": "STRESS_30D_BASE",
+                  "no_borrow_pnl": -49,
+                  "borrow_pnl": -49,
+                  "delta": 0
+                },
+                {
+                  "scenario_id": "STRESS_30D_UP",
+                  "no_borrow_pnl": 480,
+                  "borrow_pnl": 480,
+                  "delta": 0
+                }
+              ]
+            },
+            "mean_abs_pnl_delta": 2.62,
+            "max_abs_pnl_delta": 24
+          },
+          "1000BP": {
+            "synthetic_fee_rate_pct": 10,
+            "top5": {
+              "overlap": 5,
+              "no_borrow_top5": [
+                "BUY_STOCK::NASDAQ:NVDA::224.71::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C220.0::OPRA:NVDA261002C225.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C215.0::OPRA:NVDA261002C225.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-16::OPRA:NVDA261016C215.0::OPRA:NVDA261016C220.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C215.0::OPRA:NVDA261002C220.0::conservative"
+              ],
+              "borrow_top5": [
+                "BUY_STOCK::NASDAQ:NVDA::224.71::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C220.0::OPRA:NVDA261002C225.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C215.0::OPRA:NVDA261002C225.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C215.0::OPRA:NVDA261002C220.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-16::OPRA:NVDA261016C215.0::OPRA:NVDA261016C220.0::conservative"
+              ],
+              "entered_top5": [],
+              "left_top5": []
+            },
+            "largest_move": {
+              "candidate_id": "LONG_CALL::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C220.0::conservative",
+              "strategy_type": "LONG_CALL",
+              "expiration": "2026-10-02",
+              "no_borrow_rank": 40,
+              "borrow_rank": 35,
+              "abs_rank_move": 5,
+              "no_borrow_score": 31.43,
+              "borrow_score": 31.43,
+              "score_delta": 0,
+              "scenario_deltas": [
+                {
+                  "scenario_id": "STRESS_30D_DOWN",
+                  "no_borrow_pnl": -1135,
+                  "borrow_pnl": -1135,
+                  "delta": 0
+                },
+                {
+                  "scenario_id": "STRESS_30D_BASE",
+                  "no_borrow_pnl": -664,
+                  "borrow_pnl": -664,
+                  "delta": 0
+                },
+                {
+                  "scenario_id": "STRESS_30D_UP",
+                  "no_borrow_pnl": 1583,
+                  "borrow_pnl": 1583,
+                  "delta": 0
+                }
+              ]
+            },
+            "mean_abs_pnl_delta": 8.2,
+            "max_abs_pnl_delta": 63
+          }
+        },
+        "PHASE2C_ORIGINAL_30D": {
+          "25BP": {
+            "synthetic_fee_rate_pct": 0.25,
+            "top5": {
+              "overlap": 5,
+              "no_borrow_top5": [
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C230.0::OPRA:NVDA261002C235.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C230.0::OPRA:NVDA261002C240.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C225.0::OPRA:NVDA261002C240.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C225.0::OPRA:NVDA261002C235.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C220.0::OPRA:NVDA261002C235.0::conservative"
+              ],
+              "borrow_top5": [
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C230.0::OPRA:NVDA261002C235.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C230.0::OPRA:NVDA261002C240.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C225.0::OPRA:NVDA261002C240.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C225.0::OPRA:NVDA261002C235.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C220.0::OPRA:NVDA261002C235.0::conservative"
+              ],
+              "entered_top5": [],
+              "left_top5": []
+            },
+            "largest_move": {
+              "candidate_id": "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-09::OPRA:NVDA261009C220.0::OPRA:NVDA261009C235.0::conservative",
+              "strategy_type": "BULL_CALL_SPREAD",
+              "expiration": "2026-10-09",
+              "no_borrow_rank": 17,
+              "borrow_rank": 15,
+              "abs_rank_move": 2,
+              "no_borrow_score": 53.92,
+              "borrow_score": 53.89,
+              "score_delta": -0.03,
+              "scenario_deltas": [
+                {
+                  "scenario_id": "PHASE2C_ORIGINAL_30D_DOWN",
+                  "no_borrow_pnl": -702,
+                  "borrow_pnl": -702,
+                  "delta": 0
+                },
+                {
+                  "scenario_id": "PHASE2C_ORIGINAL_30D_BASE",
+                  "no_borrow_pnl": 435,
+                  "borrow_pnl": 434,
+                  "delta": -1
+                },
+                {
+                  "scenario_id": "PHASE2C_ORIGINAL_30D_UP",
+                  "no_borrow_pnl": 713,
+                  "borrow_pnl": 713,
+                  "delta": 0
+                }
+              ]
+            },
+            "mean_abs_pnl_delta": 0.34,
+            "max_abs_pnl_delta": 3
+          },
+          "75BP": {
+            "synthetic_fee_rate_pct": 0.75,
+            "top5": {
+              "overlap": 5,
+              "no_borrow_top5": [
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C230.0::OPRA:NVDA261002C235.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C230.0::OPRA:NVDA261002C240.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C225.0::OPRA:NVDA261002C240.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C225.0::OPRA:NVDA261002C235.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C220.0::OPRA:NVDA261002C235.0::conservative"
+              ],
+              "borrow_top5": [
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C230.0::OPRA:NVDA261002C235.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C230.0::OPRA:NVDA261002C240.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C225.0::OPRA:NVDA261002C240.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C225.0::OPRA:NVDA261002C235.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C220.0::OPRA:NVDA261002C235.0::conservative"
+              ],
+              "entered_top5": [],
+              "left_top5": []
+            },
+            "largest_move": {
+              "candidate_id": "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-09::OPRA:NVDA261009C230.0::OPRA:NVDA261009C245.0::conservative",
+              "strategy_type": "BULL_CALL_SPREAD",
+              "expiration": "2026-10-09",
+              "no_borrow_rank": 15,
+              "borrow_rank": 17,
+              "abs_rank_move": 2,
+              "no_borrow_score": 53.95,
+              "borrow_score": 53.82,
+              "score_delta": -0.13,
+              "scenario_deltas": [
+                {
+                  "scenario_id": "PHASE2C_ORIGINAL_30D_DOWN",
+                  "no_borrow_pnl": -464,
+                  "borrow_pnl": -464,
+                  "delta": 0
+                },
+                {
+                  "scenario_id": "PHASE2C_ORIGINAL_30D_BASE",
+                  "no_borrow_pnl": 212,
+                  "borrow_pnl": 209,
+                  "delta": -3
+                },
+                {
+                  "scenario_id": "PHASE2C_ORIGINAL_30D_UP",
+                  "no_borrow_pnl": 725,
+                  "borrow_pnl": 724,
+                  "delta": -1
+                }
+              ]
+            },
+            "mean_abs_pnl_delta": 0.9,
+            "max_abs_pnl_delta": 7
+          },
+          "250BP": {
+            "synthetic_fee_rate_pct": 2.5,
+            "top5": {
+              "overlap": 5,
+              "no_borrow_top5": [
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C230.0::OPRA:NVDA261002C235.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C230.0::OPRA:NVDA261002C240.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C225.0::OPRA:NVDA261002C240.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C225.0::OPRA:NVDA261002C235.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C220.0::OPRA:NVDA261002C235.0::conservative"
+              ],
+              "borrow_top5": [
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C230.0::OPRA:NVDA261002C235.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C230.0::OPRA:NVDA261002C240.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C225.0::OPRA:NVDA261002C240.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C225.0::OPRA:NVDA261002C235.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C220.0::OPRA:NVDA261002C235.0::conservative"
+              ],
+              "entered_top5": [],
+              "left_top5": []
+            },
+            "largest_move": {
+              "candidate_id": "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-16::OPRA:NVDA261016C230.0::OPRA:NVDA261016C240.0::conservative",
+              "strategy_type": "BULL_CALL_SPREAD",
+              "expiration": "2026-10-16",
+              "no_borrow_rank": 30,
+              "borrow_rank": 34,
+              "abs_rank_move": 4,
+              "no_borrow_score": 51.42,
+              "borrow_score": 51,
+              "score_delta": -0.42,
+              "scenario_deltas": [
+                {
+                  "scenario_id": "PHASE2C_ORIGINAL_30D_DOWN",
+                  "no_borrow_pnl": -347,
+                  "borrow_pnl": -347,
+                  "delta": 0
+                },
+                {
+                  "scenario_id": "PHASE2C_ORIGINAL_30D_BASE",
+                  "no_borrow_pnl": 169,
+                  "borrow_pnl": 163,
+                  "delta": -6
+                },
+                {
+                  "scenario_id": "PHASE2C_ORIGINAL_30D_UP",
+                  "no_borrow_pnl": 417,
+                  "borrow_pnl": 412,
+                  "delta": -5
+                }
+              ]
+            },
+            "mean_abs_pnl_delta": 2.98,
+            "max_abs_pnl_delta": 24
+          },
+          "1000BP": {
+            "synthetic_fee_rate_pct": 10,
+            "top5": {
+              "overlap": 5,
+              "no_borrow_top5": [
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C230.0::OPRA:NVDA261002C235.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C230.0::OPRA:NVDA261002C240.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C225.0::OPRA:NVDA261002C240.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C225.0::OPRA:NVDA261002C235.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C220.0::OPRA:NVDA261002C235.0::conservative"
+              ],
+              "borrow_top5": [
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C230.0::OPRA:NVDA261002C235.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C230.0::OPRA:NVDA261002C240.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C225.0::OPRA:NVDA261002C240.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C225.0::OPRA:NVDA261002C235.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-02::OPRA:NVDA261002C220.0::OPRA:NVDA261002C235.0::conservative"
+              ],
+              "entered_top5": [],
+              "left_top5": []
+            },
+            "largest_move": {
+              "candidate_id": "BULL_CALL_SPREAD::NASDAQ:NVDA::2026-10-16::OPRA:NVDA261016C230.0::OPRA:NVDA261016C240.0::conservative",
+              "strategy_type": "BULL_CALL_SPREAD",
+              "expiration": "2026-10-16",
+              "no_borrow_rank": 30,
+              "borrow_rank": 37,
+              "abs_rank_move": 7,
+              "no_borrow_score": 51.42,
+              "borrow_score": 50.22,
+              "score_delta": -1.2,
+              "scenario_deltas": [
+                {
+                  "scenario_id": "PHASE2C_ORIGINAL_30D_DOWN",
+                  "no_borrow_pnl": -347,
+                  "borrow_pnl": -349,
+                  "delta": -2
+                },
+                {
+                  "scenario_id": "PHASE2C_ORIGINAL_30D_BASE",
+                  "no_borrow_pnl": 169,
+                  "borrow_pnl": 151,
+                  "delta": -18
+                },
+                {
+                  "scenario_id": "PHASE2C_ORIGINAL_30D_UP",
+                  "no_borrow_pnl": 417,
+                  "borrow_pnl": 410,
+                  "delta": -7
+                }
+              ]
+            },
+            "mean_abs_pnl_delta": 8.68,
+            "max_abs_pnl_delta": 63
+          }
+        }
+      }
+    },
+    {
+      "symbol": "NASDAQ:AAPL",
+      "root": "AAPL",
+      "quote": {
+        "last": 325.5,
+        "exchange": "Cboe One",
+        "time": 1788355800
+      },
+      "key_stats": {
+        "price": 325.66,
+        "dividend_yield_pct": 0.334543159223607,
+        "volume": 24655858,
+        "next_earnings_date": "2026-10-29"
+      },
+      "option_chain": {
+        "retrieved_at_utc": {
+          "calls": "2026-09-02T19:23:00.518Z",
+          "puts": "2026-09-02T19:23:00.814Z"
+        },
+        "returned_contracts": 245,
+        "matched_contracts": {
+          "calls": 119,
+          "puts": 126
+        },
+        "scanned": {
+          "calls": 3276,
+          "puts": 3276
+        },
+        "completeness": "COMPLETE",
+        "data_quality": {
+          "calls": {
+            "zero_bid_count": 0,
+            "crossed_market_count": 0,
+            "missing_iv_count": 0,
+            "missing_greeks_count": 0,
+            "missing_theoretical_price_count": 0,
+            "wide_spread_count": 7
+          },
+          "puts": {
+            "zero_bid_count": 0,
+            "crossed_market_count": 0,
+            "missing_iv_count": 0,
+            "missing_greeks_count": 0,
+            "missing_theoretical_price_count": 0,
+            "wide_spread_count": 6
+          }
+        }
+      },
+      "candidates": 70,
+      "scenarios": {
+        "STRESS_30D": {
+          "25BP": {
+            "synthetic_fee_rate_pct": 0.25,
+            "top5": {
+              "overlap": 5,
+              "no_borrow_top5": [
+                "BUY_STOCK::NASDAQ:AAPL::325.66::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C315.0::OPRA:AAPL261002C325.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C320.0::OPRA:AAPL261002C325.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C315.0::OPRA:AAPL261002C330.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C315.0::OPRA:AAPL261002C320.0::conservative"
+              ],
+              "borrow_top5": [
+                "BUY_STOCK::NASDAQ:AAPL::325.66::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C315.0::OPRA:AAPL261002C325.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C320.0::OPRA:AAPL261002C325.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C315.0::OPRA:AAPL261002C330.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C315.0::OPRA:AAPL261002C320.0::conservative"
+              ],
+              "entered_top5": [],
+              "left_top5": []
+            },
+            "largest_move": {
+              "candidate_id": "LONG_CALL::NASDAQ:AAPL::2026-10-16::OPRA:AAPL261016C320.0::conservative",
+              "strategy_type": "LONG_CALL",
+              "expiration": "2026-10-16",
+              "no_borrow_rank": 14,
+              "borrow_rank": 15,
+              "abs_rank_move": 1,
+              "no_borrow_score": 36.59,
+              "borrow_score": 36.53,
+              "score_delta": -0.06,
+              "scenario_deltas": [
+                {
+                  "scenario_id": "STRESS_30D_DOWN",
+                  "no_borrow_pnl": -1516,
+                  "borrow_pnl": -1517,
+                  "delta": -1
+                },
+                {
+                  "scenario_id": "STRESS_30D_BASE",
+                  "no_borrow_pnl": -577,
+                  "borrow_pnl": -579,
+                  "delta": -2
+                },
+                {
+                  "scenario_id": "STRESS_30D_UP",
+                  "no_borrow_pnl": 2334,
+                  "borrow_pnl": 2331,
+                  "delta": -3
+                }
+              ]
+            },
+            "mean_abs_pnl_delta": 0.4,
+            "max_abs_pnl_delta": 4
+          },
+          "75BP": {
+            "synthetic_fee_rate_pct": 0.75,
+            "top5": {
+              "overlap": 5,
+              "no_borrow_top5": [
+                "BUY_STOCK::NASDAQ:AAPL::325.66::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C315.0::OPRA:AAPL261002C325.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C320.0::OPRA:AAPL261002C325.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C315.0::OPRA:AAPL261002C330.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C315.0::OPRA:AAPL261002C320.0::conservative"
+              ],
+              "borrow_top5": [
+                "BUY_STOCK::NASDAQ:AAPL::325.66::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C315.0::OPRA:AAPL261002C325.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C320.0::OPRA:AAPL261002C325.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C315.0::OPRA:AAPL261002C330.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C315.0::OPRA:AAPL261002C320.0::conservative"
+              ],
+              "entered_top5": [],
+              "left_top5": []
+            },
+            "largest_move": {
+              "candidate_id": "LONG_CALL::NASDAQ:AAPL::2026-10-09::OPRA:AAPL261009C325.0::conservative",
+              "strategy_type": "LONG_CALL",
+              "expiration": "2026-10-09",
+              "no_borrow_rank": 19,
+              "borrow_rank": 17,
+              "abs_rank_move": 2,
+              "no_borrow_score": 36.07,
+              "borrow_score": 36,
+              "score_delta": -0.07,
+              "scenario_deltas": [
+                {
+                  "scenario_id": "STRESS_30D_DOWN",
+                  "no_borrow_pnl": -1150,
+                  "borrow_pnl": -1150,
+                  "delta": 0
+                },
+                {
+                  "scenario_id": "STRESS_30D_BASE",
+                  "no_borrow_pnl": -678,
+                  "borrow_pnl": -680,
+                  "delta": -2
+                },
+                {
+                  "scenario_id": "STRESS_30D_UP",
+                  "no_borrow_pnl": 2195,
+                  "borrow_pnl": 2190,
+                  "delta": -5
+                }
+              ]
+            },
+            "mean_abs_pnl_delta": 0.97,
+            "max_abs_pnl_delta": 10
+          },
+          "250BP": {
+            "synthetic_fee_rate_pct": 2.5,
+            "top5": {
+              "overlap": 5,
+              "no_borrow_top5": [
+                "BUY_STOCK::NASDAQ:AAPL::325.66::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C315.0::OPRA:AAPL261002C325.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C320.0::OPRA:AAPL261002C325.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C315.0::OPRA:AAPL261002C330.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C315.0::OPRA:AAPL261002C320.0::conservative"
+              ],
+              "borrow_top5": [
+                "BUY_STOCK::NASDAQ:AAPL::325.66::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C315.0::OPRA:AAPL261002C325.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C320.0::OPRA:AAPL261002C325.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C315.0::OPRA:AAPL261002C330.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C315.0::OPRA:AAPL261002C320.0::conservative"
+              ],
+              "entered_top5": [],
+              "left_top5": []
+            },
+            "largest_move": {
+              "candidate_id": "LONG_CALL::NASDAQ:AAPL::2026-10-16::OPRA:AAPL261016C325.0::conservative",
+              "strategy_type": "LONG_CALL",
+              "expiration": "2026-10-16",
+              "no_borrow_rank": 18,
+              "borrow_rank": 22,
+              "abs_rank_move": 4,
+              "no_borrow_score": 36.13,
+              "borrow_score": 35.6,
+              "score_delta": -0.53,
+              "scenario_deltas": [
+                {
+                  "scenario_id": "STRESS_30D_DOWN",
+                  "no_borrow_pnl": -1238,
+                  "borrow_pnl": -1239,
+                  "delta": -1
+                },
+                {
+                  "scenario_id": "STRESS_30D_BASE",
+                  "no_borrow_pnl": -589,
+                  "borrow_pnl": -606,
+                  "delta": -17
+                },
+                {
+                  "scenario_id": "STRESS_30D_UP",
+                  "no_borrow_pnl": 2130,
+                  "borrow_pnl": 2096,
+                  "delta": -34
+                }
+              ]
+            },
+            "mean_abs_pnl_delta": 3.36,
+            "max_abs_pnl_delta": 34
+          },
+          "1000BP": {
+            "synthetic_fee_rate_pct": 10,
+            "top5": {
+              "overlap": 5,
+              "no_borrow_top5": [
+                "BUY_STOCK::NASDAQ:AAPL::325.66::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C315.0::OPRA:AAPL261002C325.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C320.0::OPRA:AAPL261002C325.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C315.0::OPRA:AAPL261002C330.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C315.0::OPRA:AAPL261002C320.0::conservative"
+              ],
+              "borrow_top5": [
+                "BUY_STOCK::NASDAQ:AAPL::325.66::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C315.0::OPRA:AAPL261002C325.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C320.0::OPRA:AAPL261002C325.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C315.0::OPRA:AAPL261002C330.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C315.0::OPRA:AAPL261002C320.0::conservative"
+              ],
+              "entered_top5": [],
+              "left_top5": []
+            },
+            "largest_move": {
+              "candidate_id": "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-09::OPRA:AAPL261009C330.0::OPRA:AAPL261009C345.0::conservative",
+              "strategy_type": "BULL_CALL_SPREAD",
+              "expiration": "2026-10-09",
+              "no_borrow_rank": 24,
+              "borrow_rank": 16,
+              "abs_rank_move": 8,
+              "no_borrow_score": 35.67,
+              "borrow_score": 35.43,
+              "score_delta": -0.24,
+              "scenario_deltas": [
+                {
+                  "scenario_id": "STRESS_30D_DOWN",
+                  "no_borrow_pnl": -530,
+                  "borrow_pnl": -530,
+                  "delta": 0
+                },
+                {
+                  "scenario_id": "STRESS_30D_BASE",
+                  "no_borrow_pnl": -264,
+                  "borrow_pnl": -282,
+                  "delta": -18
+                },
+                {
+                  "scenario_id": "STRESS_30D_UP",
+                  "no_borrow_pnl": 891,
+                  "borrow_pnl": 910,
+                  "delta": 19
+                }
+              ]
+            },
+            "mean_abs_pnl_delta": 9.99,
+            "max_abs_pnl_delta": 88
+          }
+        },
+        "PHASE2C_ORIGINAL_30D": {
+          "25BP": {
+            "synthetic_fee_rate_pct": 0.25,
+            "top5": {
+              "overlap": 5,
+              "no_borrow_top5": [
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C330.0::OPRA:AAPL261002C345.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C335.0::OPRA:AAPL261002C345.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C335.0::OPRA:AAPL261002C340.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C330.0::OPRA:AAPL261002C340.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C335.0::OPRA:AAPL261002C350.0::conservative"
+              ],
+              "borrow_top5": [
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C330.0::OPRA:AAPL261002C345.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C335.0::OPRA:AAPL261002C345.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C335.0::OPRA:AAPL261002C340.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C330.0::OPRA:AAPL261002C340.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C335.0::OPRA:AAPL261002C350.0::conservative"
+              ],
+              "entered_top5": [],
+              "left_top5": []
+            },
+            "largest_move": {
+              "candidate_id": "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C330.0::OPRA:AAPL261002C345.0::conservative",
+              "strategy_type": "BULL_CALL_SPREAD",
+              "expiration": "2026-10-02",
+              "no_borrow_rank": 1,
+              "borrow_rank": 1,
+              "abs_rank_move": 0,
+              "no_borrow_score": 68.84,
+              "borrow_score": 68.84,
+              "score_delta": 0,
+              "scenario_deltas": [
+                {
+                  "scenario_id": "PHASE2C_ORIGINAL_30D_DOWN",
+                  "no_borrow_pnl": -500,
+                  "borrow_pnl": -500,
+                  "delta": 0
+                },
+                {
+                  "scenario_id": "PHASE2C_ORIGINAL_30D_BASE",
+                  "no_borrow_pnl": 694,
+                  "borrow_pnl": 694,
+                  "delta": 0
+                },
+                {
+                  "scenario_id": "PHASE2C_ORIGINAL_30D_UP",
+                  "no_borrow_pnl": 1000,
+                  "borrow_pnl": 1000,
+                  "delta": 0
+                }
+              ]
+            },
+            "mean_abs_pnl_delta": 0.45,
+            "max_abs_pnl_delta": 4
+          },
+          "75BP": {
+            "synthetic_fee_rate_pct": 0.75,
+            "top5": {
+              "overlap": 5,
+              "no_borrow_top5": [
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C330.0::OPRA:AAPL261002C345.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C335.0::OPRA:AAPL261002C345.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C335.0::OPRA:AAPL261002C340.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C330.0::OPRA:AAPL261002C340.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C335.0::OPRA:AAPL261002C350.0::conservative"
+              ],
+              "borrow_top5": [
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C330.0::OPRA:AAPL261002C345.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C335.0::OPRA:AAPL261002C345.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C335.0::OPRA:AAPL261002C340.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C330.0::OPRA:AAPL261002C340.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C335.0::OPRA:AAPL261002C350.0::conservative"
+              ],
+              "entered_top5": [],
+              "left_top5": []
+            },
+            "largest_move": {
+              "candidate_id": "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-09::OPRA:AAPL261009C335.0::OPRA:AAPL261009C345.0::conservative",
+              "strategy_type": "BULL_CALL_SPREAD",
+              "expiration": "2026-10-09",
+              "no_borrow_rank": 6,
+              "borrow_rank": 7,
+              "abs_rank_move": 1,
+              "no_borrow_score": 63.45,
+              "borrow_score": 63.31,
+              "score_delta": -0.14,
+              "scenario_deltas": [
+                {
+                  "scenario_id": "PHASE2C_ORIGINAL_30D_DOWN",
+                  "no_borrow_pnl": -320,
+                  "borrow_pnl": -320,
+                  "delta": 0
+                },
+                {
+                  "scenario_id": "PHASE2C_ORIGINAL_30D_BASE",
+                  "no_borrow_pnl": 251,
+                  "borrow_pnl": 249,
+                  "delta": -2
+                },
+                {
+                  "scenario_id": "PHASE2C_ORIGINAL_30D_UP",
+                  "no_borrow_pnl": 610,
+                  "borrow_pnl": 609,
+                  "delta": -1
+                }
+              ]
+            },
+            "mean_abs_pnl_delta": 1.16,
+            "max_abs_pnl_delta": 10
+          },
+          "250BP": {
+            "synthetic_fee_rate_pct": 2.5,
+            "top5": {
+              "overlap": 5,
+              "no_borrow_top5": [
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C330.0::OPRA:AAPL261002C345.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C335.0::OPRA:AAPL261002C345.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C335.0::OPRA:AAPL261002C340.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C330.0::OPRA:AAPL261002C340.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C335.0::OPRA:AAPL261002C350.0::conservative"
+              ],
+              "borrow_top5": [
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C330.0::OPRA:AAPL261002C345.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C335.0::OPRA:AAPL261002C345.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C335.0::OPRA:AAPL261002C340.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C330.0::OPRA:AAPL261002C340.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C335.0::OPRA:AAPL261002C350.0::conservative"
+              ],
+              "entered_top5": [],
+              "left_top5": []
+            },
+            "largest_move": {
+              "candidate_id": "LONG_CALL::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C315.0::conservative",
+              "strategy_type": "LONG_CALL",
+              "expiration": "2026-10-02",
+              "no_borrow_rank": 25,
+              "borrow_rank": 20,
+              "abs_rank_move": 5,
+              "no_borrow_score": 58.86,
+              "borrow_score": 58.86,
+              "score_delta": 0,
+              "scenario_deltas": [
+                {
+                  "scenario_id": "PHASE2C_ORIGINAL_30D_DOWN",
+                  "no_borrow_pnl": -1665,
+                  "borrow_pnl": -1665,
+                  "delta": 0
+                },
+                {
+                  "scenario_id": "PHASE2C_ORIGINAL_30D_BASE",
+                  "no_borrow_pnl": 1029,
+                  "borrow_pnl": 1029,
+                  "delta": 0
+                },
+                {
+                  "scenario_id": "PHASE2C_ORIGINAL_30D_UP",
+                  "no_borrow_pnl": 2658,
+                  "borrow_pnl": 2658,
+                  "delta": 0
+                }
+              ]
+            },
+            "mean_abs_pnl_delta": 3.86,
+            "max_abs_pnl_delta": 34
+          },
+          "1000BP": {
+            "synthetic_fee_rate_pct": 10,
+            "top5": {
+              "overlap": 5,
+              "no_borrow_top5": [
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C330.0::OPRA:AAPL261002C345.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C335.0::OPRA:AAPL261002C345.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C335.0::OPRA:AAPL261002C340.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C330.0::OPRA:AAPL261002C340.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C335.0::OPRA:AAPL261002C350.0::conservative"
+              ],
+              "borrow_top5": [
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C330.0::OPRA:AAPL261002C345.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C335.0::OPRA:AAPL261002C345.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C335.0::OPRA:AAPL261002C340.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C330.0::OPRA:AAPL261002C340.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-02::OPRA:AAPL261002C335.0::OPRA:AAPL261002C350.0::conservative"
+              ],
+              "entered_top5": [],
+              "left_top5": []
+            },
+            "largest_move": {
+              "candidate_id": "BULL_CALL_SPREAD::NASDAQ:AAPL::2026-10-16::OPRA:AAPL261016C340.0::OPRA:AAPL261016C350.0::conservative",
+              "strategy_type": "BULL_CALL_SPREAD",
+              "expiration": "2026-10-16",
+              "no_borrow_rank": 20,
+              "borrow_rank": 29,
+              "abs_rank_move": 9,
+              "no_borrow_score": 59.28,
+              "borrow_score": 57.3,
+              "score_delta": -1.98,
+              "scenario_deltas": [
+                {
+                  "scenario_id": "PHASE2C_ORIGINAL_30D_DOWN",
+                  "no_borrow_pnl": -269,
+                  "borrow_pnl": -270,
+                  "delta": -1
+                },
+                {
+                  "scenario_id": "PHASE2C_ORIGINAL_30D_BASE",
+                  "no_borrow_pnl": 165,
+                  "borrow_pnl": 140,
+                  "delta": -25
+                },
+                {
+                  "scenario_id": "PHASE2C_ORIGINAL_30D_UP",
+                  "no_borrow_pnl": 510,
+                  "borrow_pnl": 503,
+                  "delta": -7
+                }
+              ]
+            },
+            "mean_abs_pnl_delta": 10.62,
+            "max_abs_pnl_delta": 88
+          }
+        }
+      }
+    },
+    {
+      "symbol": "NASDAQ:PANW",
+      "root": "PANW",
+      "quote": {
+        "last": 327.01,
+        "exchange": "Cboe One",
+        "time": 1788355800
+      },
+      "key_stats": {
+        "price": 327.1301,
+        "dividend_yield_pct": 0,
+        "volume": 10552428,
+        "next_earnings_date": "2026-11-12"
+      },
+      "option_chain": {
+        "retrieved_at_utc": {
+          "calls": "2026-09-02T19:23:23.557Z",
+          "puts": "2026-09-02T19:23:23.549Z"
+        },
+        "returned_contracts": 292,
+        "matched_contracts": {
+          "calls": 156,
+          "puts": 136
+        },
+        "scanned": {
+          "calls": 3628,
+          "puts": 3628
+        },
+        "completeness": "COMPLETE",
+        "data_quality": {
+          "calls": {
+            "zero_bid_count": 0,
+            "crossed_market_count": 0,
+            "missing_iv_count": 0,
+            "missing_greeks_count": 0,
+            "missing_theoretical_price_count": 0,
+            "wide_spread_count": 77
+          },
+          "puts": {
+            "zero_bid_count": 0,
+            "crossed_market_count": 0,
+            "missing_iv_count": 0,
+            "missing_greeks_count": 0,
+            "missing_theoretical_price_count": 0,
+            "wide_spread_count": 41
+          }
+        }
+      },
+      "candidates": 102,
+      "scenarios": {
+        "STRESS_30D": {
+          "25BP": {
+            "synthetic_fee_rate_pct": 0.25,
+            "top5": {
+              "overlap": 5,
+              "no_borrow_top5": [
+                "BUY_STOCK::NASDAQ:PANW::327.13::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016C310.0::OPRA:PANW261016C320.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016C310.0::OPRA:PANW261016C340.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C320.0::OPRA:PANW261002C330.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016C310.0::OPRA:PANW261016C330.0::conservative"
+              ],
+              "borrow_top5": [
+                "BUY_STOCK::NASDAQ:PANW::327.13::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016C310.0::OPRA:PANW261016C320.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016C310.0::OPRA:PANW261016C340.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C320.0::OPRA:PANW261002C330.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016C310.0::OPRA:PANW261016C330.0::conservative"
+              ],
+              "entered_top5": [],
+              "left_top5": []
+            },
+            "largest_move": {
+              "candidate_id": "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016C320.0::OPRA:PANW261016C330.0::conservative",
+              "strategy_type": "BULL_CALL_SPREAD",
+              "expiration": "2026-10-16",
+              "no_borrow_rank": 25,
+              "borrow_rank": 26,
+              "abs_rank_move": 1,
+              "no_borrow_score": 30.1,
+              "borrow_score": 30.04,
+              "score_delta": -0.06,
+              "scenario_deltas": [
+                {
+                  "scenario_id": "STRESS_30D_DOWN",
+                  "no_borrow_pnl": -579,
+                  "borrow_pnl": -580,
+                  "delta": -1
+                },
+                {
+                  "scenario_id": "STRESS_30D_BASE",
+                  "no_borrow_pnl": -219,
+                  "borrow_pnl": -220,
+                  "delta": -1
+                },
+                {
+                  "scenario_id": "STRESS_30D_UP",
+                  "no_borrow_pnl": 152,
+                  "borrow_pnl": 152,
+                  "delta": 0
+                }
+              ]
+            },
+            "mean_abs_pnl_delta": 0.35,
+            "max_abs_pnl_delta": 3
+          },
+          "75BP": {
+            "synthetic_fee_rate_pct": 0.75,
+            "top5": {
+              "overlap": 5,
+              "no_borrow_top5": [
+                "BUY_STOCK::NASDAQ:PANW::327.13::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016C310.0::OPRA:PANW261016C320.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016C310.0::OPRA:PANW261016C340.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C320.0::OPRA:PANW261002C330.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016C310.0::OPRA:PANW261016C330.0::conservative"
+              ],
+              "borrow_top5": [
+                "BUY_STOCK::NASDAQ:PANW::327.13::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016C310.0::OPRA:PANW261016C320.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016C310.0::OPRA:PANW261016C340.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C320.0::OPRA:PANW261002C330.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016C310.0::OPRA:PANW261016C330.0::conservative"
+              ],
+              "entered_top5": [],
+              "left_top5": []
+            },
+            "largest_move": {
+              "candidate_id": "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016C360.0::OPRA:PANW261016C370.0::conservative",
+              "strategy_type": "BULL_CALL_SPREAD",
+              "expiration": "2026-10-16",
+              "no_borrow_rank": 79,
+              "borrow_rank": 81,
+              "abs_rank_move": 2,
+              "no_borrow_score": 15.8,
+              "borrow_score": 15.67,
+              "score_delta": -0.13,
+              "scenario_deltas": [
+                {
+                  "scenario_id": "STRESS_30D_DOWN",
+                  "no_borrow_pnl": -291,
+                  "borrow_pnl": -291,
+                  "delta": 0
+                },
+                {
+                  "scenario_id": "STRESS_30D_BASE",
+                  "no_borrow_pnl": -191,
+                  "borrow_pnl": -192,
+                  "delta": -1
+                },
+                {
+                  "scenario_id": "STRESS_30D_UP",
+                  "no_borrow_pnl": 122,
+                  "borrow_pnl": 120,
+                  "delta": -2
+                }
+              ]
+            },
+            "mean_abs_pnl_delta": 0.93,
+            "max_abs_pnl_delta": 10
+          },
+          "250BP": {
+            "synthetic_fee_rate_pct": 2.5,
+            "top5": {
+              "overlap": 4,
+              "no_borrow_top5": [
+                "BUY_STOCK::NASDAQ:PANW::327.13::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016C310.0::OPRA:PANW261016C320.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016C310.0::OPRA:PANW261016C340.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C320.0::OPRA:PANW261002C330.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016C310.0::OPRA:PANW261016C330.0::conservative"
+              ],
+              "borrow_top5": [
+                "BUY_STOCK::NASDAQ:PANW::327.13::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016C310.0::OPRA:PANW261016C320.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C320.0::OPRA:PANW261002C330.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016C310.0::OPRA:PANW261016C340.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C310.0::OPRA:PANW261002C325.0::conservative"
+              ],
+              "entered_top5": [
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C310.0::OPRA:PANW261002C325.0::conservative"
+              ],
+              "left_top5": [
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016C310.0::OPRA:PANW261016C330.0::conservative"
+              ]
+            },
+            "largest_move": {
+              "candidate_id": "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C310.0::OPRA:PANW261002C315.0::conservative",
+              "strategy_type": "BULL_CALL_SPREAD",
+              "expiration": "2026-10-02",
+              "no_borrow_rank": 24,
+              "borrow_rank": 22,
+              "abs_rank_move": 2,
+              "no_borrow_score": 30.36,
+              "borrow_score": 30.36,
+              "score_delta": 0,
+              "scenario_deltas": [
+                {
+                  "scenario_id": "STRESS_30D_DOWN",
+                  "no_borrow_pnl": -555,
+                  "borrow_pnl": -555,
+                  "delta": 0
+                },
+                {
+                  "scenario_id": "STRESS_30D_BASE",
+                  "no_borrow_pnl": -55,
+                  "borrow_pnl": -55,
+                  "delta": 0
+                },
+                {
+                  "scenario_id": "STRESS_30D_UP",
+                  "no_borrow_pnl": -55,
+                  "borrow_pnl": -55,
+                  "delta": 0
+                }
+              ]
+            },
+            "mean_abs_pnl_delta": 2.93,
+            "max_abs_pnl_delta": 33
+          },
+          "1000BP": {
+            "synthetic_fee_rate_pct": 10,
+            "top5": {
+              "overlap": 4,
+              "no_borrow_top5": [
+                "BUY_STOCK::NASDAQ:PANW::327.13::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016C310.0::OPRA:PANW261016C320.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016C310.0::OPRA:PANW261016C340.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C320.0::OPRA:PANW261002C330.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016C310.0::OPRA:PANW261016C330.0::conservative"
+              ],
+              "borrow_top5": [
+                "BUY_STOCK::NASDAQ:PANW::327.13::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016C310.0::OPRA:PANW261016C320.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C320.0::OPRA:PANW261002C330.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C310.0::OPRA:PANW261002C325.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016C310.0::OPRA:PANW261016C340.0::conservative"
+              ],
+              "entered_top5": [
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C310.0::OPRA:PANW261002C325.0::conservative"
+              ],
+              "left_top5": [
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016C310.0::OPRA:PANW261016C330.0::conservative"
+              ]
+            },
+            "largest_move": {
+              "candidate_id": "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016C340.0::OPRA:PANW261016C350.0::conservative",
+              "strategy_type": "BULL_CALL_SPREAD",
+              "expiration": "2026-10-16",
+              "no_borrow_rank": 22,
+              "borrow_rank": 26,
+              "abs_rank_move": 4,
+              "no_borrow_score": 30.51,
+              "borrow_score": 29.53,
+              "score_delta": -0.98,
+              "scenario_deltas": [
+                {
+                  "scenario_id": "STRESS_30D_DOWN",
+                  "no_borrow_pnl": -350,
+                  "borrow_pnl": -353,
+                  "delta": -3
+                },
+                {
+                  "scenario_id": "STRESS_30D_BASE",
+                  "no_borrow_pnl": -115,
+                  "borrow_pnl": -127,
+                  "delta": -12
+                },
+                {
+                  "scenario_id": "STRESS_30D_UP",
+                  "no_borrow_pnl": 283,
+                  "borrow_pnl": 273,
+                  "delta": -10
+                }
+              ]
+            },
+            "mean_abs_pnl_delta": 9.57,
+            "max_abs_pnl_delta": 94
+          }
+        },
+        "PHASE2C_ORIGINAL_30D": {
+          "25BP": {
+            "synthetic_fee_rate_pct": 0.25,
+            "top5": {
+              "overlap": 5,
+              "no_borrow_top5": [
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C330.0::OPRA:PANW261002C345.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C325.0::OPRA:PANW261002C340.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C330.0::OPRA:PANW261002C340.0::conservative",
+                "BUY_STOCK::NASDAQ:PANW::327.13::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C335.0::OPRA:PANW261002C345.0::conservative"
+              ],
+              "borrow_top5": [
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C330.0::OPRA:PANW261002C345.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C325.0::OPRA:PANW261002C340.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C330.0::OPRA:PANW261002C340.0::conservative",
+                "BUY_STOCK::NASDAQ:PANW::327.13::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C335.0::OPRA:PANW261002C345.0::conservative"
+              ],
+              "entered_top5": [],
+              "left_top5": []
+            },
+            "largest_move": {
+              "candidate_id": "LONG_CALL::NASDAQ:PANW::2026-10-09::OPRA:PANW261009C310.0::conservative",
+              "strategy_type": "LONG_CALL",
+              "expiration": "2026-10-09",
+              "no_borrow_rank": 41,
+              "borrow_rank": 42,
+              "abs_rank_move": 1,
+              "no_borrow_score": 39.24,
+              "borrow_score": 39.23,
+              "score_delta": -0.01,
+              "scenario_deltas": [
+                {
+                  "scenario_id": "PHASE2C_ORIGINAL_30D_DOWN",
+                  "no_borrow_pnl": -2905,
+                  "borrow_pnl": -2905,
+                  "delta": 0
+                },
+                {
+                  "scenario_id": "PHASE2C_ORIGINAL_30D_BASE",
+                  "no_borrow_pnl": 291,
+                  "borrow_pnl": 290,
+                  "delta": -1
+                },
+                {
+                  "scenario_id": "PHASE2C_ORIGINAL_30D_UP",
+                  "no_borrow_pnl": 1892,
+                  "borrow_pnl": 1890,
+                  "delta": -2
+                }
+              ]
+            },
+            "mean_abs_pnl_delta": 0.36,
+            "max_abs_pnl_delta": 3
+          },
+          "75BP": {
+            "synthetic_fee_rate_pct": 0.75,
+            "top5": {
+              "overlap": 5,
+              "no_borrow_top5": [
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C330.0::OPRA:PANW261002C345.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C325.0::OPRA:PANW261002C340.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C330.0::OPRA:PANW261002C340.0::conservative",
+                "BUY_STOCK::NASDAQ:PANW::327.13::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C335.0::OPRA:PANW261002C345.0::conservative"
+              ],
+              "borrow_top5": [
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C330.0::OPRA:PANW261002C345.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C325.0::OPRA:PANW261002C340.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C330.0::OPRA:PANW261002C340.0::conservative",
+                "BUY_STOCK::NASDAQ:PANW::327.13::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C335.0::OPRA:PANW261002C345.0::conservative"
+              ],
+              "entered_top5": [],
+              "left_top5": []
+            },
+            "largest_move": {
+              "candidate_id": "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016C360.0::OPRA:PANW261016C390.0::conservative",
+              "strategy_type": "BULL_CALL_SPREAD",
+              "expiration": "2026-10-16",
+              "no_borrow_rank": 77,
+              "borrow_rank": 79,
+              "abs_rank_move": 2,
+              "no_borrow_score": 28.34,
+              "borrow_score": 28.22,
+              "score_delta": -0.12,
+              "scenario_deltas": [
+                {
+                  "scenario_id": "PHASE2C_ORIGINAL_30D_DOWN",
+                  "no_borrow_pnl": -576,
+                  "borrow_pnl": -576,
+                  "delta": 0
+                },
+                {
+                  "scenario_id": "PHASE2C_ORIGINAL_30D_BASE",
+                  "no_borrow_pnl": -91,
+                  "borrow_pnl": -93,
+                  "delta": -2
+                },
+                {
+                  "scenario_id": "PHASE2C_ORIGINAL_30D_UP",
+                  "no_borrow_pnl": 357,
+                  "borrow_pnl": 353,
+                  "delta": -4
+                }
+              ]
+            },
+            "mean_abs_pnl_delta": 1.06,
+            "max_abs_pnl_delta": 10
+          },
+          "250BP": {
+            "synthetic_fee_rate_pct": 2.5,
+            "top5": {
+              "overlap": 5,
+              "no_borrow_top5": [
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C330.0::OPRA:PANW261002C345.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C325.0::OPRA:PANW261002C340.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C330.0::OPRA:PANW261002C340.0::conservative",
+                "BUY_STOCK::NASDAQ:PANW::327.13::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C335.0::OPRA:PANW261002C345.0::conservative"
+              ],
+              "borrow_top5": [
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C330.0::OPRA:PANW261002C345.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C325.0::OPRA:PANW261002C340.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C330.0::OPRA:PANW261002C340.0::conservative",
+                "BUY_STOCK::NASDAQ:PANW::327.13::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C335.0::OPRA:PANW261002C345.0::conservative"
+              ],
+              "entered_top5": [],
+              "left_top5": []
+            },
+            "largest_move": {
+              "candidate_id": "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016C360.0::OPRA:PANW261016C390.0::conservative",
+              "strategy_type": "BULL_CALL_SPREAD",
+              "expiration": "2026-10-16",
+              "no_borrow_rank": 77,
+              "borrow_rank": 80,
+              "abs_rank_move": 3,
+              "no_borrow_score": 28.34,
+              "borrow_score": 27.91,
+              "score_delta": -0.43,
+              "scenario_deltas": [
+                {
+                  "scenario_id": "PHASE2C_ORIGINAL_30D_DOWN",
+                  "no_borrow_pnl": -576,
+                  "borrow_pnl": -577,
+                  "delta": -1
+                },
+                {
+                  "scenario_id": "PHASE2C_ORIGINAL_30D_BASE",
+                  "no_borrow_pnl": -91,
+                  "borrow_pnl": -98,
+                  "delta": -7
+                },
+                {
+                  "scenario_id": "PHASE2C_ORIGINAL_30D_UP",
+                  "no_borrow_pnl": 357,
+                  "borrow_pnl": 346,
+                  "delta": -11
+                }
+              ]
+            },
+            "mean_abs_pnl_delta": 3.28,
+            "max_abs_pnl_delta": 33
+          },
+          "1000BP": {
+            "synthetic_fee_rate_pct": 10,
+            "top5": {
+              "overlap": 5,
+              "no_borrow_top5": [
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C330.0::OPRA:PANW261002C345.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C325.0::OPRA:PANW261002C340.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C330.0::OPRA:PANW261002C340.0::conservative",
+                "BUY_STOCK::NASDAQ:PANW::327.13::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C335.0::OPRA:PANW261002C345.0::conservative"
+              ],
+              "borrow_top5": [
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C330.0::OPRA:PANW261002C345.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C325.0::OPRA:PANW261002C340.0::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C330.0::OPRA:PANW261002C340.0::conservative",
+                "BUY_STOCK::NASDAQ:PANW::327.13::conservative",
+                "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-02::OPRA:PANW261002C335.0::OPRA:PANW261002C345.0::conservative"
+              ],
+              "entered_top5": [],
+              "left_top5": []
+            },
+            "largest_move": {
+              "candidate_id": "BULL_CALL_SPREAD::NASDAQ:PANW::2026-10-16::OPRA:PANW261016C340.0::OPRA:PANW261016C370.0::conservative",
+              "strategy_type": "BULL_CALL_SPREAD",
+              "expiration": "2026-10-16",
+              "no_borrow_rank": 30,
+              "borrow_rank": 36,
+              "abs_rank_move": 6,
+              "no_borrow_score": 41.64,
+              "borrow_score": 40.28,
+              "score_delta": -1.36,
+              "scenario_deltas": [
+                {
+                  "scenario_id": "PHASE2C_ORIGINAL_30D_DOWN",
+                  "no_borrow_pnl": -832,
+                  "borrow_pnl": -839,
+                  "delta": -7
+                },
+                {
+                  "scenario_id": "PHASE2C_ORIGINAL_30D_BASE",
+                  "no_borrow_pnl": 163,
+                  "borrow_pnl": 124,
+                  "delta": -39
+                },
+                {
+                  "scenario_id": "PHASE2C_ORIGINAL_30D_UP",
+                  "no_borrow_pnl": 740,
+                  "borrow_pnl": 703,
+                  "delta": -37
+                }
+              ]
+            },
+            "mean_abs_pnl_delta": 10.37,
+            "max_abs_pnl_delta": 94
+          }
+        }
+      }
+    }
+  ]
+}

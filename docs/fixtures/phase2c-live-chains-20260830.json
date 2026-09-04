@@ -1,0 +1,63 @@
+{
+  "as_of_utc": "2026-08-30T07:06Z",
+  "treasury_bill_rates_observation_date": "2026-08-28",
+  "treasury_bill_rates_coupon_equivalent": {
+    "fourWeek": 0.0375, "sixWeek": 0.0377, "eightWeek": 0.0379,
+    "thirteenWeek": 0.0383, "seventeenWeek": 0.0390, "twentySixWeek": 0.0398, "fiftyTwoWeek": 0.0414
+  },
+  "symbols": {
+    "NVDA": { "spot": 217.55, "dividend_yield_pct": 0.128706044587451 },
+    "AAPL": { "spot": 319.70, "dividend_yield_pct": 0.333778371161549 },
+    "PANW": { "spot": 371.59, "dividend_yield_pct": 0 }
+  },
+  "NVDA_contracts": [
+    {"contract":"OPRA:NVDA261009C245.0","expiration":"2026-10-09","dte":40,"strike":245,"type":"call","bid":2.05,"ask":2.18,"iv":33.69,"delta":0.1681,"gamma":0.010112,"theta":-0.07556,"vega":0.18533,"rho":0.03956,"theoretical_price":2.11},
+    {"contract":"OPRA:NVDA261016C215.0","expiration":"2026-10-16","dte":47,"strike":215,"type":"call","bid":12.4,"ask":12.65,"iv":33.47,"delta":0.5718,"gamma":0.014716,"theta":-0.11025,"vega":0.31278,"rho":0.15032,"theoretical_price":12.2},
+    {"contract":"OPRA:NVDA261009C230.0","expiration":"2026-10-09","dte":40,"strike":230,"type":"call","bid":5.15,"ask":5.3,"iv":33.24,"delta":0.3392,"gamma":0.014931,"theta":-0.10916,"vega":0.27003,"rho":0.07874,"theoretical_price":5.2},
+    {"contract":"OPRA:NVDA261016C230.0","expiration":"2026-10-16","dte":47,"strike":230,"type":"call","bid":6.15,"ask":6.25,"iv":34.09,"delta":0.3590,"gamma":0.013757,"theta":-0.10595,"vega":0.29787,"rho":0.09636,"theoretical_price":6.2},
+    {"contract":"OPRA:NVDA261016C225.0","expiration":"2026-10-16","dte":47,"strike":225,"type":"call","bid":7.85,"ask":8.0,"iv":34.12,"delta":0.4268,"gamma":0.014422,"theta":-0.11154,"vega":0.31257,"rho":0.11380,"theoretical_price":7.95},
+    {"contract":"OPRA:NVDA261016C220.0","expiration":"2026-10-16","dte":47,"strike":220,"type":"call","bid":9.95,"ask":10.1,"iv":34.21,"delta":0.4983,"gamma":0.014634,"theta":-0.11405,"vega":0.31793,"rho":0.13186,"theoretical_price":10.05},
+    {"contract":"OPRA:NVDA261009C225.0","expiration":"2026-10-09","dte":40,"strike":225,"type":"call","bid":6.8,"ask":7.0,"iv":33.15,"delta":0.4129,"gamma":0.015925,"theta":-0.11607,"vega":0.28722,"rho":0.09525,"theoretical_price":6.85},
+    {"contract":"OPRA:NVDA261009C215.0","expiration":"2026-10-09","dte":40,"strike":215,"type":"call","bid":11.25,"ask":11.75,"iv":33.25,"delta":0.5733,"gamma":0.015993,"theta":-0.11806,"vega":0.28929,"rho":0.13014,"theoretical_price":11.35},
+    {"contract":"OPRA:NVDA261009C220.0","expiration":"2026-10-09","dte":40,"strike":220,"type":"call","bid":8.75,"ask":9.15,"iv":33.14,"delta":0.4920,"gamma":0.016318,"theta":-0.11922,"vega":0.29421,"rho":0.11269,"theoretical_price":8.9},
+    {"contract":"OPRA:NVDA261016C250.0","expiration":"2026-10-16","dte":47,"strike":250,"type":"call","bid":2.07,"ask":2.12,"iv":34.47,"delta":0.1545,"gamma":0.008658,"theta":-0.06775,"vega":0.18952,"rho":0.04224,"theoretical_price":2.1},
+    {"contract":"OPRA:NVDA261016C245.0","expiration":"2026-10-16","dte":47,"strike":245,"type":"call","bid":2.73,"ask":2.79,"iv":34.22,"delta":0.1938,"gamma":0.010072,"theta":-0.07777,"vega":0.21889,"rho":0.05280,"theoretical_price":2.76},
+    {"contract":"OPRA:NVDA261009C210.0","expiration":"2026-10-09","dte":40,"strike":210,"type":"call","bid":13.45,"ask":14.8,"iv":33.5,"delta":0.6523,"gamma":0.014952,"theta":-0.11264,"vega":0.27255,"rho":0.14654,"theoretical_price":14.25},
+    {"contract":"OPRA:NVDA261009C235.0","expiration":"2026-10-09","dte":40,"strike":235,"type":"call","bid":3.8,"ask":3.95,"iv":33.38,"delta":0.2733,"gamma":0.013513,"theta":-0.09941,"vega":0.24538,"rho":0.06377,"theoretical_price":3.9},
+    {"contract":"OPRA:NVDA261016C210.0","expiration":"2026-10-16","dte":47,"strike":210,"type":"call","bid":15.3,"ask":15.65,"iv":33.53,"delta":0.6453,"gamma":0.013927,"theta":-0.10528,"vega":0.29662,"rho":0.16798,"theoretical_price":15.05},
+    {"contract":"OPRA:NVDA261016C235.0","expiration":"2026-10-16","dte":47,"strike":235,"type":"call","bid":4.7,"ask":4.8,"iv":34.1,"delta":0.2969,"gamma":0.012733,"theta":-0.09795,"vega":0.27580,"rho":0.08015,"theoretical_price":4.8}
+  ],
+  "AAPL_contracts": [
+    {"contract":"OPRA:AAPL261009C315.0","expiration":"2026-10-09","dte":40,"strike":315,"type":"call","bid":13.2,"ask":14.4,"iv":23.49,"delta":0.6015,"gamma":0.015163,"theta":-0.12235,"vega":0.41830,"rho":0.20573,"theoretical_price":13.05},
+    {"contract":"OPRA:AAPL261016C335.0","expiration":"2026-10-16","dte":47,"strike":335,"type":"call","bid":5.6,"ask":5.8,"iv":24.09,"delta":0.3242,"gamma":0.012744,"theta":-0.10654,"vega":0.42099,"rho":0.13121,"theoretical_price":5.7},
+    {"contract":"OPRA:AAPL261009C310.0","expiration":"2026-10-09","dte":40,"strike":310,"type":"call","bid":16.0,"ask":17.75,"iv":23.76,"delta":0.6751,"gamma":0.013974,"theta":-0.11625,"vega":0.39002,"rho":0.22913,"theoretical_price":16.2},
+    {"contract":"OPRA:AAPL261009C320.0","expiration":"2026-10-09","dte":40,"strike":320,"type":"call","bid":10.65,"ask":11.6,"iv":23.2,"delta":0.5235,"gamma":0.015841,"theta":-0.12398,"vega":0.43161,"rho":0.18030,"theoretical_price":10.25},
+    {"contract":"OPRA:AAPL261016C315.0","expiration":"2026-10-16","dte":47,"strike":315,"type":"call","bid":14.5,"ask":14.9,"iv":23.49,"delta":0.5973,"gamma":0.014071,"theta":-0.11385,"vega":0.45317,"rho":0.23727,"theoretical_price":13.85},
+    {"contract":"OPRA:AAPL261016C310.0","expiration":"2026-10-16","dte":47,"strike":310,"type":"call","bid":17.6,"ask":18.1,"iv":23.78,"delta":0.6658,"gamma":0.013072,"theta":-0.10913,"vega":0.42617,"rho":0.26244,"theoretical_price":17.0},
+    {"contract":"OPRA:AAPL261016C300.0","expiration":"2026-10-16","dte":47,"strike":300,"type":"call","bid":24.4,"ask":25.7,"iv":24.49,"delta":0.7837,"gamma":0.010227,"theta":-0.09229,"vega":0.34335,"rho":0.30323,"theoretical_price":24.25},
+    {"contract":"OPRA:AAPL261009C325.0","expiration":"2026-10-09","dte":40,"strike":325,"type":"call","bid":8.0,"ask":8.75,"iv":24.06,"delta":0.4480,"gamma":0.015170,"theta":-0.12697,"vega":0.42868,"rho":0.15477,"theoretical_price":8.35},
+    {"contract":"OPRA:AAPL261016C340.0","expiration":"2026-10-16","dte":47,"strike":340,"type":"call","bid":4.25,"ask":4.45,"iv":23.97,"delta":0.2650,"gamma":0.011672,"theta":-0.09632,"vega":0.38353,"rho":0.10771,"theoretical_price":4.35},
+    {"contract":"OPRA:AAPL261016C330.0","expiration":"2026-10-16","dte":47,"strike":330,"type":"call","bid":7.25,"ask":7.55,"iv":24.31,"delta":0.3889,"gamma":0.013469,"theta":-0.11493,"vega":0.44890,"rho":0.15665,"theoretical_price":7.4},
+    {"contract":"OPRA:AAPL261009C330.0","expiration":"2026-10-09","dte":40,"strike":330,"type":"call","bid":6.35,"ask":6.7,"iv":24.17,"delta":0.3759,"gamma":0.014484,"theta":-0.12195,"vega":0.41127,"rho":0.13044,"theoretical_price":6.5},
+    {"contract":"OPRA:AAPL261016C325.0","expiration":"2026-10-16","dte":47,"strike":325,"type":"call","bid":9.35,"ask":9.6,"iv":24.58,"delta":0.4569,"gamma":0.013778,"theta":-0.12064,"vega":0.46441,"rho":0.18302,"theoretical_price":9.5},
+    {"contract":"OPRA:AAPL261009C340.0","expiration":"2026-10-09","dte":40,"strike":340,"type":"call","bid":3.3,"ask":4.15,"iv":24.38,"delta":0.2500,"gamma":0.012025,"theta":-0.10246,"vega":0.34440,"rho":0.08739,"theoretical_price":3.8},
+    {"contract":"OPRA:AAPL261016C305.0","expiration":"2026-10-16","dte":47,"strike":305,"type":"call","bid":20.75,"ask":21.7,"iv":24.06,"delta":0.7288,"gamma":0.011763,"theta":-0.10141,"vega":0.38801,"rho":0.28481,"theoretical_price":20.45}
+  ],
+  "PANW_contracts": [
+    {"contract":"OPRA:PANW261009C375.0","expiration":"2026-10-09","dte":40,"strike":375,"type":"call","bid":24.0,"ask":31.75,"iv":55.94,"delta":0.5216,"gamma":0.005659,"theta":-0.33974,"vega":0.50130,"rho":0.19157,"theoretical_price":26.75},
+    {"contract":"OPRA:PANW261016C380.0","expiration":"2026-10-16","dte":47,"strike":380,"type":"call","bid":26.0,"ask":28.2,"iv":56.67,"delta":0.5015,"gamma":0.005177,"theta":-0.31909,"vega":0.54241,"rho":0.21291,"theoretical_price":27.25},
+    {"contract":"OPRA:PANW261009C390.0","expiration":"2026-10-09","dte":40,"strike":390,"type":"call","bid":19.4,"ask":25.75,"iv":55.85,"delta":0.4390,"gamma":0.005610,"theta":-0.33510,"vega":0.49616,"rho":0.16340,"theoretical_price":20.6},
+    {"contract":"OPRA:PANW261016C400.0","expiration":"2026-10-16","dte":47,"strike":400,"type":"call","bid":18.6,"ask":22.0,"iv":57.24,"delta":0.4054,"gamma":0.004982,"theta":-0.31247,"vega":0.52710,"rho":0.17468,"theoretical_price":20.15},
+    {"contract":"OPRA:PANW261009C370.0","expiration":"2026-10-09","dte":40,"strike":370,"type":"call","bid":27.75,"ask":31.95,"iv":55.94,"delta":0.5498,"gamma":0.005623,"theta":-0.33783,"vega":0.49812,"rho":0.20094,"theoretical_price":29.05},
+    {"contract":"OPRA:PANW261009C360.0","expiration":"2026-10-09","dte":40,"strike":360,"type":"call","bid":32.15,"ask":38.3,"iv":55.89,"delta":0.6064,"gamma":0.005470,"theta":-0.32859,"vega":0.48408,"rho":0.21931,"theoretical_price":34.05},
+    {"contract":"OPRA:PANW261016C410.0","expiration":"2026-10-16","dte":47,"strike":410,"type":"call","bid":15.9,"ask":19.4,"iv":57.33,"delta":0.3608,"gamma":0.004804,"theta":-0.30199,"vega":0.50904,"rho":0.15650,"theoretical_price":17.15},
+    {"contract":"OPRA:PANW261009C380.0","expiration":"2026-10-09","dte":40,"strike":380,"type":"call","bid":22.85,"ask":27.1,"iv":55.92,"delta":0.4937,"gamma":0.005668,"theta":-0.33987,"vega":0.50197,"rho":0.18217,"theoretical_price":24.55},
+    {"contract":"OPRA:PANW261016C440.0","expiration":"2026-10-16","dte":47,"strike":440,"type":"call","bid":9.25,"ask":11.5,"iv":57.46,"delta":0.2448,"gamma":0.004022,"theta":-0.25354,"vega":0.42720,"rho":0.10802,"theoretical_price":10.25},
+    {"contract":"OPRA:PANW261009C355.0","expiration":"2026-10-09","dte":40,"strike":355,"type":"call","bid":34.15,"ask":41.85,"iv":55.85,"delta":0.6345,"gamma":0.005350,"theta":-0.32133,"vega":0.47321,"rho":0.22820,"theoretical_price":36.75},
+    {"contract":"OPRA:PANW261016C330.0","expiration":"2026-10-16","dte":47,"strike":330,"type":"call","bid":52.95,"ask":58.65,"iv":53.82,"delta":0.7611,"gamma":0.004238,"theta":-0.23864,"vega":0.42163,"rho":0.30688,"theoretical_price":53.55},
+    {"contract":"OPRA:PANW261009C340.0","expiration":"2026-10-09","dte":40,"strike":340,"type":"call","bid":43.0,"ask":50.9,"iv":55.75,"delta":0.7166,"gamma":0.004826,"theta":-0.28992,"vega":0.42605,"rho":0.25284,"theoretical_price":45.8},
+    {"contract":"OPRA:PANW261016C470.0","expiration":"2026-10-16","dte":47,"strike":470,"type":"call","bid":5.2,"ask":7.8,"iv":57.85,"delta":0.1594,"gamma":0.003087,"theta":-0.19695,"vega":0.33007,"rho":0.07125,"theoretical_price":6.0},
+    {"contract":"OPRA:PANW261016C490.0","expiration":"2026-10-16","dte":47,"strike":490,"type":"call","bid":3.25,"ask":5.65,"iv":58.16,"delta":0.1178,"gamma":0.002497,"theta":-0.16093,"vega":0.26843,"rho":0.05298,"theoretical_price":4.2},
+    {"contract":"OPRA:PANW261009C425.0","expiration":"2026-10-09","dte":40,"strike":425,"type":"call","bid":8.85,"ask":15.7,"iv":55.4,"delta":0.2695,"gamma":0.004738,"theta":-0.27768,"vega":0.41566,"rho":0.10279,"theoretical_price":10.45}
+  ]
+}

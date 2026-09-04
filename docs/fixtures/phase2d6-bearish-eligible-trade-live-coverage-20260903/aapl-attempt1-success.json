@@ -1,0 +1,84 @@
+{
+  "analysis_type": "DIRECTIONAL_OPTIONS",
+  "analysis_snapshot_id": "0e72d6a33fcf59bd",
+  "analysis_as_of_utc": "2026-09-03T19:38:50.626Z",
+  "symbol": "NASDAQ:AAPL",
+  "underlying_price": 327.68,
+  "direction": "bearish",
+  "horizon_days": 30,
+  "max_loss": 2500,
+  "thesis": { "base_target_price": 301, "expected_move_absolute": -26.68, "expected_move_pct": -8.14 },
+  "input_echo": {
+    "symbol": "NASDAQ:AAPL", "direction": "bearish", "horizon_days": 30, "max_loss": 2500, "base_target_price": 301,
+    "downside_target_price": null, "upside_target_price": null,
+    "downside_iv_change_points": 0, "base_iv_change_points": 0, "upside_iv_change_points": 0,
+    "min_dte": 60, "max_dte": 90, "include_crr_hybrid_diagnostics": true,
+    "execution_model": "conservative", "commission_per_contract": 0, "contract_multiplier": 100,
+    "max_spread_pct": 25, "max_ranked_results": 10
+  },
+  "scenario_definitions": {
+    "downside": { "scenario_id": "DOWNSIDE", "underlying_price": 341.02, "iv_change_points": 0, "days_forward": 30, "scenario_source": "DETERMINISTIC_HELPER" },
+    "base": { "scenario_id": "BASE", "underlying_price": 301, "iv_change_points": 0, "days_forward": 30, "scenario_source": "USER_EXPLICIT" },
+    "upside": { "scenario_id": "UPSIDE", "underlying_price": 287.66, "iv_change_points": 0, "days_forward": 30, "scenario_source": "DETERMINISTIC_HELPER" }
+  },
+  "data_source": {
+    "provider": "TradingView Options Scanner", "endpoint": "/options/scan2",
+    "options_retrieved_at_utc": "2026-09-03T19:38:50.626Z", "chain_completeness": "COMPLETE", "warnings": []
+  },
+  "candidate_generation": {
+    "input_contract_count": 162, "eligible_contract_count": 81, "candidate_count": 31, "rejected_count": 75,
+    "rejection_summary": { "WIDE_SPREAD": 22, "DELTA_OUT_OF_RANGE": 51, "MAX_LOSS_EXCEEDED": 2 }
+  },
+  "ranking": {
+    "model": "RANKING_MODEL_V1",
+    "disclaimer": "Comparative heuristic score under user-supplied scenarios; not probability or expected return.",
+    "decision_state": "TRADE_CANDIDATES_AVAILABLE",
+    "top_trade_candidate_id": "BEAR_PUT_SPREAD::NASDAQ:AAPL::2026-11-20::OPRA:AAPL261120P320.0::OPRA:AAPL261120P330.0::conservative",
+    "fallback_baseline": "NO_TRADE",
+    "thresholds": { "minimum_score_for_consideration": 60, "minimum_confidence_for_consideration": "MEDIUM", "min_capped_reward_risk": null, "configured_max_spread_pct": 25 }
+  },
+  "scenario_quality_summary": { "HIGH_CONFIDENCE_CANDIDATES": 4, "MEDIUM_CONFIDENCE_CANDIDATES": 26, "LOW_CONFIDENCE_CANDIDATES": 0 },
+  "diagnostics": {
+    "crr_hybrid_policy": {
+      "status": "AVAILABLE",
+      "mode": "DIAGNOSTIC_ONLY_NO_RANKING_CHANGE",
+      "market_inputs": [
+        {
+          "expiration": "2026-11-20", "days_to_expiry": 78, "mode": "PARTIAL_EXTERNAL_INPUTS", "overall_confidence": "LOW",
+          "discount_rate_source": "TREASURY_BILL_COUPON_EQUIVALENT_NORMALIZED",
+          "dividend_mode": "TRAILING_DIVIDEND_YIELD_APPROXIMATION", "borrow_source": "NOT_CONNECTED",
+          "warnings": ["TREASURY_RATE_FROZEN_FALLBACK_NOT_LIVE", "CONTINUOUS_DIVIDEND_APPROXIMATION", "TRAILING_NOT_FORWARD", "BORROW_DATA_UNAVAILABLE"]
+        }
+      ],
+      "summary": { "total_candidates": 31, "by_action": { "CRR_SHADOW_REVIEW": 29, "LOCAL_ONLY": 1, "NO_ACTION": 1 }, "crr_shadow_available_count": 31, "local_warning_count": 26 },
+      "candidates": [
+        { "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:AAPL::2026-11-20::OPRA:AAPL261120P315.0::OPRA:AAPL261120P330.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "action": "CRR_SHADOW_REVIEW", "reasons": ["LOCAL_WARNINGS_MODERATE", "MODEL_DISAGREEMENT_MEDIUM"], "local_warnings": ["INTRINSIC_FLOOR_APPLIED"], "max_model_disagreement_level": "MODEL_DISAGREEMENT_MEDIUM", "crr_shadow_available": true },
+        { "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:AAPL::2026-11-20::OPRA:AAPL261120P320.0::OPRA:AAPL261120P330.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "action": "CRR_SHADOW_REVIEW", "reasons": ["LOCAL_WARNINGS_MODERATE", "MODEL_DISAGREEMENT_MEDIUM"], "local_warnings": ["INTRINSIC_FLOOR_APPLIED"], "max_model_disagreement_level": "MODEL_DISAGREEMENT_MEDIUM", "crr_shadow_available": true },
+        { "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:AAPL::2026-11-20::OPRA:AAPL261120P325.0::OPRA:AAPL261120P330.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "action": "CRR_SHADOW_REVIEW", "reasons": ["LOCAL_WARNINGS_MODERATE", "MODEL_DISAGREEMENT_MEDIUM"], "local_warnings": ["INTRINSIC_FLOOR_APPLIED"], "max_model_disagreement_level": "MODEL_DISAGREEMENT_MEDIUM", "crr_shadow_available": true },
+        { "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:AAPL::2026-11-20::OPRA:AAPL261120P320.0::OPRA:AAPL261120P335.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "action": "CRR_SHADOW_REVIEW", "reasons": ["LOCAL_WARNINGS_MODERATE", "MODEL_DISAGREEMENT_MEDIUM"], "local_warnings": ["INTRINSIC_FLOOR_APPLIED"], "max_model_disagreement_level": "MODEL_DISAGREEMENT_MEDIUM", "crr_shadow_available": true },
+        { "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:AAPL::2026-11-20::OPRA:AAPL261120P325.0::OPRA:AAPL261120P335.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "action": "CRR_SHADOW_REVIEW", "reasons": ["LOCAL_WARNINGS_MODERATE"], "local_warnings": ["INTRINSIC_FLOOR_APPLIED"], "max_model_disagreement_level": "MODEL_DISAGREEMENT_LOW", "crr_shadow_available": true },
+        { "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:AAPL::2026-11-20::OPRA:AAPL261120P325.0::OPRA:AAPL261120P340.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "action": "CRR_SHADOW_REVIEW", "reasons": ["LOCAL_WARNINGS_MODERATE"], "local_warnings": ["INTRINSIC_FLOOR_APPLIED"], "max_model_disagreement_level": "MODEL_DISAGREEMENT_LOW", "crr_shadow_available": true },
+        { "candidate_id": "LONG_PUT::NASDAQ:AAPL::2026-11-20::OPRA:AAPL261120P325.0::conservative", "strategy_type": "LONG_PUT", "action": "CRR_SHADOW_REVIEW", "reasons": ["LOCAL_WARNINGS_MODERATE"], "local_warnings": ["INTRINSIC_FLOOR_APPLIED"], "max_model_disagreement_level": "MODEL_DISAGREEMENT_LOW", "crr_shadow_available": true },
+        { "candidate_id": "LONG_PUT::NASDAQ:AAPL::2026-11-20::OPRA:AAPL261120P330.0::conservative", "strategy_type": "LONG_PUT", "action": "CRR_SHADOW_REVIEW", "reasons": ["LOCAL_WARNINGS_MODERATE"], "local_warnings": ["INTRINSIC_FLOOR_APPLIED"], "max_model_disagreement_level": "MODEL_DISAGREEMENT_LOW", "crr_shadow_available": true },
+        { "candidate_id": "LONG_PUT::NASDAQ:AAPL::2026-11-20::OPRA:AAPL261120P335.0::conservative", "strategy_type": "LONG_PUT", "action": "CRR_SHADOW_REVIEW", "reasons": ["LOCAL_WARNINGS_MODERATE"], "local_warnings": ["INTRINSIC_FLOOR_APPLIED"], "max_model_disagreement_level": "MODEL_DISAGREEMENT_LOW", "crr_shadow_available": true },
+        { "candidate_id": "LONG_PUT::NASDAQ:AAPL::2026-11-20::OPRA:AAPL261120P340.0::conservative", "strategy_type": "LONG_PUT", "action": "CRR_SHADOW_REVIEW", "reasons": ["LOCAL_WARNINGS_MODERATE"], "local_warnings": ["INTRINSIC_FLOOR_APPLIED"], "max_model_disagreement_level": "MODEL_DISAGREEMENT_LOW", "crr_shadow_available": true }
+      ]
+    }
+  },
+  "top_candidates_summary": [
+    { "rank": 1, "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:AAPL::2026-11-20::OPRA:AAPL261120P320.0::OPRA:AAPL261120P330.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "score": 85.2, "confidence": "MEDIUM", "consideration_eligible": true },
+    { "rank": 2, "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:AAPL::2026-11-20::OPRA:AAPL261120P325.0::OPRA:AAPL261120P330.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "score": 84.57, "confidence": "MEDIUM", "consideration_eligible": true },
+    { "rank": 3, "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:AAPL::2026-11-20::OPRA:AAPL261120P315.0::OPRA:AAPL261120P330.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "score": 82.77, "confidence": "MEDIUM", "consideration_eligible": true },
+    { "rank": 4, "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:AAPL::2026-11-20::OPRA:AAPL261120P325.0::OPRA:AAPL261120P335.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "score": 82.12, "confidence": "MEDIUM", "consideration_eligible": true },
+    { "rank": 5, "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:AAPL::2026-11-20::OPRA:AAPL261120P320.0::OPRA:AAPL261120P335.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "score": 81.45, "confidence": "MEDIUM", "consideration_eligible": true },
+    { "rank": 6, "candidate_id": "LONG_PUT::NASDAQ:AAPL::2026-11-20::OPRA:AAPL261120P330.0::conservative", "strategy_type": "LONG_PUT", "score": 79.31, "confidence": "MEDIUM", "consideration_eligible": true },
+    { "rank": 7, "candidate_id": "LONG_PUT::NASDAQ:AAPL::2026-11-20::OPRA:AAPL261120P335.0::conservative", "strategy_type": "LONG_PUT", "score": 78.71, "confidence": "MEDIUM", "consideration_eligible": true },
+    { "rank": 8, "candidate_id": "BEAR_PUT_SPREAD::NASDAQ:AAPL::2026-11-20::OPRA:AAPL261120P325.0::OPRA:AAPL261120P340.0::conservative", "strategy_type": "BEAR_PUT_SPREAD", "score": 77.36, "confidence": "MEDIUM", "consideration_eligible": true },
+    { "rank": 9, "candidate_id": "LONG_PUT::NASDAQ:AAPL::2026-11-20::OPRA:AAPL261120P340.0::conservative", "strategy_type": "LONG_PUT", "score": 77.1, "confidence": "MEDIUM", "consideration_eligible": true },
+    { "rank": 10, "candidate_id": "LONG_PUT::NASDAQ:AAPL::2026-11-20::OPRA:AAPL261120P325.0::conservative", "strategy_type": "LONG_PUT", "score": 75.66, "confidence": "MEDIUM", "consideration_eligible": true }
+  ],
+  "near_miss_candidates": [],
+  "baselines": [
+    { "candidate_id": "NO_TRADE::NASDAQ:AAPL", "strategy_type": "NO_TRADE", "ranking_class": "BASELINE", "score": null, "grade": null, "confidence": "HIGH", "consideration_eligible": true }
+  ]
+}
