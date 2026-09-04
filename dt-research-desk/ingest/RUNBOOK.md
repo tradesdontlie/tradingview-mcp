@@ -28,7 +28,8 @@ dt-research-desk/
     build-manifest.json      provenance of the last build (owner, payload hash, counts)
     .pipeline.lock           present only while a build is in flight
     lib/                     extract_pdf.py, parse_xlsx.py, build.py,
-                             validate.py, guard.py, preflight.py, record_publish.py
+                             validate.py, verify_build.py, guard.py,
+                             preflight.py, record_publish.py
 ```
 
 ## Sequence
@@ -67,8 +68,9 @@ DT_OWNER=dt-friday-brief python3 ingest/lib/parse_xlsx.py \
   && python3 ingest/lib/extract_pdf.py \
   && DT_OWNER=dt-friday-brief python3 ingest/lib/build.py
 ```
-`build.py` takes the pipeline lock, runs `validate.py` and refuses to build if it errors,
-writes `index.html` atomically, and stamps `build-manifest.json` with owner, payload hash and counts.
+`build.py` takes the pipeline lock, runs `validate.py` and refuses to build if it errors, writes
+`index.html` atomically, runs `verify_build.py` on the output, and stamps `build-manifest.json` with
+owner, payload hash and counts. A failure at any gate aborts the build rather than publishing damage.
 
 **5. Preflight, then republish.** Never publish blind — more than one session has written here.
 ```bash
@@ -94,6 +96,19 @@ Publish with `url` from `state.json → artifact_url` so the link is kept, then 
 - **Duplicate filenames.** Some briefs are posted under an identical filename in different weeks.
   Disambiguate by file size or by the date printed on page 1.
 - **Header row is row 3** in every workbook sheet.
+- **Browser verification silently stops verifying if the working copy moves.** The preview only
+  *executes* scripts for files inside the session's project folder; outside it, it renders a static
+  snapshot and `javascript_tool` fails with "No site is open in this tab" — a step written as "open it
+  and check the console" then passes vacuously. `verify_build.py` covers the same ground without a
+  browser (mount points, data round-trip, external hosts, unrendered template literals, theme tokens)
+  and runs automatically at the end of every build. Granting directory access does not fix the preview;
+  only moving the copy back inside the project folder does.
+- **Scheduled-task definitions are global, not per-session.** They live in `~/.claude/scheduled-tasks/`
+  and any session can rewrite any task's prompt with no conflict marker and no notice. Two sessions
+  repointed these tasks at different trees within an hour of each other. Before editing a task, say so;
+  after editing one, check it still targets the tree named in `state.json → pipeline_id`.
+- **Slack file search returns tree entries as well as blobs.** Filtering only on the path prefix inflates
+  every count. Always add `select(.type=="blob")`.
 - **You are not the only writer.** A forked session republished this artifact once while the schedule
   was live. The lock, the preflight check and `build-manifest.json` exist because of that. If preflight
   returns CONFLICT, something else is driving the pipeline — find it before publishing.
