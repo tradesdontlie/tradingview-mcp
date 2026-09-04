@@ -42,6 +42,28 @@ describe('annotate', () => {
     assert.ok(out.includes('^-- no column given'));
   });
 
+  it('strips CRLF so the caret stays aligned', () => {
+    const source = '//@version=5\r\nindicator("t")\r\nplot(ta.sma(clse, 20))';
+    const out = annotate(source, [{ line: 3, column: 13, message: 'Undeclared identifier "clse"' }]);
+    const [srcLine, caretLine] = out.split('\n');
+
+    assert.ok(!srcLine.includes('\r'), 'no stray CR in the rendered line');
+    assert.equal(caretLine.indexOf('^'), srcLine.indexOf('clse'));
+  });
+
+  it('clamps an absurd column instead of allocating a huge pad', () => {
+    const out = annotate('plot(close)', [{ line: 1, column: 9_999_999, message: 'bad col' }]);
+    assert.ok(out.length < 200);
+    assert.ok(out.endsWith('^-- bad col'));
+  });
+
+  it('still allows a caret one past the last character', () => {
+    // "Syntax error at input 'end of line without line continuation'" points here.
+    const out = annotate('abc', [{ line: 1, column: 4, message: 'eol' }]);
+    const [srcLine, caretLine] = out.split('\n');
+    assert.equal(caretLine.indexOf('^'), srcLine.length);
+  });
+
   it('renders one block per issue', () => {
     const source = 'a\nb\nc';
     const out = annotate(source, [

@@ -197,7 +197,7 @@ function fillMessage(entry) {
 // Render the offending source lines with the compiler's complaint attached, so
 // the caller can fix an error without counting columns by hand.
 export function annotate(source, issues) {
-  const lines = source.split('\n');
+  const lines = source.split(/\r?\n/);
   return issues
     .map((issue) => {
       const ln = issue.line;
@@ -205,8 +205,13 @@ export function annotate(source, issues) {
         return `   ? | ${issue.message}`;
       }
       const src = lines[ln - 1];
+      // The caret may legitimately sit one past the last character ("end of
+      // line without line continuation"), but no further — clamp so a bad
+      // column can't allocate a huge pad.
+      const col = Number.isInteger(issue.column) ? issue.column : 1;
+      const caretAt = Math.min(Math.max(col, 1), src.length + 1);
       const gutter = String(ln).padStart(4, ' ');
-      const pad = ' '.repeat(5) + '|' + ' '.repeat(1 + Math.max(0, (issue.column ?? 1) - 1));
+      const pad = `${' '.repeat(5)}|${' '.repeat(caretAt)}`;
       return `${gutter} | ${src}\n${pad}^-- ${issue.message}`;
     })
     .join('\n');
