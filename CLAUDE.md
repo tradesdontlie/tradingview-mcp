@@ -42,6 +42,17 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 - `chart_set_visible_range` → zoom to exact date range (unix timestamps)
 
 ### "Work on Pine Script"
+0. `pine_check` → **always start here.** Compiles against TradingView's own
+   server-side compiler without opening the editor or needing a chart. Returns
+   `errors` / `warnings` with line+column+code, plus an `annotated` view:
+
+   ```
+    139 |     risk := atrVal * slMult
+        |     ^-- Undeclared identifier "risk"
+   ```
+
+   Fix everything it reports before touching the editor. The chart is where you
+   look at an idea, not where you debug it.
 1. `pine_set_source` → inject code into editor
 2. `pine_smart_compile` → compile with auto-detection + error check
 3. `pine_get_errors` → read compilation errors
@@ -50,6 +61,10 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 6. `pine_save` → save to TradingView cloud
 7. `pine_new` → create blank indicator/strategy/library
 8. `pine_open` → load a saved script by name
+
+Steps 1-8 drive the Monaco editor through the React fiber tree, which does not
+exist on every TradingView build. `pine_check` and `pine_analyze` never touch
+the browser, so they work regardless.
 
 ### "Practice trading with replay"
 1. `replay_start` with `date: "2025-03-01"` → enter replay mode

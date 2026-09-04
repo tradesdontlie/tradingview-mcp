@@ -66,7 +66,7 @@ export function registerPineTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('pine_check', 'Compile Pine Script via TradingView\'s server API without needing the chart open. Returns compilation errors/warnings. Useful for validating code before injecting into the chart.', {
+  server.tool('pine_check', 'Compile Pine Script via TradingView\'s server API without needing the chart open. Returns compilation errors/warnings plus an `annotated` view showing each offending source line with a caret under the exact column. Useful for validating code before injecting into the chart.', {
     source: z.string().describe('Pine Script source code to compile/validate'),
   }, async ({ source }) => {
     try { return jsonResult(await core.check({ source })); }
