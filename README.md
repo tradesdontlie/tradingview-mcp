@@ -286,6 +286,18 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 | `pine_analyze` | Offline static analysis (no chart needed) |
 | `pine_check` | Server-side compile check (no chart needed) |
 
+`pine_check` returns errors and warnings with an `annotated` view — the offending
+source line with a caret under the exact column, and the compiler's message with
+its `{placeholder}` values filled in:
+
+```
+ 139 |     risk := atrVal * slMult
+     |     ^-- Undeclared identifier "risk"
+```
+
+Run it before `pine_set_source` so the chart is where you look at an idea, not
+where you debug it.
+
 ### Replay Mode
 
 | Tool | Step |
