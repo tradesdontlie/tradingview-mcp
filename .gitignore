@@ -15,3 +15,5 @@ dt-research-desk/ingest/data/*.json
 dt-research-desk/ingest/state.json
 dt-research-desk/ingest/build-manifest.json
 dt-research-desk/ingest/.pipeline.lock
+__pycache__/
+*.pyc
