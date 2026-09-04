@@ -14,6 +14,7 @@ import { registerWatchlistTools } from './tools/watchlist.js';
 import { registerUiTools } from './tools/ui.js';
 import { registerPaneTools } from './tools/pane.js';
 import { registerTabTools } from './tools/tab.js';
+import { instrument, enabled as logEnabled } from './core/tool_log.js';
 
 const server = new McpServer(
   {
@@ -69,6 +70,9 @@ CONTEXT MANAGEMENT:
   }
 );
 
+// Optional JSONL call log (set TV_MCP_LOG_FILE). No-op when unset.
+instrument(server);
+
 // Register all tool groups
 registerHealthTools(server);
 registerChartTools(server);
@@ -87,7 +91,9 @@ registerTabTools(server);
 
 // Startup notice (stderr so it doesn't interfere with MCP stdio protocol)
 process.stderr.write('⚠  tradingview-mcp  |  Unofficial tool. Not affiliated with TradingView Inc. or Anthropic.\n');
-process.stderr.write('   Ensure your usage complies with TradingView\'s Terms of Use.\n\n');
+process.stderr.write('   Ensure your usage complies with TradingView\'s Terms of Use.\n');
+if (logEnabled) process.stderr.write(`   Tool-call log: ${process.env.TV_MCP_LOG_FILE}\n`);
+process.stderr.write('\n');
 
 // Start stdio transport
 const transport = new StdioServerTransport();

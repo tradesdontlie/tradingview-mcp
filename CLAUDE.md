@@ -120,6 +120,20 @@ These tools can return large payloads. Follow these rules to avoid context bloat
 - OHLCV capped at 500 bars, trades at 20 per request
 - Pine labels capped at 50 per study by default (pass `max_labels` to override)
 
+## Tool-Call Logging
+
+Set `TV_MCP_LOG_FILE` in the server's `env` to append every tool call to a JSONL
+file — name, args, truncated result, duration. Unset it is a no-op. Use it when
+a chart ends up in a state nobody meant to create, or to time a slow tool.
+
+```bash
+jq -r 'select(.result.is_error) | "\(.ts) \(.tool)"' ~/.tradingview-mcp/calls.jsonl
+jq -s 'group_by(.tool) | map({tool: .[0].tool, n: length,
+       p95: (sort_by(.duration_ms) | .[(length * 0.95 | floor)].duration_ms)})' calls.jsonl
+```
+
+Results are truncated at 2000 chars so screenshots do not bloat the file.
+
 ## Architecture
 
 ```

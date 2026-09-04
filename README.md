@@ -326,6 +326,30 @@ Tools return compact output by default to minimize context usage. For a typical 
 | `verbose: true` | Pass on any pine tool to get raw data with IDs/colors when needed |
 | `study_filter` | Target one indicator instead of scanning all |
 
+## Tool-Call Logging
+
+Set `TV_MCP_LOG_FILE` to record every MCP tool call as JSON lines — tool name,
+arguments, truncated result, and duration. Unset (the default) it is a no-op.
+
+```json
+{"ts":"2026-09-04T12:30:08.145Z","tool":"pine_check","args":{"source":"plot(close)"},"duration_ms":312.4,"result":{"is_error":false,"chars":35,"text":"..."}}
+```
+
+```json
+{
+  "mcpServers": {
+    "tradingview": {
+      "command": "node",
+      "args": ["/path/to/tradingview-mcp/src/server.js"],
+      "env": { "TV_MCP_LOG_FILE": "~/.tradingview-mcp/calls.jsonl" }
+    }
+  }
+}
+```
+
+Results are truncated to 2000 characters so screenshots don't bloat the log, and
+a logging failure never breaks a tool call.
+
 ## Finding TradingView on Your System
 
 Launch scripts and `tv_launch` auto-detect TradingView. If auto-detection fails:
