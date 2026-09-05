@@ -38,6 +38,24 @@ Two things had to be fixed before it could work at all:
    files with no extension makes them work under any static server — `serve.py`,
    `python3 -m http.server`, Netlify, GitHub Pages.
 
+## Running it
+
+Two ways, same pipeline:
+
+```bash
+cd apex-terminal && python3 bake.py     # by hand
+```
+
+or trigger the **`apex-terminal-now`** routine, which lives with the other on-demand
+terminals in `~/.claude/scheduled-tasks/`. It is registered **manual only** — no cron, no
+`fireAt`, no launchd job — so it never fires on its own. It runs the same command, then
+republishes the snapshot Artifact and reports the regime and stress read.
+
+The routine's `SKILL.md` is self-contained (each run starts with no memory of the last),
+so anything a run needs to know — the expected gaps, the abort conditions, the Artifact
+URL, the no-push rule — is duplicated there deliberately. If a rule here changes, change
+it there too.
+
 ## Layout
 
 ```
