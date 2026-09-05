@@ -1,0 +1,13 @@
+# Everything a bake writes. The repo holds the pipeline; the machine holds the
+# state it produces. All of it is regenerable with one command.
+cache/
+dist/
+vintages/
+build-manifest.json
+
+# Present only while a bake is in flight
+.bake.lock
+
+# Python
+__pycache__/
+*.pyc

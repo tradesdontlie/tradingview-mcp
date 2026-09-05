@@ -1,0 +1,3 @@
+# None. The pipeline runs on the Python 3 standard library alone:
+# urllib for HTTP, csv and json for parsing, unittest for the tests.
+# Tested on Python 3.9+.
