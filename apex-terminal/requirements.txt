@@ -1,0 +1,3 @@
+# Only one third-party package, and only for one panel.
+# Everything else runs on the standard library.
+pypdf>=4.0        # parses House Clerk PTR filings for the congressional-trades table

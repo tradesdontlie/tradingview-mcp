@@ -17,3 +17,11 @@ dt-research-desk/ingest/build-manifest.json
 dt-research-desk/ingest/.pipeline.lock
 __pycache__/
 *.pyc
+
+# APEX terminal — generated output and the HTTP cache.
+# vendor-dist/ (the Perplexity build) and lib/ are the tracked inputs.
+# state.json IS tracked — it carries the Artifact URL each bake republishes to.
+apex-terminal/cache/
+apex-terminal/public/
+apex-terminal/report/
+apex-terminal/build-manifest.json
