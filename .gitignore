@@ -5,3 +5,10 @@ temp_*
 *.log
 discovery-log.json
 rules.json
+
+# Personal MCP client config (hardcoded local paths) and daily screener
+# output (real trading signals/results, regenerated every run) — neither
+# belongs in the shared repo.
+.mcp.json
+screener/results/
+~$*.xlsx
