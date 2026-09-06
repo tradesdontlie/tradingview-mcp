@@ -132,7 +132,11 @@ async function execute(handler, values, positionals) {
   try {
     const result = await handler(values, positionals);
     console.log(JSON.stringify(result, null, 2));
-    process.exit(0);
+    // Setting exitCode and letting Node exit naturally (rather than calling
+    // process.exit()) avoids a Windows-only libuv crash — "Assertion failed:
+    // !(handle->flags & UV_HANDLE_CLOSING)" — that a forced exit can trigger
+    // right after a fetch() call's handles are still being torn down.
+    process.exitCode = 0;
   } catch (err) {
     handleError(err);
   }

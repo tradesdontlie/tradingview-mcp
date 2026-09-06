@@ -45,8 +45,15 @@ export async function waitForChartReady(expectedSymbol = null, expectedTf = null
       continue;
     }
 
-    // Check symbol match if expected
-    if (expectedSymbol && state.currentSymbol && !state.currentSymbol.toUpperCase().includes(expectedSymbol.toUpperCase())) {
+    // Check symbol match if expected. The legend only ever shows the ticker
+    // (e.g. "ANTM"), never the exchange-qualified form (e.g. "IDX:ANTM"), so
+    // strip any "EXCHANGE:" prefix before comparing — otherwise this never
+    // matches for exchange-qualified symbols and every call burns the full
+    // timeout.
+    const expectedTicker = expectedSymbol && expectedSymbol.includes(':')
+      ? expectedSymbol.slice(expectedSymbol.lastIndexOf(':') + 1)
+      : expectedSymbol;
+    if (expectedTicker && state.currentSymbol && !state.currentSymbol.toUpperCase().includes(expectedTicker.toUpperCase())) {
       stableCount = 0;
       await new Promise(r => setTimeout(r, POLL_INTERVAL));
       continue;
