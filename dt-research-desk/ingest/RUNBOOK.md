@@ -22,6 +22,33 @@ desktop control, and that approval **cannot be granted inside an unattended sche
 tasks that could never do the one thing only a human could authorise were worse than one routine a
 human starts.
 
+**The routine's prompt is committed** at `ingest/routine/dt-push.SKILL.md`. The copy that actually runs
+is `~/.claude/scheduled-tasks/dt-push/SKILL.md`; the committed one is the recoverable original. Task
+definitions are global to the machine rather than per-session, so any session can overwrite this one
+with no history — that is what the committed copy is for. To install or restore it:
+
+```bash
+mkdir -p ~/.claude/scheduled-tasks/dt-push
+sed "s#\`<repo>/dt-research-desk\`, where \`<repo>\` is your local checkout#\`$(pwd)\`#" \
+  ingest/routine/dt-push.SKILL.md > ~/.claude/scheduled-tasks/dt-push/SKILL.md
+```
+
+The two files differ in exactly one line: the committed copy carries a `<repo>` placeholder where the
+installed one carries the absolute checkout path, because an absolute path names the account and this
+repo is public. After editing either, re-sync and check that the diff is still only that line.
+
+**This repo is public and the research it ingests is not.** The corpus, the extracted text, every
+figure and the attribution are gitignored; the repo holds only the pipeline. Gate the push on the
+audit, and let the `&&` do the gating — a report read by eye has already been pushed past once:
+
+```bash
+python3 -I ingest/lib/audit_public.py && git push
+```
+
+It derives the confidential strings from the gitignored `state.json` and `data/copy.json`, so the
+check itself names nothing, and it exits 2 rather than 0 if those files are missing — a pass it cannot
+substantiate is not reported as a pass.
+
 ## Layout
 
 ```

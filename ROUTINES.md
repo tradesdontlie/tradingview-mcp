@@ -8,11 +8,14 @@ passes. There is no service to keep running and no shared state between them.
 |---|---|---|---|---|
 | **Macro Nowcast** — 9-pillar macro & liquidity regime monitor | `cd macro-nowcast && python3 bake.py` | `macro-nowcast-now` | manual only | [RUNBOOK](macro-nowcast/RUNBOOK.md) |
 | **APEX Terminal** — institutional macro & liquidity terminal | `cd apex-terminal && python3 bake.py` | `apex-terminal-now` | manual only | [RUNBOOK](apex-terminal/RUNBOOK.md) |
-| **Dual Trend Desk** — weekly research ingest from Slack | `cd dt-research-desk/ingest && python3 build.py` | `dt-friday-brief`, `dt-weekly-ingest` | Fri 21:12, Mon 21:40 | [RUNBOOK](dt-research-desk/ingest/RUNBOOK.md) |
+| **Dual Trend Desk** — weekly research ingest from Slack | `cd dt-research-desk && python3 ingest/lib/build.py` (rebuild only — the sweep and the file fetch run inside the routine) | `dt-push` | manual only | [RUNBOOK](dt-research-desk/ingest/RUNBOOK.md) |
 
-The **scheduled task** column is the routine's id in `~/.claude/scheduled-tasks/`. The two
-manual ones deliberately carry no cron expression and no launchd job — they exist so the run
-is one trigger with its reporting rules attached, not so it fires on a timer.
+The **scheduled task** column is the routine's id in `~/.claude/scheduled-tasks/`. All three
+deliberately carry no cron expression and no launchd job — they exist so the run is one
+trigger with its reporting rules attached, not so it fires on a timer. The Dual Trend Desk
+ran on two timed tasks until 2026-10-21; they fired together on an app-launch catch-up and
+duplicated each other's records, so they were merged into the single manual `dt-push`, whose
+prompt is committed at `dt-research-desk/ingest/routine/dt-push.SKILL.md`.
 
 ## Manual push
 
@@ -46,6 +49,9 @@ adding another.
   where, how long it took and what failed.
 - **The page is self-contained.** Generated HTML carries its data inline, with no runtime API
   call, so it survives being opened from disk or published under a strict CSP.
+- **Licensed input never enters the repo.** Where a routine reads subscriber-only research,
+  the repo holds the pipeline and the machine holds the corpus, the figures and the
+  attribution. `dt-research-desk/ingest/lib/audit_public.py` gates the push on that.
 
 ## Adding a routine
 
@@ -55,5 +61,7 @@ adding another.
 4. Gitignore everything the routine writes — the repo holds the pipeline, the machine holds
    the state.
 5. Register a scheduled task (`<name>-now`, manual only) carrying the command, the gates and
-   what to report.
+   what to report, and commit a copy of its prompt next to the pipeline. Task definitions are
+   global to the machine, not per-session, so an uncommitted one can be overwritten silently
+   with no way back.
 6. Add a row to the table above.
