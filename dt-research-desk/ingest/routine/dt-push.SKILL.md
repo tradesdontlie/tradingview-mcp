@@ -8,8 +8,11 @@ Refresh the **Dual Trend Desk** dashboard. This is a manual, on-demand push — 
 routine on 2026-10-21 after they fired simultaneously on an app-launch catch-up and duplicated each
 other's records.
 
-Working directory:
-`<repo>/dt-research-desk`, where `<repo>` is your local checkout
+This routine starts in the **repository root**, not in the desk directory, so every command below is
+written to be run from there as `cd dt-research-desk && ...`. Run them **exactly as written**: each one
+is pre-approved by that literal string, and editing it — even adding an absolute path — turns the run
+into a permission prompt that nothing is there to answer, which is how a run once stalled after it had
+already appended its records.
 
 **First: read `ingest/RUNBOOK.md` in full and follow it.** It is the authority on schemas, file naming,
 gotchas and known limits. This prompt is the dispatch summary only.
@@ -53,7 +56,7 @@ Run:
      refresh as a result.
 
 4. Append new records per the runbook schemas. **Use the append tool — never hand-edit the JSON:**
-   `python3 ingest/lib/append.py <records.json> --owner dt-push`
+   `cd dt-research-desk && python3 ingest/lib/append.py <records.json> --owner dt-push`
    It takes the pipeline lock, re-reads inside it, and skips records already present, so re-running the
    same window is a no-op instead of a collision. Pass `--dry-run` first to see what would change.
    Schemas: `trades`, `calls`, `perf` (Weekly Brief only — the only source for the performance pair),
@@ -61,7 +64,7 @@ Run:
    analyst states outright), `persistence` (upserts — re-mark earlier calls Held / Faded / Reversed /
    Confirmed). Use the actual message and PDF text; do not invent figures you have not read.
 5. Rebuild:
-   `DT_OWNER=dt-push python3 ingest/lib/parse_xlsx.py && python3 ingest/lib/extract_pdf.py && DT_OWNER=dt-push python3 ingest/lib/build.py`
+   `cd dt-research-desk && DT_OWNER=dt-push python3 ingest/lib/parse_xlsx.py && python3 ingest/lib/extract_pdf.py && DT_OWNER=dt-push python3 ingest/lib/build.py`
    `build.py` takes the lock, runs `validate.py` and aborts on any integrity error, writes atomically,
    runs `verify_build.py`, and stamps `build-manifest.json`. If validation fails, fix the data — never
    bypass it. Universe row counts drift week to week, so breadth is always a percentage of that
@@ -71,9 +74,9 @@ Run:
 7. **Preflight before publishing.** Read the artifact with the Artifact tool (`action: "read"` on
    `state.json → artifact_url`) — it saves the live page to a local file whose name carries the artifact
    version. Then:
-   `python3 -I ingest/lib/preflight.py <that-file>`
+   `cd dt-research-desk && python3 -I ingest/lib/preflight.py <that-file>`
    - **exit 0 (PUBLISH)** — publish with `url` set to the artifact URL, then
-     `python3 ingest/lib/record_publish.py <the-version-you-read>`.
+     `cd dt-research-desk && python3 ingest/lib/record_publish.py <the-version-you-read>`.
    - **exit 3 (SKIP)** — live already matches local. Do not publish. Say so.
    - **exit 2 (CONFLICT)** — someone published in between. **Do not publish.** Report the conflict, name
      both payload hashes, and stop.

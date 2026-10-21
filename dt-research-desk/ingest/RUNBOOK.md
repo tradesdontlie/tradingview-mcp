@@ -25,17 +25,24 @@ human starts.
 **The routine's prompt is committed** at `ingest/routine/dt-push.SKILL.md`. The copy that actually runs
 is `~/.claude/scheduled-tasks/dt-push/SKILL.md`; the committed one is the recoverable original. Task
 definitions are global to the machine rather than per-session, so any session can overwrite this one
-with no history — that is what the committed copy is for. To install or restore it:
+with no history — that is what the committed copy is for. The two are byte-identical, so installing or
+restoring it is a copy:
 
 ```bash
 mkdir -p ~/.claude/scheduled-tasks/dt-push
-sed "s#\`<repo>/dt-research-desk\`, where \`<repo>\` is your local checkout#\`$(pwd)\`#" \
-  ingest/routine/dt-push.SKILL.md > ~/.claude/scheduled-tasks/dt-push/SKILL.md
+cp ingest/routine/dt-push.SKILL.md ~/.claude/scheduled-tasks/dt-push/SKILL.md
 ```
 
-The two files differ in exactly one line: the committed copy carries a `<repo>` placeholder where the
-installed one carries the absolute checkout path, because an absolute path names the account and this
-repo is public. After editing either, re-sync and check that the diff is still only that line.
+After editing either copy, re-sync and check `diff` is empty. The routine holds no absolute path on
+purpose: it starts in the **repository root** and every command in it is written `cd dt-research-desk
+&& ...`, which also keeps the account name out of this public repo.
+
+**Those command strings are load-bearing — run them verbatim.** Each is pre-approved in
+`.claude/settings.local.json` by its literal text, so a run that rewrites one (even just expanding the
+`cd` to an absolute path) turns into a permission prompt. In a routine there is nobody to answer it:
+on 2026-10-22 a run swept Slack, appended a new trade, then parked at the rebuild for want of an
+approval and reported nothing. Both spellings of each command are allow-listed — the whole `&&` chain
+and the individual steps — because the matcher may check either.
 
 **This repo is public and the research it ingests is not.** The corpus, the extracted text, every
 figure and the attribution are gitignored; the repo holds only the pipeline. Gate the push on the
