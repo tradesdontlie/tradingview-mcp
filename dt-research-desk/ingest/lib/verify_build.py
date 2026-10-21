@@ -71,7 +71,8 @@ if payload:
         bb = 100 * s["universe"]["BB"] / s["n"]
         if not 0 <= bb <= 100:
             E(f"snapshot {d}: breadth {bb} outside 0-100")
-    for k in ("trades", "calls", "perf", "regime", "persistence", "copy", "meta"):
+    for k in ("trades", "calls", "perf", "regime", "persistence", "copy", "meta",
+              "cash", "framework"):
         if k not in payload:
             E(f"payload missing {k!r}")
     if payload.get("meta", {}).get("n_pdf", 0) < 1:

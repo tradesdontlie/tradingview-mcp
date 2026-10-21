@@ -36,6 +36,7 @@ with pipeline_lock(OWNER):
     payload = {"meta": meta, "trades": trades, "calls": D("calls.json"),
                "perf": D("perf.json"), "regime": D("regime.json"),
                "persistence": D("persistence.json"), "copy": D("copy.json"),
+               "cash": D("cash.json"), "framework": D("framework.json"),
                "sp1500": rank["sp1500"], "thematic": rank["thematic"]}
 
     # hash exactly the bytes that land in the HTML, so preflight's extraction

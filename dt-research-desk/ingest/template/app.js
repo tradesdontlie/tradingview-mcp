@@ -50,11 +50,16 @@ $('#kpiOpen').textContent = BOOK.open.length;
   $('#kExcess').textContent=(ex>=0?'+':'')+ex.toFixed(1);
   $('#kExcess').className='v '+(ex>=0?'up':'dn');
   $('#kExcessD').textContent='pp, '+md(P.date);
-  const cashPts=D.perf.filter(p=>p.cash!=null);
+  // cash comes from two places: the Weekly Brief series in perf.json, and the
+  // levels stated in Slack between briefs (cash.json). The latest disclosed
+  // level is often a message, not a brief — so merge before taking the last.
+  const cashPts=D.perf.filter(p=>p.cash!=null).map(p=>({date:p.date,cash:p.cash,src:'brief'}))
+    .concat((D.cash||[]).map(c=>({date:c.date,cash:c.cash,src:'slack'})))
+    .sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:0);
   const lastCash=cashPts[cashPts.length-1], firstCash=cashPts[0];
   $('#kCash').textContent=lastCash?lastCash.cash+'%':'n/d';
-  $('#kCashD').textContent=firstCash&&lastCash&&firstCash!==lastCash
-    ? 'from '+firstCash.cash+'% on '+md(firstCash.date) : 'last disclosed';
+  $('#kCashD').textContent=lastCash
+    ? md(lastCash.date)+(lastCash.src==='slack'?' (Slack)':' (brief)') : 'last disclosed';
   const b0=100*D.sp1500[DATES[0]].universe.BB/D.sp1500[DATES[0]].n;
   const bN=100*D.sp1500[DATES[DATES.length-1]].universe.BB/D.sp1500[DATES[DATES.length-1]].n;
   $('#kBreadth').textContent=bN.toFixed(1)+'%';
@@ -207,6 +212,30 @@ $('#persistTable').innerHTML = `<thead><tr><th>Call date</th><th>Call</th><th>Co
  PERSIST.map(p=>`<tr><td class="mono" style="font-size:12px;white-space:nowrap">${p.date}</td>
   <td class="tick">${esc(p.call)}</td><td>${convChip(p.conviction)}</td>
   <td><span class="chip ${p.tone}">${esc(p.outcome)}</span></td><td class="why">${esc(p.note)}</td></tr>`).join('')+'</tbody>';
+
+/* ---------- framework ---------- */
+// Decision rules the analyst stated outright in Slack. Kept separate from calls:
+// a rule is not a dated market view, and it is what makes the trade record legible
+// (why a holding is trimmed rather than sold, why a top-ranked name is skipped).
+const FW = (D.framework||[]).slice().sort((a,b)=>a.date<b.date?-1:1);
+$('#fwBody').innerHTML = FW.length ? `<div class="tl">`+FW.map(f=>`<div class="tl-item">
+  <div class="tl-d">${esc(f.date)}</div><div class="tl-h">${esc(f.topic)}</div>
+  <div class="tl-b"><strong>${esc(f.rule)}</strong><br>${esc(f.detail)}
+  ${f.url?` <a href="${esc(f.url)}" target="_blank" rel="noopener">source</a>`:''}</div></div>`).join('')+`</div>`
+  : '<p class="note">No framework records yet.</p>';
+
+const CASHROWS = (D.perf||[]).filter(p=>p.cash!=null).map(p=>({date:p.date,cash:p.cash,src:'Weekly Brief',note:'',url:null}))
+  .concat((D.cash||[]).map(c=>({date:c.date,cash:c.cash,src:'Slack',note:c.note||'',url:c.url})))
+  .sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:0);
+$('#cashTable').innerHTML = `<thead><tr><th>Date</th><th class="num">Cash</th><th>Change</th><th>Source</th><th>Note</th></tr></thead><tbody>`+
+  CASHROWS.map((c,i)=>{
+    const prev=i?CASHROWS[i-1].cash:null, dl=prev==null?null:+(c.cash-prev).toFixed(2);
+    return `<tr><td class="mono" style="font-size:12px;white-space:nowrap">${c.date}</td>
+      <td class="num mono">${c.cash}%</td>
+      <td class="${dl==null?'':dl>0?'up':dl<0?'dn':''}">${dl==null?'—':(dl>0?'+':'')+dl+'pp'}</td>
+      <td><span class="chip">${esc(c.src)}</span></td>
+      <td class="why">${esc(c.note)}${c.url?` <a href="${esc(c.url)}" target="_blank" rel="noopener">source</a>`:''}</td></tr>`;
+  }).join('')+'</tbody>';
 
 /* ---------- active book ---------- */
 function bookTable(el, rows, closed){

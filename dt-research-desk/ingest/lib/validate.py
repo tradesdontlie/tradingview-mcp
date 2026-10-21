@@ -17,6 +17,7 @@ DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 state    = json.load(open(os.path.join(ROOT, "state.json"), encoding="utf-8"))
 trades, calls, perf = D("trades.json"), D("calls.json"), D("perf.json")
 rank, copy = D("rankings.json"), D("copy.json")
+cash, framework = D("cash.json"), D("framework.json")
 TRADE_CH = state["channels"]["dt_trade_updates"]["id"]
 PUB_CH   = state["channels"]["mo_publishing"]["id"]
 
@@ -98,11 +99,51 @@ for date, snap in sorted(rank["sp1500"].items()):
         E(f"snapshot {date}: signal states sum to {sum(u.values())}, universe is {n}")
     if not 1000 < n < 2000:
         E(f"snapshot {date}: implausible universe size {n}")
+    # A snapshot with no sectors renders empty charts and crashes the rank
+    # tables on null.toFixed — that is a build-blocking fault, not a warning.
     if len(snap["sectors"]) != 11:
-        W(f"snapshot {date}: {len(snap['sectors'])} sectors, expected 11")
+        E(f"snapshot {date}: {len(snap['sectors'])} sectors, expected 11 "
+          f"(workbook layout probably drifted — check the Sector Summary header)")
+    if any(not s.get("Sector") for s in snap["sectors"]):
+        E(f"snapshot {date}: a sector row has no name — header misaligned")
     ranks = sorted(int(s["Rank"]) for s in snap["sectors"])
     if ranks != list(range(1, len(ranks) + 1)):
         E(f"snapshot {date}: sector ranks are not 1..{len(ranks)}")
+
+# --- 8b. cash ladder and framework records --------------------------------
+# Cash is the first hedge, so a wrong cash number misstates the risk dial.
+# These rows come from Slack messages between briefs, so they carry a permalink
+# into one of the two channels and nowhere else.
+CH = {TRADE_CH, PUB_CH}
+cd = [c["date"] for c in cash]
+if len(set(cd)) != len(cd):
+    E("cash.json has duplicate dates")
+if cd != sorted(cd):
+    E("cash.json is not in date order")
+for c in cash:
+    if not DATE.match(c.get("date", "")):
+        E(f"cash {c.get('date')!r}: malformed date")
+    elif c["date"] > today:
+        E(f"cash {c['date']} is in the future (today is {today})")
+    if not isinstance(c.get("cash"), (int, float)) or not 0 <= c["cash"] <= 100:
+        E(f"cash {c.get('date')}: level {c.get('cash')!r} missing or outside 0-100")
+    if not c.get("url") or not any(ch in c["url"] for ch in CH):
+        E(f"cash {c.get('date')}: url is not a permalink into either source channel")
+# A brief-derived cash level lives in perf.json; the same date must not also
+# appear in cash.json or the ladder would double-count it.
+_brief = {p["date"] for p in perf if p.get("cash") is not None}
+for d in sorted(_brief & set(cd)):
+    E(f"cash {d} is in both perf.json and cash.json — one source per datapoint")
+
+for f in framework:
+    if not DATE.match(f.get("date", "")):
+        E(f"framework {f.get('date')!r}: malformed date")
+    for k in ("topic", "rule", "detail"):
+        if not f.get(k):
+            E(f"framework {f.get('date')}: {k} missing — the panel would render blank")
+    if not f.get("url") or not any(ch in f["url"] for ch in CH):
+        E(f"framework {f.get('date')} {f.get('topic')}: url is not a permalink into "
+          f"either source channel — a stated rule must be citable")
 
 # --- 9. dashboard copy must be present (empty panels render blank) --------
 for k in ("summary", "chartNotes", "workflow", "footer", "brandline", "bookNote", "sumRange"):

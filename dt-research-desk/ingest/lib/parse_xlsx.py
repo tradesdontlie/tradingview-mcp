@@ -4,17 +4,34 @@ import openpyxl, os, json, glob, re
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC, OUT = os.path.join(ROOT, "corpus", "xlsx"), os.path.join(ROOT, "data", "rankings.json")
 
-def rows(ws, hdr_row=3):
-    hdr, out = None, []
-    for i, r in enumerate(ws.iter_rows(values_only=True), 1):
-        if i < hdr_row:
-            continue
-        if i == hdr_row:
-            hdr = [str(c).replace("\n", " ").strip() if c is not None else "" for c in r]
-            continue
+def rows(ws, hdr_row=None):
+    """Read a sheet into dicts, LOCATING the header rather than assuming row 3.
+
+    The workbooks drift. Three layouts have shipped so far: header on row 3 at
+    column A; header on row 3 preceded by two blank columns, with the sector
+    split into "Sector (Code)" + "Sector Name"; and header on row 4 with the
+    same two blank columns and no code column. Hardcoding the position made six
+    weeks of snapshots parse to zero sectors while still looking like a success.
+    """
+    grid = list(ws.iter_rows(values_only=True))
+    hdr = hidx = None
+    for i, r in enumerate(grid[:12]):
+        cells = [str(c).replace("\n", " ").strip() if c is not None else "" for c in r]
+        if "Rank" in cells:                      # the header is the row naming Rank
+            hdr, hidx = cells, i
+            break
+    if hdr is None:
+        return []
+    out = []
+    for r in grid[hidx + 1:]:
         if all(c is None for c in r):
             continue
-        out.append(dict(zip(hdr, r)))
+        rec = dict(zip(hdr, r))
+        rec.pop("", None)                        # drop the blank leading columns
+        # normalise the sector column across layouts
+        if "Sector" not in rec and "Sector Name" in rec:
+            rec["Sector"] = rec["Sector Name"]
+        out.append(rec)
     return out
 
 def ranked(ws):

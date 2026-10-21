@@ -23,6 +23,7 @@
   <button role="tab" aria-selected="false" data-v="weekly">Weekly 1500 review</button>
   <button role="tab" aria-selected="false" data-v="charts">Charts</button>
   <button role="tab" aria-selected="false" data-v="active">Active book</button>
+  <button role="tab" aria-selected="false" data-v="framework">Framework</button>
   <button role="tab" aria-selected="false" data-v="workflow">Update workflow</button>
 </div></nav>
 
@@ -126,6 +127,16 @@
 </section>
 
 <!-- ============ WORKFLOW ============ -->
+<!-- ============ FRAMEWORK ============ -->
+<section id="v-framework" class="hide">
+  <div class="p"><div class="ph"><h2>The method, in his own words</h2>
+    <span class="ph note">Decision rules stated directly in Slack — not inferred from the trade record</span></div>
+    <div class="pb" id="fwBody"></div></div>
+  <div class="p"><div class="ph"><h2>Stated cash levels</h2>
+    <span class="ph note">Cash is the first hedge, so the level is the risk dial</span></div>
+    <div class="pb tight"><div class="tscroll"><table id="cashTable"></table></div></div></div>
+</section>
+
 <section id="v-workflow" class="hide">
   <div class="panel"><div class="ph"><h2>Keeping this current</h2>
     <span class="ph note">What to re-run, when, and what each step produces.</span></div>
