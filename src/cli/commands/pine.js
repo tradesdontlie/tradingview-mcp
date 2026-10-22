@@ -34,11 +34,17 @@ register('pine', {
     }],
     ['compile', {
       description: 'Smart compile: detect button, compile, check errors',
-      handler: () => core.smartCompile(),
+      options: {
+        'allow-title-mismatch': { type: 'boolean', description: 'Save even if the editor script name differs from the source title' },
+      },
+      handler: (opts) => core.smartCompile({ allowTitleMismatch: !!opts['allow-title-mismatch'] }),
     }],
     ['raw-compile', {
       description: 'Click compile/add button without smart detection',
-      handler: () => core.compile(),
+      options: {
+        'allow-title-mismatch': { type: 'boolean', description: 'Save even if the editor script name differs from the source title' },
+      },
+      handler: (opts) => core.compile({ allowTitleMismatch: !!opts['allow-title-mismatch'] }),
     }],
     ['analyze', {
       description: 'Offline static analysis (no TradingView needed)',
@@ -74,7 +80,10 @@ register('pine', {
     }],
     ['save', {
       description: 'Save the current Pine Script (Ctrl+S)',
-      handler: () => core.save(),
+      options: {
+        'allow-title-mismatch': { type: 'boolean', description: 'Save even if the editor script name differs from the source title' },
+      },
+      handler: (opts) => core.save({ allowTitleMismatch: !!opts['allow-title-mismatch'] }),
     }],
     ['new', {
       description: 'Create a new blank Pine Script (indicator, strategy, library)',
