@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "MCP bridge for TradingView Desktop via Chrome DevTools Protocol",
   "type": "module",
+  "engines": {
+    "node": ">=24.22.1 <25"
+  },
   "main": "src/server.js",
   "bin": {
     "tv": "src/cli/index.js"
@@ -29,5 +32,8 @@
   },
   "devDependencies": {
     "eslint": "^9.39.4"
+  },
+  "overrides": {
+    "body-parser": "^2.4.0"
   }
 }
