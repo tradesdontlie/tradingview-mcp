@@ -1,23 +1,23 @@
 /**
  * Core screenshot/capture logic.
  */
-import { getClient, evaluate, getChartCollection } from '../connection.js';
-import { waitForChartRender } from '../wait.js';
+import { getClient as getClientDefault, evaluate as evaluateDefault, getChartCollection as getChartCollectionDefault } from '../connection.js';
+import { waitForChartRender as waitForChartRenderDefault } from '../wait.js';
 import { writeFileSync, mkdirSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { getOutputDirectory, sanitizeOutputBasename } from '../output-paths.js';
+import { join } from 'path';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const SCREENSHOT_DIR = join(dirname(dirname(__dirname)), 'screenshots');
-
-export async function captureScreenshot({ region, filename, method, waitForRender = false } = {}) {
-  mkdirSync(SCREENSHOT_DIR, { recursive: true });
+export async function captureScreenshot({ region, filename, method, waitForRender = false, _deps } = {}) {
+  const getClient = _deps?.getClient || getClientDefault;
+  const evaluate = _deps?.evaluate || evaluateDefault;
+  const getChartCollection = _deps?.getChartCollection || getChartCollectionDefault;
+  const waitForChartRender = _deps?.waitForChartRender || waitForChartRenderDefault;
 
   if (waitForRender) await waitForChartRender();
 
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
-  const fname = (filename || `tv_${region || 'full'}_${ts}`).replace(/[\/\\]/g, '_').replace(/\.\./g, '_');
-  const filePath = join(SCREENSHOT_DIR, `${fname}.png`);
+  const fname = sanitizeOutputBasename(filename || `tv_${region || 'full'}_${ts}`);
+
 
   if (method === 'api') {
     try {
@@ -64,6 +64,9 @@ export async function captureScreenshot({ region, filename, method, waitForRende
   if (clip) params.clip = clip;
 
   const { data } = await client.Page.captureScreenshot(params);
+  const directory = getOutputDirectory('screenshots');
+  mkdirSync(directory, { recursive: true });
+  const filePath = join(directory, `${fname}.png`);
   writeFileSync(filePath, Buffer.from(data, 'base64'));
 
   return {

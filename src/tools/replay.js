@@ -4,9 +4,10 @@ import * as core from '../core/replay.js';
 
 export function registerReplayTools(server) {
   server.tool('replay_start', 'Start bar replay mode, optionally at a specific date', {
-    date: z.string().optional().describe('Date to start replay from (YYYY-MM-DD format). If omitted, selects first available date.'),
-  }, async ({ date }) => {
-    try { return jsonResult(await core.start({ date })); }
+    date: z.string().optional().describe('UTC YYYY-MM-DD or an intraday ISO 8601 timestamp with explicit Z/offset. Omit to select the first available bar.'),
+    timestamp: z.number().finite().min(-62135596800).max(253402300799.999).optional().describe('Exact Unix seconds, including fractional seconds; do not pass milliseconds or combine with date.'),
+  }, async ({ date, timestamp }) => {
+    try { return jsonResult(await core.start({ date, timestamp })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
@@ -22,7 +23,7 @@ export function registerReplayTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('replay_stop', 'Stop replay and return to realtime', {}, async () => {
+  server.tool('replay_stop', 'Return replay to live mode and verify the replay manager cleared its started flag and current date', {}, async () => {
     try { return jsonResult(await core.stop()); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });

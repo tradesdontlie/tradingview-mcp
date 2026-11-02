@@ -23,7 +23,7 @@ export function registerTabTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('tab_close', 'Close the current chart tab', {}, async () => {
+  server.tool('tab_close', 'Close the session-selected visible chart tab only when native shell ownership is unambiguous; never close a hidden or unrelated selected target', {}, async () => {
     try { return jsonResult(await core.closeTab()); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });

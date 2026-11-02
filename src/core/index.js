@@ -14,3 +14,8 @@ export * as batch from './batch.js';
 export * as watchlist from './watchlist.js';
 export * as indicators from './indicators.js';
 export * as ui from './ui.js';
+
+export * as history from './history.js';
+export * as indicatorStyles from './indicator-styles.js';
+export * as watchlistSections from './watchlist-sections.js';
+export * as viewport from './viewport.js';

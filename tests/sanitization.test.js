@@ -6,6 +6,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { safeString, requireFinite } from '../src/connection.js';
 import { setSymbol, setTimeframe, setType, manageIndicator, setVisibleRange } from '../src/core/chart.js';
 import { drawShape } from '../src/core/drawing.js';
@@ -287,7 +288,7 @@ describe('drawing.js — sanitized evaluate calls', () => {
 // ── Source-level audit ───────────────────────────────────────────────────
 
 describe('source audit — no unsafe interpolation patterns', () => {
-  const CORE_DIR = new URL('../src/core/', import.meta.url).pathname;
+  const CORE_DIR = fileURLToPath(new URL('../src/core/', import.meta.url));
   const coreFiles = readdirSync(CORE_DIR).filter(f => f.endsWith('.js'));
 
   for (const file of coreFiles) {
@@ -318,13 +319,13 @@ describe('source audit — no unsafe interpolation patterns', () => {
 // ── Path traversal prevention ────────────────────────────────────────────
 
 describe('path traversal prevention', () => {
-  it('capture.js strips path separators from filename', () => {
-    const source = readFileSync(new URL('../src/core/capture.js', import.meta.url), 'utf8');
-    assert.ok(source.includes(".replace(/[\\/\\\\]/g, '_')"));
-  });
-
-  it('batch.js strips path separators from filename', () => {
-    const source = readFileSync(new URL('../src/core/batch.js', import.meta.url), 'utf8');
-    assert.ok(source.includes(".replace(/[\\/\\\\]/g, '_')"));
+  it('sanitizes capture and batch basenames into portable ordinary files', async () => {
+    const { sanitizeOutputBasename } = await import('../src/output-paths.js');
+    for (const value of ['../outside', 'folder\\file', 'batch_IDX:BBCA_day', 'NUL']) {
+      const safe = sanitizeOutputBasename(value);
+      assert.ok(!/[\\/:]/.test(safe));
+      assert.ok(!safe.includes('..'));
+      assert.notEqual(safe, 'NUL');
+    }
   });
 });

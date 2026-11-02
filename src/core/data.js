@@ -1,8 +1,7 @@
 /**
  * Core data access logic.
  */
-import { evaluate, evaluateAsync, KNOWN_PATHS, safeString } from '../connection.js';
-import { waitForChartReady } from '../wait.js';
+import { evaluate, KNOWN_PATHS, safeString } from '../connection.js';
 
 const MAX_OHLCV_BARS = 500;
 const MAX_TRADES = 20;
@@ -13,12 +12,6 @@ const MAX_TRADES = 20;
 const roundPrice = (v) => (v == null ? null : Math.round(v * 1e8) / 1e8);
 const CHART_API = KNOWN_PATHS.chartApi;
 const BARS_PATH = KNOWN_PATHS.mainSeriesBars;
-
-// Serializes getQuote() calls that mutate chart symbol so concurrent callers
-// can't race over the shared chart state. JS is single-threaded but our
-// awaits interleave; without this every parallel quote_get(symbol) would
-// read whichever symbol the chart happened to be on at evaluate() time.
-let _quoteLock = Promise.resolve();
 
 // Shared page-context JS: locate the strategy data source. Strategies are
 // identified by metaInfo().isTVScriptStrategy / is_strategy — NOT by
@@ -213,7 +206,7 @@ export async function getIndicator({ entity_id }) {
 // strategies, and wait for reportData to populate, so the strategy read tools
 // work even when the panel started closed or the strategy was hidden.
 // Returns { status, unhidden } — unhidden lists strategies made visible.
-async function ensureStrategyTesterReady(maxWaitMs = 6000) {
+export async function prepareStrategyTester(maxWaitMs = 6000) {
   const unhidden = await evaluate(`
     (function() {
       ${FIND_STRATEGY_JS}
@@ -241,9 +234,10 @@ async function ensureStrategyTesterReady(maxWaitMs = 6000) {
   return { status, unhidden: unhidden || [] };
 }
 
-export async function getStrategyResults() {
-  const ready = await ensureStrategyTesterReady();
-  const results = await evaluate(`
+export async function getStrategyResults({ _deps } = {}) {
+  const evaluateRead = _deps?.evaluate || evaluate;
+  const ready = { unhidden: [] };
+  const results = await evaluateRead(`
     (function() {
       ${FIND_STRATEGY_JS}
       try {
@@ -292,10 +286,11 @@ export async function getStrategyResults() {
   };
 }
 
-export async function getTrades({ max_trades } = {}) {
+export async function getTrades({ max_trades, _deps } = {}) {
   const limit = Math.min(max_trades || 20, MAX_TRADES);
-  const ready = await ensureStrategyTesterReady();
-  const trades = await evaluate(`
+  const evaluateRead = _deps?.evaluate || evaluate;
+  const ready = { unhidden: [] };
+  const trades = await evaluateRead(`
     (function() {
       ${FIND_STRATEGY_JS}
       try {
@@ -336,9 +331,10 @@ export async function getTrades({ max_trades } = {}) {
   };
 }
 
-export async function getEquity() {
-  const ready = await ensureStrategyTesterReady();
-  const equity = await evaluate(`
+export async function getEquity({ _deps } = {}) {
+  const evaluateRead = _deps?.evaluate || evaluate;
+  const ready = { unhidden: [] };
+  const equity = await evaluateRead(`
     (function() {
       ${FIND_STRATEGY_JS}
       try {
@@ -367,86 +363,49 @@ export async function getEquity() {
   };
 }
 
-export async function getQuote({ symbol } = {}) {
-  // Serialize: chained on _quoteLock so parallel callers run one after another.
-  // Catch on the lock chain prevents a single failure from poisoning the chain.
-  const run = _quoteLock.then(() => _getQuoteInternal({ symbol }));
-  _quoteLock = run.then(() => {}, () => {});
-  return run;
-}
-
-async function _getQuoteInternal({ symbol } = {}) {
-  const requested = (symbol || '').toString().trim();
-  let originalSymbol = null;
-  let needsRestore = false;
-
-  if (requested) {
-    try { originalSymbol = await evaluate(`${CHART_API}.symbol()`); } catch (e) {}
-    const bare = (s) => (s || '').toString().split(':').pop().toUpperCase();
-    if (bare(originalSymbol) !== bare(requested)) {
-      needsRestore = true;
-      await evaluateAsync(`
-        (function() {
-          var chart = ${CHART_API};
-          return new Promise(function(resolve) {
-            chart.setSymbol(${safeString(requested)}, {});
-            setTimeout(resolve, 500);
-          });
-        })()
-      `);
-      await waitForChartReady(requested);
-    }
-  }
-
-  try {
-    const data = await evaluate(`
-      (function() {
-        var api = ${CHART_API};
-        var sym = '';
-        try { sym = api.symbol(); } catch(e) {}
-        if (!sym) { try { sym = api.symbolExt().symbol; } catch(e) {} }
-        var ext = {};
-        try { ext = api.symbolExt() || {}; } catch(e) {}
-        var bars = ${BARS_PATH};
-        var quote = { symbol: sym };
-        if (bars && typeof bars.lastIndex === 'function') {
-          var last = bars.valueAt(bars.lastIndex());
-          if (last) { quote.time = last[0]; quote.open = last[1]; quote.high = last[2]; quote.low = last[3]; quote.close = last[4]; quote.last = last[4]; quote.volume = last[5] || 0; }
-        }
-        try {
-          var bidEl = document.querySelector('[class*="bid"] [class*="price"], [class*="dom-"] [class*="bid"]');
-          var askEl = document.querySelector('[class*="ask"] [class*="price"], [class*="dom-"] [class*="ask"]');
-          if (bidEl) quote.bid = parseFloat(bidEl.textContent.replace(/[^0-9.\\-]/g, ''));
-          if (askEl) quote.ask = parseFloat(askEl.textContent.replace(/[^0-9.\\-]/g, ''));
-        } catch(e) {}
-        try {
-          var hdr = document.querySelector('[class*="headerRow"] [class*="last-"]');
-          if (hdr) { var hdrPrice = parseFloat(hdr.textContent.replace(/[^0-9.\\-]/g, '')); if (!isNaN(hdrPrice)) quote.header_price = hdrPrice; }
-        } catch(e) {}
-        if (ext.description) quote.description = ext.description;
-        if (ext.exchange) quote.exchange = ext.exchange;
-        if (ext.type) quote.type = ext.type;
-        return quote;
-      })()
-    `);
-    if (!data || (!data.last && !data.close)) throw new Error('Could not retrieve quote. The chart may still be loading.');
-    return { success: true, ...data };
-  } finally {
-    if (needsRestore && originalSymbol) {
+export async function getQuote({ symbol, _deps } = {}) {
+  const evaluatePage = _deps?.evaluate || evaluate;
+  const data = await evaluatePage(`
+    (function() {
+      var api = ${CHART_API};
+      var ext = {};
+      try { ext = api.symbolExt() || {}; } catch(e) {}
+      var apiSym = '';
+      try { apiSym = api.symbol() || ''; } catch(e) {}
+      var candidates = [ext.full_name, ext.pro_name, apiSym, ext.symbol].filter(Boolean);
+      var sym = candidates.find(function(value) { return String(value).indexOf(':') > 0; }) || candidates[0] || '';
+      var bars = ${BARS_PATH};
+      var quote = { symbol: sym };
+      if (bars && typeof bars.lastIndex === 'function') {
+        var last = bars.valueAt(bars.lastIndex());
+        if (last) { quote.time = last[0]; quote.open = last[1]; quote.high = last[2]; quote.low = last[3]; quote.close = last[4]; quote.last = last[4]; quote.volume = last[5] || 0; }
+      }
       try {
-        await evaluateAsync(`
-          (function() {
-            var chart = ${CHART_API};
-            return new Promise(function(resolve) {
-              chart.setSymbol(${safeString(originalSymbol)}, {});
-              setTimeout(resolve, 500);
-            });
-          })()
-        `);
-        await waitForChartReady(originalSymbol);
-      } catch (e) {}
-    }
+        var bidEl = document.querySelector('[class*="bid"] [class*="price"], [class*="dom-"] [class*="bid"]');
+        var askEl = document.querySelector('[class*="ask"] [class*="price"], [class*="dom-"] [class*="ask"]');
+        if (bidEl) quote.bid = parseFloat(bidEl.textContent.replace(/[^0-9.\\-]/g, ''));
+        if (askEl) quote.ask = parseFloat(askEl.textContent.replace(/[^0-9.\\-]/g, ''));
+      } catch(e) {}
+      try {
+        var hdr = document.querySelector('[class*="headerRow"] [class*="last-"]');
+        if (hdr) { var hdrPrice = parseFloat(hdr.textContent.replace(/[^0-9.\\-]/g, '')); if (!isNaN(hdrPrice)) quote.header_price = hdrPrice; }
+      } catch(e) {}
+      if (ext.description) quote.description = ext.description;
+      if (ext.exchange) quote.exchange = ext.exchange;
+      if (ext.type) quote.type = ext.type;
+      return quote;
+    })()
+  `);
+  if (!data || (!data.last && !data.close)) throw new Error('Could not retrieve quote. The chart may still be loading.');
+  const requested = String(symbol || '').trim().toUpperCase();
+  const active = String(data.symbol || '').trim().toUpperCase();
+  if (requested && !requested.includes(':')) {
+    throw new Error(`Invalid symbol "${symbol}". TradingView symbols must use SOURCE:TICKER, for example "NASDAQ:AAPL" or "INDEX:BTCUSD".`);
   }
+  if (requested && requested !== active) {
+    throw new Error(`Requested symbol "${symbol}" is not the active chart symbol "${data.symbol}". quote_get is read-only and never switches charts. Resolve a full SOURCE:TICKER with symbol_search, then use chart_set_symbol if changing the chart is authorized.`);
+  }
+  return { success: true, ...data };
 }
 
 export async function getDepth() {
@@ -493,8 +452,9 @@ export async function getDepth() {
   return { success: true, bid_levels: data.bids?.length || 0, ask_levels: data.asks?.length || 0, spread: data.spread, bids: data.bids || [], asks: data.asks || [], raw_values: data.raw_values, note: data.note };
 }
 
-export async function getStudyValues() {
-  const data = await evaluate(`
+export async function getStudyValues({ _deps } = {}) {
+  const run = _deps?.evaluate || evaluate;
+  const data = await run(`
     (function() {
       var chart = window.TradingViewApi._activeChartWidgetWV.value()._chartWidget;
       var model = chart.model();
@@ -520,13 +480,34 @@ export async function getStudyValues() {
               }
             }
           } catch(e) {}
+          // The data window above follows the crosshair: with the mouse resting on
+          // the chart it shows THAT bar, not the latest one. Read the latest bar
+          // straight from the study's own series too (value[0] = bar time,
+          // value[i + 1] = metaInfo().plots[i]); titled plots only.
+          var lastBarValues = {};
+          var lastBarTime = null;
+          try {
+            var last = s.data && s.data() && s.data().last ? s.data().last() : null;
+            if (last && last.value) {
+              lastBarTime = last.value[0];
+              var plots = meta.plots || [];
+              for (var p = 0; p < plots.length; p++) {
+                var style = meta.styles && meta.styles[plots[p].id];
+                var v = last.value[p + 1];
+                if (style && style.title && typeof v === 'number' && isFinite(v)) lastBarValues[style.title] = v;
+              }
+            }
+          } catch(e) {}
           // Include id + inputs so multiple instances of the same indicator
           // (e.g. two EMAs with different lengths) are distinguishable (#143).
           var id = null;
           try { id = s.id ? s.id() : null; } catch(e) {}
           var inputs = null;
           try { var ip = s.inputs ? s.inputs() : null; if (ip && Object.keys(ip).length) inputs = ip; } catch(e) {}
-          if (Object.keys(values).length > 0) results.push({ id: id, name: name, inputs: inputs, values: values });
+          if (Object.keys(values).length > 0 || Object.keys(lastBarValues).length > 0) {
+            results.push({ id: id, name: name, inputs: inputs, values: values,
+                           last_bar_time: lastBarTime, last_bar_values: lastBarValues });
+          }
         } catch(e) {}
       }
       return results;

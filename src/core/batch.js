@@ -1,16 +1,20 @@
 /**
  * Core batch execution logic.
  */
-import { evaluate, evaluateAsync, getClient, getChartApi, getChartCollection, safeString } from '../connection.js';
-import { waitForChartReady } from '../wait.js';
+import { evaluate as evaluateDefault, evaluateAsync as evaluateAsyncDefault, getClient as getClientDefault, getChartApi as getChartApiDefault, getChartCollection as getChartCollectionDefault, safeString } from '../connection.js';
+import { waitForChartReady as waitForChartReadyDefault } from '../wait.js';
 import { writeFileSync, mkdirSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { join } from 'path';
+import { getOutputDirectory, sanitizeOutputBasename } from '../output-paths.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const SCREENSHOT_DIR = join(dirname(dirname(__dirname)), 'screenshots');
-
-export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_count }) {
+export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_count, _deps }) {
+  const evaluate = _deps?.evaluate || evaluateDefault;
+  const evaluateAsync = _deps?.evaluateAsync || evaluateAsyncDefault;
+  const getClient = _deps?.getClient || getClientDefault;
+  const getChartApi = _deps?.getChartApi || getChartApiDefault;
+  const getChartCollection = _deps?.getChartCollection || getChartCollectionDefault;
+  const waitForChartReady = _deps?.waitForChartReady || waitForChartReadyDefault;
+  const sleep = _deps?.sleep || (ms => new Promise(r => setTimeout(r, ms)));
   const tfs = timeframes && timeframes.length > 0 ? timeframes : [null];
   const delay = delay_ms || 2000;
   const results = [];
@@ -32,16 +36,17 @@ export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_co
         }
 
         await waitForChartReady(symbol);
-        await new Promise(r => setTimeout(r, delay));
+        await sleep(delay);
 
         let actionResult;
         if (action === 'screenshot') {
-          mkdirSync(SCREENSHOT_DIR, { recursive: true });
           const client = await getClient();
           const { data } = await client.Page.captureScreenshot({ format: 'png' });
           const ts = new Date().toISOString().replace(/[:.]/g, '-');
-          const fname = `batch_${symbol}_${tf || 'default'}_${ts}`.replace(/[\/\\]/g, '_') + '.png';
-          const filePath = join(SCREENSHOT_DIR, fname);
+          const fname = sanitizeOutputBasename(`batch_${symbol}_${tf || 'default'}_${ts}`) + '.png';
+          const directory = getOutputDirectory('screenshots');
+          mkdirSync(directory, { recursive: true });
+          const filePath = join(directory, fname);
           writeFileSync(filePath, Buffer.from(data, 'base64'));
           actionResult = { file_path: filePath };
         } else if (action === 'get_ohlcv' && apiPath) {
@@ -56,7 +61,7 @@ export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_co
             })
           `);
         } else if (action === 'get_strategy_results') {
-          await new Promise(r => setTimeout(r, 1000));
+          await sleep(1000);
           actionResult = await evaluate(`
             (function() {
               var metrics = {};

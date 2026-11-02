@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { booleanParam } from './_schema.js';
 import { jsonResult } from './_format.js';
 import * as core from '../core/ui.js';
 
@@ -71,7 +72,7 @@ export function registerUiTools(server) {
     x: z.coerce.number().describe('X coordinate (pixels from left)'),
     y: z.coerce.number().describe('Y coordinate (pixels from top)'),
     button: z.enum(['left', 'right', 'middle']).optional().describe('Mouse button (default left)'),
-    double_click: z.coerce.boolean().optional().describe('Double click (default false)'),
+    double_click: booleanParam().optional().describe('Double click (default false)'),
   }, async ({ x, y, button, double_click }) => {
     try { return jsonResult(await core.mouseClick({ x, y, button, double_click })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }

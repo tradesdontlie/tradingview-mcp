@@ -13,61 +13,81 @@ function _resolve(deps) {
   return {
     evaluate: deps?.evaluate || _evaluate,
     getReplayApi: deps?.getReplayApi || _getReplayApi,
+    sleep: deps?.sleep || (ms => new Promise(resolve => setTimeout(resolve, ms))),
   };
 }
 
-export async function start({ date, _deps } = {}) {
-  const { evaluate, getReplayApi } = _resolve(_deps);
+// The public timestamp contract is always Unix seconds. Convert only at the API boundary.
+export function parseReplayStart({ date, timestamp } = {}) {
+  if (date !== undefined && timestamp !== undefined) throw new Error('Provide date or timestamp, not both');
+  if (timestamp !== undefined) {
+    if (typeof timestamp !== 'number' || !Number.isFinite(timestamp) || timestamp < -62135596800 || timestamp > 253402300799.999) {
+      throw new Error('timestamp must be finite Unix seconds between years 0001 and 9999; milliseconds are not accepted');
+    }
+    return Math.round(timestamp * 1000);
+  }
+  if (date === undefined) return null;
+  if (typeof date !== 'string') throw new Error('Invalid date: use YYYY-MM-DD or ISO 8601 with an explicit Z/offset');
+  const match = /^(\d{4})-(\d{2})-(\d{2})(?:T([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d)(?:\.(\d{1,3}))?)?(Z|[+-](?:0\d|1[0-4]):[0-5]\d))?$/.exec(date);
+  if (!match) throw new Error(`Invalid date: "${date}". Use YYYY-MM-DD or ISO 8601 with an explicit Z/offset.`);
+  const [year, month, day] = match.slice(1, 4).map(Number);
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (year < 1 || month < 1 || month > 12 || day < 1 || day > days[month - 1] || /[+-]14:(?!00)/.test(date)) {
+    throw new Error(`Invalid date: "${date}"`);
+  }
+  const milliseconds = Date.parse(match[4] === undefined ? `${date}T00:00:00Z` : date);
+  if (!Number.isFinite(milliseconds) || milliseconds < -62135596800000 || milliseconds > 253402300799999) throw new Error(`Invalid date: "${date}"`);
+  return milliseconds;
+}
+
+export async function start({ date, timestamp, _deps } = {}) {
+  // Validate before opening the toolbar or making any other chart change.
+  const selectedMs = parseReplayStart({ date, timestamp });
+  const { evaluate, getReplayApi, sleep } = _resolve(_deps);
   const rp = await getReplayApi();
   const available = await evaluate(wv(`${rp}.isReplayAvailable()`));
   if (!available) throw new Error('Replay is not available for the current symbol/timeframe');
 
   await evaluate(`${rp}.showReplayToolbar()`);
-
-  // selectDate() is async — it calls enableReplayMode() then _onPointSelected()
-  // which initializes the server-side replay session. Must be awaited inside the
-  // page context, otherwise the promise is fire-and-forget and replay state says
-  // "started" but stepping doesn't work (issue #26).
-  if (date) {
-    const ts = new Date(date).getTime();
-    if (isNaN(ts)) throw new Error(`Invalid date: "${date}". Use YYYY-MM-DD format.`);
-    await evaluate(`${rp}.selectDate(${ts}).then(function() { return 'ok'; })`);
+  if (selectedMs !== null) {
+    await evaluate(`Promise.resolve(${rp}.selectDate(${selectedMs})).then(function() { return 'ok'; })`, { awaitPromise: true });
   } else {
-    await evaluate(`${rp}.selectFirstAvailableDate()`);
+    await evaluate(`Promise.resolve(${rp}.selectFirstAvailableDate()).then(function() { return 'ok'; })`, { awaitPromise: true });
   }
 
-  // Poll until replay is fully initialized: isReplayStarted AND currentDate is set.
-  // selectDate()'s promise resolves before the data series is ready, so we need
-  // to wait for currentDate to become non-null before stepping will work.
   let started = false;
   let currentDate = null;
   for (let i = 0; i < 30; i++) {
     started = await evaluate(wv(`${rp}.isReplayStarted()`));
     currentDate = await evaluate(wv(`${rp}.currentDate()`));
-    if (started && currentDate !== null) break;
-    await new Promise(r => setTimeout(r, 250));
+    if (started === true && Number.isFinite(currentDate)) break;
+    await sleep(250);
   }
-
-  if (!started) {
-    try { await evaluate(`${rp}.stopReplay()`); } catch {}
-    throw new Error('Replay failed to start. The selected date may not have data for this timeframe. Try a more recent date or a higher timeframe (e.g., Daily).');
+  if (started !== true || !Number.isFinite(currentDate)) {
+    // Recover a partially started session through the same verified live-return path.
+    if (started === true) { try { await stop({ _deps }); } catch { /* original initialization error remains primary */ } }
+    throw new Error('Replay failed to start with a ready bar. The selected time may not have data for this timeframe. Try a more recent date or a higher timeframe.');
   }
-
-  return { success: true, replay_started: true, date: date || '(first available)', current_date: currentDate };
+  return {
+    success: true, replay_started: true, date: date ?? (timestamp === undefined ? '(first available)' : null),
+    ...(selectedMs !== null && { requested_timestamp: selectedMs / 1000, requested_time_utc: new Date(selectedMs).toISOString() }),
+    current_date: currentDate,
+  };
 }
 
 export async function step({ _deps } = {}) {
-  const { evaluate, getReplayApi } = _resolve(_deps);
+  const { evaluate, getReplayApi, sleep } = _resolve(_deps);
   const rp = await getReplayApi();
   const started = await evaluate(wv(`${rp}.isReplayStarted()`));
-  if (!started) throw new Error('Replay is not started. Use replay_start first.');
+  if (!started) throw new Error('Replay is not started. Use replay action=start first.');
   const before = await evaluate(wv(`${rp}.currentDate()`));
   await evaluate(`${rp}.doStep()`);
   // doStep() is async internally — currentDate takes ~500ms to update.
   // Poll until it changes or timeout after 3s.
   let currentDate = before;
   for (let i = 0; i < 12; i++) {
-    await new Promise(r => setTimeout(r, 250));
+    await sleep(250);
     currentDate = await evaluate(wv(`${rp}.currentDate()`));
     if (currentDate !== before) break;
   }
@@ -93,14 +113,35 @@ export async function autoplay({ speed, _deps } = {}) {
 }
 
 export async function stop({ _deps } = {}) {
-  const { evaluate, getReplayApi } = _resolve(_deps);
+  const { evaluate, getReplayApi, sleep } = _resolve(_deps);
   const rp = await getReplayApi();
-  const started = await evaluate(wv(`${rp}.isReplayStarted()`));
-  if (!started) {
-    return { success: true, action: 'already_stopped' };
+  const readState = async () => ({
+    started: await evaluate(wv(`${rp}.isReplayStarted()`)),
+    date: await evaluate(wv(`${rp}.currentDate()`)),
+  });
+  const before = await readState();
+  if (before.started === false && before.date === null) {
+    return { success: true, action: 'already_stopped', is_replay_started: false, current_date: null };
   }
-  await evaluate(`${rp}.stopReplay()`);
-  return { success: true, action: 'replay_stopped' };
+  if (typeof before.started !== 'boolean') throw new Error('Could not establish replay state; refusing an unverified stop');
+
+  // Calling the legacy close first can leave the manager desynchronized. Prefer
+  // the one operation that ends the session and returns the chart to the live edge.
+  const canReturnLive = await evaluate(`typeof ${rp}.goToRealtime === 'function'`);
+  let method;
+  if (canReturnLive === true) method = 'goToRealtime';
+  else if (canReturnLive === false && before.started === true && await evaluate(`typeof ${rp}.stopReplay === 'function'`) === true) method = 'stopReplay';
+  else throw new Error('No supported replay-to-live operation is available; state was not changed');
+  await evaluate(`Promise.resolve(${rp}.${method}()).then(function() { return 'ok'; })`, { awaitPromise: true });
+
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const current = await readState();
+    if (current.started === false && current.date === null) {
+      return { success: true, action: 'replay_stopped', method, is_replay_started: false, current_date: null };
+    }
+    if (attempt < 19) await sleep(250);
+  }
+  throw new Error(`Replay did not return to verified realtime after ${method}; no success was reported`);
 }
 
 export async function trade({ action, _deps }) {

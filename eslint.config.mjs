@@ -14,7 +14,7 @@ export default [
       ecmaVersion: 'latest',
       sourceType: 'module',
       globals: {
-        fetch: 'readonly', setTimeout: 'readonly', clearTimeout: 'readonly',
+        fetch: 'readonly', AbortSignal: 'readonly', queueMicrotask: 'readonly', setTimeout: 'readonly', clearTimeout: 'readonly',
         setInterval: 'readonly', clearInterval: 'readonly', console: 'readonly',
         process: 'readonly', Buffer: 'readonly', URL: 'readonly',
         URLSearchParams: 'readonly', WebSocket: 'readonly', AbortController: 'readonly',

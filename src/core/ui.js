@@ -243,21 +243,6 @@ export async function scroll({ direction, amount }) {
   return { success: true, direction, amount: px };
 }
 
-export async function mouseClick({ x, y, button, double_click }) {
-  const c = await getClient();
-  const btn = button === 'right' ? 'right' : button === 'middle' ? 'middle' : 'left';
-  const btnNum = btn === 'right' ? 2 : btn === 'middle' ? 1 : 0;
-  await c.Input.dispatchMouseEvent({ type: 'mouseMoved', x, y });
-  await c.Input.dispatchMouseEvent({ type: 'mousePressed', x, y, button: btn, buttons: btnNum, clickCount: 1 });
-  await c.Input.dispatchMouseEvent({ type: 'mouseReleased', x, y, button: btn });
-  if (double_click) {
-    await new Promise(r => setTimeout(r, 50));
-    await c.Input.dispatchMouseEvent({ type: 'mousePressed', x, y, button: btn, buttons: btnNum, clickCount: 2 });
-    await c.Input.dispatchMouseEvent({ type: 'mouseReleased', x, y, button: btn });
-  }
-  return { success: true, x, y, button: btn, double_click: !!double_click };
-}
-
 export async function findElement({ query, strategy }) {
   const strat = strategy || 'text';
   const results = await evaluate(`
@@ -294,6 +279,26 @@ export async function findElement({ query, strategy }) {
     })()
   `);
   return { success: true, query, strategy: strat, count: results?.length || 0, elements: results || [] };
+}
+
+export function mouseButtonMask(button) {
+  return button === 'left' ? 1 : button === 'right' ? 2 : 4;
+}
+
+export async function mouseClick({ x, y, button, double_click, _deps }) {
+  const client = _deps?.getClient || getClient;
+  const c = await client();
+  const btn = button === 'right' ? 'right' : button === 'middle' ? 'middle' : 'left';
+  const btnNum = mouseButtonMask(btn);
+  await c.Input.dispatchMouseEvent({ type: 'mouseMoved', x, y });
+  await c.Input.dispatchMouseEvent({ type: 'mousePressed', x, y, button: btn, buttons: btnNum, clickCount: 1 });
+  await c.Input.dispatchMouseEvent({ type: 'mouseReleased', x, y, button: btn });
+  if (double_click) {
+    await new Promise(r => setTimeout(r, 50));
+    await c.Input.dispatchMouseEvent({ type: 'mousePressed', x, y, button: btn, buttons: btnNum, clickCount: 2 });
+    await c.Input.dispatchMouseEvent({ type: 'mouseReleased', x, y, button: btn });
+  }
+  return { success: true, x, y, button: btn, double_click: !!double_click };
 }
 
 export async function uiEvaluate({ expression }) {

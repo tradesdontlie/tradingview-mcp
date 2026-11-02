@@ -47,10 +47,16 @@ This is not a trading bot. It is an interface layer that makes a trading applica
 
 See [RESEARCH.md](RESEARCH.md) for open questions, findings, and related work.
 
+## Optional permission-managed bridge
+
+This proposal preserves existing tool names and `npm start` stdio behavior. Run `npm run admin` to configure Read/Read-write/Custom access, screenshot output folder and opt-in metadata-only logging. `npm run http` and `npm run sse` enable optional HTTP transports and activity monitoring. Explicit target tools isolate MCP clients across chart windows.
+
+See [configuration, compatibility changes and verification limits](docs/UPSTREAM_PROPOSAL.md) before using Read mode. `quote_get` is now active-symbol-only, and strategy report preparation is an explicit `strategy_prepare` write operation. Market-data file exports and strategy/screener layers are not part of this proposal.
+
 ## Prerequisites
 
 - **TradingView Desktop app** (paid subscription required for real-time data)
-- **Node.js 18+**
+- **Node.js >=20.19**
 - **Claude Code** with MCP support (for MCP tools) or any terminal (for CLI)
 - **macOS, Windows, or Linux**
 
@@ -217,7 +223,7 @@ Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project
 | "Draw a level at 24500" | `draw_shape` (horizontal_line) |
 | "Take a screenshot" | `capture_screenshot` |
 
-## Tool Reference (78 MCP tools)
+## Tool Reference (93 MCP tools; legacy names retained)
 
 ### Chart Reading
 
@@ -353,10 +359,10 @@ npm test
 Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  TradingView Desktop (Electron)
 ```
 
-- **Transport**: MCP over stdio (84 tools) + CLI (`tv` command, 30 commands with 66 subcommands)
+- **Transport**: MCP over stdio (93 tools) + CLI (`tv` command, 30 commands with 66 subcommands)
 - **Connection**: Chrome DevTools Protocol on localhost:9222
 - **Streaming**: Poll-and-diff loop with deduplication, JSONL output to stdout
-- **No dependencies** beyond `@modelcontextprotocol/sdk` and `chrome-remote-interface`
+- **Runtime dependencies**: `@modelcontextprotocol/sdk`, `chrome-remote-interface`, and directly declared `zod`
 
 ## Attributions
 

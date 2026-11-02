@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { booleanParam } from './_schema.js';
 import { jsonResult } from './_format.js';
 import * as core from '../core/pine.js';
 
@@ -15,8 +16,10 @@ export function registerPineTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('pine_compile', 'Compile / add the current Pine Script to the chart', {}, async () => {
-    try { return jsonResult(await core.compile()); }
+  server.tool('pine_compile', 'Compile / add the current Pine Script to the chart', {
+    allow_title_mismatch: booleanParam().optional().describe('Explicitly permit updating a saved script whose name differs from the source declaration title.'),
+  }, async ({ allow_title_mismatch }) => {
+    try { return jsonResult(await core.compile({ allowTitleMismatch: allow_title_mismatch })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
@@ -25,8 +28,10 @@ export function registerPineTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('pine_save', 'Save the current Pine Script (Ctrl+S)', {}, async () => {
-    try { return jsonResult(await core.save()); }
+  server.tool('pine_save', 'Save the current Pine Script (Ctrl+S)', {
+    allow_title_mismatch: booleanParam().optional().describe('Explicitly permit updating a saved script whose name differs from the source declaration title.'),
+  }, async ({ allow_title_mismatch }) => {
+    try { return jsonResult(await core.save({ allowTitleMismatch: allow_title_mismatch })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
@@ -35,19 +40,21 @@ export function registerPineTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('pine_smart_compile', 'Intelligent compile: detects button, compiles, checks errors, reports study changes', {}, async () => {
-    try { return jsonResult(await core.smartCompile()); }
+  server.tool('pine_smart_compile', 'Intelligent compile: detects button, compiles, checks errors, reports study changes', {
+    allow_title_mismatch: booleanParam().optional().describe('Explicitly permit updating a saved script whose name differs from the source declaration title.'),
+  }, async ({ allow_title_mismatch }) => {
+    try { return jsonResult(await core.smartCompile({ allowTitleMismatch: allow_title_mismatch })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('pine_new', 'Create a new blank Pine Script', {
+  server.tool('pine_new', 'Create a new unsaved Pine Script through the editor menu and verify a new model binding; never overwrite the currently bound script or discard unsaved changes', {
     type: z.enum(['indicator', 'strategy', 'library']).describe('Type of script to create'),
   }, async ({ type }) => {
     try { return jsonResult(await core.newScript({ type })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('pine_open', 'Open a saved Pine Script by name', {
+  server.tool('pine_open', 'Open one uniquely matched saved script through the editor UI and verify its new model binding; never inject its source into another bound script', {
     name: z.string().describe('Name of the saved script to open (case-insensitive match)'),
   }, async ({ name }) => {
     try { return jsonResult(await core.openScript({ name })); }
