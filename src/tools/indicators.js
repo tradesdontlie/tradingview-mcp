@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { booleanParam } from './_schema.js';
 import { jsonResult } from './_format.js';
 import * as core from '../core/indicators.js';
 
@@ -13,7 +14,7 @@ export function registerIndicatorTools(server) {
 
   server.tool('indicator_toggle_visibility', 'Show or hide an indicator/study on the chart', {
     entity_id: z.string().describe('Entity ID of the study (from chart_get_state)'),
-    visible: z.coerce.boolean().describe('true to show, false to hide'),
+    visible: booleanParam().describe('true to show, false to hide'),
   }, async ({ entity_id, visible }) => {
     try { return jsonResult(await core.toggleVisibility({ entity_id, visible })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }

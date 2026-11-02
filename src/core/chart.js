@@ -26,8 +26,14 @@ export async function getState({ _deps } = {}) {
           return { id: s.id, name: s.name || s.title || 'unknown' };
         });
       } catch(e) {}
+      var sym = '';
+      try {
+        var ext = chart.symbolExt();
+        if (ext) sym = ext.full_name || ext.pro_name || ext.symbol || '';
+      } catch(e) {}
+      if (!sym) { try { sym = chart.symbol(); } catch(e) {} } // deprecated fallback
       return {
-        symbol: chart.symbol(),
+        symbol: sym,
         resolution: chart.resolution(),
         chartType: chart.chartType(),
         studies: studies,

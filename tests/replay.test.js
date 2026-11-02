@@ -36,7 +36,7 @@ function mockGetReplayApi() {
 
 function mockDeps(responses = {}, sequence) {
   const evaluate = mockEvaluate(responses, sequence);
-  return { _deps: { evaluate, getReplayApi: mockGetReplayApi() }, evaluate };
+  return { _deps: { evaluate, getReplayApi: mockGetReplayApi(), sleep: async () => {} }, evaluate };
 }
 
 // ── start() ──────────────────────────────────────────────────────────────
@@ -111,13 +111,13 @@ describe('start() — date selection and polling', () => {
       return undefined;
     };
     evaluate.calls = [];
-    const result = await start({ date: '2026-01-01', _deps: { evaluate, getReplayApi: mockGetReplayApi() } });
+    const result = await start({ date: '2026-01-01', _deps: { evaluate, getReplayApi: mockGetReplayApi(), sleep: async () => {} } });
     assert.equal(result.success, true);
     assert.equal(result.current_date, 1700000000);
     assert.ok(pollCount >= 4, 'polled multiple times');
   });
 
-  it('throws and stops replay when polling times out (never started)', async () => {
+  it('throws without a legacy close when replay never initialized', async () => {
     let stopCalled = false;
     const evaluate = async (expr) => {
       if (expr.includes('isReplayAvailable')) return true;
@@ -129,13 +129,13 @@ describe('start() — date selection and polling', () => {
     };
     evaluate.calls = [];
     await assert.rejects(
-      () => start({ date: '2026-01-01', _deps: { evaluate, getReplayApi: mockGetReplayApi() } }),
+      () => start({ date: '2026-01-01', _deps: { evaluate, getReplayApi: mockGetReplayApi(), sleep: async () => {} } }),
       (err) => {
         assert.ok(err.message.includes('Replay failed to start'));
         return true;
       },
     );
-    assert.ok(stopCalled, 'stopReplay called for cleanup');
+    assert.equal(stopCalled, false, 'do not close a replay session that never initialized');
   });
 });
 
@@ -157,7 +157,7 @@ describe('step() — doStep and polling', () => {
       return undefined;
     };
     evaluate.calls = [];
-    const result = await step({ _deps: { evaluate, getReplayApi: mockGetReplayApi() } });
+    const result = await step({ _deps: { evaluate, getReplayApi: mockGetReplayApi(), sleep: async () => {} } });
     assert.equal(result.success, true);
     assert.equal(result.current_date, 2000);
     assert.equal(result.action, 'step');
@@ -171,7 +171,7 @@ describe('step() — doStep and polling', () => {
       return undefined;
     };
     evaluate.calls = [];
-    const result = await step({ _deps: { evaluate, getReplayApi: mockGetReplayApi() } });
+    const result = await step({ _deps: { evaluate, getReplayApi: mockGetReplayApi(), sleep: async () => {} } });
     assert.equal(result.current_date, 5000);
   });
 
@@ -257,20 +257,22 @@ describe('autoplay() — delay validation', () => {
 // ── stop() ───────────────────────────────────────────────────────────────
 
 describe('stop()', () => {
-  it('calls stopReplay when started', async () => {
-    const { _deps, evaluate } = mockDeps({
-      'isReplayStarted': true,
-      'stopReplay': undefined,
-    });
-    const result = await stop({ _deps });
+  it('prefers goToRealtime and verifies that replay actually ended', async () => {
+    let live = false;
+    const evaluate = async expr => {
+      if (expr.includes('typeof') && expr.includes('goToRealtime')) return true;
+      if (expr.includes('goToRealtime()')) { live = true; return 'ok'; }
+      if (expr.includes('isReplayStarted')) return !live;
+      if (expr.includes('currentDate')) return live ? null : 1700000000;
+    };
+    const result = await stop({ _deps: { evaluate, getReplayApi: mockGetReplayApi(), sleep: async () => {} } });
     assert.equal(result.success, true);
     assert.equal(result.action, 'replay_stopped');
-    const stopCall = evaluate.calls.find(c => c.includes('stopReplay'));
-    assert.ok(stopCall, 'stopReplay was called');
+    assert.equal(result.method, 'goToRealtime');
   });
 
-  it('returns already_stopped when not started', async () => {
-    const { _deps, evaluate } = mockDeps({ 'isReplayStarted': false });
+  it('returns already_stopped only when both replay state and current date show live', async () => {
+    const { _deps, evaluate } = mockDeps({ 'isReplayStarted': false, 'currentDate': null });
     const result = await stop({ _deps });
     assert.equal(result.action, 'already_stopped');
     const stopCall = evaluate.calls.find(c => c.includes('stopReplay'));
@@ -344,7 +346,7 @@ describe('status()', () => {
       return undefined;
     };
     evaluate.calls = [];
-    const result = await status({ _deps: { evaluate, getReplayApi: mockGetReplayApi() } });
+    const result = await status({ _deps: { evaluate, getReplayApi: mockGetReplayApi(), sleep: async () => {} } });
     assert.equal(result.success, true);
     assert.equal(result.is_replay_started, true);
     assert.equal(result.current_date, 1700000000);

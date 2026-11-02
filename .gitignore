@@ -5,3 +5,11 @@ temp_*
 *.log
 discovery-log.json
 rules.json
+
+# Local permissions, screenshots and metadata logs.
+.env
+.env.*.tmp
+.local/
+*.jsonl
+*.jsonl.*
+.mcp.json

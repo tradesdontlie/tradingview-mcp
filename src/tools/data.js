@@ -1,11 +1,16 @@
 import { z } from 'zod';
+import { booleanParam } from './_schema.js';
 import { jsonResult } from './_format.js';
 import * as core from '../core/data.js';
 
 export function registerDataTools(server) {
+  server.tool('strategy_prepare', 'Open Strategy Tester and unhide strategies so reports can compute. This is an explicit chart/UI mutation, separate from read-only strategy result tools.', {}, async () => {
+    try { return jsonResult({ success: true, ...await core.prepareStrategyTester() }); }
+    catch (error) { return jsonResult({ success: false, error: error.message }, true); }
+  });
   server.tool('data_get_ohlcv', 'Get OHLCV bar data from the chart. Use summary=true for compact stats instead of all bars (saves context).', {
     count: z.coerce.number().optional().describe('Number of bars to retrieve (max 500, default 100)'),
-    summary: z.coerce.boolean().optional().describe('Return summary stats (high, low, open, close, avg volume, range) instead of all bars — much smaller output'),
+    summary: booleanParam().optional().describe('Return summary stats (high, low, open, close, avg volume, range) instead of all bars — much smaller output'),
   }, async ({ count, summary }) => {
     try { return jsonResult(await core.getOhlcv({ count, summary })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
@@ -18,12 +23,12 @@ export function registerDataTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('data_get_strategy_results', 'Get strategy performance metrics from Strategy Tester. Auto-opens the panel and auto-unhides a hidden strategy (TradingView never computes reports for hidden strategies); result includes unhidden_strategies when that happened.', {}, async () => {
+  server.tool('data_get_strategy_results', 'Get strategy performance metrics from Strategy Tester. Read-only; use strategy_prepare first if the report is not ready.', {}, async () => {
     try { return jsonResult(await core.getStrategyResults()); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('data_get_trades', 'Get trade list from Strategy Tester. Auto-opens the panel and auto-unhides a hidden strategy.', {
+  server.tool('data_get_trades', 'Get trade list from Strategy Tester. Read-only; use strategy_prepare first if needed.', {
     max_trades: z.coerce.number().optional().describe('Maximum trades to return'),
   }, async ({ max_trades }) => {
     try { return jsonResult(await core.getTrades({ max_trades })); }
@@ -35,8 +40,8 @@ export function registerDataTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('quote_get', 'Get real-time quote data for a symbol (price, OHLC, volume). If symbol is provided and differs from the current chart, the chart is briefly switched to fetch the quote and then restored — adds ~1-2s and serializes parallel calls.', {
-    symbol: z.string().optional().describe('Symbol to quote (blank = current chart symbol). Non-blank values cause a chart switch + restore.'),
+  server.tool('quote_get', 'Read a quote from the currently selected chart without switching its symbol. If symbol is provided it must exactly match the active SOURCE:TICKER; use chart_set_symbol separately for an authorized chart change.', {
+    symbol: z.string().optional().describe('Optional exact active SOURCE:TICKER. A different or unqualified symbol is rejected; no chart switch occurs.'),
   }, async ({ symbol }) => {
     try { return jsonResult(await core.getQuote({ symbol })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
@@ -49,7 +54,7 @@ export function registerDataTools(server) {
 
   server.tool('data_get_pine_lines', 'Read horizontal price levels drawn by Pine Script indicators (line.new). Returns deduplicated price levels per study. Use study_filter to target a specific indicator.', {
     study_filter: z.string().optional().describe('Substring to match study name (e.g., "Profiler", "NY Levels"). Omit for all.'),
-    verbose: z.coerce.boolean().optional().describe('Return raw line data with IDs, coordinates, colors (default false — returns only unique price levels)'),
+    verbose: booleanParam().optional().describe('Return raw line data with IDs, coordinates, colors (default false — returns only unique price levels)'),
   }, async ({ study_filter, verbose }) => {
     try { return jsonResult(await core.getPineLines({ study_filter, verbose })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
@@ -58,7 +63,7 @@ export function registerDataTools(server) {
   server.tool('data_get_pine_labels', 'Read text labels drawn by Pine Script indicators (label.new). Returns text and price pairs. Use study_filter to target a specific indicator.', {
     study_filter: z.string().optional().describe('Substring to match study name. Omit for all.'),
     max_labels: z.coerce.number().optional().describe('Max labels per study (default 50). Set higher if you need all.'),
-    verbose: z.coerce.boolean().optional().describe('Return raw label data with IDs, colors, positions (default false — returns only text + price)'),
+    verbose: booleanParam().optional().describe('Return raw label data with IDs, colors, positions (default false — returns only text + price)'),
   }, async ({ study_filter, max_labels, verbose }) => {
     try { return jsonResult(await core.getPineLabels({ study_filter, max_labels, verbose })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
@@ -73,13 +78,13 @@ export function registerDataTools(server) {
 
   server.tool('data_get_pine_boxes', 'Read box/zone boundaries drawn by Pine Script indicators (box.new). Returns deduplicated {high, low} price zones. Use study_filter to target a specific indicator.', {
     study_filter: z.string().optional().describe('Substring to match study name. Omit for all.'),
-    verbose: z.coerce.boolean().optional().describe('Return all boxes with IDs and coordinates (default false — returns unique price zones)'),
+    verbose: booleanParam().optional().describe('Return all boxes with IDs and coordinates (default false — returns unique price zones)'),
   }, async ({ study_filter, verbose }) => {
     try { return jsonResult(await core.getPineBoxes({ study_filter, verbose })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('data_get_study_values', 'Get current indicator values from the data window for all visible studies (RSI, MACD, Bollinger Bands, EMAs, custom indicators with plot()).', {}, async () => {
+  server.tool('data_get_study_values', 'Read Data Window display values, which may follow the crosshair, and separate latest loaded-bar values/time for visible studies including non-price panes.', {}, async () => {
     try { return jsonResult(await core.getStudyValues()); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
