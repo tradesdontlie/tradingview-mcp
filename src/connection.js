@@ -7,6 +7,11 @@ let targetInfo = null;
 // resolves to ::1 first, and Electron's --remote-debugging-port only listens on IPv4.
 export const CDP_HOST = process.env.TV_CDP_HOST || process.env.CDP_HOST || '127.0.0.1';
 export const CDP_PORT = Number(process.env.TV_CDP_PORT || process.env.CDP_PORT) || 9222;
+// Optional: pin this process to one specific tab, matched by URL substring
+// (e.g. "/chart/qJPHO5Xx/"). Lets multiple server instances drive different
+// charts concurrently. Matched on URL, not target id — ids are regenerated
+// when a tab is reopened or the app restarts; the chart id in the URL is stable.
+export const CDP_TARGET_URL = process.env.TV_CDP_TARGET_URL || null;
 const MAX_RETRIES = 5;
 const BASE_DELAY = 500;
 
@@ -110,9 +115,25 @@ export async function reconnectTo(targetId) {
 async function findChartTarget() {
   const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
   const targets = await resp.json();
+  const pages = targets.filter(t => t.type === 'page');
+
+  // Pinned mode: bind to one specific tab. Fail loudly rather than silently
+  // falling back to "first chart found" — a wrong-tab read looks like valid data.
+  if (CDP_TARGET_URL) {
+    const pinned = pages.find(t => t.url.includes(CDP_TARGET_URL));
+    if (!pinned) {
+      const open = pages.map(t => t.url).filter(u => /tradingview/i.test(u));
+      throw new Error(
+        `TV_CDP_TARGET_URL="${CDP_TARGET_URL}" matched no open tab. ` +
+        `Open TradingView tabs: ${open.join(', ') || '(none)'}`
+      );
+    }
+    return pinned;
+  }
+
   // Prefer targets with tradingview.com/chart in the URL
-  return targets.find(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
-    || targets.find(t => t.type === 'page' && /tradingview/i.test(t.url))
+  return pages.find(t => /tradingview\.com\/chart/i.test(t.url))
+    || pages.find(t => /tradingview/i.test(t.url))
     || null;
 }
 
