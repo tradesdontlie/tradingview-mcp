@@ -138,7 +138,22 @@ export async function uiState() {
       ui.right_panel = { open: !!(right && right.offsetWidth > 50), width: right ? right.offsetWidth : 0 };
       var monacoEl = document.querySelector('.monaco-editor.pine-editor-monaco');
       ui.pine_editor = { open: !!monacoEl, width: monacoEl ? monacoEl.offsetWidth : 0, height: monacoEl ? monacoEl.offsetHeight : 0 };
-      var stratPanel = document.querySelector('[data-name="backtesting"]') || document.querySelector('[class*="strategyReport"]');
+      // Desktop: data-name="backtesting" or class~=strategyReport.
+      // TV web (added vdm/web-compat 2026-05-03): selectors above don't match; fall back to
+      // searching for the visible "Strategy Report" header text inside any open bottom panel.
+      var stratPanel = document.querySelector('[data-name="backtesting"]')
+        || document.querySelector('[class*="strategyReport"]')
+        || document.querySelector('[class*="strategy-tester"]')
+        || document.querySelector('[class*="strategyTester"]');
+      if (!stratPanel) {
+        var headers = document.querySelectorAll('[class*="header"], [class*="title"]');
+        for (var hi = 0; hi < headers.length; hi++) {
+          if (headers[hi].textContent && headers[hi].textContent.indexOf('Strategy Report') >= 0 && headers[hi].offsetParent) {
+            stratPanel = headers[hi];
+            break;
+          }
+        }
+      }
       ui.strategy_tester = { open: !!(stratPanel && stratPanel.offsetParent) };
       var widgetbar = document.querySelector('[data-name="widgetbar-wrap"]');
       ui.widgetbar = { open: !!(widgetbar && widgetbar.offsetWidth > 50) };
