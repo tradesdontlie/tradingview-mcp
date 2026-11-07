@@ -3,6 +3,7 @@
  */
 import { evaluate, evaluateAsync, getClient, getChartApi, getChartCollection, safeString } from '../connection.js';
 import { waitForChartReady } from '../wait.js';
+import { getStrategyResults } from './data.js';
 import { writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -40,7 +41,7 @@ export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_co
           const client = await getClient();
           const { data } = await client.Page.captureScreenshot({ format: 'png' });
           const ts = new Date().toISOString().replace(/[:.]/g, '-');
-          const fname = `batch_${symbol}_${tf || 'default'}_${ts}`.replace(/[\/\\]/g, '_') + '.png';
+          const fname = `batch_${symbol}_${tf || 'default'}_${ts}`.replace(/[\/\\:*?"<>|]/g, '_') + '.png';
           const filePath = join(SCREENSHOT_DIR, fname);
           writeFileSync(filePath, Buffer.from(data, 'base64'));
           actionResult = { file_path: filePath };
@@ -56,21 +57,10 @@ export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_co
             })
           `);
         } else if (action === 'get_strategy_results') {
-          await new Promise(r => setTimeout(r, 1000));
-          actionResult = await evaluate(`
-            (function() {
-              var metrics = {};
-              var panel = document.querySelector('[data-name="backtesting"]') || document.querySelector('[class*="strategyReport"]');
-              if (!panel) return { error: 'Strategy Tester not found' };
-              var items = panel.querySelectorAll('[class*="reportItem"], [class*="metric"]');
-              items.forEach(function(item) {
-                var label = item.querySelector('[class*="label"]');
-                var value = item.querySelector('[class*="value"]');
-                if (label && value) metrics[label.textContent.trim()] = value.textContent.trim();
-              });
-              return { metric_count: Object.keys(metrics).length, metrics: metrics };
-            })()
-          `);
+          // Same internal-API path as data_get_strategy_results (opens the
+          // tester and waits for the report) instead of scraping the DOM.
+          const r = await getStrategyResults();
+          actionResult = { metric_count: r.metric_count, strategy: r.strategy, metrics: r.metrics, ...(r.error && { error: r.error }) };
         } else {
           actionResult = { error: 'Unknown action or API not available: ' + action };
         }

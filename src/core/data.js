@@ -36,8 +36,8 @@ const FIND_STRATEGY_JS = `
     for (var i = 0; i < sources.length; i++) {
       var s = sources[i], mi = null;
       try { mi = s.metaInfo ? s.metaInfo() : null; } catch (e) {}
-      var isStrat = mi && (mi.isTVScriptStrategy || mi.is_strategy);
-      if ((isStrat || typeof s.reportData === 'function') && typeof s.reportData === 'function') {
+      // Any source exposing reportData() is a strategy for our purposes.
+      if (typeof s.reportData === 'function') {
         strategies.push({ s: s, name: mi ? mi.description : null });
       }
     }
@@ -83,7 +83,7 @@ const FIND_STRATEGY_JS = `
   }
 `;
 
-function buildGraphicsJS(collectionName, mapKey, filter) {
+export function buildGraphicsJS(collectionName, mapKey, filter) {
   return `
     (function() {
       var chart = window.TradingViewApi._activeChartWidgetWV.value()._chartWidget;
@@ -382,8 +382,13 @@ async function _getQuoteInternal({ symbol } = {}) {
 
   if (requested) {
     try { originalSymbol = await evaluate(`${CHART_API}.symbol()`); } catch (e) {}
-    const bare = (s) => (s || '').toString().split(':').pop().toUpperCase();
-    if (bare(originalSymbol) !== bare(requested)) {
+    const up = (s) => (s || '').toString().toUpperCase();
+    const bare = (s) => up(s).split(':').pop();
+    // An exchange-prefixed request must match exchange too (BINANCE:BTCUSDT ≠ COINBASE:BTCUSDT).
+    const sameSymbol = requested.includes(':') && up(originalSymbol).includes(':')
+      ? up(originalSymbol) === up(requested)
+      : bare(originalSymbol) === bare(requested);
+    if (!sameSymbol) {
       needsRestore = true;
       await evaluateAsync(`
         (function() {

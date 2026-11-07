@@ -35,6 +35,59 @@ const FIND_MONACO = `
   })()
 `;
 
+// ── Shared page-context snippets ──
+
+// Monaco markers on the Pine model (severity: 1 hint, 2 info, 4 warning, 8 error).
+const READ_MARKERS_JS = `
+  (function() {
+    var m = ${FIND_MONACO};
+    if (!m) return [];
+    var model = m.editor.getModel();
+    if (!model) return [];
+    var markers = m.env.editor.getModelMarkers({ resource: model.uri });
+    return markers.map(function(mk) {
+      return { line: mk.startLineNumber, column: mk.startColumn, message: mk.message, severity: mk.severity };
+    });
+  })()
+`;
+
+// Click the editor's compile button, preferring "Save and add to chart" >
+// "Add to chart" > "Update on chart" > Pine Save. Returns the label, or null.
+const CLICK_COMPILE_JS = `
+  (function() {
+    var btns = document.querySelectorAll('button');
+    var addBtn = null, updateBtn = null, saveBtn = null;
+    for (var i = 0; i < btns.length; i++) {
+      var text = btns[i].textContent.trim();
+      if (/save and add to chart/i.test(text)) { btns[i].click(); return 'Save and add to chart'; }
+      if (!addBtn && /^add to chart$/i.test(text)) addBtn = btns[i];
+      if (!updateBtn && /^update on chart$/i.test(text)) updateBtn = btns[i];
+      if (!saveBtn && btns[i].className.indexOf('saveButton') !== -1 && btns[i].offsetParent !== null) saveBtn = btns[i];
+    }
+    if (addBtn) { addBtn.click(); return 'Add to chart'; }
+    if (updateBtn) { updateBtn.click(); return 'Update on chart'; }
+    if (saveBtn) { saveBtn.click(); return 'Pine Save'; }
+    return null;
+  })()
+`;
+
+const STUDY_COUNT_JS = `
+  (function() {
+    try {
+      var chart = window.TradingViewApi._activeChartWidgetWV.value();
+      if (chart && typeof chart.getAllStudies === 'function') return chart.getAllStudies().length;
+    } catch(e) {}
+    return null;
+  })()
+`;
+
+// Ctrl+Enter fallback when no compile button is found.
+async function pressCtrlEnter() {
+  const c = await getClient();
+  await c.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: 2, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+  await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 'Enter', code: 'Enter' });
+}
+
 /**
  * Opens the Pine Editor panel and waits for Monaco to become available.
  * Returns true if editor is accessible, false on timeout.
@@ -107,6 +160,17 @@ export function analyze({ source }) {
     }
   }
 
+  // Arrays grown/shrunk anywhere (push, unshift, insert, concat, pop, …) have no
+  // fixed size, so static bounds checks would be false positives.
+  for (const line of lines) {
+    const resize = /(?:array\.(push|unshift|insert|concat|pop|shift|remove|clear)\(\s*(\w+))|(?:(\w+)\.(push|unshift|insert|concat|pop|shift|remove|clear)\()/g;
+    let m;
+    while ((m = resize.exec(line)) !== null) {
+      const info = arrays.get(m[2] || m[3]);
+      if (info) info.size = null;
+    }
+  }
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const pattern = /array\.(get|set)\(\s*(\w+)\s*,\s*(-?\d+)/g;
@@ -145,22 +209,15 @@ export function analyze({ source }) {
     }
   }
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const trimmed = line.trim();
-    if (trimmed.includes('strategy.entry') || trimmed.includes('strategy.close')) {
-      let hasStrategyDecl = false;
-      for (const l of lines) {
-        if (l.trim().startsWith('strategy(')) { hasStrategyDecl = true; break; }
-      }
-      if (!hasStrategyDecl) {
-        diagnostics.push({
-          line: i + 1, column: 1,
-          message: 'strategy.entry/close used but no strategy() declaration found — did you mean to use indicator()?',
-          severity: 'error',
-        });
-        break;
-      }
+  // Scan for the strategy() declaration once, not once per strategy.* line.
+  if (!lines.some(l => l.trim().startsWith('strategy('))) {
+    const i = lines.findIndex(l => l.includes('strategy.entry') || l.includes('strategy.close'));
+    if (i !== -1) {
+      diagnostics.push({
+        line: i + 1, column: 1,
+        message: 'strategy.entry/close used but no strategy() declaration found — did you mean to use indicator()?',
+        severity: 'error',
+      });
     }
   }
 
@@ -285,35 +342,8 @@ export async function compile() {
   const editorReady = await ensurePineEditorOpen();
   if (!editorReady) throw new Error('Could not open Pine Editor.');
 
-  const clicked = await evaluate(`
-    (function() {
-      var btns = document.querySelectorAll('button');
-      var fallback = null;
-      var saveBtn = null;
-      for (var i = 0; i < btns.length; i++) {
-        var text = btns[i].textContent.trim();
-        if (/save and add to chart/i.test(text)) {
-          btns[i].click();
-          return 'Save and add to chart';
-        }
-        if (!fallback && /^(Add to chart|Update on chart)/i.test(text)) {
-          fallback = btns[i];
-        }
-        if (!saveBtn && btns[i].className.indexOf('saveButton') !== -1 && btns[i].offsetParent !== null) {
-          saveBtn = btns[i];
-        }
-      }
-      if (fallback) { fallback.click(); return fallback.textContent.trim(); }
-      if (saveBtn) { saveBtn.click(); return 'Pine Save'; }
-      return null;
-    })()
-  `);
-
-  if (!clicked) {
-    const c = await getClient();
-    await c.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: 2, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
-    await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 'Enter', code: 'Enter' });
-  }
+  const clicked = await evaluate(CLICK_COMPILE_JS);
+  if (!clicked) await pressCtrlEnter();
 
   await new Promise(r => setTimeout(r, 2000));
   return { success: true, button_clicked: clicked || 'keyboard_shortcut', source: 'dom_fallback' };
@@ -323,25 +353,22 @@ export async function getErrors() {
   const editorReady = await ensurePineEditorOpen();
   if (!editorReady) throw new Error('Could not open Pine Editor.');
 
-  const errors = await evaluate(`
-    (function() {
-      var m = ${FIND_MONACO};
-      if (!m) return [];
-      var model = m.editor.getModel();
-      if (!model) return [];
-      var markers = m.env.editor.getModelMarkers({ resource: model.uri });
-      return markers.map(function(mk) {
-        return { line: mk.startLineNumber, column: mk.startColumn, message: mk.message, severity: mk.severity };
-      });
-    })()
-  `);
+  const errors = await evaluate(READ_MARKERS_JS);
 
+  const list = errors || [];
+  const realErrors = list.filter(isErrorMarker);
   return {
     success: true,
-    has_errors: errors?.length > 0,
-    error_count: errors?.length || 0,
-    errors: errors || [],
+    has_errors: realErrors.length > 0,
+    error_count: realErrors.length,
+    warning_count: list.length - realErrors.length,
+    errors: list,
   };
+}
+
+// Monaco MarkerSeverity: Hint=1, Info=2, Warning=4, Error=8. Only Error blocks compilation.
+function isErrorMarker(mk) {
+  return mk && (mk.severity == null || mk.severity >= 8);
 }
 
 export async function save() {
@@ -430,76 +457,22 @@ export async function smartCompile() {
   const editorReady = await ensurePineEditorOpen();
   if (!editorReady) throw new Error('Could not open Pine Editor.');
 
-  const studiesBefore = await evaluate(`
-    (function() {
-      try {
-        var chart = window.TradingViewApi._activeChartWidgetWV.value();
-        if (chart && typeof chart.getAllStudies === 'function') return chart.getAllStudies().length;
-      } catch(e) {}
-      return null;
-    })()
-  `);
+  const studiesBefore = await evaluate(STUDY_COUNT_JS);
 
-  const buttonClicked = await evaluate(`
-    (function() {
-      var btns = document.querySelectorAll('button');
-      var addBtn = null;
-      var updateBtn = null;
-      var saveBtn = null;
-      for (var i = 0; i < btns.length; i++) {
-        var text = btns[i].textContent.trim();
-        if (/save and add to chart/i.test(text)) {
-          btns[i].click();
-          return 'Save and add to chart';
-        }
-        if (!addBtn && /^add to chart$/i.test(text)) addBtn = btns[i];
-        if (!updateBtn && /^update on chart$/i.test(text)) updateBtn = btns[i];
-        if (!saveBtn && btns[i].className.indexOf('saveButton') !== -1 && btns[i].offsetParent !== null) saveBtn = btns[i];
-      }
-      if (addBtn) { addBtn.click(); return 'Add to chart'; }
-      if (updateBtn) { updateBtn.click(); return 'Update on chart'; }
-      if (saveBtn) { saveBtn.click(); return 'Pine Save'; }
-      return null;
-    })()
-  `);
-
-  if (!buttonClicked) {
-    const c = await getClient();
-    await c.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: 2, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
-    await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 'Enter', code: 'Enter' });
-  }
+  const buttonClicked = await evaluate(CLICK_COMPILE_JS);
+  if (!buttonClicked) await pressCtrlEnter();
 
   await new Promise(r => setTimeout(r, 2500));
 
-  const errors = await evaluate(`
-    (function() {
-      var m = ${FIND_MONACO};
-      if (!m) return [];
-      var model = m.editor.getModel();
-      if (!model) return [];
-      var markers = m.env.editor.getModelMarkers({ resource: model.uri });
-      return markers.map(function(mk) {
-        return { line: mk.startLineNumber, column: mk.startColumn, message: mk.message, severity: mk.severity };
-      });
-    })()
-  `);
-
-  const studiesAfter = await evaluate(`
-    (function() {
-      try {
-        var chart = window.TradingViewApi._activeChartWidgetWV.value();
-        if (chart && typeof chart.getAllStudies === 'function') return chart.getAllStudies().length;
-      } catch(e) {}
-      return null;
-    })()
-  `);
+  const errors = await evaluate(READ_MARKERS_JS);
+  const studiesAfter = await evaluate(STUDY_COUNT_JS);
 
   const studyAdded = (studiesBefore !== null && studiesAfter !== null) ? studiesAfter > studiesBefore : null;
 
   return {
     success: true,
     button_clicked: buttonClicked || 'keyboard_shortcut',
-    has_errors: errors?.length > 0,
+    has_errors: (errors || []).some(isErrorMarker),
     errors: errors || [],
     study_added: studyAdded,
   };

@@ -320,11 +320,11 @@ describe('source audit — no unsafe interpolation patterns', () => {
 describe('path traversal prevention', () => {
   it('capture.js strips path separators from filename', () => {
     const source = readFileSync(new URL('../src/core/capture.js', import.meta.url), 'utf8');
-    assert.ok(source.includes(".replace(/[\\/\\\\]/g, '_')"));
+    assert.ok(source.includes(".replace(/[\\/\\\\:*?\"<>|]/g, '_')"));
   });
 
   it('batch.js strips path separators from filename', () => {
     const source = readFileSync(new URL('../src/core/batch.js', import.meta.url), 'utf8');
-    assert.ok(source.includes(".replace(/[\\/\\\\]/g, '_')"));
+    assert.ok(source.includes(".replace(/[\\/\\\\:*?\"<>|]/g, '_')"));
   });
 });

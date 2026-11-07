@@ -31,7 +31,7 @@ export async function start({ date, _deps } = {}) {
   if (date) {
     const ts = new Date(date).getTime();
     if (isNaN(ts)) throw new Error(`Invalid date: "${date}". Use YYYY-MM-DD format.`);
-    await evaluate(`${rp}.selectDate(${ts}).then(function() { return 'ok'; })`);
+    await evaluate(`${rp}.selectDate(${ts}).then(function() { return 'ok'; })`, { awaitPromise: true });
   } else {
     await evaluate(`${rp}.selectFirstAvailableDate()`);
   }
