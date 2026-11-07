@@ -3,6 +3,24 @@ import { evaluate } from './connection.js';
 const DEFAULT_TIMEOUT = 10000;
 const POLL_INTERVAL = 200;
 
+// True when the chart is on the expected symbol. Prefers the chart API symbol;
+// falls back to the legend text. An exchange prefix in `expected` must match
+// the API symbol's prefix, but a bare ticker matches any exchange.
+function symbolMatches(expected, state) {
+  const want = String(expected).trim().toUpperCase();
+  const api = String(state.apiSymbol || '').toUpperCase();
+  if (api) {
+    if (api === want) return true;
+    const wantBare = want.split(':').pop();
+    const apiBare = api.split(':').pop();
+    // Both prefixed but different → wrong exchange; otherwise compare tickers.
+    if (want.includes(':') && api.includes(':')) return false;
+    return apiBare === wantBare;
+  }
+  const legend = String(state.currentSymbol || '').toUpperCase();
+  return !legend || legend.includes(want.split(':').pop());
+}
+
 export async function waitForChartReady(expectedSymbol = null, expectedTf = null, timeout = DEFAULT_TIMEOUT) {
   const start = Date.now();
   let lastBarCount = -1;
@@ -28,8 +46,12 @@ export async function waitForChartReady(expectedSymbol = null, expectedTf = null
         var symbolEl = document.querySelector('[data-name="legend-source-title"]')
           || document.querySelector('[class*="title"] [class*="apply-common-tooltip"]');
         var currentSymbol = symbolEl ? symbolEl.textContent.trim() : '';
+        // The API symbol is authoritative ("BINANCE:SUIUSDT"); the legend text
+        // has no exchange prefix and may be a description ("Sui / TetherUS").
+        var apiSymbol = '';
+        try { apiSymbol = String(window.TradingViewApi._activeChartWidgetWV.value().symbol() || ''); } catch (e) {}
 
-        return { isLoading: !!isLoading, barCount: barCount, currentSymbol: currentSymbol };
+        return { isLoading: !!isLoading, barCount: barCount, currentSymbol: currentSymbol, apiSymbol: apiSymbol };
       })()
     `);
 
@@ -46,7 +68,7 @@ export async function waitForChartReady(expectedSymbol = null, expectedTf = null
     }
 
     // Check symbol match if expected
-    if (expectedSymbol && state.currentSymbol && !state.currentSymbol.toUpperCase().includes(expectedSymbol.toUpperCase())) {
+    if (expectedSymbol && !symbolMatches(expectedSymbol, state)) {
       stableCount = 0;
       await new Promise(r => setTimeout(r, POLL_INTERVAL));
       continue;

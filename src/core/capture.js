@@ -16,7 +16,7 @@ export async function captureScreenshot({ region, filename, method, waitForRende
   if (waitForRender) await waitForChartRender();
 
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
-  const fname = (filename || `tv_${region || 'full'}_${ts}`).replace(/[\/\\]/g, '_').replace(/\.\./g, '_');
+  const fname = (filename || `tv_${region || 'full'}_${ts}`).replace(/[\/\\:*?"<>|]/g, '_').replace(/\.\./g, '_');
   const filePath = join(SCREENSHOT_DIR, `${fname}.png`);
 
   if (method === 'api') {
@@ -64,11 +64,12 @@ export async function captureScreenshot({ region, filename, method, waitForRende
   if (clip) params.clip = clip;
 
   const { data } = await client.Page.captureScreenshot(params);
-  writeFileSync(filePath, Buffer.from(data, 'base64'));
+  const png = Buffer.from(data, 'base64');
+  writeFileSync(filePath, png);
 
   return {
     success: true, method: 'cdp', file_path: filePath, region,
     waited_for_render: !!waitForRender,
-    size_bytes: Buffer.from(data, 'base64').length,
+    size_bytes: png.length,
   };
 }

@@ -107,6 +107,17 @@ export function analyze({ source }) {
     }
   }
 
+  // Arrays grown/shrunk anywhere (push, unshift, insert, concat, pop, …) have no
+  // fixed size, so static bounds checks would be false positives.
+  for (const line of lines) {
+    const resize = /(?:array\.(push|unshift|insert|concat|pop|shift|remove|clear)\(\s*(\w+))|(?:(\w+)\.(push|unshift|insert|concat|pop|shift|remove|clear)\()/g;
+    let m;
+    while ((m = resize.exec(line)) !== null) {
+      const info = arrays.get(m[2] || m[3]);
+      if (info) info.size = null;
+    }
+  }
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const pattern = /array\.(get|set)\(\s*(\w+)\s*,\s*(-?\d+)/g;
@@ -336,12 +347,20 @@ export async function getErrors() {
     })()
   `);
 
+  const list = errors || [];
+  const realErrors = list.filter(isErrorMarker);
   return {
     success: true,
-    has_errors: errors?.length > 0,
-    error_count: errors?.length || 0,
-    errors: errors || [],
+    has_errors: realErrors.length > 0,
+    error_count: realErrors.length,
+    warning_count: list.length - realErrors.length,
+    errors: list,
   };
+}
+
+// Monaco MarkerSeverity: Hint=1, Info=2, Warning=4, Error=8. Only Error blocks compilation.
+function isErrorMarker(mk) {
+  return mk && (mk.severity == null || mk.severity >= 8);
 }
 
 export async function save() {
@@ -499,7 +518,7 @@ export async function smartCompile() {
   return {
     success: true,
     button_clicked: buttonClicked || 'keyboard_shortcut',
-    has_errors: errors?.length > 0,
+    has_errors: (errors || []).some(isErrorMarker),
     errors: errors || [],
     study_added: studyAdded,
   };

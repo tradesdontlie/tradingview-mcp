@@ -382,8 +382,13 @@ async function _getQuoteInternal({ symbol } = {}) {
 
   if (requested) {
     try { originalSymbol = await evaluate(`${CHART_API}.symbol()`); } catch (e) {}
-    const bare = (s) => (s || '').toString().split(':').pop().toUpperCase();
-    if (bare(originalSymbol) !== bare(requested)) {
+    const up = (s) => (s || '').toString().toUpperCase();
+    const bare = (s) => up(s).split(':').pop();
+    // An exchange-prefixed request must match exchange too (BINANCE:BTCUSDT ≠ COINBASE:BTCUSDT).
+    const sameSymbol = requested.includes(':') && up(originalSymbol).includes(':')
+      ? up(originalSymbol) === up(requested)
+      : bare(originalSymbol) === bare(requested);
+    if (!sameSymbol) {
       needsRestore = true;
       await evaluateAsync(`
         (function() {

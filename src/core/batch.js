@@ -40,7 +40,7 @@ export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_co
           const client = await getClient();
           const { data } = await client.Page.captureScreenshot({ format: 'png' });
           const ts = new Date().toISOString().replace(/[:.]/g, '-');
-          const fname = `batch_${symbol}_${tf || 'default'}_${ts}`.replace(/[\/\\]/g, '_') + '.png';
+          const fname = `batch_${symbol}_${tf || 'default'}_${ts}`.replace(/[\/\\:*?"<>|]/g, '_') + '.png';
           const filePath = join(SCREENSHOT_DIR, fname);
           writeFileSync(filePath, Buffer.from(data, 'base64'));
           actionResult = { file_path: filePath };

@@ -194,10 +194,10 @@ export async function setVisibleRange({ from, to, _deps }) {
       var bars = m.mainSeries().bars();
       var startIdx = bars.firstIndex();
       var endIdx = bars.lastIndex();
-      var fromIdx = startIdx, toIdx = endIdx;
+      var fromIdx = startIdx, toIdx = endIdx, fromFound = false;
       for (var i = startIdx; i <= endIdx; i++) {
         var v = bars.valueAt(i);
-        if (v && v[0] >= ${f} && fromIdx === startIdx) fromIdx = i;
+        if (v && v[0] >= ${f} && !fromFound) { fromIdx = i; fromFound = true; }
         if (v && v[0] <= ${t}) toIdx = i;
       }
       ts.zoomToBarsRange(fromIdx, toIdx);
@@ -222,12 +222,14 @@ export async function scrollToDate({ date, _deps } = {}) {
   if (isNaN(timestamp)) throw new Error(`Could not parse date: ${date}. Use ISO format (2024-01-15) or unix timestamp.`);
 
   const resolution = await evaluate(`${CHART_API}.resolution()`);
+  // Resolution strings: "15" (minutes), "30S", "3D", "2W", "3M", "12M".
   let secsPerBar = 60;
-  const res = String(resolution);
-  if (res === 'D' || res === '1D') secsPerBar = 86400;
-  else if (res === 'W' || res === '1W') secsPerBar = 604800;
-  else if (res === 'M' || res === '1M') secsPerBar = 2592000;
-  else { const mins = parseInt(res, 10); if (!isNaN(mins)) secsPerBar = mins * 60; }
+  const resMatch = String(resolution).trim().toUpperCase().match(/^(\d*)([SDWM]?)$/);
+  if (resMatch) {
+    const n = resMatch[1] ? parseInt(resMatch[1], 10) : 1;
+    const unit = { '': 60, S: 1, D: 86400, W: 604800, M: 2592000 }[resMatch[2]];
+    if (n > 0) secsPerBar = n * unit;
+  }
 
   const halfWindow = 25 * secsPerBar;
   const from = timestamp - halfWindow;
@@ -241,10 +243,10 @@ export async function scrollToDate({ date, _deps } = {}) {
       var bars = m.mainSeries().bars();
       var startIdx = bars.firstIndex();
       var endIdx = bars.lastIndex();
-      var fromIdx = startIdx, toIdx = endIdx;
+      var fromIdx = startIdx, toIdx = endIdx, fromFound = false;
       for (var i = startIdx; i <= endIdx; i++) {
         var v = bars.valueAt(i);
-        if (v && v[0] >= ${from} && fromIdx === startIdx) fromIdx = i;
+        if (v && v[0] >= ${from} && !fromFound) { fromIdx = i; fromFound = true; }
         if (v && v[0] <= ${to}) toIdx = i;
       }
       ts.zoomToBarsRange(fromIdx, toIdx);

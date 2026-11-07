@@ -47,23 +47,29 @@ async function withShell(fn) {
 
   for (const cand of candidates) {
     let c = null;
+    let isShell = false;
     try {
       c = await CDP({ host: CDP_HOST, port: CDP_PORT, target: cand.id });
       const probe = await c.Runtime.evaluate({
         expression: `!!document.querySelector('.tabs-container .tab')`,
         returnByValue: true,
       });
-      if (probe.result?.value) {
-        const out = await fn(async (expression) => {
-          const { result } = await c.Runtime.evaluate({ expression, returnByValue: true });
-          return result?.value;
-        });
-        await c.close();
-        return out;
-      }
-      await c.close();
+      isShell = !!probe.result?.value;
     } catch {
+      isShell = false;
+    }
+    if (!isShell) {
       try { if (c) await c.close(); } catch { /* already gone */ }
+      continue;
+    }
+    // Shell found: run fn exactly once and let its errors propagate.
+    try {
+      return await fn(async (expression) => {
+        const { result } = await c.Runtime.evaluate({ expression, returnByValue: true });
+        return result?.value;
+      });
+    } finally {
+      try { await c.close(); } catch { /* already gone */ }
     }
   }
   throw new Error('TradingView shell window (tab bar) not found. Is this TradingView Desktop with tabs?');
@@ -288,7 +294,7 @@ export async function switchTab({ index }) {
   const tabs = await list();
   const idx = Number(index);
 
-  if (idx >= tabs.tab_count) {
+  if (!Number.isInteger(idx) || idx < 0 || idx >= tabs.tab_count) {
     throw new Error(`Tab index ${idx} out of range (have ${tabs.tab_count} tabs)`);
   }
 
