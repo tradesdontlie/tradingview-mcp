@@ -3,6 +3,7 @@
  */
 import { evaluate as _evaluate, evaluateAsync as _evaluateAsync, safeString, requireFinite } from '../connection.js';
 import { waitForChartReady as _waitForChartReady } from '../wait.js';
+import { applyInputsJS } from './_inputs.js';
 
 const CHART_API = 'window.TradingViewApi._activeChartWidgetWV.value()';
 
@@ -12,6 +13,31 @@ function _resolve(deps) {
     evaluateAsync: deps?.evaluateAsync || _evaluateAsync,
     waitForChartReady: deps?.waitForChartReady || _waitForChartReady,
   };
+}
+
+// Page-context JS: zoom the chart to the loaded bars whose time is within
+// [from, to] (unix seconds). Bars are time-ordered, so stop once past `to`.
+// If no bar falls inside, falls back to the whole loaded range (as before).
+function zoomToTimeRangeJS(from, to) {
+  return `
+    (function() {
+      var m = ${CHART_API}._chartWidget.model();
+      var bars = m.mainSeries().bars();
+      var startIdx = bars.firstIndex();
+      var endIdx = bars.lastIndex();
+      var fromIdx = null, toIdx = null;
+      for (var i = startIdx; i <= endIdx; i++) {
+        var v = bars.valueAt(i);
+        if (!v) continue;
+        if (v[0] > ${to}) break;
+        if (fromIdx === null && v[0] >= ${from}) fromIdx = i;
+        toIdx = i;
+      }
+      if (fromIdx === null) fromIdx = startIdx;
+      if (toIdx === null) toIdx = endIdx;
+      m.timeScale().zoomToBarsRange(fromIdx, toIdx);
+    })()
+  `;
 }
 
 export async function getState({ _deps } = {}) {
@@ -107,27 +133,7 @@ export async function manageIndicator({ action, indicator, entity_id, inputs: in
     // report what actually took.
     let appliedInputs;
     if (entityId && inputs && Object.keys(inputs).length) {
-      const result = await evaluate(`
-        (function() {
-          var chart = ${CHART_API};
-          var study = chart.getStudyById(${safeString(entityId)});
-          if (!study || typeof study.getInputValues !== 'function') return { error: 'inputs unsupported for this study' };
-          var current = study.getInputValues();
-          var overrides = ${JSON.stringify(inputs)};
-          var applied = {}, unknown = [];
-          var byId = {};
-          for (var i = 0; i < current.length; i++) byId[current[i].id] = true;
-          for (var k in overrides) {
-            if (byId[k]) { for (var j = 0; j < current.length; j++) { if (current[j].id === k) current[j].value = overrides[k]; } applied[k] = overrides[k]; }
-            else unknown.push(k);
-          }
-          study.setInputValues(current);
-          var after = study.getInputValues();
-          var confirmed = {};
-          for (var m = 0; m < after.length; m++) { if (applied.hasOwnProperty(after[m].id)) confirmed[after[m].id] = after[m].value; }
-          return { confirmed: confirmed, unknown: unknown };
-        })()
-      `);
+      const result = await evaluate(applyInputsJS(entityId, inputs));
       if (result?.error) appliedInputs = { error: result.error };
       else appliedInputs = { applied: result?.confirmed || {}, ...(result?.unknown?.length && { unknown_inputs: result.unknown }) };
     }
@@ -186,23 +192,7 @@ export async function setVisibleRange({ from, to, _deps }) {
     await new Promise(r => setTimeout(r, 1800));
   }
 
-  await evaluate(`
-    (function() {
-      var chart = ${CHART_API};
-      var m = chart._chartWidget.model();
-      var ts = m.timeScale();
-      var bars = m.mainSeries().bars();
-      var startIdx = bars.firstIndex();
-      var endIdx = bars.lastIndex();
-      var fromIdx = startIdx, toIdx = endIdx, fromFound = false;
-      for (var i = startIdx; i <= endIdx; i++) {
-        var v = bars.valueAt(i);
-        if (v && v[0] >= ${f} && !fromFound) { fromIdx = i; fromFound = true; }
-        if (v && v[0] <= ${t}) toIdx = i;
-      }
-      ts.zoomToBarsRange(fromIdx, toIdx);
-    })()
-  `);
+  await evaluate(zoomToTimeRangeJS(f, t));
   await new Promise(r => setTimeout(r, 500));
   const actual = await evaluate(`
     (function() {
@@ -235,23 +225,7 @@ export async function scrollToDate({ date, _deps } = {}) {
   const from = timestamp - halfWindow;
   const to = timestamp + halfWindow;
 
-  await evaluate(`
-    (function() {
-      var chart = ${CHART_API};
-      var m = chart._chartWidget.model();
-      var ts = m.timeScale();
-      var bars = m.mainSeries().bars();
-      var startIdx = bars.firstIndex();
-      var endIdx = bars.lastIndex();
-      var fromIdx = startIdx, toIdx = endIdx, fromFound = false;
-      for (var i = startIdx; i <= endIdx; i++) {
-        var v = bars.valueAt(i);
-        if (v && v[0] >= ${from} && !fromFound) { fromIdx = i; fromFound = true; }
-        if (v && v[0] <= ${to}) toIdx = i;
-      }
-      ts.zoomToBarsRange(fromIdx, toIdx);
-    })()
-  `);
+  await evaluate(zoomToTimeRangeJS(from, to));
   await new Promise(r => setTimeout(r, 500));
   return { success: true, date, centered_on: timestamp, resolution, window: { from, to } };
 }

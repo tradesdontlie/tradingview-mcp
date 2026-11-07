@@ -3,6 +3,7 @@
  * Uses efficient poll + dedup: only emits when data changes.
  */
 import { evaluate } from '../connection.js';
+import { buildGraphicsJS } from './data.js';
 
 const CHART_API = 'window.TradingViewApi._activeChartWidgetWV.value()';
 const MODEL = `${CHART_API}._chartWidget.model()`;
@@ -149,89 +150,48 @@ export async function streamValues({ interval } = {}) {
   return pollLoop(fetchValues, { interval: interval || 500, label: 'values' });
 }
 
-// ── Stream: pine lines ──
+// ── Stream: pine lines / labels ──
+// Same graphics reader as data_get_pine_lines / data_get_pine_labels, so the
+// streams see exactly what the one-shot tools see (y1/y2 for lines, t/y for labels).
+
+const roundPrice = (v) => (v == null ? null : Math.round(v * 1e8) / 1e8);
+
+async function fetchGraphics(collection, mapKey, studyFilter) {
+  return evaluate(`({ symbol: ${CHART_API}.symbol(), raw: ${buildGraphicsJS(collection, mapKey, studyFilter || '')} })`);
+}
 
 async function fetchLines(studyFilter) {
-  const filter = studyFilter ? JSON.stringify(studyFilter) : 'null';
-  return evaluate(`
-    (function() {
-      var filter = ${filter};
-      var chart = ${CHART_API};
-      var studies = chart.getAllStudies();
-      var results = [];
-      for (var i = 0; i < studies.length; i++) {
-        var s = studies[i];
-        if (filter && (s.name || '').toLowerCase().indexOf(filter.toLowerCase()) === -1) continue;
-        try {
-          var study = chart.getStudyById(s.id);
-          if (!study) continue;
-          var src = study._study || study;
-          var g = src._graphics || (src._source && src._source._graphics);
-          if (!g) continue;
-          var pc = g._primitivesCollection;
-          if (!pc || !pc.dwglines) continue;
-          var linesMap = pc.dwglines.get('lines');
-          if (!linesMap) continue;
-          var data = linesMap.get(false);
-          if (!data || !data._primitivesDataById) continue;
-          var levels = [];
-          var seen = {};
-          data._primitivesDataById.forEach(function(line) {
-            var p1 = line.points && line.points[0] ? line.points[0].price : null;
-            var p2 = line.points && line.points[1] ? line.points[1].price : null;
-            var price = (p1 !== null && p1 === p2) ? p1 : (p1 || p2);
-            if (price !== null && !seen[price]) { seen[price] = true; levels.push(price); }
-          });
-          levels.sort(function(a, b) { return b - a; });
-          if (levels.length > 0) results.push({ study: s.name, levels: levels });
-        } catch(e) {}
-      }
-      return { symbol: chart.symbol(), study_count: results.length, studies: results };
-    })()
-  `);
+  const r = await fetchGraphics('dwglines', 'lines', studyFilter);
+  if (!r) return null;
+  const studies = (r.raw || []).map((s) => {
+    const seen = new Set();
+    const levels = [];
+    for (const { raw: v } of s.items) {
+      if (v.y1 == null || v.y1 !== v.y2) continue; // horizontal levels only
+      const y = roundPrice(v.y1);
+      if (!seen.has(y)) { seen.add(y); levels.push(y); }
+    }
+    levels.sort((x, y) => y - x);
+    return { study: s.name, levels };
+  }).filter((s) => s.levels.length > 0);
+  return { symbol: r.symbol, study_count: studies.length, studies };
 }
 
 export async function streamLines({ interval, filter } = {}) {
   return pollLoop(() => fetchLines(filter), { interval: interval || 1000, label: 'lines' });
 }
 
-// ── Stream: pine labels ──
-
 async function fetchLabels(studyFilter) {
-  const filterStr = studyFilter ? JSON.stringify(studyFilter) : 'null';
-  return evaluate(`
-    (function() {
-      var filter = ${filterStr};
-      var chart = ${CHART_API};
-      var studies = chart.getAllStudies();
-      var results = [];
-      for (var i = 0; i < studies.length; i++) {
-        var s = studies[i];
-        if (filter && (s.name || '').toLowerCase().indexOf(filter.toLowerCase()) === -1) continue;
-        try {
-          var study = chart.getStudyById(s.id);
-          if (!study) continue;
-          var src = study._study || study;
-          var g = src._graphics || (src._source && src._source._graphics);
-          if (!g) continue;
-          var pc = g._primitivesCollection;
-          if (!pc || !pc.dwglabels) continue;
-          var labelsMap = pc.dwglabels.get('labels');
-          if (!labelsMap) continue;
-          var data = labelsMap.get(false);
-          if (!data || !data._primitivesDataById) continue;
-          var labels = [];
-          data._primitivesDataById.forEach(function(lbl) {
-            var text = lbl.text || '';
-            var price = lbl.points && lbl.points[0] ? lbl.points[0].price : null;
-            if (text) labels.push({ text: text, price: price });
-          });
-          if (labels.length > 0) results.push({ study: s.name, labels: labels.slice(0, 50) });
-        } catch(e) {}
-      }
-      return { symbol: chart.symbol(), study_count: results.length, studies: results };
-    })()
-  `);
+  const r = await fetchGraphics('dwglabels', 'labels', studyFilter);
+  if (!r) return null;
+  const studies = (r.raw || []).map((s) => ({
+    study: s.name,
+    labels: s.items
+      .map(({ raw: v }) => ({ text: v.t || '', price: roundPrice(v.y) }))
+      .filter((l) => l.text)
+      .slice(-50),
+  })).filter((s) => s.labels.length > 0);
+  return { symbol: r.symbol, study_count: studies.length, studies };
 }
 
 export async function streamLabels({ interval, filter } = {}) {

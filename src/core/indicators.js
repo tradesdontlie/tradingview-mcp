@@ -2,6 +2,7 @@
  * Core indicator settings logic.
  */
 import { evaluate, safeString } from '../connection.js';
+import { applyInputsJS } from './_inputs.js';
 
 const CHART_API = 'window.TradingViewApi._activeChartWidgetWV.value()';
 const DIALOG = '[data-name="indicators-dialog"]';
@@ -166,29 +167,15 @@ export async function setInputs({ entity_id, inputs: inputsRaw }) {
     throw new Error('inputs must be a non-empty object, e.g. { length: 50 }');
   }
 
-  const inputsJson = JSON.stringify(inputs);
-
-  const result = await evaluate(`
-    (function() {
-      var chart = ${CHART_API};
-      var study = chart.getStudyById(${safeString(entity_id)});
-      if (!study) return { error: 'Study not found: ' + ${safeString(entity_id)} };
-      var currentInputs = study.getInputValues();
-      var overrides = ${inputsJson};
-      var updatedKeys = {};
-      for (var i = 0; i < currentInputs.length; i++) {
-        if (overrides.hasOwnProperty(currentInputs[i].id)) {
-          currentInputs[i].value = overrides[currentInputs[i].id];
-          updatedKeys[currentInputs[i].id] = overrides[currentInputs[i].id];
-        }
-      }
-      study.setInputValues(currentInputs);
-      return { updated_inputs: updatedKeys };
-    })()
-  `);
+  const result = await evaluate(applyInputsJS(entity_id, inputs));
 
   if (result && result.error) throw new Error(result.error);
-  return { success: true, entity_id, updated_inputs: result.updated_inputs };
+  // updated_inputs = values read back after setInputValues (what actually took).
+  return {
+    success: true, entity_id,
+    updated_inputs: result?.confirmed || {},
+    ...(result?.unknown?.length && { unknown_inputs: result.unknown }),
+  };
 }
 
 export async function toggleVisibility({ entity_id, visible }) {

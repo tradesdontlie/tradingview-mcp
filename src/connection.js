@@ -50,6 +50,11 @@ export function requireFinite(value, name) {
   return n;
 }
 
+// In-flight connect() shared by concurrent callers, so parallel tool calls
+// made while disconnected open one CDP session instead of several.
+let connecting = null;
+let connectingTarget = null;
+
 export async function getClient() {
   if (client) {
     try {
@@ -65,8 +70,20 @@ export async function getClient() {
 }
 
 export async function connect(targetId = null) {
+  // Join an in-flight connect for the same target; wait out one for another.
+  while (connecting) {
+    if (connectingTarget === targetId) return connecting;
+    try { await connecting; } catch { /* ours may still succeed */ }
+  }
+  connectingTarget = targetId;
+  connecting = _connect(targetId).finally(() => { connecting = null; connectingTarget = null; });
+  return connecting;
+}
+
+async function _connect(targetId) {
   let lastError;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    let c = null;
     try {
       const target = targetId ? await findTargetById(targetId) : await findChartTarget();
       if (!target) {
@@ -74,19 +91,26 @@ export async function connect(targetId = null) {
           ? `CDP target ${targetId} not found — is the tab still open?`
           : 'No TradingView chart target found. Is TradingView open with a chart?');
       }
-      targetInfo = target;
-      client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: target.id });
+      c = await CDP({ host: CDP_HOST, port: CDP_PORT, target: target.id });
 
       // Enable required domains
-      await client.Runtime.enable();
-      await client.Page.enable();
-      await client.DOM.enable();
+      await c.Runtime.enable();
+      await c.Page.enable();
+      await c.DOM.enable();
 
+      // Publish only a fully initialised client; drop any one it replaces.
+      if (client && client !== c) { try { await client.close(); } catch { /* already gone */ } }
+      client = c;
+      targetInfo = target;
       return client;
     } catch (err) {
       lastError = err;
-      const delay = Math.min(BASE_DELAY * Math.pow(2, attempt), 30000);
-      await new Promise(r => setTimeout(r, delay));
+      if (c) { try { await c.close(); } catch { /* already gone */ } }
+      // No point sleeping after the final attempt.
+      if (attempt < MAX_RETRIES - 1) {
+        const delay = Math.min(BASE_DELAY * Math.pow(2, attempt), 30000);
+        await new Promise(r => setTimeout(r, delay));
+      }
     }
   }
   throw new Error(`CDP connection failed after ${MAX_RETRIES} attempts: ${lastError?.message}`);

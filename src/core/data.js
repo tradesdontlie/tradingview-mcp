@@ -36,8 +36,8 @@ const FIND_STRATEGY_JS = `
     for (var i = 0; i < sources.length; i++) {
       var s = sources[i], mi = null;
       try { mi = s.metaInfo ? s.metaInfo() : null; } catch (e) {}
-      var isStrat = mi && (mi.isTVScriptStrategy || mi.is_strategy);
-      if ((isStrat || typeof s.reportData === 'function') && typeof s.reportData === 'function') {
+      // Any source exposing reportData() is a strategy for our purposes.
+      if (typeof s.reportData === 'function') {
         strategies.push({ s: s, name: mi ? mi.description : null });
       }
     }
@@ -83,7 +83,7 @@ const FIND_STRATEGY_JS = `
   }
 `;
 
-function buildGraphicsJS(collectionName, mapKey, filter) {
+export function buildGraphicsJS(collectionName, mapKey, filter) {
   return `
     (function() {
       var chart = window.TradingViewApi._activeChartWidgetWV.value()._chartWidget;
