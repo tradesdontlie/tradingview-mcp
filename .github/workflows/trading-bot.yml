@@ -1,0 +1,19 @@
+name: trading-bot tests
+on:
+  push:
+    paths: ["trading-bot/**"]
+  pull_request:
+    paths: ["trading-bot/**"]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: trading-bot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pandas numpy
+      - run: python -m unittest discover -s tests -v
