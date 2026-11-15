@@ -30,6 +30,14 @@ binds to 127.0.0.1 only. Never expose it to a network.
 | app.py | one command: bot + console |
 | run_sim.py / run_demo.py / check_mt5.py / kill.py | simulator, demo plumbing test, read-only health check, kill CLI |
 
+## Research (evidence-based strategies)
+    python portfolio_research.py --synthetic random   # negative control: all must fail
+    python portfolio_research.py --synthetic trend    # positive control: trend rules must pass
+    python portfolio_research.py                      # your data in data/ (daily files)
+Tests volatility-targeted trend (time-series momentum) across many instruments and FX
+cross-sectional momentum, with costs, 2x-cost stress, both-halves check and the Deflated
+Sharpe Ratio. A strategy must pass here before it goes anywhere near the bot.
+
 ## Commands
     python -m unittest discover -s tests -v   # 22 tests, any OS
     python run_sim.py --equity 10000          # whole bot on the simulated broker
