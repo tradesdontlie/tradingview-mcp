@@ -11,19 +11,24 @@ import secrets
 import threading
 import time
 
+from tradingbot.advanced_bot import AdvancedBot
 from tradingbot.config import Config
+from tradingbot.market_context import ContextCache
 from tradingbot.database import Database
 from tradingbot.models import Signal
 from tradingbot.orchestrator import Bot
+from tradingbot.setups import ScannerStrategy
 from tradingbot.server import serve
 
 
-def bot_loop(cfg, mode, speed, equity, interval):
+def bot_loop(cfg, mode, speed, equity, interval, legacy=False):
     db = Database(cfg.db_path)
     rng = random.Random()
     if mode == "sim":
         from tradingbot.broker_sim import SimBroker
-        broker = SimBroker(equity=equity, seed=rng.randint(1, 9999))
+        broker = SimBroker(equity=equity, seed=rng.randint(1, 9999), t0=1_699_999_200, sigma=0.0008,
+                           spread_pips=0.7)
+        broker.warmup(700)
     else:
         from tradingbot.broker_mt5 import MT5Broker
         broker = MT5Broker(require_demo=True)
@@ -39,7 +44,11 @@ def bot_loop(cfg, mode, speed, equity, interval):
         pip = sp.tick_size * 10 if sp.digits in (3, 5) else sp.tick_size
         return [Signal(sym, rng.choice(["BUY", "SELL"]), 20 * pip, now, "random-placeholder")]
 
-    bot = Bot(cfg, db, broker, strat)
+    if legacy:
+        bot = Bot(cfg, db, broker, strat)                  # the original bot, random placeholder
+    else:
+        cache = ContextCache()
+        bot = AdvancedBot(cfg, db, broker, ScannerStrategy(cfg, symbols, cache), cache)
     db.kv_set("run_mode", mode)
     bot.startup()
     while True:
@@ -59,15 +68,16 @@ def main():
     ap.add_argument("--speed", type=float, default=0.15, help="sim: seconds per simulated hour")
     ap.add_argument("--equity", type=float, default=10000)
     ap.add_argument("--interval", type=float, default=60, help="demo: seconds between ticks")
+    ap.add_argument("--legacy", action="store_true", help="original bot with random placeholder signals")
     a = ap.parse_args()
 
-    cfg = Config(db_path="sim.db" if a.mode == "sim" else "bot.db")
+    cfg = (Config if a.legacy else Config.improved)(db_path="sim.db" if a.mode == "sim" else "bot.db")
     if a.mode == "sim":
         for ext in ("", "-wal", "-shm"):
             if os.path.exists(cfg.db_path + ext):
                 os.remove(cfg.db_path + ext)
     token = os.environ.get("DASHBOARD_TOKEN") or secrets.token_urlsafe(8)
-    threading.Thread(target=bot_loop, args=(cfg, a.mode, a.speed, a.equity, a.interval),
+    threading.Thread(target=bot_loop, args=(cfg, a.mode, a.speed, a.equity, a.interval, a.legacy),
                      daemon=True).start()
     print(f"\nConsole:  http://127.0.0.1:{a.port}\nControl token (paste into the page): {token}\n")
     serve(cfg, token, a.port)
