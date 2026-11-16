@@ -38,6 +38,18 @@ Tests volatility-targeted trend (time-series momentum) across many instruments a
 cross-sectional momentum, with costs, 2x-cost stress, both-halves check and the Deflated
 Sharpe Ratio. A strategy must pass here before it goes anywhere near the bot.
 
+## Advancements (all additive: the original Config() and Bot behave exactly as before)
+Config.improved() switches on: the pre-trade checklist (CHECKLIST.md), the trade journal and
+learning gate, the equity guard (profit lock, drawdown ladder, loss-streak cooldown), one open trade
+per tree, marginal wins no longer funding children, and optional extra slots for proven setups.
+    python app.py --mode sim                       # improved bot + scanner (add --legacy for the original)
+    python setup_research.py --synthetic random    # checklist on 8 years of data: must find NOTHING
+    python setup_research.py --synthetic trend     # ...and must find an edge where one exists
+    python setup_research.py --ablation            # on YOUR data/<PAIR>_H1.csv: which items earn their place
+    python setup_research.py --learn               # same, with the journal blocking losing buckets as it goes
+    python analyze_journal.py                      # what is working and what the bot has learned
+    python compare_modes.py --market random        # original vs improved on identical simulated markets
+
 ## Commands
     python -m unittest discover -s tests -v   # 22 tests, any OS
     python run_sim.py --equity 10000          # whole bot on the simulated broker
