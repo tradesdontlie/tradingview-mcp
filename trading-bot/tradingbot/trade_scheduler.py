@@ -8,7 +8,8 @@ also gives the 'one child at a time' behaviour from the design document.
 
 def assign(signals, queued_children, n_open_total, n_open_children, cfg):
     """Returns [(child_node_or_None, signal)]; None means 'start a new root'."""
-    free = cfg.max_open - n_open_total
+    ceiling = cfg.max_open_high_conf if getattr(cfg, "multi_slot_enabled", False) else cfg.max_open
+    free = ceiling - n_open_total
     child_cap = max(0, cfg.max_open - cfg.reserve_root_slots - n_open_children)
     kids = list(queued_children)
     out = []

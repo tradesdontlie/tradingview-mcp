@@ -57,6 +57,9 @@ def make_handler(cfg, token):
             if self.path == "/":
                 with open(HTML, "rb") as f:
                     return self._send(200, f.read(), "text/html; charset=utf-8")
+            if self.path.startswith("/api/journal"):
+                from .journal import Journal
+                return self._send(200, json.dumps(Journal(Database(cfg.db_path), cfg).analyze(), default=str))
             if self.path.startswith("/api/state"):
                 return self._send(200, json.dumps(build_state(Database(cfg.db_path), cfg), default=str))
             self._send(404, "{}")
