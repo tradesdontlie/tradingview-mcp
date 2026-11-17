@@ -55,3 +55,19 @@ def dsr(r, n_trials: int, var_sr_period=None) -> float:
     floor = 1 / max(len(r) - 1, 1)                  # sampling variance of a per-period Sharpe
     var = max(var_sr_period or 0.0, floor)          # conservative: never below the floor
     return _psr_period(r, expected_max_sharpe(n_trials, var))
+
+
+def wilson(wins: int, n: int, z: float = 1.96):
+    """95% Wilson score interval for a win rate. Honest about small samples."""
+    if n <= 0:
+        return (0.0, 1.0)
+    p = wins / n
+    d = 1 + z * z / n
+    centre = (p + z * z / (2 * n)) / d
+    half = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d
+    return (max(0.0, centre - half), min(1.0, centre + half))
+
+
+def breakeven_win_rate(rr: float, cost_r: float = 0.0) -> float:
+    """Win rate at which a rr-to-1 trade breaks even once costs (in R) are included."""
+    return (1 + cost_r) / (rr + 1)

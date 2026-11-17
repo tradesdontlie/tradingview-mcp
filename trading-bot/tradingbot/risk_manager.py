@@ -31,12 +31,18 @@ def _ccy(symbol: str, side: str) -> dict:
 
 
 class RiskManager:
-    def __init__(self, db, cfg, kill):
+    def __init__(self, db, cfg, kill, guard=None):
         self.db, self.cfg, self.kill = db, cfg, kill
+        self.guard = guard
+        if guard is None and getattr(cfg, "equity_guard_enabled", False):
+            from .equity_guard import EquityGuard
+            self.guard = EquityGuard(db, cfg, kill)
 
     # ---- account-level watch: run every tick ----
     def check_account(self, acct, now: float) -> None:
         self.db.snapshot(acct.balance, acct.equity, acct.margin_free)
+        if self.guard is not None:
+            self.guard.update(acct.equity, now)
         day = time.strftime("%Y-%m-%d", time.gmtime(now))
         if self.db.kv_get("day_key") != day:
             self.db.kv_set("day_key", day)
@@ -51,7 +57,8 @@ class RiskManager:
             self.kill.trigger(Mode.FREEZE, "max_drawdown")
 
     # ---- per-trade approval ----
-    def evaluate(self, planned_loss, sig, spec, quote, acct, now, node_id=None) -> Decision:
+    def evaluate(self, planned_loss, sig, spec, quote, acct, now, node_id=None,
+                 high_conf=False, root_id=None) -> Decision:
         c = self.cfg
 
         def reject(reason, permanent=False):
@@ -62,8 +69,19 @@ class RiskManager:
         if mode != Mode.NONE:
             return reject(f"kill_switch_{mode.value}")
         open_nodes = self.db.nodes("OPEN", "SENDING")
-        if len(open_nodes) >= c.max_open:
+        if self.guard is not None:
+            ok, why = self.guard.entries_allowed(now)
+            if not ok:
+                return reject(why)
+            planned_loss = planned_loss * self.guard.risk_scale()
+        limit = c.max_open
+        if getattr(c, "multi_slot_enabled", False) and high_conf:
+            limit = c.max_open_high_conf                  # proven high-confidence trades only
+        if len(open_nodes) >= limit:
             return reject("max_open_reached")
+        if getattr(c, "one_open_per_tree", False) and root_id is not None and \
+                any(n["root_id"] == root_id for n in open_nodes):
+            return reject("same_tree_open")
         if now - sig.created_at > c.signal_max_age_s:
             return reject("stale_signal")
         if sig.stop_distance < spec.min_stop_distance:

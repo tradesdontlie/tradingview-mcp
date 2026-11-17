@@ -45,6 +45,9 @@ class TreeManager:
         c = self.cfg
         if node["level"] + 1 > c.max_depth:
             return []
+        risk = node.get("risk_amount") or 0
+        if getattr(c, "child_min_win_r", 0) and risk and net_pnl < c.child_min_win_r * risk:
+            return []                    # a marginal win does not fund children
         budget = c.child_profit_frac * net_pnl / c.children_per_win
         planned = c.child_loss_frac * budget
         if planned <= 0:
