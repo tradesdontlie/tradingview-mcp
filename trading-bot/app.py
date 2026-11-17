@@ -68,10 +68,12 @@ def main():
     ap.add_argument("--speed", type=float, default=0.15, help="sim: seconds per simulated hour")
     ap.add_argument("--equity", type=float, default=10000)
     ap.add_argument("--interval", type=float, default=60, help="demo: seconds between ticks")
+    ap.add_argument("--db", help="database file: give EACH broker account its own (e.g. exness1.db)")
+    ap.add_argument("--host", default="127.0.0.1", help="0.0.0.0 or a Tailscale IP to open it to your phone")
     ap.add_argument("--legacy", action="store_true", help="original bot with random placeholder signals")
     a = ap.parse_args()
 
-    cfg = (Config if a.legacy else Config.improved)(db_path="sim.db" if a.mode == "sim" else "bot.db")
+    cfg = (Config if a.legacy else Config.improved)(db_path=a.db or ("sim.db" if a.mode == "sim" else "bot.db"))
     if a.mode == "sim":
         for ext in ("", "-wal", "-shm"):
             if os.path.exists(cfg.db_path + ext):
@@ -79,8 +81,15 @@ def main():
     token = os.environ.get("DASHBOARD_TOKEN") or secrets.token_urlsafe(8)
     threading.Thread(target=bot_loop, args=(cfg, a.mode, a.speed, a.equity, a.interval, a.legacy),
                      daemon=True).start()
-    print(f"\nConsole:  http://127.0.0.1:{a.port}\nControl token (paste into the page): {token}\n")
-    serve(cfg, token, a.port)
+    tg, chat = os.environ.get("TELEGRAM_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
+    if tg and chat:
+        from tradingbot.alerts import alerts_loop, telegram_sender
+        time.sleep(1)
+        threading.Thread(target=alerts_loop, args=(cfg.db_path, telegram_sender(tg, chat), a.mode),
+                         daemon=True).start()
+        print("Telegram alerts: ON")
+    print(f"\nConsole:  http://{a.host}:{a.port}\nControl token (paste into the page): {token}\n")
+    serve(cfg, token, a.port, a.host)
 
 
 if __name__ == "__main__":
