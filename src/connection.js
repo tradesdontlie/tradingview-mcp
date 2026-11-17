@@ -110,9 +110,9 @@ export async function reconnectTo(targetId) {
 async function findChartTarget() {
   const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
   const targets = await resp.json();
-  // Prefer targets with tradingview.com/chart in the URL
-  return targets.find(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
-    || targets.find(t => t.type === 'page' && /tradingview/i.test(t.url))
+  // Prefer targets with tradingview.com/chart in the URL; never match file:///.../TradingView.app/... shell pages.
+  return targets.find(t => t.type === 'page' && /https?:\/\/[^/]*tradingview\.com\/chart/i.test(t.url))
+    || targets.find(t => t.type === 'page' && /https?:\/\/[^/]*tradingview\.com/i.test(t.url))
     || null;
 }
 
