@@ -12,8 +12,9 @@ from .database import Database
 from .kill_switch import KillSwitch
 from .models import Mode
 
-HTML = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                    "dashboard", "index.html")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+HTML = os.path.join(ROOT, "dashboard", "mobile.html")          # phone-first home screen
+HTML_DESKTOP = os.path.join(ROOT, "dashboard", "index.html")   # the original full console
 
 
 def build_state(db, cfg) -> dict:
@@ -36,10 +37,17 @@ def build_state(db, cfg) -> dict:
         "stats": summarize(db), "equity": snaps, "nodes": nodes,
         "rejections": [[r[0], r[1]] for r in reasons], "audit": [list(r) for r in audit],
         "config": asdict(cfg),
+        "accounts": [{"name": "this", "equity": eq, "kill": ks.mode.value, "ok": True}],
     }
 
 
-def make_handler(cfg, token):
+MANIFEST = json.dumps({"name": "Tree Bot", "short_name": "TreeBot", "start_url": "/", "display": "standalone",
+                       "background_color": "#10181d", "theme_color": "#10181d", "icons": [{
+                           "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231b2b34'/%3E%3Cpath d='M32 50V30M32 30L18 16M32 30l14-14' stroke='%234cc39a' stroke-width='5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E",
+                           "sizes": "any", "type": "image/svg+xml"}]})
+
+
+def make_handler(cfg, token, lan=False):
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):
             pass
@@ -53,10 +61,18 @@ def make_handler(cfg, token):
             self.end_headers()
             self.wfile.write(data)
 
+        def _authed(self):
+            q = self.path.split("t=")[-1] if "t=" in self.path else ""
+            return self.headers.get("X-Token") == token or q == token
+
         def do_GET(self):
-            if self.path == "/":
-                with open(HTML, "rb") as f:
+            if self.path in ("/", "/desktop"):
+                with open(HTML if self.path == "/" else HTML_DESKTOP, "rb") as f:
                     return self._send(200, f.read(), "text/html; charset=utf-8")
+            if self.path == "/manifest.json":
+                return self._send(200, MANIFEST, "application/manifest+json")
+            if lan and self.path.startswith("/api") and not self._authed():
+                return self._send(403, json.dumps({"error": "token required"}))
             if self.path.startswith("/api/journal"):
                 from .journal import Journal
                 return self._send(200, json.dumps(Journal(Database(cfg.db_path), cfg).analyze(), default=str))
@@ -82,6 +98,7 @@ def make_handler(cfg, token):
     return H
 
 
-def serve(cfg, token, port=8765):
-    srv = ThreadingHTTPServer(("127.0.0.1", port), make_handler(cfg, token))
+def serve(cfg, token, port=8765, host="127.0.0.1"):
+    """host 127.0.0.1 = this machine only. Any other host turns on token checks for ALL api calls."""
+    srv = ThreadingHTTPServer((host, port), make_handler(cfg, token, lan=host != "127.0.0.1"))
     srv.serve_forever()
