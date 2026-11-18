@@ -62,10 +62,20 @@ class Config:
     gate_min_n: int = 25                   # trades needed before a bucket can be blocked
     breakeven_cost_r: float = 0.10         # assumed cost per trade, in R
 
+    # v4: fewer dust/expired branches, correlation handling, weekly limit (neutral defaults)
+    max_queued_children: int = 99
+    merge_small_children: bool = False     # one combined child when two halves cannot fund a minimum lot
+    dust_use_full_budget: bool = False     # may risk the whole child budget (not half) to reach one minimum lot
+    correlated_risk_scale: float = 0.0     # 0 = refuse overlapping trades; 0.5 = allow them at half risk
+    weekly_loss_pct: float = 0.0           # 0 = off
+
     @classmethod
     def improved(cls, **kw):
         """Preset with all advancements on."""
         base = dict(checklist_enabled=True, equity_guard_enabled=True, journal_enabled=True,
-                    multi_slot_enabled=True, one_open_per_tree=True, child_min_win_r=1.0)
+                    multi_slot_enabled=True, one_open_per_tree=True, child_min_win_r=1.0,
+                    merge_small_children=True, dust_use_full_budget=True, max_queued_children=4,
+                    correlated_risk_scale=0.5, weekly_loss_pct=0.04, daily_loss_pct=0.02,
+                    child_ttl_s=7 * 24 * 3600, ck_room_r=1.5)
         base.update(kw)
         return cls(**base)

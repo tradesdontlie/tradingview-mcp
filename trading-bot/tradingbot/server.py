@@ -28,7 +28,16 @@ def build_state(db, cfg) -> dict:
                               "GROUP BY reason ORDER BY 2 DESC").fetchall()
     audit = db.conn.execute("SELECT ts, actor, event_type, payload FROM audit "
                             "ORDER BY event_id DESC LIMIT 25").fetchall()
-    nodes = db.nodes()[-400:]
+    all_nodes = db.nodes()
+    nodes = all_nodes[-400:]
+    t_now = snaps[-1][0] if snaps else time.time()
+    d0 = t_now - t_now % 86400
+    done = [n for n in all_nodes if n["closed_ts"] and n["closed_ts"] >= d0 and n["state"] in ("WON", "LOST")]
+    w = sum(1 for n in done if n["state"] == "WON")
+    today = {"opened": sum(1 for n in all_nodes if n["opened_ts"] and n["opened_ts"] >= d0), "closed": len(done),
+             "wins": w, "losses": len(done) - w, "win_pct": w / len(done) * 100 if done else 0.0,
+             "loss_pct": (len(done) - w) / len(done) * 100 if done else 0.0,
+             "net": sum(n["net_pnl"] or 0 for n in done)}
     return {
         "run_mode": db.kv_get("run_mode", "idle"), "heartbeat": float(db.kv_get("heartbeat", 0) or 0),
         "now": time.time(), "kill": {"mode": ks.mode.value, "reason": ks.reason},
@@ -37,7 +46,7 @@ def build_state(db, cfg) -> dict:
         "stats": summarize(db), "equity": snaps, "nodes": nodes,
         "rejections": [[r[0], r[1]] for r in reasons], "audit": [list(r) for r in audit],
         "config": asdict(cfg),
-        "accounts": [{"name": "this", "equity": eq, "kill": ks.mode.value, "ok": True}],
+        "today": today, "accounts": [{"name": "this", "equity": eq, "kill": ks.mode.value, "ok": True}],
     }
 
 

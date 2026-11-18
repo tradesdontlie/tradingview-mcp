@@ -29,6 +29,7 @@ def merge(results):
            "account": {"equity": 0.0, "day_pnl": 0.0, "drawdown_pct": 0.0}, "nodes": [], "accounts": [],
            "rejections": [], "audit": [], "equity": [], "config": {}, "stats": {}, "alerts": []}
     wins = trades = 0
+    td = {"opened": 0, "closed": 0, "wins": 0, "losses": 0, "net": 0.0}
     net, seen = 0.0, {}
     for name, s in results:
         if s is None:
@@ -50,6 +51,8 @@ def merge(results):
             out["nodes"].append(n)
             if n["state"] in ("OPEN", "SENDING"):
                 seen.setdefault((n["symbol"], n["side"]), []).append(name)
+        for k in td:
+            td[k] += (s.get("today") or {}).get(k, 0)
         st = s["stats"]
         trades += st.get("trades", 0)
         wins += round(st.get("win_rate", 0) * st.get("trades", 0))
@@ -58,6 +61,9 @@ def merge(results):
     for (sym, side), names in seen.items():
         if len(set(names)) > 1:
             out["alerts"].append(f"{sym} {side} is open on {len(set(names))} accounts: double exposure")
+    td["win_pct"] = td["wins"] / td["closed"] * 100 if td["closed"] else 0.0
+    td["loss_pct"] = td["losses"] / td["closed"] * 100 if td["closed"] else 0.0
+    out["today"] = td
     out["stats"] = {"trades": trades, "win_rate": wins / trades if trades else 0, "net_pnl": net,
                     "profit_factor": 0, "trades_per_root": 0, "root_pool": 0, "states": {}, "by_level": {}}
     return out
@@ -144,7 +150,7 @@ def main():
         url, _, tok = rest.partition(",")
         agents.append({"name": name, "url": url.rstrip("/"), "token": tok or os.environ.get("DASHBOARD_TOKEN", "")})
     token = os.environ.get("HUB_TOKEN") or secrets.token_urlsafe(8)
-    print(f"\nHub:  http://{a.host}:{a.port}   token: {token}   ({len(agents)} accounts)\n")
+    print(f"\nHub:  http://{a.host}:{a.port}/?t={token}   token: {token}   ({len(agents)} accounts)\n")
     ThreadingHTTPServer((a.host, a.port), handler(Hub(agents, a.max_dd), token)).serve_forever()
 
 

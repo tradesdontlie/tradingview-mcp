@@ -37,11 +37,14 @@ input{font:inherit;width:100%;min-height:44px;padding:0 10px;border-radius:10px;
 <main>
   <div id="status" class="NONE">Connecting…</div>
   <div id="alerts"></div>
+  <div class="card" id="tokcard" hidden><b>Paste your access token</b><input id="tok2" type="password" placeholder="Token from the bot window" style="margin:8px 0"><button id="tokgo" style="width:100%">Connect</button></div>
   <div class="card">
     <div class="mute">Total equity</div><p class="big num" id="eq">–</p>
     <div class="row"><span>Today <b class="num" id="day">–</b></span><span class="mute" id="dd"></span></div>
     <div class="chips" id="accts"></div>
   </div>
+  <div class="card"><b>Today</b><p class="big num" id="tnet">–</p><div class="mute" id="tn"></div>
+    <div class="row"><b class="pos" id="tw"></b><b class="neg" id="tl"></b></div></div>
   <div class="card"><div class="row"><b>Open trades</b><span class="mute" id="nopen"></span></div><div id="open"></div></div>
   <div class="card">
     <div class="mute" style="margin-bottom:8px">Hold the red button for 1 second to stop all new trades</div>
@@ -60,6 +63,7 @@ input{font:inherit;width:100%;min-height:44px;padding:0 10px;border-radius:10px;
 </main>
 <script>
 const $=s=>document.querySelector(s),money=v=>(v<0?"-":"")+Math.abs(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+{const q=new URLSearchParams(location.search).get("t");if(q){localStorage.setItem("tok",q);history.replaceState(null,"",location.pathname)}}
 let S=null;const tok=()=>$("#tok").value||localStorage.getItem("tok")||new URLSearchParams(location.search).get("t")||"";
 $("#tok").value=localStorage.getItem("tok")||"";$("#tok").oninput=e=>localStorage.setItem("tok",e.target.value);
 const H=()=>({headers:{"X-Token":tok()}});
@@ -71,7 +75,9 @@ $("#reset").onclick=()=>{const t=prompt("Type RESET to allow new trades again");
 (()=>{const b=$("#freeze"),bar=b.querySelector("i");let t0,raf;const tick=()=>{const p=Math.min(1,(performance.now()-t0)/1000);bar.style.width=p*100+"%";if(p>=1){stop();kill("freeze");navigator.vibrate&&navigator.vibrate(80)}else raf=requestAnimationFrame(tick)};
  const stop=()=>{cancelAnimationFrame(raf);bar.style.width="0"};b.addEventListener("pointerdown",e=>{t0=performance.now();tick()});["pointerup","pointerleave","pointercancel"].forEach(ev=>b.addEventListener(ev,stop))})();
 
-function render(s){S=s;const k=s.kill.mode,off=(s.now-s.heartbeat>120&&s.run_mode!=="hub");const st=$("#status");
+function render(s){S=s;const t=s.today||{opened:0,closed:0,wins:0,losses:0,win_pct:0,loss_pct:0,net:0};
+  $("#tnet").textContent=money(t.net);$("#tnet").className="big num "+(t.net>0?"pos":t.net<0?"neg":"");$("#tn").textContent=t.opened+" trades taken · "+t.closed+" finished";
+  $("#tw").textContent="Wins "+t.wins+" ("+t.win_pct.toFixed(0)+"%)";$("#tl").textContent="Losses "+t.losses+" ("+t.loss_pct.toFixed(0)+"%)";const k=s.kill.mode,off=(s.now-s.heartbeat>120&&s.run_mode!=="hub");const st=$("#status");
   st.className=off?"OFFLINE":k;st.innerHTML=off?"Bot not responding<small>No heartbeat for 2+ minutes</small>":k==="NONE"?"Trading is ON<small>Checking the market every bar</small>":(k==="LIQUIDATE"?"Closing everything":"Trading is STOPPED")+`<small>${s.kill.reason||k}</small>`;
   const al=[...(s.alerts||[])];if(s.account.drawdown_pct>=3)al.push("Drawdown "+s.account.drawdown_pct.toFixed(1)+"% from peak: risk is being reduced");
   $("#alerts").innerHTML=al.map(a=>`<div class="alert">${a}</div>`).join("");
@@ -82,10 +88,11 @@ function render(s){S=s;const k=s.kill.mode,off=(s.now-s.heartbeat>120&&s.run_mod
   $("#open").innerHTML=o.length?o.map(n=>`<div class="trade"><span><b>${n.symbol}</b> ${n.side}${n.account?` <span class="mute">${n.account}</span>`:""}</span><span class="num mute">${n.volume} lot · risk ${money(n.risk_amount||0)}</span></div>`).join(""):'<p class="mute">Nothing open. Waiting for a setup that passes every check.</p>'}
 async function lazy(id,fn){$(id).addEventListener("toggle",e=>{if(e.target.open)fn()})}
 lazy("#jd",async()=>{try{const j=await (await fetch("/api/journal",H())).json(),o=j.overall||{};$("#journal").innerHTML=o.n?`${o.n} trades, win rate ${(o.win_rate*100).toFixed(0)}% (needs ${(j.breakeven_win_rate*100).toFixed(0)}% to break even), average ${o.avg_r.toFixed(2)}R.<br>`+(j.recent_lessons||[]).slice(-4).map(x=>"• "+x).join("<br>"):"No finished trades yet."}catch(e){$("#journal").textContent="Unavailable"}});
-lazy("#td",()=>{const by={};S.nodes.forEach(n=>(by[n.parent_id||0]=by[n.parent_id||0]||[]).push(n));const one=(n,d)=>`<div style="margin-left:${d*14}px" class="trade"><span>L${n.level} ${n.symbol||""} ${n.side||""}</span><span class="num ${n.net_pnl>0?"pos":n.net_pnl<0?"neg":"mute"}">${n.state.toLowerCase()} ${n.net_pnl!=null?money(n.net_pnl):""}</span></div>`+(by[n.node_id]||[]).map(c=>one(c,d+1)).join("");$("#trees").innerHTML=(by[0]||[]).slice(-12).reverse().map(r=>one(r,0)).join("")||'<p class="mute">None yet.</p>'});
+lazy("#td",()=>{const by={};S.nodes.filter(n=>!["EXPIRED","DUST","CANCELLED"].includes(n.state)).forEach(n=>(by[n.parent_id||0]=by[n.parent_id||0]||[]).push(n));const one=(n,d)=>`<div style="margin-left:${d*14}px" class="trade"><span>L${n.level} ${n.symbol||""} ${n.side||""}</span><span class="num ${n.net_pnl>0?"pos":n.net_pnl<0?"neg":"mute"}">${n.state.toLowerCase()} ${n.net_pnl!=null?money(n.net_pnl):""}</span></div>`+(by[n.node_id]||[]).map(c=>one(c,d+1)).join("");$("#trees").innerHTML=(by[0]||[]).slice(-12).reverse().map(r=>one(r,0)).join("")||'<p class="mute">None yet.</p>'});
 lazy("#rd",()=>{$("#rej").innerHTML=`<table>${(S.rejections||[]).map(r=>`<tr><td>${r[0].replace(/_/g," ")}</td><td class="num">${r[1]}</td></tr>`).join("")}</table>`});
 lazy("#ld",()=>{$("#log").innerHTML=`<table>${(S.audit||[]).map(e=>`<tr><td>${e[2].replace(/_/g," ")}</td><td class="mute">${e[1]}</td></tr>`).join("")}</table>`});
-async function load(){try{const r=await fetch("/api/state",H());if(r.status===403){$("#status").className="OFFLINE";$("#status").innerHTML="Enter your access token<small>Open More controls and paste it</small>";return}render(await r.json())}catch(e){$("#status").className="OFFLINE";$("#status").innerHTML="Can't reach the bot<small>Check the connection</small>"}}
+async function load(){try{const r=await fetch("/api/state",H());if(r.status===403){$("#tokcard").hidden=false;$("#status").className="OFFLINE";$("#status").innerHTML="Access token needed<small>Paste it in the box below</small>";return}$("#tokcard").hidden=true;render(await r.json())}catch(e){$("#status").className="OFFLINE";$("#status").innerHTML="Can't reach the bot<small>Check the connection</small>"}}
+$("#tokgo").onclick=()=>{const v=$("#tok2").value.trim();if(v){localStorage.setItem("tok",v);$("#tok").value=v;load()}};
 load();setInterval(load,5000);
 </script>
 </body>
