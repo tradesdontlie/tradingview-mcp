@@ -88,7 +88,7 @@ def main():
         threading.Thread(target=alerts_loop, args=(cfg.db_path, telegram_sender(tg, chat), a.mode),
                          daemon=True).start()
         print("Telegram alerts: ON")
-    print(f"\nConsole:  http://{a.host}:{a.port}\nControl token (paste into the page): {token}\n")
+    print(f"\nOpen this link (token included, on your phone too):\n  http://{a.host}:{a.port}/?t={token}\n")
     serve(cfg, token, a.port, a.host)
 
 

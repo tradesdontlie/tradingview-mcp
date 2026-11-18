@@ -45,6 +45,17 @@ class AdvancedBot(Bot):
         self.tree = JournalingTreeManager(db, cfg, self.journal, self.guard)
         self.exec = ExecutionEngine(db, broker, self.tree, self.kill, cfg)
         self.cache = ctx_cache or ContextCache()
+        self.tree.min_risk_fn = self._min_risk
+
+    def _min_risk(self, node):
+        """Risk of one minimum lot at the stop distance the parent used (None if unknown)."""
+        try:
+            if not (node.get("entry") and node.get("sl") and node.get("symbol")):
+                return None
+            spec = self.broker.spec(node["symbol"])
+            return spec.volume_min * abs(node["entry"] - node["sl"]) / spec.tick_size * spec.tick_value
+        except Exception:
+            return None
 
     def tick(self):
         now, cfg, db = self.broker.now(), self.cfg, self.db
@@ -92,7 +103,7 @@ class AdvancedBot(Bot):
                     continue
                 setup = result.trigger
                 hit = {f"setup:{setup}", f"session:{session_name(int(row['hour']))}",
-                       f"pair:{sig.symbol}"} & blocked
+                       f"pair:{sig.symbol}", f"level:{node['level'] if node else 0}"} & blocked
                 if hit:
                     db.decision(nid, False, "journal_blocked:" + ",".join(sorted(hit)), 0, 0)
                     continue
@@ -105,7 +116,7 @@ class AdvancedBot(Bot):
             d = self.risk.evaluate(planned, sig, spec, quote, acct, now, nid, high_conf=high_conf,
                                    root_id=node["root_id"] if node else None)
             if not d.approved:
-                if node and d.permanent:
+                if node and d.permanent and not cfg.merge_small_children:
                     db.update_node(nid, state="DUST")
                     db.audit("tree", "node_dust", {"node": nid, "budget": node["budget"]})
                 continue

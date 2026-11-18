@@ -126,7 +126,7 @@ class Journal:
         be = breakeven_win_rate(rows[-1]["rr"], cost)
         blocked = set()
         for tag, v in self._by_tag(rows).items():
-            if tag.split(":")[0] in ("setup", "session", "pair") and len(v) >= cfg_n:
+            if tag.split(":")[0] in ("setup", "session", "pair", "level") and tag != "level:0" and len(v) >= cfg_n:
                 wins = sum(1 for r in v if r["r_multiple"] > 0)
                 if wilson(wins, len(v))[1] < be:
                     blocked.add(tag)

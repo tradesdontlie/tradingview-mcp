@@ -15,6 +15,7 @@ Rules (defaults from the design document):
 class TreeManager:
     def __init__(self, db, cfg):
         self.db, self.cfg = db, cfg
+        self.min_risk_fn = None          # optional: node -> risk of one minimum lot at that node's stop
 
     def create_root(self, signal, risk_amount: float, now: float) -> int:
         return self.db.add_node(
@@ -48,14 +49,26 @@ class TreeManager:
         risk = node.get("risk_amount") or 0
         if getattr(c, "child_min_win_r", 0) and risk and net_pnl < c.child_min_win_r * risk:
             return []                    # a marginal win does not fund children
-        budget = c.child_profit_frac * net_pnl / c.children_per_win
+        if len([x for x in self.db.nodes("QUEUED") if x["level"] > 0]) >= c.max_queued_children:
+            return []                                     # queue full: bank the profit instead
+        n = c.children_per_win
+        budget = c.child_profit_frac * net_pnl / n
         planned = c.child_loss_frac * budget
+        mr = self.min_risk_fn(node) if self.min_risk_fn else None
+        if mr is not None:
+            reach = (lambda b: b) if c.dust_use_full_budget else (lambda b: c.child_loss_frac * b)
+            if reach(budget) < mr and c.merge_small_children:
+                n, budget = 1, c.child_profit_frac * net_pnl      # one child with the combined budget
+                planned = c.child_loss_frac * budget
+            if reach(budget) < mr:
+                return []                                 # cannot fund even one minimum lot: keep the profit
+            planned = max(planned, min(mr, budget))       # may use up to the full budget for one minimum lot
         if planned <= 0:
             return []
         return [self.db.add_node(
             parent_id=node["node_id"], root_id=node["root_id"], level=node["level"] + 1,
             state="QUEUED", budget=budget, planned_loss=planned, created_ts=now,
-            expires_ts=now + c.child_ttl_s) for _ in range(c.children_per_win)]
+            expires_ts=now + c.child_ttl_s) for _ in range(n)]
 
     def cancel_descendants(self, node_id: int) -> list:
         cancelled, frontier = [], [node_id]

@@ -48,6 +48,14 @@ class RiskManager:
             self.db.kv_set("day_key", day)
             self.db.kv_set("day_start_equity", acct.equity)
         day_start = float(self.db.kv_get("day_start_equity", acct.equity))
+        wk = time.strftime("%G-%V", time.gmtime(now))
+        if self.db.kv_get("week_key") != wk:
+            self.db.kv_set("week_key", wk)
+            self.db.kv_set("week_start_equity", acct.equity)
+        wstart = float(self.db.kv_get("week_start_equity", acct.equity))
+        if getattr(self.cfg, "weekly_loss_pct", 0) and wstart > 0 and \
+                (wstart - acct.equity) / wstart >= self.cfg.weekly_loss_pct:
+            self.kill.trigger(Mode.PAUSE, "weekly_loss_limit")
         peak = max(float(self.db.kv_get("peak_equity", acct.equity)), acct.equity)
         self.db.kv_set("peak_equity", peak)
 
@@ -96,6 +104,11 @@ class RiskManager:
         if loss_per_lot <= 0:
             return reject("bad_symbol_spec")
 
+        scale = getattr(c, "correlated_risk_scale", 0.0)
+        if c.block_correlated and scale > 0:
+            new = _ccy(sig.symbol, sig.side)
+            if any(new.get(ccy) == s for n in open_nodes for ccy, s in _ccy(n["symbol"], n["side"]).items()):
+                planned_loss = planned_loss * scale       # overlapping bet: smaller size, not a refusal
         # 1) can this node's own budget fund a minimum lot at all?
         budget_cap = min(planned_loss, c.max_trade_risk_pct * acct.equity)
         if floor_step(budget_cap / loss_per_lot, spec.volume_step) < spec.volume_min - 1e-12:
@@ -109,7 +122,7 @@ class RiskManager:
             return reject("no_risk_headroom")
         vol = min(vol, spec.volume_max)
 
-        if c.block_correlated:
+        if c.block_correlated and scale <= 0:
             new = _ccy(sig.symbol, sig.side)
             for n in open_nodes:
                 for ccy, s in _ccy(n["symbol"], n["side"]).items():
