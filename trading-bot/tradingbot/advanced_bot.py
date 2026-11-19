@@ -3,6 +3,7 @@ The original Bot is untouched; this class only adds steps around the same compon
 from dataclasses import replace
 
 from .checklist import market_checks
+from .costs import extra_cost_price
 from .equity_guard import EquityGuard
 from .execution_engine import ExecutionEngine
 from .journal import Journal
@@ -44,7 +45,7 @@ class AdvancedBot(Bot):
         self.risk = RiskManager(db, cfg, self.kill, guard=self.guard)
         self.tree = JournalingTreeManager(db, cfg, self.journal, self.guard)
         self.exec = ExecutionEngine(db, broker, self.tree, self.kill, cfg)
-        self.cache = ctx_cache or ContextCache()
+        self.cache = ctx_cache or ContextCache(tf=cfg.ctx_tf, htf=cfg.ctx_htf)
         self.tree.min_risk_fn = self._min_risk
 
     def _min_risk(self, node):
@@ -87,7 +88,7 @@ class AdvancedBot(Bot):
         for node, sig in plan:
             nid = node["node_id"] if node else None
             spec, quote = self.broker.spec(sig.symbol), self.broker.quote(sig.symbol)
-            spread = quote[1] - quote[0]
+            spread = quote[1] - quote[0] + extra_cost_price(spec, cfg)      # spread + commission + slippage
             row = result = est = None
             setup, high_conf = sig.strategy, False
 

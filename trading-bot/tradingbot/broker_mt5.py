@@ -54,11 +54,13 @@ class MT5Broker:
             raise ConnectionError(f"no tick for {symbol}: {self.mt5.last_error()}")
         return (t.bid, t.ask)
 
-    def candles(self, symbol: str, n: int):
+    def candles(self, symbol: str, n: int, tf: str = "H1"):
         """Last n COMPLETED H1 candles (the still-forming bar is dropped). Times are broker
         server time; the checklist's session rules assume UTC, so check your broker's offset."""
         import pandas as pd
-        rates = self.mt5.copy_rates_from_pos(symbol, self.mt5.TIMEFRAME_H1, 0, n + 1)
+        frame = {"M1": self.mt5.TIMEFRAME_M1, "M5": self.mt5.TIMEFRAME_M5, "M15": self.mt5.TIMEFRAME_M15,
+                 "H1": self.mt5.TIMEFRAME_H1}[tf]
+        rates = self.mt5.copy_rates_from_pos(symbol, frame, 0, n + 1)
         if rates is None or len(rates) < 2:
             raise ConnectionError(f"copy_rates failed for {symbol}: {self.mt5.last_error()}")
         df = pd.DataFrame(rates)

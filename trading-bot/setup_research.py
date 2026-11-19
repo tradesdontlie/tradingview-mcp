@@ -29,11 +29,11 @@ from tradingbot.models import Signal
 from tradingbot.stats import dsr, psr
 
 ITEMS = ["trend", "structure", "location", "trigger", "room", "not_chasing", "volatility",
-         "session", "spread_stop"]
+         "session", "spread_stop", "regime", "news"]
 
 
-def load_h1(sym):
-    path = Path("data") / f"{sym}_H1.csv"
+def load_h1(sym, tf="H1"):
+    path = Path("data") / f"{sym}_{tf}.csv"
     if not path.exists():
         return None
     df = pd.read_csv(path, parse_dates=["time"])
@@ -41,9 +41,9 @@ def load_h1(sym):
     return df[["open", "high", "low", "close"]]
 
 
-def synthetic(kind, bars, seed):
+def synthetic(kind, bars, seed, bar_minutes=60):
     from tradingbot.broker_sim import SimBroker
-    b = SimBroker(seed=seed, t0=1_699_999_200, sigma=0.0008, spread_pips=0.7,
+    b = SimBroker(seed=seed, t0=1_699_999_200, sigma=0.0008, spread_pips=0.7, bar_minutes=bar_minutes,
                   trend=0.000002 if kind == "trend" else 0.0)
     b.warmup(bars)
     return {s: b.candles(s, bars) for s in ("EURUSD", "GBPUSD", "USDJPY")}
@@ -55,8 +55,8 @@ def spread_of(sym, df):
 
 def candidates(df, sym, cfg):
     """For every bar and side: (failed items, trigger, stop). Independent of the journal."""
-    ctx = build_context(df)
-    spread = spread_of(sym, df)
+    ctx = build_context(df, cfg.ctx_htf)
+    spread = spread_of(sym, df) + cfg.slippage_price
     recs = ctx.to_dict("records")
     out = [None] * len(recs)
     for i in range(300, len(recs) - 2):
@@ -85,7 +85,7 @@ def simulate(df, i, side, stop, cost_r, rr, max_hold=48):
     return s * (c[last] - e) / stop - cost_r, last, "TIME"
 
 
-def run(data, cfg, drop=frozenset(), learn=False, cache=None):
+def run(data, cfg, drop=frozenset(), learn=False, cache=None, max_hold=48):
     cache = cache if cache is not None else {}
     for sym, df in data.items():
         if sym not in cache:
@@ -121,7 +121,7 @@ def run(data, cfg, drop=frozenset(), learn=False, cache=None):
             if learn and ({f"setup:{setup}", f"session:{sess}", f"pair:{sym}"} & blocked):
                 continue
             cost_r = spread / stop
-            R, exit_i, why = simulate(df, i, side, stop, cost_r, cfg.rr)
+            R, exit_i, why = simulate(df, i, side, stop, cost_r, cfg.rr, max_hold)
             nid += 1
             res = market_checks(recs[i], side, spread, cfg)
             j.record_entry(nid, ts.timestamp(), Signal(sym, side, stop, 0), 0, nid, setup, recs[i], res,
@@ -171,24 +171,33 @@ def main():
     ap.add_argument("--learn", action="store_true")
     ap.add_argument("--ablation", action="store_true")
     ap.add_argument("--trials", type=int, default=25)
-    ap.add_argument("--rr", type=float, default=3.0)
+    ap.add_argument("--rr", type=float, default=None)
+    ap.add_argument("--profile", choices=["standard", "small", "scalp"], default="standard")
+    ap.add_argument("--spread-frac", type=float, default=None, help="max all-in cost as a share of the stop")
+    ap.add_argument("--last-bars", type=int, default=0, help="use only the most recent N bars (keeps M5 runs fast)")
     a = ap.parse_args()
-    cfg = Config.improved(rr=a.rr)
+    scalp = a.profile == "scalp"
+    kw = {**({"rr": a.rr} if a.rr else {}), **({"ck_spread_frac": a.spread_frac} if a.spread_frac else {})}
+    cfg = {"scalp": Config.scalp, "small": Config.small}.get(a.profile, Config.improved)(**kw)
+    bar_min = 5 if scalp else 60
+    max_hold = max(1, int(cfg.max_hold_s / (bar_min * 60)))
 
     if a.synthetic:
-        data = synthetic(a.synthetic, a.bars, a.seed)
+        data = synthetic(a.synthetic, a.bars, a.seed, bar_min)
     else:
-        data = {s: load_h1(s) for s in a.symbols}
+        data = {s: load_h1(s, "M5" if scalp else "H1") for s in a.symbols}
         for s in [k for k, v in data.items() if v is None]:
-            print(f"[skip] data/{s}_H1.csv not found")
+            print(f"[skip] data/{s}_{'M5' if scalp else 'H1'}.csv not found")
             data.pop(s)
         if not data:
-            raise SystemExit("No H1 data. Run fetch_data.py --timeframe H1 for each symbol.")
-    years = max(len(df) for df in data.values()) / 6240
-    print(f"\n{', '.join(data)}  |  ~{years:.1f} years of H1 bars  |  rr 1:{a.rr:g}  |  spread charged  |  "
+            raise SystemExit("No data. Run fetch_data.py --timeframe " + ("M5" if scalp else "H1") + " for each symbol.")
+    if a.last_bars:
+        data = {s: df.iloc[-a.last_bars:] for s, df in data.items()}
+    years = max(len(df) for df in data.values()) / (6240 * 60 / bar_min)
+    print(f"\n{', '.join(data)}  |  ~{years:.1f} years of {"M5" if scalp else "H1"} bars  |  rr 1:{cfg.rr:g}  |  spread charged  |  "
           f"DSR deflated for {a.trials} trials\n")
     cache = {}
-    base = run(data, cfg, learn=a.learn, cache=cache)
+    base = run(data, cfg, learn=a.learn, cache=cache, max_hold=max_hold)
     print(HEAD)
     print("-" * len(HEAD))
     print(line("CHECKLIST (all items)", stats(base, years, a.trials)))
@@ -203,7 +212,7 @@ def main():
               "is hurting; if it falls, the item earns its place.")
         print(HEAD)
         for item in ITEMS:
-            print(line(f"without {item}", stats(run(data, cfg, drop={item}, learn=a.learn, cache=cache),
+            print(line(f"without {item}", stats(run(data, cfg, drop={item}, learn=a.learn, cache=cache, max_hold=max_hold),
                                                 years, a.trials)))
     print("\nPASS means: avgR > 0 in BOTH halves, DSR >= 0.95, and 100+ trades so it means something.")
 

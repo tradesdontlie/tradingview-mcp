@@ -44,7 +44,8 @@ class Journal:
                      high_conf, risk_amount, rr, spread):
         feats = {"htf": int(row["htf"]), "zone": int(row["zone"]), "atr_ratio": round(float(row["atr_ratio"]), 2),
                  "dist_ma": round(float(row["dist_ma"]), 2), "stop_atr": round(result.stop / row["atr"], 2),
-                 "spread_frac": round(spread / result.stop, 3)}
+                 "spread_frac": round(spread / result.stop, 3),
+                 "er": round(float(row.get("er") or 0.0), 2)}
         from .market_context import session_name
         sess = session_name(int(row["hour"]))
         self.db.conn.execute(
@@ -71,6 +72,8 @@ class Journal:
     def _tags(row, f, reason):
         t = [f"setup:{row['setup']}", f"session:{row['session']}", f"pair:{row['symbol']}",
              f"level:{row['level']}", f"exit:{reason}"]
+        er = f.get("er", 0.0)
+        t.append("regime:trend" if er >= 0.30 else "regime:range" if er <= 0.20 else "regime:mixed")
         t.append("vol:low" if f["atr_ratio"] < 0.8 else "vol:high" if f["atr_ratio"] > 1.4 else "vol:normal")
         t.append("entry:extended" if abs(f["dist_ma"]) > 1.2 else "entry:near_average")
         t.append("spread:wide" if f["spread_frac"] > 0.10 else "spread:tight")

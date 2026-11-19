@@ -22,7 +22,7 @@ START = {"EURUSD": 1.10, "GBPUSD": 1.30, "USDJPY": 150.0}
 
 class SimBroker:
     def __init__(self, equity=10000.0, seed=1, spread_pips=1.0, sigma=0.0005,
-                 commission_per_lot=7.0, t0=1_700_000_000.0, trend=0.0):
+                 commission_per_lot=7.0, t0=1_700_000_000.0, trend=0.0, bar_minutes=60):
         self.rng = random.Random(seed)
         self.specs = dict(DEFAULT_SPECS)
         self.mid = dict(START)
@@ -34,6 +34,7 @@ class SimBroker:
         self.fail_next = None
         self.connected = True
         self.send_calls = 0
+        self.bar_minutes = bar_minutes           # 60 = hourly bars (default), 5 = M5 bars
         self.trend = trend                       # >0 adds slow persistent drifts (trending market)
         self._drift = {k: 0.0 for k in self.mid}
         self.bars = {k: [] for k in self.mid}    # completed hourly candles (mid prices)
@@ -124,16 +125,18 @@ class SimBroker:
         self._guard()
 
     # ---- time ----
-    def step(self, dt=3600.0, micro=6):
+    def step(self, dt=None, micro=6):
         """Advance one bar. Stops/targets are checked on every micro-step."""
+        f = self.bar_minutes / 60.0
+        dt = dt or self.bar_minutes * 60.0
         if self.trend > 0:
             for sym in self.mid:
-                self._drift[sym] = 0.998 * self._drift[sym] + self.rng.gauss(0, self.trend)
+                self._drift[sym] = 0.998 ** f * self._drift[sym] + self.rng.gauss(0, self.trend * f ** 0.5)
         opens = dict(self.mid)
         hi, lo = dict(self.mid), dict(self.mid)
         for _ in range(micro):
             for sym in self.mid:
-                self.mid[sym] *= 1 + self.rng.gauss(0, self.sigma / micro ** 0.5) + self._drift[sym] / micro
+                self.mid[sym] *= 1 + self.rng.gauss(0, self.sigma * f ** 0.5 / micro ** 0.5) + self._drift[sym] * f / micro
                 hi[sym], lo[sym] = max(hi[sym], self.mid[sym]), min(lo[sym], self.mid[sym])
             for p in list(self._positions.values()):
                 bid, ask = self.quote(p.symbol)
@@ -153,7 +156,7 @@ class SimBroker:
         for _ in range(bars):
             self.step()
 
-    def candles(self, symbol, n):
+    def candles(self, symbol, n, tf="H1"):
         self._guard()
         rows = self.bars[symbol][-n:]
         df = pd.DataFrame(rows, columns=["time", "open", "high", "low", "close"])

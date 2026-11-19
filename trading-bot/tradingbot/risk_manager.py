@@ -76,6 +76,11 @@ class RiskManager:
         mode = self.kill.mode
         if mode != Mode.NONE:
             return reject(f"kill_switch_{mode.value}")
+        cap = getattr(c, "max_trades_per_day", 0)
+        if cap:
+            d0 = now - now % 86400
+            if sum(1 for n in self.db.nodes() if (n["sent_ts"] or 0) >= d0) >= cap:
+                return reject("daily_trade_cap")
         open_nodes = self.db.nodes("OPEN", "SENDING")
         if self.guard is not None:
             ok, why = self.guard.entries_allowed(now)
