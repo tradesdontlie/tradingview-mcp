@@ -9,6 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from .analytics import summarize
 from .config import Config
 from .database import Database
+from .jsonutil import safe_json
 from .kill_switch import KillSwitch
 from .models import Mode
 
@@ -75,18 +76,19 @@ def make_handler(cfg, token, lan=False):
             return self.headers.get("X-Token") == token or q == token
 
         def do_GET(self):
-            if self.path in ("/", "/desktop"):
-                with open(HTML if self.path == "/" else HTML_DESKTOP, "rb") as f:
+            route = self.path.split("?")[0]            # "/?t=TOKEN" must still be the page
+            if route in ("/", "/desktop"):
+                with open(HTML if route == "/" else HTML_DESKTOP, "rb") as f:
                     return self._send(200, f.read(), "text/html; charset=utf-8")
-            if self.path == "/manifest.json":
+            if route == "/manifest.json":
                 return self._send(200, MANIFEST, "application/manifest+json")
-            if lan and self.path.startswith("/api") and not self._authed():
+            if lan and route.startswith("/api") and not self._authed():
                 return self._send(403, json.dumps({"error": "token required"}))
-            if self.path.startswith("/api/journal"):
+            if route.startswith("/api/journal"):
                 from .journal import Journal
-                return self._send(200, json.dumps(Journal(Database(cfg.db_path), cfg).analyze(), default=str))
-            if self.path.startswith("/api/state"):
-                return self._send(200, json.dumps(build_state(Database(cfg.db_path), cfg), default=str))
+                return self._send(200, safe_json(Journal(Database(cfg.db_path), cfg).analyze()))
+            if route.startswith("/api/state"):
+                return self._send(200, safe_json(build_state(Database(cfg.db_path), cfg)))
             self._send(404, "{}")
 
         def do_POST(self):

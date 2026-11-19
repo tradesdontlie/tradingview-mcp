@@ -10,6 +10,8 @@ import json
 import os
 import secrets
 import urllib.request
+
+from tradingbot.jsonutil import safe_json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 SEV = {"NONE": 0, "PAUSE": 1, "FREEZE": 2, "LIQUIDATE": 3}
@@ -115,16 +117,17 @@ def handler(hub, token):
             return self.headers.get("X-Token") == token or ("t=" + token) in self.path
 
         def do_GET(self):
-            if self.path == "/":
+            route = self.path.split("?")[0]
+            if route == "/":
                 return self._send(200, open(os.path.join(ROOT, "dashboard", "mobile.html"), "rb").read(),
                                   "text/html; charset=utf-8")
             if not self._ok():
                 return self._send(403, '{"error":"token required"}')
-            if self.path.startswith("/api/state"):
-                return self._send(200, json.dumps(hub.state(), default=str))
-            if self.path.startswith("/api/journal"):
+            if route.startswith("/api/state"):
+                return self._send(200, safe_json(hub.state()))
+            if route.startswith("/api/journal"):
                 try:
-                    return self._send(200, json.dumps(call(hub.agents[0], "/api/journal")))
+                    return self._send(200, safe_json(call(hub.agents[0], "/api/journal")))
                 except Exception:
                     return self._send(200, "{}")
             self._send(404, "{}")

@@ -13,6 +13,7 @@ import hub
 from tradingbot.alerts import format_event, poll_once
 from tradingbot.config import Config
 from tradingbot.database import Database
+from tradingbot.jsonutil import safe_json
 from tradingbot.kill_switch import KillSwitch
 from tradingbot.models import Mode
 from tradingbot.server import make_handler
@@ -104,6 +105,37 @@ class Server(unittest.TestCase):
         self.assertEqual(self.get(base + "/api/state", "wrong"), 403)
         self.assertEqual(self.get(base + "/api/state", "secret"), 200)
         self.assertEqual(self.get(base + "/api/state?t=secret"), 200)
+
+    def test_printed_token_link_opens_the_page(self):
+        for lan in (False, True):
+            base = self.serve(lan=lan)
+            self.assertEqual(self.get(base + "/?t=secret"), 200)
+            self.assertEqual(self.get(base + "/desktop?t=secret"), 200)
+
+    def test_hub_token_link_opens_the_page(self):
+        h = hub.Hub([], 0.06)
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), hub.handler(h, "hubtok"))
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.shutdown)
+        self.assertEqual(self.get(f"http://127.0.0.1:{srv.server_port}/?t=hubtok"), 200)
+
+    def body(self, url):
+        return urllib.request.urlopen(url, timeout=5).read().decode()
+
+    def test_a_fresh_bot_with_no_trades_sends_json_a_browser_can_parse(self):
+        def strict(const):                                   # what a browser does: Infinity/NaN are errors
+            raise ValueError(const)
+        for lan in (False, True):
+            base = self.serve(lan=lan)
+            for path in ("/api/state", "/api/journal"):
+                req = urllib.request.Request(base + path + "?t=secret")
+                text = urllib.request.urlopen(req, timeout=5).read().decode()
+                json.loads(text, parse_constant=strict)
+                self.assertNotIn("Infinity", text)
+
+    def test_non_finite_numbers_become_null(self):
+        out = json.loads(safe_json({"pf": float("inf"), "x": [float("nan"), 1.5], "n": {"a": float("-inf")}}))
+        self.assertEqual(out, {"pf": None, "x": [None, 1.5], "n": {"a": None}})
 
     def test_local_only_mode_serves_state_and_manifest(self):
         base = self.serve(lan=False)
