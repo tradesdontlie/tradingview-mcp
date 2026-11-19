@@ -69,6 +69,38 @@ class Config:
     correlated_risk_scale: float = 0.0     # 0 = refuse overlapping trades; 0.5 = allow them at half risk
     weekly_loss_pct: float = 0.0           # 0 = off
 
+    # v5: scalping / small accounts (neutral defaults keep the older profiles unchanged)
+    ctx_tf: str = "H1"                     # candle timeframe the bot analyses (H1, M15, M5)
+    ctx_htf: str = "4h"                    # higher timeframe for the trend filter (pandas rule, e.g. "15min")
+    regime_gating: bool = False            # trend setups only in a TREND regime; sweeps in TREND or RANGE
+    ck_er_trend: float = 0.30              # efficiency ratio at/above this = trending
+    ck_er_range: float = 0.20              # at/below this = ranging
+    news_blackouts: tuple = ()             # ("2026-11-20 13:25-13:45", ...) UTC windows with no entries
+    commission_per_lot: float = 0.0        # round-turn commission per 1.0 lot, account currency
+    slippage_price: float = 0.0            # slippage allowance in price units, added to every trade's cost
+    max_trades_per_day: int = 0            # 0 = no cap
+
+    @classmethod
+    def scalp(cls, **kw):
+        """Small-account scalping profile (M5 setups, M15 trend, one trade at a time, tighter limits).
+        Starting points to be tested on YOUR data, not proven settings."""
+        base = dict(ctx_tf="M5", ctx_htf="15min", rr=2.0, max_open=1, reserve_root_slots=0,
+                    multi_slot_enabled=False, max_depth=2, root_risk_pct=0.01, max_trade_risk_pct=0.01,
+                    regime_gating=True, ck_stop_atr_lo=1.5, ck_stop_atr_hi=3.0, ck_spread_frac=0.20,
+                    ck_room_r=1.5, max_hold_s=2 * 3600, child_ttl_s=12 * 3600, max_trades_per_day=8,
+                    signal_max_age_s=120, streak_cooldown_s=3600)
+        base.update(kw)
+        return cls.improved(**base)
+
+    @classmethod
+    def small(cls, **kw):
+        """Small-account profile on H1 (the timeframe where the synthetic controls showed an edge):
+        one trade at a time, children depth 2, strict cost cap, daily trade cap."""
+        base = dict(max_open=1, reserve_root_slots=0, multi_slot_enabled=False, max_depth=2,
+                    root_risk_pct=0.01, max_trade_risk_pct=0.01, ck_spread_frac=0.10, max_trades_per_day=4)
+        base.update(kw)
+        return cls.improved(**base)
+
     @classmethod
     def improved(cls, **kw):
         """Preset with all advancements on."""

@@ -30,7 +30,7 @@ def session_name(hour: int) -> str:
     return "off"
 
 
-def build_context(df: pd.DataFrame) -> pd.DataFrame:
+def build_context(df: pd.DataFrame, htf: str = "4h") -> pd.DataFrame:
     o, h, l, c = df["open"], df["high"], df["low"], df["close"]
     ctx = pd.DataFrame({"open": o, "high": h, "low": l, "close": c}, index=df.index)
 
@@ -41,9 +41,12 @@ def build_context(df: pd.DataFrame) -> pd.DataFrame:
     ctx["atr_ratio"] = atr / atr.rolling(100).median()
     ctx["dist_ma"] = (c - c.rolling(20).mean()) / atr
     ctx["low5"], ctx["high5"] = l.rolling(5).min(), h.rolling(5).max()
+    ema20 = c.ewm(span=20, adjust=False).mean()
+    ctx["near_ema"] = ((c - ema20).abs() / atr) <= 0.5               # pulled back to the 20 EMA
+    ctx["er"] = (c - c.shift(30)).abs() / c.diff().abs().rolling(30).sum()   # efficiency ratio: 1 = straight line
 
     # higher-timeframe trend (4h). shift(1): only COMPLETED 4h bars are visible.
-    h4 = df.resample("4h").agg(OHLC).dropna()
+    h4 = df.resample(htf).agg(OHLC).dropna()
     sma = h4["close"].rolling(50).mean()
     up = (h4["close"] > sma) & (sma > sma.shift(10))
     dn = (h4["close"] < sma) & (sma < sma.shift(10))
@@ -102,30 +105,35 @@ def build_context(df: pd.DataFrame) -> pd.DataFrame:
     # London opening range (first 1h bar), usable from 08:00 to 15:59 UTC
     hour = df.index.hour
     day = df.index.normalize()
-    or_hi = h.where(hour == 7).groupby(day).transform("max")
-    or_lo = l.where(hour == 7).groupby(day).transform("min")
-    valid = (hour >= 8) & (hour <= 15)
+    mod = hour * 60 + df.index.minute
+    gaps = np.diff(df.index.values).astype("timedelta64[s]").astype(float)
+    or_len = 60 if (len(gaps) == 0 or np.median(gaps) >= 3600) else 30     # opening range: 1h bar, or 30 min
+    in_or = (mod >= 420) & (mod < 420 + or_len)
+    or_hi = h.where(in_or).groupby(day).transform("max")
+    or_lo = l.where(in_or).groupby(day).transform("min")
+    valid = (mod >= 420 + or_len) & (mod < 960)
     ctx["orb_up"] = valid & (c > or_hi) & (pc <= or_hi)
     ctx["orb_dn"] = valid & (c < or_lo) & (pc >= or_lo)
 
     ctx["hour"], ctx["dow"] = hour, df.index.dayofweek
+    ctx["ts"] = ((df.index - pd.Timestamp("1970-01-01")) // pd.Timedelta("1s")).values
     return ctx
 
 
 class ContextCache:
     """Builds the context once per new bar per symbol."""
 
-    def __init__(self, bars: int = 450):
-        self.bars, self._store = bars, {}
+    def __init__(self, bars: int = 450, tf: str = "H1", htf: str = "4h"):
+        self.bars, self.tf, self.htf, self._store = bars, tf, htf, {}
 
     def get(self, broker, symbol):
-        df = broker.candles(symbol, self.bars)
+        df = broker.candles(symbol, self.bars, self.tf)
         if df is None or len(df) < 260:
             return None
         key = df.index[-1]
         hit = self._store.get(symbol)
         if hit and hit[0] == key:
             return hit[1]
-        ctx = build_context(df)
+        ctx = build_context(df, self.htf)
         self._store[symbol] = (key, ctx)
         return ctx

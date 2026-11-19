@@ -50,6 +50,13 @@ per tree, marginal wins no longer funding children, and optional extra slots for
     python analyze_journal.py                      # what is working and what the bot has learned
     python compare_modes.py --market random        # original vs improved on identical simulated markets
 
+## Small accounts and scalping (v5)
+    python check_mt5.py                              # can THIS balance trade at all? (minimum-lot risk vs budget)
+    python app.py --mode demo --profile small        # H1, one trade at a time, strict cost cap (for $10-50)
+    python app.py --mode demo --profile scalp        # M5: cost-bound, only after setup_research proves it on M5 data
+    python setup_research.py --profile scalp         # needs data/<PAIR>_M5.csv (fetch_data.py --timeframe M5)
+Profiles: standard (Config.improved), small (Config.small), scalp (Config.scalp). Original Config() is unchanged.
+
 ## Commands
     python -m unittest discover -s tests -v   # 22 tests, any OS
     python run_sim.py --equity 10000          # whole bot on the simulated broker

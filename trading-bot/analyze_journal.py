@@ -28,6 +28,13 @@ def main():
               f"{s['win_lo'] * 100:>8.0f}-{s['win_hi'] * 100:.0f}%")
     print("\nBlocked by the learning gate:", ", ".join(sorted(j.blocked_buckets())) or "nothing yet "
           f"(needs {j.cfg.gate_min_n}+ trades and a win-rate range entirely below break-even)")
+    db = j.db
+    reasons = db.conn.execute("SELECT reason, COUNT(*) FROM risk_decisions WHERE approved=0 "
+                              "GROUP BY reason ORDER BY 2 DESC LIMIT 8").fetchall()
+    if reasons:
+        print("\nWhy trades were NOT taken (a no-trade is a decision too):")
+        for reason, n in reasons:
+            print(f"  {n:>6}  {reason[:90]}")
     print("\nRecent lessons:")
     for lesson in r["recent_lessons"]:
         print("  -", lesson)
