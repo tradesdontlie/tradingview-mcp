@@ -112,19 +112,30 @@ export async function reconnectTo(targetId) {
   return connect(targetId);
 }
 
-async function findChartTarget() {
-  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
+function _resolveTargetDeps(deps) {
+  return {
+    fetch: deps?.fetch || fetch,
+    targetUrl: deps?.targetUrl !== undefined ? deps.targetUrl : CDP_TARGET_URL,
+  };
+}
+
+export async function findChartTarget({ _deps } = {}) {
+  const deps = _resolveTargetDeps(_deps);
+  const resp = await deps.fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
   const targets = await resp.json();
-  const pages = targets.filter(t => t.type === 'page');
+  // http(s) only: the Electron shell's own file:///Applications/TradingView.app/... pages
+  // are type 'page' and contain "TradingView", so they match the loose fallback below
+  // and the server would attach to the shell instead of a chart.
+  const pages = targets.filter(t => t.type === 'page' && /^https?:/i.test(t.url));
 
   // Pinned mode: bind to one specific tab. Fail loudly rather than silently
   // falling back to "first chart found" — a wrong-tab read looks like valid data.
-  if (CDP_TARGET_URL) {
-    const pinned = pages.find(t => t.url.includes(CDP_TARGET_URL));
+  if (deps.targetUrl) {
+    const pinned = pages.find(t => t.url.includes(deps.targetUrl));
     if (!pinned) {
       const open = pages.map(t => t.url).filter(u => /tradingview/i.test(u));
       throw new Error(
-        `TV_CDP_TARGET_URL="${CDP_TARGET_URL}" matched no open tab. ` +
+        `TV_CDP_TARGET_URL="${deps.targetUrl}" matched no open tab. ` +
         `Open TradingView tabs: ${open.join(', ') || '(none)'}`
       );
     }
