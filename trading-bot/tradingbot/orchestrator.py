@@ -49,7 +49,10 @@ class Bot:
                       sum(1 for n in open_nodes if n["level"] > 0), self.cfg)
         for node, sig in plan:
             spec, quote = self.broker.spec(sig.symbol), self.broker.quote(sig.symbol)
-            planned = node["planned_loss"] if node else self.cfg.root_risk_pct * acct.equity
+            allocation = float(getattr(self.cfg, "allocated_capital", 0.0) or 0.0)
+            risk_equity = min(acct.equity, allocation) if allocation > 0 else acct.equity
+            risk_amount = float(getattr(self.cfg, "risk_per_trade_amount", 0.0) or 0.0)
+            planned = node["planned_loss"] if node else (risk_amount if risk_amount > 0 else self.cfg.root_risk_pct * risk_equity)
             nid = node["node_id"] if node else None
             d = self.risk.evaluate(planned, sig, spec, quote, acct, now, nid)
             if not d.approved:

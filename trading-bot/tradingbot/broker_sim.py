@@ -48,6 +48,10 @@ class SimBroker:
         spec = self.specs[sym]
         return self.spread_pips * (10 * spec.tick_size) / 2
 
+    def shutdown(self):
+        """Disconnect the simulator without liquidating open positions."""
+        self.connected = False
+
     def now(self):
         return self.t
 

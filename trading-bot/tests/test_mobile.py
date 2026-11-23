@@ -3,6 +3,7 @@ import os
 import sys
 import threading
 import unittest
+from unittest.mock import patch
 import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
@@ -82,17 +83,31 @@ class Alerts(unittest.TestCase):
 
 
 class Server(unittest.TestCase):
-    def serve(self, lan):
+    def serve(self, lan, supervisor=None, kill_mode=None, auth_verifier=None):
         import tempfile
         cfg = Config(db_path=os.path.join(tempfile.mkdtemp(), "s.db"))
-        Database(cfg.db_path)
-        srv = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(cfg, "secret", lan=lan))
+        db = Database(cfg.db_path)
+        if kill_mode:
+            KillSwitch(db).trigger(Mode[kill_mode], "test", actor="test")
+        db.close()
+        srv = ThreadingHTTPServer(
+            ("127.0.0.1", 0),
+            make_handler(
+                cfg, "secret", lan=lan, supervisor=supervisor,
+                auth_verifier=auth_verifier,
+            ),
+        )
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         self.addCleanup(srv.shutdown)
         return f"http://127.0.0.1:{srv.server_port}"
 
-    def get(self, url, token=None):
-        req = urllib.request.Request(url, headers={"X-Token": token} if token else {})
+    def get(self, url, token=None, bearer=None):
+        headers = {}
+        if token:
+            headers["X-Token"] = token
+        if bearer:
+            headers["Authorization"] = "Bearer " + bearer
+        req = urllib.request.Request(url, headers=headers)
         try:
             return urllib.request.urlopen(req, timeout=5).status
         except urllib.error.HTTPError as e:
@@ -105,6 +120,95 @@ class Server(unittest.TestCase):
         self.assertEqual(self.get(base + "/api/state", "wrong"), 403)
         self.assertEqual(self.get(base + "/api/state", "secret"), 200)
         self.assertEqual(self.get(base + "/api/state?t=secret"), 200)
+
+    def test_supabase_user_can_read_but_not_control(self):
+        verifier = lambda token: (
+            {"id": "regular-user"} if token == "valid-user" else None
+        )
+        supervisor = self.FakeSupervisor()
+        base = self.serve(
+            lan=True, supervisor=supervisor, auth_verifier=verifier
+        )
+
+        self.assertEqual(
+            self.get(base + "/api/state", bearer="valid-user"), 200
+        )
+        self.assertEqual(
+            self.get(base + "/api/state", bearer="invalid-user"), 403
+        )
+
+        status, result = self.post(
+            base + "/api/engine", {"action": "start"},
+            token=None, bearer="valid-user",
+        )
+        self.assertEqual(status, 403)
+        self.assertEqual(supervisor.state, "STOPPED")
+
+    def test_supabase_regular_user_access_role(self):
+        verifier = lambda token: {"id": "regular-user"} if token == "user-token" else None
+        base = self.serve(lan=True, auth_verifier=verifier)
+
+        self.assertEqual(self.get(base + "/api/access"), 403)
+        self.assertEqual(self.get(base + "/api/access", bearer="invalid"), 403)
+
+        req = urllib.request.Request(
+            base + "/api/access",
+            headers={"Authorization": "Bearer user-token"},
+        )
+        with urllib.request.urlopen(req, timeout=5) as response:
+            result = json.loads(response.read().decode())
+
+        self.assertTrue(result["authenticated"])
+        self.assertFalse(result["admin"])
+
+    def test_supabase_admin_access_role(self):
+        with patch.dict(os.environ, {"TREEBOT_ADMIN_USER_IDS": "admin-user"}):
+            verifier = lambda token: {"id": "admin-user"} if token == "admin-token" else None
+            base = self.serve(lan=True, auth_verifier=verifier)
+
+            req = urllib.request.Request(
+                base + "/api/access",
+                headers={"Authorization": "Bearer admin-token"},
+            )
+            with urllib.request.urlopen(req, timeout=5) as response:
+                result = json.loads(response.read().decode())
+
+        self.assertTrue(result["authenticated"])
+        self.assertTrue(result["admin"])
+
+    def test_supabase_admin_can_control_engine(self):
+        with patch.dict(os.environ, {"TREEBOT_ADMIN_USER_IDS": "admin-user"}):
+            verifier = lambda token: (
+                {"id": "admin-user"} if token == "admin-token" else None
+            )
+            supervisor = self.FakeSupervisor()
+            base = self.serve(
+                lan=True, supervisor=supervisor, auth_verifier=verifier
+            )
+
+            status, result = self.post(
+                base + "/api/engine", {"action": "start"},
+                token=None, bearer="admin-token",
+            )
+
+        self.assertEqual(status, 200)
+        self.assertTrue(result["accepted"])
+        self.assertEqual(supervisor.state, "RUNNING")
+
+    def test_supabase_admin_can_activate_kill_switch(self):
+        with patch.dict(os.environ, {"TREEBOT_ADMIN_USER_IDS": "admin-user"}):
+            verifier = lambda token: (
+                {"id": "admin-user"} if token == "admin-token" else None
+            )
+            base = self.serve(lan=True, auth_verifier=verifier)
+
+            status, result = self.post(
+                base + "/api/kill", {"action": "freeze"},
+                token=None, bearer="admin-token",
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(result["mode"], "FREEZE")
 
     def test_printed_token_link_opens_the_page(self):
         for lan in (False, True):
@@ -119,8 +223,167 @@ class Server(unittest.TestCase):
         self.addCleanup(srv.shutdown)
         self.assertEqual(self.get(f"http://127.0.0.1:{srv.server_port}/?t=hubtok"), 200)
 
+    def post(self, url, payload, token="secret", bearer=None):
+        data = json.dumps(payload).encode()
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["X-Token"] = token
+        if bearer:
+            headers["Authorization"] = "Bearer " + bearer
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers=headers,
+            method="POST",
+        )
+        try:
+            response = urllib.request.urlopen(req, timeout=5)
+            return response.status, json.loads(response.read().decode())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read().decode())
+
+    class FakeSupervisor:
+        def __init__(self):
+            self.state = "STOPPED"
+
+        def status(self):
+            return {"state": self.state, "alive": self.state == "RUNNING", "error": None}
+
+        def start(self):
+            if self.state == "RUNNING":
+                return False, self.status()
+            self.state = "RUNNING"
+            return True, self.status()
+
+        def stop(self):
+            self.state = "STOPPED"
+            return True, self.status()
+
+    def test_engine_status_start_and_stop(self):
+        supervisor = self.FakeSupervisor()
+        base = self.serve(lan=True, supervisor=supervisor)
+
+        status, result = self.get_json(base + "/api/engine", "secret")
+        self.assertEqual(status, 200)
+        self.assertEqual(result["state"], "STOPPED")
+
+        status, result = self.post(base + "/api/engine", {"action": "start"})
+        self.assertEqual(status, 200)
+        self.assertTrue(result["accepted"])
+        self.assertEqual(result["state"], "RUNNING")
+
+        status, result = self.post(base + "/api/engine", {"action": "stop"})
+        self.assertEqual(status, 200)
+        self.assertTrue(result["stopped"])
+        self.assertEqual(result["state"], "STOPPED")
+
+    def test_engine_controls_reject_wrong_token(self):
+        supervisor = self.FakeSupervisor()
+        base = self.serve(lan=True, supervisor=supervisor)
+
+        status, result = self.post(
+            base + "/api/engine", {"action": "start"}, token="wrong"
+        )
+        self.assertEqual(status, 403)
+        self.assertEqual(supervisor.state, "STOPPED")
+
+    def test_engine_start_is_blocked_by_active_kill_switch(self):
+        supervisor = self.FakeSupervisor()
+        base = self.serve(lan=True, supervisor=supervisor, kill_mode="FREEZE")
+
+        status, result = self.post(base + "/api/engine", {"action": "start"})
+        self.assertEqual(status, 409)
+        self.assertEqual(result["kill_mode"], "FREEZE")
+        self.assertEqual(supervisor.state, "STOPPED")
+
+    def get_json(self, url, token=None):
+        req = urllib.request.Request(url, headers={"X-Token": token} if token else {})
+        try:
+            response = urllib.request.urlopen(req, timeout=5)
+            return response.status, json.loads(response.read().decode())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read().decode())
+
     def body(self, url):
         return urllib.request.urlopen(url, timeout=5).read().decode()
+
+    def test_settings_api_requires_token_and_saves_when_stopped(self):
+        supervisor = self.FakeSupervisor()
+        base = self.serve(lan=True, supervisor=supervisor)
+
+        self.assertEqual(self.get(base + "/api/settings"), 403)
+
+        status, result = self.post(base + "/api/settings", {
+            "profile": "small",
+            "allocated_capital": 500,
+            "risk_per_trade_amount": 5,
+            "daily_loss_pct": 0.03,
+            "max_open": 2,
+        })
+        self.assertEqual(status, 200)
+        self.assertTrue(result["saved"])
+        self.assertEqual(result["settings"]["profile"], "small")
+        self.assertEqual(result["settings"]["allocated_capital"], 500)
+        self.assertEqual(result["settings"]["risk_per_trade_amount"], 5)
+        self.assertEqual(result["settings"]["max_open"], 2)
+
+        status, result = self.get_json(base + "/api/settings", "secret")
+        self.assertEqual(status, 200)
+        self.assertEqual(result["allocated_capital"], 500)
+
+    def test_settings_api_rejects_changes_while_engine_is_running(self):
+        supervisor = self.FakeSupervisor()
+        base = self.serve(lan=True, supervisor=supervisor)
+        supervisor.state = "RUNNING"
+
+        status, result = self.post(base + "/api/settings", {
+            "allocated_capital": 900,
+        })
+        self.assertEqual(status, 409)
+        self.assertIn("stop the engine", result["error"])
+
+    def test_settings_api_rejects_invalid_values(self):
+        supervisor = self.FakeSupervisor()
+        base = self.serve(lan=True, supervisor=supervisor)
+
+        for payload in (
+            {"daily_loss_pct": 0.5},
+            {"max_open": 6},
+            {"allocated_capital": -10},
+            {"profile": "unknown"},
+        ):
+            status, _ = self.post(base + "/api/settings", payload)
+            self.assertEqual(status, 400)
+
+    def test_settings_persist_and_restore_on_startup(self):
+        import tempfile
+        from tradingbot.server import load_settings, save_settings
+
+        path = os.path.join(tempfile.mkdtemp(), "settings.db")
+        cfg = Config(db_path=path)
+        db = Database(path)
+        supervisor = self.FakeSupervisor()
+
+        try:
+            status, result = save_settings(cfg, db, {
+                "profile": "scalp",
+                "allocated_capital": 750,
+                "risk_per_trade_amount": 7.5,
+                "daily_loss_pct": 0.04,
+                "max_open": 3,
+            }, supervisor)
+            self.assertEqual(status, 200)
+        finally:
+            db.close()
+
+        restored = Config(db_path=path)
+        profile = load_settings(restored)
+
+        self.assertEqual(profile, "scalp")
+        self.assertEqual(restored.allocated_capital, 750)
+        self.assertEqual(restored.risk_per_trade_amount, 7.5)
+        self.assertEqual(restored.daily_loss_pct, 0.04)
+        self.assertEqual(restored.max_open, 3)
 
     def test_a_fresh_bot_with_no_trades_sends_json_a_browser_can_parse(self):
         def strict(const):                                   # what a browser does: Infinity/NaN are errors

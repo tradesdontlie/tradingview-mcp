@@ -25,6 +25,10 @@ class MT5Broker:
             mt5.shutdown()
             raise SystemExit("Refusing to run: this is not a DEMO account.")
 
+    def shutdown(self):
+        """Release the MetaTrader 5 terminal connection."""
+        self.mt5.shutdown()
+
     def now(self) -> float:
         return time.time()
 
@@ -36,7 +40,8 @@ class MT5Broker:
             raise ConnectionError(f"account_info failed: {m.last_error()}")
         return AccountInfo(a.balance, a.equity, a.margin_free,
                            a.trade_mode == m.ACCOUNT_TRADE_MODE_DEMO,
-                           a.margin_mode == m.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING)
+                           a.margin_mode == m.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,
+                           getattr(a, "currency", "UNKNOWN"))
 
     def spec(self, symbol: str) -> SymbolSpec:
         m = self.mt5

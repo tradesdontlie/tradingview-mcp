@@ -115,7 +115,7 @@ def build_context(df: pd.DataFrame, htf: str = "4h") -> pd.DataFrame:
     ctx["orb_up"] = valid & (c > or_hi) & (pc <= or_hi)
     ctx["orb_dn"] = valid & (c < or_lo) & (pc >= or_lo)
 
-    ctx["hour"], ctx["dow"] = hour, df.index.dayofweek
+    ctx["hour"], ctx["dow"] = hour, df.index.day_of_week
     ctx["ts"] = ((df.index - pd.Timestamp("1970-01-01")) // pd.Timedelta("1s")).values
     return ctx
 

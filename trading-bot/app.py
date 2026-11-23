@@ -19,10 +19,11 @@ from tradingbot.database import Database
 from tradingbot.models import Signal
 from tradingbot.orchestrator import Bot
 from tradingbot.setups import ScannerStrategy
-from tradingbot.server import serve
+from tradingbot.server import serve, load_settings
+from tradingbot.engine_supervisor import EngineSupervisor
 
 
-def bot_loop(cfg, mode, speed, equity, interval, legacy=False):
+def bot_loop(cfg, mode, speed, equity, interval, legacy=False, stop_event=None):
     db = Database(cfg.db_path)
     rng = random.Random()
     if mode == "sim":
@@ -70,15 +71,40 @@ def bot_loop(cfg, mode, speed, equity, interval, legacy=False):
         cache = ContextCache(tf=cfg.ctx_tf, htf=cfg.ctx_htf)
         bot = AdvancedBot(cfg, db, broker, ScannerStrategy(cfg, symbols, cache), cache)
     db.kv_set("run_mode", mode)
-    bot.startup()
-    while True:
-        bot.tick()
-        db.kv_set("heartbeat", time.time())
-        if mode == "sim":
-            broker.step()
-            time.sleep(speed)
-        else:
-            time.sleep(interval)
+    if stop_event is None:
+        stop_event = threading.Event()
+
+    try:
+        bot.startup()
+        while not stop_event.is_set():
+            bot.tick()
+            db.kv_set("heartbeat", time.time())
+
+            if stop_event.is_set():
+                break
+
+            if mode == "sim":
+                broker.step()
+                stop_event.wait(speed)
+            else:
+                stop_event.wait(interval)
+
+        db.audit("bot", "engine_stopped", {"reason": "stop_requested"})
+
+    except Exception as e:
+        db.audit("bot", "engine_error", {"error": repr(e)})
+        raise
+
+    finally:
+        try:
+            broker.shutdown()
+        except Exception as e:
+            print("Broker shutdown warning:", repr(e))
+
+        try:
+            db.close()
+        except Exception as e:
+            print("Database shutdown warning:", repr(e))
 
 
 def main():
@@ -96,13 +122,17 @@ def main():
     a = ap.parse_args()
 
     cfg = (Config if a.legacy else Config.scalp if a.profile == "scalp" else Config.small if a.profile == "small" else Config.improved)(db_path=a.db or ("sim.db" if a.mode == "sim" else "bot.db"))
-    if a.mode == "sim":
-        for ext in ("", "-wal", "-shm"):
-            if os.path.exists(cfg.db_path + ext):
-                os.remove(cfg.db_path + ext)
+    if not a.legacy:
+        load_settings(cfg, default_profile=a.profile)
     token = os.environ.get("DASHBOARD_TOKEN") or secrets.token_urlsafe(8)
-    threading.Thread(target=bot_loop, args=(cfg, a.mode, a.speed, a.equity, a.interval, a.legacy),
-                     daemon=True).start()
+    engine_args = (cfg, a.mode, a.speed, a.equity, a.interval, a.legacy)
+    supervisor = EngineSupervisor(bot_loop, args=engine_args)
+
+    started, engine_state = supervisor.start()
+    if not started:
+        raise RuntimeError(f"Could not start trading engine: {engine_state}")
+
+    print("Trading engine:", engine_state["state"])
     tg, chat = os.environ.get("TELEGRAM_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
     if tg and chat:
         from tradingbot.alerts import alerts_loop, telegram_sender
@@ -111,7 +141,7 @@ def main():
                          daemon=True).start()
         print("Telegram alerts: ON")
     print(f"\nOpen this link (token included, on your phone too):\n  http://{a.host}:{a.port}/?t={token}\n")
-    serve(cfg, token, a.port, a.host)
+    serve(cfg, token, a.port, a.host, supervisor=supervisor)
 
 
 if __name__ == "__main__":

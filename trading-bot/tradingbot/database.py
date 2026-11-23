@@ -116,3 +116,7 @@ class Database:
         else:
             rows = self.conn.execute("SELECT * FROM audit ORDER BY event_id").fetchall()
         return [dict(r) for r in rows]
+
+    def close(self):
+        """Close the SQLite connection when the engine shuts down."""
+        self.conn.close()

@@ -59,7 +59,9 @@ class RiskManager:
         peak = max(float(self.db.kv_get("peak_equity", acct.equity)), acct.equity)
         self.db.kv_set("peak_equity", peak)
 
-        if day_start > 0 and (day_start - acct.equity) / day_start >= self.cfg.daily_loss_pct:
+        allocation = float(getattr(self.cfg, "allocated_capital", 0.0) or 0.0)
+        daily_base = min(day_start, allocation) if allocation > 0 else day_start
+        if daily_base > 0 and (day_start - acct.equity) / daily_base >= self.cfg.daily_loss_pct:
             self.kill.trigger(Mode.PAUSE, "daily_loss_limit")
         if peak > 0 and (peak - acct.equity) / peak >= self.cfg.max_drawdown_pct:
             self.kill.trigger(Mode.FREEZE, "max_drawdown")
@@ -114,13 +116,19 @@ class RiskManager:
             new = _ccy(sig.symbol, sig.side)
             if any(new.get(ccy) == s for n in open_nodes for ccy, s in _ccy(n["symbol"], n["side"]).items()):
                 planned_loss = planned_loss * scale       # overlapping bet: smaller size, not a refusal
+        # Allocation limits the equity base used for all risk calculations.
+        allocation = float(getattr(c, "allocated_capital", 0.0) or 0.0)
+        risk_equity = min(acct.equity, allocation) if allocation > 0 else acct.equity
+
         # 1) can this node's own budget fund a minimum lot at all?
-        budget_cap = min(planned_loss, c.max_trade_risk_pct * acct.equity)
+        fixed_risk = float(getattr(c, "risk_per_trade_amount", 0.0) or 0.0)
+        per_trade_cap = fixed_risk if fixed_risk > 0 else c.max_trade_risk_pct * risk_equity
+        budget_cap = min(planned_loss, per_trade_cap)
         if floor_step(budget_cap / loss_per_lot, spec.volume_step) < spec.volume_min - 1e-12:
             return reject("below_min_lot", permanent=True)
 
         # 2) does the account have risk headroom right now?
-        headroom = c.max_open_risk_pct * acct.equity - sum(n["risk_amount"] or 0 for n in open_nodes)
+        headroom = c.max_open_risk_pct * risk_equity - sum(n["risk_amount"] or 0 for n in open_nodes)
         cap = min(budget_cap, headroom)
         vol = floor_step(cap / loss_per_lot, spec.volume_step)
         if vol < spec.volume_min - 1e-12:

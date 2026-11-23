@@ -36,6 +36,7 @@ class AccountInfo:
     margin_free: float
     is_demo: bool
     hedging: bool
+    currency: str = "SIM"
 
 
 @dataclass(frozen=True)

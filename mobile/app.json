@@ -1,0 +1,39 @@
+{
+  "expo": {
+    "name": "Tree Bot",
+    "slug": "tree-bot",
+    "version": "1.0.0",
+    "scheme": "treebot",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "backgroundColor": "#10181D"
+    },
+    "android": {
+      "package": "com.etojuemmanuel.treebot",
+      "adaptiveIcon": {
+        "backgroundColor": "#10181D",
+        "foregroundImage": "./assets/android-icon-foreground.png"
+      }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {
+        "asyncRoutes": {
+          "web": true
+        }
+      },
+      "eas": {
+        "projectId": "28530e2d-222f-4053-ae7b-346d172b6825"
+      }
+    },
+    "owner": "etojue"
+  }
+}

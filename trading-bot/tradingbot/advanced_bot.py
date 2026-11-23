@@ -113,7 +113,10 @@ class AdvancedBot(Bot):
                     est = self.journal.win_prob_lcb(setup, cfg.extra_slot_min_trades)
                     high_conf = est is not None and est >= cfg.extra_slot_min_prob
 
-            planned = node["planned_loss"] if node else cfg.root_risk_pct * acct.equity
+            allocation = float(getattr(cfg, "allocated_capital", 0.0) or 0.0)
+            risk_equity = min(acct.equity, allocation) if allocation > 0 else acct.equity
+            risk_amount = float(getattr(cfg, "risk_per_trade_amount", 0.0) or 0.0)
+            planned = node["planned_loss"] if node else (risk_amount if risk_amount > 0 else cfg.root_risk_pct * risk_equity)
             d = self.risk.evaluate(planned, sig, spec, quote, acct, now, nid, high_conf=high_conf,
                                    root_id=node["root_id"] if node else None)
             if not d.approved:

@@ -135,6 +135,39 @@ class RiskRules(unittest.TestCase):
         self.assertFalse(d.approved)                            # headroom ($1) cannot fund a minimum lot ($2)
         self.assertEqual(d.reason, "no_risk_headroom")
 
+    def test_allocation_caps_per_trade_risk(self):
+        self.bot.cfg.allocated_capital = 1000.0
+        self.bot.cfg.max_trade_risk_pct = 0.01
+
+        d = self.ev(50.0)
+
+        self.assertTrue(d.approved)
+        self.assertLessEqual(d.risk_amount, 10.0)
+        self.assertAlmostEqual(d.risk_amount, 10.0)
+
+    def test_allocation_caps_total_open_risk(self):
+        self.bot.cfg.allocated_capital = 1000.0
+        self.bot.cfg.max_trade_risk_pct = 0.05
+        self.db.add_node(
+            level=0, state="OPEN", budget=14, planned_loss=14,
+            symbol="USDJPY", side="SELL", risk_amount=14.0
+        )
+
+        d = self.ev(50.0)
+
+        self.assertFalse(d.approved)
+        self.assertEqual(d.reason, "no_risk_headroom")
+
+    def test_allocation_scales_daily_loss_limit(self):
+        self.bot.cfg.allocated_capital = 1000.0
+        self.bot.cfg.daily_loss_pct = 0.03
+
+        self.bot.tick()
+        self.broker.balance = 9965.0
+        self.bot.tick()
+
+        self.assertEqual(self.bot.kill.mode, Mode.PAUSE)
+
     def test_stale_signal(self):
         old = Signal("EURUSD", "BUY", 0.0020, self.broker.now() - 10_000)
         self.assertEqual(self.ev(50, old).reason, "stale_signal")

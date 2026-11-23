@@ -18,6 +18,8 @@ class Config:
 
     # --- account protection ---
     root_risk_pct: float = 0.005       # planned loss of a root trade (fraction of equity)
+    allocated_capital: float = 0.0   # 0 = use available account equity; otherwise allocation cap
+    risk_per_trade_amount: float = 0.0  # fixed account-currency risk amount; 0 = use profile percentage
     max_trade_risk_pct: float = 0.01   # hard cap per trade
     max_open_risk_pct: float = 0.015   # hard cap on total planned risk across open trades
     daily_loss_pct: float = 0.03       # -> PAUSE
