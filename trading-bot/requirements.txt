@@ -1,0 +1,3 @@
+MetaTrader5>=5.0.45   # Windows only
+pandas>=2.0
+numpy>=1.26

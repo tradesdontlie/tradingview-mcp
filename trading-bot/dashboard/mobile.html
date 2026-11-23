@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#10181d">
+<link rel="manifest" href="/manifest.json">
+<title>Tree Bot</title>
+<style>
+:root{--bg:#eef2f4;--panel:#fff;--ink:#1b2b34;--mute:#5f7380;--line:#cbd5db;--ok:#1f7a5a;--bad:#b3412f;--warn:#c98a00;--open:#2b5fa8}
+@media (prefers-color-scheme:dark){:root{--bg:#10181d;--panel:#18232a;--ink:#e3ebef;--mute:#8da0ac;--line:#2d3d46;--ok:#4cc39a;--bad:#f0816e;--warn:#e8b64a;--open:#7fa8e8}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,"Segoe UI",sans-serif;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+.num{font-family:ui-monospace,Consolas,monospace;font-variant-numeric:tabular-nums}
+main{max-width:560px;margin:0 auto;padding:12px;display:grid;gap:12px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
+#status{font-weight:700;font-size:18px;padding:14px;border-radius:14px;color:#fff;background:var(--ok)}
+#status.PAUSE,#status.FREEZE{background:var(--warn);color:#1b2b34}#status.LIQUIDATE,#status.OFFLINE{background:var(--bad)}
+#status small{display:block;font-weight:400;opacity:.9;font-size:13px}
+.big{font-size:34px;font-weight:700;margin:0}.mute{color:var(--mute);font-size:13px}
+.row{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.pos{color:var(--ok)}.neg{color:var(--bad)}
+.alert{border-left:5px solid var(--warn);padding:8px 12px;margin:6px 0;background:rgba(201,138,0,.12);border-radius:6px}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.chip{padding:3px 10px;border-radius:12px;border:1px solid var(--line);font-size:13px}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;background:var(--ok)}.dot.x{background:var(--bad)}.dot.w{background:var(--warn)}
+.trade{display:flex;justify-content:space-between;padding:9px 0;border-top:1px solid var(--line)}.trade:first-child{border:0}
+button{font:inherit;min-height:48px;border-radius:12px;border:1px solid var(--line);background:var(--panel);color:var(--ink);padding:0 14px}
+.hold{position:relative;overflow:hidden;background:var(--bad);color:#fff;border:0;flex:1;font-weight:700;user-select:none;touch-action:none}
+.hold i{position:absolute;left:0;top:0;bottom:0;width:0;background:rgba(0,0,0,.35)}
+.btns{display:flex;gap:8px}.btns button{flex:1}
+details summary{min-height:44px;display:flex;align-items:center;cursor:pointer;font-weight:600}
+table{width:100%;border-collapse:collapse;font-size:14px}td,th{text-align:left;padding:5px 4px;border-bottom:1px solid var(--line)}
+input{font:inherit;width:100%;min-height:44px;padding:0 10px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--ink)}
+</style>
+</head>
+<body>
+<main>
+  <div id="status" class="NONE">Connecting…</div>
+  <div id="alerts"></div>
+  <div class="card" id="tokcard" hidden><b>Paste your access token</b><input id="tok2" type="password" placeholder="Token from the bot window" style="margin:8px 0"><button id="tokgo" style="width:100%">Connect</button></div>
+  <div class="card">
+    <div class="mute">Total equity</div><p class="big num" id="eq">–</p>
+    <div class="row"><span>Today <b class="num" id="day">–</b></span><span class="mute" id="dd"></span></div>
+    <div class="chips" id="accts"></div>
+  </div>
+  <div class="card"><b>Today</b><p class="big num" id="tnet">–</p><div class="mute" id="tn"></div>
+    <div class="row"><b class="pos" id="tw"></b><b class="neg" id="tl"></b></div></div>
+  <div class="card"><div class="row"><b>Open trades</b><span class="mute" id="nopen"></span></div><div id="open"></div></div>
+  <div class="card">
+    <div class="mute" style="margin-bottom:8px">Hold the red button for 1 second to stop all new trades</div>
+    <div class="btns"><button class="hold" id="freeze"><i></i><span>HOLD TO FREEZE</span></button><button id="pause">Pause</button></div>
+  </div>
+  <div class="card">
+    <details><summary>More controls</summary>
+      <input id="tok" type="password" placeholder="Access token" aria-label="Access token">
+      <div class="btns" style="margin-top:8px"><button id="reset">Resume trading</button><button id="liq">Close everything</button></div><p class="mute" id="msg"></p>
+    </details>
+    <details id="jd"><summary>What the bot has learned</summary><div id="journal" class="mute">Loading…</div></details>
+    <details id="td"><summary>Trade trees</summary><div id="trees"></div></details>
+    <details id="rd"><summary>Trades it refused, and why</summary><div id="rej"></div></details>
+    <details id="ld"><summary>Event log</summary><div id="log"></div></details>
+  </div>
+</main>
+<script>
+const $=s=>document.querySelector(s),money=v=>(v<0?"-":"")+Math.abs(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+{const q=new URLSearchParams(location.search).get("t");if(q){localStorage.setItem("tok",q);history.replaceState(null,"",location.pathname)}}
+let S=null;const tok=()=>$("#tok").value||localStorage.getItem("tok")||new URLSearchParams(location.search).get("t")||"";
+$("#tok").value=localStorage.getItem("tok")||"";$("#tok").oninput=e=>localStorage.setItem("tok",e.target.value);
+const H=()=>({headers:{"X-Token":tok()}});
+async function kill(action,confirmText){const r=await fetch("/api/kill",{method:"POST",headers:{"X-Token":tok(),"Content-Type":"application/json"},body:JSON.stringify({action,confirm:confirmText||""})});
+  const j=await r.json();$("#msg").textContent=r.ok?"Done: "+(j.mode||action):(j.error||"failed");load()}
+$("#pause").onclick=()=>kill("pause");
+$("#liq").onclick=()=>confirm("Close ALL open positions at market now?")&&kill("liquidate");
+$("#reset").onclick=()=>{const t=prompt("Type RESET to allow new trades again");t&&kill("reset",t)};
+(()=>{const b=$("#freeze"),bar=b.querySelector("i");let t0,raf;const tick=()=>{const p=Math.min(1,(performance.now()-t0)/1000);bar.style.width=p*100+"%";if(p>=1){stop();kill("freeze");navigator.vibrate&&navigator.vibrate(80)}else raf=requestAnimationFrame(tick)};
+ const stop=()=>{cancelAnimationFrame(raf);bar.style.width="0"};b.addEventListener("pointerdown",e=>{t0=performance.now();tick()});["pointerup","pointerleave","pointercancel"].forEach(ev=>b.addEventListener(ev,stop))})();
+
+function render(s){S=s;const t=s.today||{opened:0,closed:0,wins:0,losses:0,win_pct:0,loss_pct:0,net:0};
+  $("#tnet").textContent=money(t.net);$("#tnet").className="big num "+(t.net>0?"pos":t.net<0?"neg":"");$("#tn").textContent=t.opened+" trades taken · "+t.closed+" finished";
+  $("#tw").textContent="Wins "+t.wins+" ("+t.win_pct.toFixed(0)+"%)";$("#tl").textContent="Losses "+t.losses+" ("+t.loss_pct.toFixed(0)+"%)";const k=s.kill.mode,off=(s.now-s.heartbeat>120&&s.run_mode!=="hub");const st=$("#status");
+  st.className=off?"OFFLINE":k;st.innerHTML=off?"Bot not responding<small>No heartbeat for 2+ minutes</small>":k==="NONE"?"Trading is ON<small>Checking the market every bar</small>":(k==="LIQUIDATE"?"Closing everything":"Trading is STOPPED")+`<small>${s.kill.reason||k}</small>`;
+  const al=[...(s.alerts||[])];if(s.account.drawdown_pct>=3)al.push("Drawdown "+s.account.drawdown_pct.toFixed(1)+"% from peak: risk is being reduced");
+  $("#alerts").innerHTML=al.map(a=>`<div class="alert">${a}</div>`).join("");
+  const a=s.account;$("#eq").textContent=money(a.equity);$("#day").textContent=money(a.day_pnl);$("#day").className="num "+(a.day_pnl>0?"pos":a.day_pnl<0?"neg":"");
+  $("#dd").textContent=a.drawdown_pct>0.05?"-"+a.drawdown_pct.toFixed(1)+"% from peak":"";
+  $("#accts").innerHTML=(s.accounts||[]).map(c=>`<span class="chip"><span class="dot ${c.ok?(c.kill==="NONE"?"":"w"):"x"}"></span>${c.name} ${c.ok?money(c.equity):"offline"}</span>`).join("");
+  const o=s.nodes.filter(n=>n.state==="OPEN"||n.state==="SENDING");$("#nopen").textContent=o.length+" open";
+  $("#open").innerHTML=o.length?o.map(n=>`<div class="trade"><span><b>${n.symbol}</b> ${n.side}${n.account?` <span class="mute">${n.account}</span>`:""}</span><span class="num mute">${n.volume} lot · risk ${money(n.risk_amount||0)}</span></div>`).join(""):'<p class="mute">Nothing open. Waiting for a setup that passes every check.</p>'}
+async function lazy(id,fn){$(id).addEventListener("toggle",e=>{if(e.target.open)fn()})}
+lazy("#jd",async()=>{try{const j=await (await fetch("/api/journal",H())).json(),o=j.overall||{};$("#journal").innerHTML=o.n?`${o.n} trades, win rate ${(o.win_rate*100).toFixed(0)}% (needs ${(j.breakeven_win_rate*100).toFixed(0)}% to break even), average ${o.avg_r.toFixed(2)}R.<br>`+(j.recent_lessons||[]).slice(-4).map(x=>"• "+x).join("<br>"):"No finished trades yet."}catch(e){$("#journal").textContent="Unavailable"}});
+lazy("#td",()=>{const by={};S.nodes.filter(n=>!["EXPIRED","DUST","CANCELLED"].includes(n.state)).forEach(n=>(by[n.parent_id||0]=by[n.parent_id||0]||[]).push(n));const one=(n,d)=>`<div style="margin-left:${d*14}px" class="trade"><span>L${n.level} ${n.symbol||""} ${n.side||""}</span><span class="num ${n.net_pnl>0?"pos":n.net_pnl<0?"neg":"mute"}">${n.state.toLowerCase()} ${n.net_pnl!=null?money(n.net_pnl):""}</span></div>`+(by[n.node_id]||[]).map(c=>one(c,d+1)).join("");$("#trees").innerHTML=(by[0]||[]).slice(-12).reverse().map(r=>one(r,0)).join("")||'<p class="mute">None yet.</p>'});
+lazy("#rd",()=>{$("#rej").innerHTML=`<table>${(S.rejections||[]).map(r=>`<tr><td>${r[0].replace(/_/g," ")}</td><td class="num">${r[1]}</td></tr>`).join("")}</table>`});
+lazy("#ld",()=>{$("#log").innerHTML=`<table>${(S.audit||[]).map(e=>`<tr><td>${e[2].replace(/_/g," ")}</td><td class="mute">${e[1]}</td></tr>`).join("")}</table>`});
+async function load(){let r;try{r=await fetch("/api/state",H())}catch(e){$("#status").className="OFFLINE";$("#status").innerHTML="Can't reach the bot<small>Is the bot window still running? Is the address right?</small>";return}try{if(r.status===403){$("#tokcard").hidden=false;$("#status").className="OFFLINE";$("#status").innerHTML="Access token needed<small>Paste it in the box below</small>";return}$("#tokcard").hidden=true;render(await r.json())}catch(e){$("#status").className="OFFLINE";$("#status").innerHTML="Display problem<small>"+String(e.message||e).slice(0,120)+"</small>"}}
+$("#tokgo").onclick=()=>{const v=$("#tok2").value.trim();if(v){localStorage.setItem("tok",v);$("#tok").value=v;load()}};
+load();setInterval(load,5000);
+</script>
+</body>
+</html>
