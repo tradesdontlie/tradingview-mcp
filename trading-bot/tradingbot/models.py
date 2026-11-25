@@ -46,6 +46,9 @@ class Signal:
     stop_distance: float       # price units between entry and stop
     created_at: float          # unix seconds
     strategy: str = "placeholder-v0"
+    quality_score: float = 0.0
+    root_id: int | None = None
+    signal_id: str | None = None
 
 
 @dataclass(frozen=True)

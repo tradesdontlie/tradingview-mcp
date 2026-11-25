@@ -8,6 +8,7 @@ import time
 from dataclasses import dataclass
 
 from .models import Mode
+from .costs import extra_cost_price
 
 
 @dataclass
@@ -68,7 +69,7 @@ class RiskManager:
 
     # ---- per-trade approval ----
     def evaluate(self, planned_loss, sig, spec, quote, acct, now, node_id=None,
-                 high_conf=False, root_id=None) -> Decision:
+                 high_conf=False, root_id=None, allow_same_symbol=False) -> Decision:
         c = self.cfg
 
         def reject(reason, permanent=False):
@@ -78,36 +79,34 @@ class RiskManager:
         mode = self.kill.mode
         if mode != Mode.NONE:
             return reject(f"kill_switch_{mode.value}")
-        cap = getattr(c, "max_trades_per_day", 0)
-        if cap:
-            d0 = now - now % 86400
-            if sum(1 for n in self.db.nodes() if (n["sent_ts"] or 0) >= d0) >= cap:
-                return reject("daily_trade_cap")
+        # No arbitrary daily trade-count or open-position-count ceiling.
+        # Portfolio risk, margin, correlation and account protections govern entries.
         open_nodes = self.db.nodes("OPEN", "SENDING")
         if self.guard is not None:
             ok, why = self.guard.entries_allowed(now)
             if not ok:
                 return reject(why)
             planned_loss = planned_loss * self.guard.risk_scale()
-        limit = c.max_open
-        if getattr(c, "multi_slot_enabled", False) and high_conf:
-            limit = c.max_open_high_conf                  # proven high-confidence trades only
-        if len(open_nodes) >= limit:
-            return reject("max_open_reached")
         if getattr(c, "one_open_per_tree", False) and root_id is not None and \
                 any(n["root_id"] == root_id for n in open_nodes):
             return reject("same_tree_open")
+        if getattr(c, "one_open_per_symbol", False) and not allow_same_symbol and any(
+                n["symbol"] == sig.symbol for n in open_nodes):
+            return reject("same_symbol_open")
         if now - sig.created_at > c.signal_max_age_s:
             return reject("stale_signal")
         if sig.stop_distance < spec.min_stop_distance:
             return reject("stop_too_close")
         bid, ask = quote
-        if ask - bid > c.max_spread_frac_of_stop * sig.stop_distance:
+        all_in_cost = ask - bid + extra_cost_price(spec, c)
+        if all_in_cost > c.max_spread_frac_of_stop * sig.stop_distance:
             return reject("spread_too_wide")
         if acct.margin_free < c.min_free_margin_pct * acct.equity:
             return reject("low_free_margin")
 
-        loss_per_lot = sig.stop_distance / spec.tick_size * spec.tick_value
+        # Include configured round-turn commission and slippage in stop-loss risk.
+        risk_distance = sig.stop_distance + extra_cost_price(spec, c)
+        loss_per_lot = risk_distance / spec.tick_size * spec.tick_value
         if loss_per_lot <= 0:
             return reject("bad_symbol_spec")
 
@@ -123,12 +122,18 @@ class RiskManager:
         # 1) can this node's own budget fund a minimum lot at all?
         fixed_risk = float(getattr(c, "risk_per_trade_amount", 0.0) or 0.0)
         per_trade_cap = fixed_risk if fixed_risk > 0 else c.max_trade_risk_pct * risk_equity
+        demo_pct = max(0.0, float(getattr(c, "demo_risk_cap_pct", 0.0) or 0.0))
+        demo_cap = demo_pct * risk_equity if demo_pct > 0 else float("inf")
+        per_trade_cap = min(per_trade_cap, demo_cap)
         budget_cap = min(planned_loss, per_trade_cap)
         if floor_step(budget_cap / loss_per_lot, spec.volume_step) < spec.volume_min - 1e-12:
             return reject("below_min_lot", permanent=True)
 
         # 2) does the account have risk headroom right now?
-        headroom = c.max_open_risk_pct * risk_equity - sum(n["risk_amount"] or 0 for n in open_nodes)
+        total_risk_cap = c.max_open_risk_pct * risk_equity
+        if demo_pct > 0:
+            total_risk_cap = min(total_risk_cap, demo_cap)
+        headroom = total_risk_cap - sum(n["risk_amount"] or 0 for n in open_nodes)
         cap = min(budget_cap, headroom)
         vol = floor_step(cap / loss_per_lot, spec.volume_step)
         if vol < spec.volume_min - 1e-12:

@@ -13,7 +13,12 @@ MAGIC = 515151
 
 
 class MT5Broker:
-    def __init__(self, require_demo: bool = True):
+    def __init__(self, require_demo: bool = True, cfg=None):
+        self.cfg = cfg
+        self.require_demo = require_demo
+        if require_demo and self.cfg is not None:
+            current_cap = float(getattr(self.cfg, "demo_risk_cap_pct", 0.0) or 0.0)
+            self.cfg.demo_risk_cap_pct = min(current_cap, 0.001) if current_cap > 0 else 0.001
         import MetaTrader5 as mt5            # imported here so other OSes can run the simulator
         self.mt5 = mt5
         if not mt5.initialize():
@@ -38,6 +43,8 @@ class MT5Broker:
         a = m.account_info()
         if a is None:
             raise ConnectionError(f"account_info failed: {m.last_error()}")
+        if self.require_demo and a.trade_mode != m.ACCOUNT_TRADE_MODE_DEMO:
+            raise ConnectionError("DEMO account requirement violated; trading paused.")
         return AccountInfo(a.balance, a.equity, a.margin_free,
                            a.trade_mode == m.ACCOUNT_TRADE_MODE_DEMO,
                            a.margin_mode == m.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,
@@ -85,6 +92,52 @@ class MT5Broker:
                 raise ConnectionError(f"positions_get failed: {self.mt5.last_error()}")
             return []
         return [self._to_position(p) for p in res]
+
+    def floating_net_pnl(self, position):
+        """Conservative net floating P&L; None means costs/history cannot be verified."""
+        cfg = self.cfg
+        if cfg is None or cfg.commission_per_lot <= 0:
+            return None
+        if position is None or not position.client_id:
+            return None
+
+        m = self.mt5
+        found = m.positions_get(ticket=position.ticket)
+        if not found or len(found) != 1:
+            return None
+        raw = found[0]
+        if raw.magic != MAGIC or raw.comment != position.client_id:
+            return None
+
+        identifier = getattr(raw, "identifier", None)
+        if not identifier:
+            return None
+        deals = m.history_deals_get(position=identifier)
+        if deals is None:
+            return None
+        entries = [d for d in deals if d.entry == m.DEAL_ENTRY_IN]
+        if not entries or any(d.entry == m.DEAL_ENTRY_OUT for d in deals):
+            return None
+
+        entry_costs = sum(
+            float(getattr(d, "commission", 0.0))
+            + float(getattr(d, "fee", 0.0))
+            for d in entries
+        )
+        expected_commission = cfg.commission_per_lot * float(raw.volume)
+        remaining_commission = max(0.0, expected_commission - abs(entry_costs))
+
+        spec = self.spec(raw.symbol)
+        if spec.tick_size <= 0 or spec.tick_value <= 0:
+            return None
+        slippage_cost = (
+            cfg.slippage_price / spec.tick_size
+            * spec.tick_value * float(raw.volume)
+        )
+        return (
+            float(raw.profit) + float(raw.swap) + entry_costs
+            - remaining_commission - slippage_cost
+        )
 
     def find_position(self, client_id: str):
         return next((p for p in self.positions() if p.client_id == client_id), None)

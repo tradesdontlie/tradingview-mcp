@@ -5,7 +5,7 @@ export type TradingSettings = {
   allocated_capital: number;
   risk_per_trade_amount: number;
   daily_loss_pct: number;
-  max_open: number;
+  max_open_risk_pct: number;
 };
 
 export type EngineStatus = {

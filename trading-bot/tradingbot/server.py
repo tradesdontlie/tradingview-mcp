@@ -88,7 +88,7 @@ def settings_payload(cfg, profile):
         "allocated_capital": cfg.allocated_capital,
         "risk_per_trade_amount": cfg.risk_per_trade_amount,
         "daily_loss_pct": cfg.daily_loss_pct,
-        "max_open": cfg.max_open,
+        "max_open_risk_pct": cfg.max_open_risk_pct,
     }
 
 
@@ -101,12 +101,10 @@ def load_settings(cfg, default_profile="standard"):
         apply_profile(cfg, profile)
 
         for key in ("allocated_capital", "risk_per_trade_amount",
-                    "daily_loss_pct", "max_open"):
+                    "daily_loss_pct", "max_open_risk_pct"):
             raw = db.kv_get("setting_" + key)
             if raw is not None:
                 value = float(raw)
-                if key == "max_open":
-                    value = int(value)
                 setattr(cfg, key, value)
         return profile
     finally:
@@ -122,7 +120,7 @@ def save_settings(cfg, db, body, supervisor):
         return 409, {"error": "stop the engine before changing settings", "engine_state": state}
 
     allowed = {"profile", "allocated_capital", "risk_per_trade_amount",
-               "daily_loss_pct", "max_open"}
+               "daily_loss_pct", "max_open_risk_pct"}
     unknown = set(body) - allowed
     if unknown:
         return 400, {"error": "unknown settings", "fields": sorted(unknown)}
@@ -145,11 +143,14 @@ def save_settings(cfg, db, body, supervisor):
                     raise ValueError("daily_loss_pct must be between 0.001 and 0.20")
                 values[key] = value
 
-        if "max_open" in body:
-            value = body["max_open"]
-            if isinstance(value, bool) or int(value) != float(value) or not 1 <= int(value) <= 5:
-                raise ValueError("max_open must be a whole number from 1 to 5")
-            values["max_open"] = int(value)
+        if "max_open_risk_pct" in body:
+            value = body["max_open_risk_pct"]
+            if isinstance(value, bool):
+                raise ValueError("max_open_risk_pct must be a number")
+            value = float(value)
+            if not math.isfinite(value) or not 0.001 <= value <= 0.10:
+                raise ValueError("max_open_risk_pct must be between 0.001 and 0.10")
+            values["max_open_risk_pct"] = value
     except (TypeError, ValueError, OverflowError) as exc:
         return 400, {"error": str(exc)}
 
@@ -159,7 +160,7 @@ def save_settings(cfg, db, body, supervisor):
 
     db.kv_set("settings_profile", profile)
     for key in ("allocated_capital", "risk_per_trade_amount",
-                "daily_loss_pct", "max_open"):
+                "daily_loss_pct", "max_open_risk_pct"):
         db.kv_set("setting_" + key, getattr(cfg, key))
 
     db.audit("operator", "settings_updated", settings_payload(cfg, profile))

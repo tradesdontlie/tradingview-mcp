@@ -99,6 +99,41 @@ class Checklist(unittest.TestCase):
         row = {**good_row(), "atr": float("nan")}
         self.assertEqual(market_checks(row, "BUY", 0.0, self.cfg).failed, ["data"])
 
+    def test_not_chasing_limits_absolute_distance_for_both_sides(self):
+        for side in ("BUY", "SELL"):
+            for distance in (-2.5, 2.5):
+                result = market_checks(
+                    {**good_row(side), "dist_ma": distance},
+                    side, 0.00005, self.cfg,
+                )
+                self.assertIn("not_chasing", result.failed)
+
+    def test_quality_score_penalises_absolute_distance_symmetrically(self):
+        for side in ("BUY", "SELL"):
+            nearer = market_checks(
+                {**good_row(side), "dist_ma": 0.5}, side, 0.00005, self.cfg
+            )
+            farther = market_checks(
+                {**good_row(side), "dist_ma": -1.5}, side, 0.00005, self.cfg
+            )
+            self.assertTrue(nearer.passed)
+            self.assertTrue(farther.passed)
+            self.assertGreater(nearer.quality_score, farther.quality_score)
+
+    def test_stronger_trigger_receives_higher_quality_score(self):
+        rejection = market_checks(good_row("BUY"), "BUY", 0.00005, self.cfg)
+        sweep_row = {
+            **good_row("BUY"),
+            "sweep_low_recent": True,
+            "reject_buy": False,
+        }
+        sweep = market_checks(sweep_row, "BUY", 0.00005, self.cfg)
+
+        self.assertTrue(rejection.passed)
+        self.assertTrue(sweep.passed)
+        self.assertEqual(sweep.trigger, "sweep")
+        self.assertGreater(sweep.quality_score, rejection.quality_score)
+
 
 class Learning(unittest.TestCase):
     def setUp(self):
@@ -213,17 +248,169 @@ class RiskIntegration(unittest.TestCase):
         return self.bot.risk.evaluate(planned, sig, self.spec, self.broker.quote("EURUSD"), self.acct,
                                       self.now, None, high_conf=high_conf, root_id=root)
 
-    def test_extra_slots_only_for_high_confidence_and_capped(self):
-        self.open_node("EURUSD", "BUY"); self.open_node("AUDJPY", "BUY")
-        self.assertEqual(self.ev().reason, "max_open_reached")               # normal: capped at 2
-        self.assertTrue(self.ev(high_conf=True).approved)                    # proven: 3rd slot
-        self.open_node("NZDCAD", "BUY"); self.open_node("USDSEK", "BUY")
-        self.assertEqual(self.ev(high_conf=True).reason, "max_open_reached")  # hard cap of 4
+    def test_entries_are_not_blocked_by_position_count(self):
+        self.open_node("EURUSD", "BUY")
+        self.open_node("AUDJPY", "BUY")
+        self.assertTrue(self.ev().approved)  # third position is allowed
+
+        self.open_node("NZDCAD", "BUY")
+        self.open_node("USDSEK", "BUY")
+        self.assertTrue(self.ev().approved)  # fifth position is allowed
 
     def test_never_two_open_from_the_same_tree(self):
         self.open_node("EURUSD", "BUY", root=7)
         self.assertEqual(self.ev(root=7).reason, "same_tree_open")
         self.assertTrue(self.ev(root=8).approved)
+
+    def test_never_two_open_positions_on_the_same_symbol(self):
+        self.open_node("EURUSD", "BUY", root=7)
+        sig = Signal("EURUSD", "SELL", 0.0020, self.now)
+        decision = self.bot.risk.evaluate(
+            50.0, sig, self.spec, self.broker.quote("EURUSD"),
+            self.acct, self.now, root_id=8,
+        )
+        self.assertFalse(decision.approved)
+        self.assertEqual(decision.reason, "same_symbol_open")
+        self.assertTrue(self.ev().approved)  # a different pair remains eligible
+
+    def test_independent_same_symbol_entries_allowed_when_configured(self):
+        self.cfg.one_open_per_symbol = False
+        self.open_node("EURUSD", "BUY", root=7)
+        sig = Signal("EURUSD", "SELL", 0.0020, self.now)
+        decision = self.bot.risk.evaluate(
+            50.0, sig, self.spec, self.broker.quote("EURUSD"),
+            self.acct, self.now, root_id=8,
+        )
+        self.assertNotEqual(decision.reason, "same_symbol_open")
+
+    def pyramid_fixture(self, side="BUY"):
+        import pandas as pd
+
+        self.cfg.pyramiding_enabled = True
+        bid, ask = self.broker.quote("EURUSD")
+        entry = ask if side == "BUY" else bid
+        sl = entry - 0.01 if side == "BUY" else entry + 0.01
+        tp = entry + 0.02 if side == "BUY" else entry - 0.02
+        pos = self.broker.send_market("tm-existing", "EURUSD", side, 0.01, sl, tp)
+        node = self.open_node("EURUSD", side)
+        self.db.update_node(node, client_id=pos.client_id, ticket=pos.ticket)
+
+        direction = 1 if side == "BUY" else -1
+        if side == "BUY":
+            m1 = pd.DataFrame([{"open": 1.1000, "close": 1.1002, "direction": 1}])
+            m5 = pd.DataFrame([
+                {"open": 1.0998, "close": 1.1000, "direction": 1},
+                {"open": 1.1001, "close": 1.1003, "direction": 1},
+            ])
+        else:
+            m1 = pd.DataFrame([{"open": 1.1002, "close": 1.1000, "direction": -1}])
+            m5 = pd.DataFrame([
+                {"open": 1.1002, "close": 1.1000, "direction": -1},
+                {"open": 1.0999, "close": 1.0997, "direction": -1},
+            ])
+
+        sig = Signal("EURUSD", side, 0.0020, self.now)
+        return pos, sig, {"M1": m1, "M5": m5}, self.acct
+
+    def test_pyramiding_approves_profitable_confirmed_group(self):
+        from unittest.mock import patch
+
+        _, sig, contexts, acct = self.pyramid_fixture()
+        with patch.object(self.broker, "floating_net_pnl", return_value=10.0):
+            allowed, reason, found = self.bot._same_symbol_pyramid_check(
+                sig, acct, contexts, self.now
+            )
+        self.assertTrue(allowed)
+        self.assertEqual(reason, "pyramiding_approved")
+        self.assertTrue(found)
+
+    def test_pyramiding_rejects_group_not_profitable(self):
+        from unittest.mock import patch
+
+        _, sig, contexts, acct = self.pyramid_fixture()
+        with patch.object(self.broker, "floating_net_pnl", return_value=0.0):
+            allowed, reason, found = self.bot._same_symbol_pyramid_check(
+                sig, acct, contexts, self.now
+            )
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "pyramiding_group_not_profitable")
+        self.assertTrue(found)
+
+    def test_pyramiding_rejects_unconfirmed_m1(self):
+        from unittest.mock import patch
+
+        _, sig, contexts, acct = self.pyramid_fixture()
+        contexts["M1"].loc[0, "direction"] = -1
+        with patch.object(self.broker, "floating_net_pnl", return_value=10.0):
+            allowed, reason, _ = self.bot._same_symbol_pyramid_check(
+                sig, acct, contexts, self.now
+            )
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "pyramiding_m1_not_confirmed")
+
+    def test_pyramiding_rejects_missing_protective_stop(self):
+        from dataclasses import replace
+        from unittest.mock import patch
+
+        pos, sig, contexts, acct = self.pyramid_fixture()
+        self.broker._positions[pos.ticket] = replace(pos, sl=0.0)
+        with patch.object(self.broker, "floating_net_pnl", return_value=10.0):
+            allowed, reason, _ = self.bot._same_symbol_pyramid_check(
+                sig, acct, contexts, self.now
+            )
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "pyramiding_protection_missing")
+
+    def test_pyramiding_rejects_non_hedging_account(self):
+        from dataclasses import replace
+        from unittest.mock import patch
+
+        _, sig, contexts, acct = self.pyramid_fixture()
+        acct = replace(acct, hedging=False)
+        with patch.object(self.broker, "floating_net_pnl", return_value=10.0):
+            allowed, reason, _ = self.bot._same_symbol_pyramid_check(
+                sig, acct, contexts, self.now
+            )
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "pyramiding_requires_hedging")
+
+    def test_pyramiding_rejects_untracked_manual_position(self):
+        from unittest.mock import patch
+
+        bid, ask = self.broker.quote("EURUSD")
+        entry = ask
+        manual = self.broker.send_market(
+            "manual-position", "EURUSD", "BUY", 0.01,
+            entry - 0.01, entry + 0.02,
+        )
+        sig = Signal("EURUSD", "BUY", 0.002, self.now)
+
+        allowed, reason, found = self.bot._same_symbol_pyramid_check(
+            sig, self.acct, {}, self.now
+        )
+
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "pyramiding_untracked_position")
+        self.assertTrue(found)
+
+    def test_pyramiding_rejects_manual_position_alongside_treebot(self):
+        from unittest.mock import patch
+
+        _, sig, contexts, acct = self.pyramid_fixture()
+        bid, ask = self.broker.quote("EURUSD")
+        self.broker.send_market(
+            "manual-position", "EURUSD", "BUY", 0.01,
+            ask - 0.01, ask + 0.02,
+        )
+
+        with patch.object(self.broker, "floating_net_pnl", return_value=10.0):
+            allowed, reason, found = self.bot._same_symbol_pyramid_check(
+                sig, acct, contexts, self.now
+            )
+
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "pyramiding_position_reconciliation")
+        self.assertTrue(found)
 
     def test_drawdown_ladder_scales_planned_risk(self):
         self.bot.guard.update(10000, 0)

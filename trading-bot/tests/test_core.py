@@ -88,13 +88,23 @@ class TreeRules(unittest.TestCase):
         tree.expire(cfg.child_ttl_s + 1)
         self.assertTrue(all(db.node(k)["state"] == "EXPIRED" for k in kids))
 
-    def test_scheduler_reserves_a_root_slot(self):
+    def test_scheduler_assigns_without_position_ceiling(self):
         cfg = Config()
         sigs = [Signal("EURUSD", "BUY", 0.002, 0)]
         kid = {"node_id": 9}
-        self.assertEqual(assign(sigs, [kid], 2, 0, cfg), [])                 # full
-        self.assertEqual(assign(sigs, [kid], 1, 1, cfg)[0][0], None)          # root, not 2nd child
-        self.assertEqual(assign(sigs, [kid], 0, 0, cfg)[0][0], kid)           # child first
+        # Unlinked signals are independent roots, not child-tree entries.
+        self.assertIsNone(assign(sigs, [kid], 2, 0, cfg)[0][0])
+        self.assertIsNone(assign(sigs, [kid], 1, 1, cfg)[0][0])
+        self.assertIsNone(assign(sigs, [], 10, 0, cfg)[0][0])
+
+    def test_scheduler_prioritises_higher_quality_signals(self):
+        cfg = Config()
+        low = Signal("EURUSD", "BUY", 0.002, 1, "rejection", 45.0)
+        high = Signal("GBPUSD", "SELL", 0.002, 2, "sweep", 82.0)
+
+        ranked = assign([low, high], [], 0, 0, cfg)
+
+        self.assertEqual([item[1] for item in ranked], [high, low])
 
 
 class RiskRules(unittest.TestCase):
@@ -120,11 +130,12 @@ class RiskRules(unittest.TestCase):
         self.assertEqual(d.reason, "below_min_lot")
         self.assertTrue(d.permanent)
 
-    def test_risk_manager_enforces_open_limit_on_its_own(self):
+    def test_risk_manager_does_not_enforce_open_position_count(self):
+        self.bot.cfg.block_correlated = False
         for sym, side in (("EURUSD", "BUY"), ("USDJPY", "SELL")):
             self.db.add_node(level=0, state="OPEN", budget=1, planned_loss=1, symbol=sym,
                              side=side, risk_amount=1.0)
-        self.assertEqual(self.ev(50).reason, "max_open_reached")
+        self.assertTrue(self.ev(50).approved)
 
     def test_risk_manager_caps_total_open_risk(self):
         self.db.add_node(level=0, state="OPEN", budget=1, planned_loss=1, symbol="USDJPY",
@@ -133,6 +144,51 @@ class RiskRules(unittest.TestCase):
                                    self.spec, self.broker.quote("EURUSD"), self.acct,
                                    self.broker.now())
         self.assertFalse(d.approved)                            # headroom ($1) cannot fund a minimum lot ($2)
+        self.assertEqual(d.reason, "no_risk_headroom")
+
+    def test_commission_and_slippage_reduce_risk_sized_volume(self):
+        self.bot.cfg.commission_per_lot = 7.0
+        self.bot.cfg.slippage_price = 0.00002
+
+        d = self.ev(12.5)
+
+        self.assertTrue(d.approved)
+        from tradingbot.costs import extra_cost_price
+        cost = extra_cost_price(self.spec, self.bot.cfg)
+        expected = d.volume * (
+            (0.0020 + cost) / self.spec.tick_size * self.spec.tick_value
+        )
+        self.assertAlmostEqual(d.risk_amount, expected)
+        self.assertLessEqual(d.risk_amount, 12.5)
+
+    def test_demo_cap_limits_per_trade_risk(self):
+        self.bot.cfg.demo_risk_cap_pct = 0.001
+
+        d = self.ev(50.0)
+
+        self.assertTrue(d.approved)
+        self.assertLessEqual(d.risk_amount, self.acct.equity * 0.001)
+
+    def test_demo_cap_limits_fixed_currency_risk(self):
+        self.bot.cfg.demo_risk_cap_pct = 0.001
+        self.bot.cfg.risk_per_trade_amount = 500.0
+
+        d = self.ev(500.0)
+
+        self.assertTrue(d.approved)
+        self.assertLessEqual(d.risk_amount, self.acct.equity * 0.001)
+
+    def test_demo_cap_limits_total_open_risk(self):
+        self.bot.cfg.demo_risk_cap_pct = 0.001
+        self.bot.cfg.block_correlated = False
+        self.db.add_node(
+            level=0, state="OPEN", budget=9, planned_loss=9,
+            symbol="USDJPY", side="SELL", risk_amount=9.0
+        )
+
+        d = self.ev(50.0)
+
+        self.assertFalse(d.approved)
         self.assertEqual(d.reason, "no_risk_headroom")
 
     def test_allocation_caps_per_trade_risk(self):
@@ -174,6 +230,13 @@ class RiskRules(unittest.TestCase):
 
     def test_wide_spread(self):
         self.assertEqual(self.ev(50, quote=(1.1000, 1.1010)).reason, "spread_too_wide")
+
+    def test_commission_is_included_in_spread_cost_gate(self):
+        self.bot.cfg.commission_per_lot = 7.0
+        quote = (1.10000, 1.10035)  # raw spread is below the 0.00040 limit
+        d = self.ev(50, quote=quote)
+        self.assertFalse(d.approved)
+        self.assertEqual(d.reason, "spread_too_wide")
 
     def test_correlated_exposure_blocked(self):
         self.db.add_node(level=0, state="OPEN", budget=1, planned_loss=1, symbol="EURUSD",
@@ -228,6 +291,39 @@ class KillSwitchRules(unittest.TestCase):
 
 
 class ExecutionSafety(unittest.TestCase):
+    def test_demo_cap_pauses_on_unmanaged_position_without_closing_it(self):
+        bot, broker, db = make(one_shot(), cfg=Config(demo_risk_cap_pct=0.001))
+        external = broker.send_market(
+            "manual-external", "EURUSD", "BUY", 0.01, 1.0, 2.0
+        )
+        sends_before = broker.send_calls
+
+        bot.tick()
+
+        self.assertEqual(bot.kill.mode, Mode.PAUSE)
+        self.assertEqual(bot.kill.reason, "unmanaged_position")
+        self.assertEqual(broker.send_calls, sends_before)
+        self.assertIsNotNone(broker.find_position("manual-external"))
+        events = db.conn.execute(
+            "SELECT COUNT(*) FROM audit WHERE event_type='unmanaged_positions_detected'"
+        ).fetchone()[0]
+        self.assertEqual(events, 1)
+
+        bot.tick()
+        events_after = db.conn.execute(
+            "SELECT COUNT(*) FROM audit WHERE event_type='unmanaged_positions_detected'"
+        ).fetchone()[0]
+        self.assertEqual(events_after, 1)
+
+    def test_unmanaged_position_does_not_pause_without_demo_cap(self):
+        bot, broker, db = make(one_shot())
+        broker.send_market("manual-external", "EURUSD", "BUY", 0.01, 1.0, 2.0)
+
+        bot.tick()
+
+        self.assertEqual(bot.kill.mode, Mode.NONE)
+        self.assertEqual(len(broker.positions()), 2)
+
     def test_lost_ack_does_not_duplicate_order(self):
         bot, broker, db = make(one_shot())
         broker.fail_next = "lost_ack"

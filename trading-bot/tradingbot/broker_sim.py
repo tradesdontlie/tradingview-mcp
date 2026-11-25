@@ -16,18 +16,61 @@ DEFAULT_SPECS = {
     "EURUSD": SymbolSpec("EURUSD", 0.01, 0.01, 100.0, 0.00001, 1.0, 5),
     "GBPUSD": SymbolSpec("GBPUSD", 0.01, 0.01, 100.0, 0.00001, 1.0, 5),
     "USDJPY": SymbolSpec("USDJPY", 0.01, 0.01, 100.0, 0.001, 0.68, 3),
+
+    # Approximate USD-account tick values for simulation only.
+    # Live MT5 trading always obtains contract values from the broker.
+    "AUDUSD": SymbolSpec("AUDUSD", 0.01, 0.01, 100.0, 0.00001, 1.00, 5),
+    "NZDUSD": SymbolSpec("NZDUSD", 0.01, 0.01, 100.0, 0.00001, 1.00, 5),
+    "USDCAD": SymbolSpec("USDCAD", 0.01, 0.01, 100.0, 0.00001, 0.74, 5),
+    "USDCHF": SymbolSpec("USDCHF", 0.01, 0.01, 100.0, 0.00001, 1.10, 5),
+    "EURGBP": SymbolSpec("EURGBP", 0.01, 0.01, 100.0, 0.00001, 1.25, 5),
+    "EURJPY": SymbolSpec("EURJPY", 0.01, 0.01, 100.0, 0.001, 0.68, 3),
+    "GBPJPY": SymbolSpec("GBPJPY", 0.01, 0.01, 100.0, 0.001, 0.68, 3),
+    "EURCHF": SymbolSpec("EURCHF", 0.01, 0.01, 100.0, 0.00001, 1.10, 5),
+
+    # SIMULATION ASSUMPTION ONLY: illustrative 100 oz XAUUSD contract.
+    # $0.01 tick = $1.00 per 1.0 lot. Live MT5 always uses broker specifications.
+    "XAUUSD": SymbolSpec("XAUUSD", 0.01, 0.01, 100.0, 0.01, 1.0, 2),
 }
-START = {"EURUSD": 1.10, "GBPUSD": 1.30, "USDJPY": 150.0}
+
+START = {
+    "EURUSD": 1.10,
+    "GBPUSD": 1.30,
+    "USDJPY": 150.0,
+    "AUDUSD": 0.66,
+    "NZDUSD": 0.60,
+    "USDCAD": 1.35,
+    "USDCHF": 0.90,
+    "EURGBP": 0.85,
+    "EURJPY": 165.0,
+    "GBPJPY": 190.0,
+    "EURCHF": 0.95,
+    "XAUUSD": 2000.0,
+}
 
 
 class SimBroker:
     def __init__(self, equity=10000.0, seed=1, spread_pips=1.0, sigma=0.0005,
-                 commission_per_lot=7.0, t0=1_700_000_000.0, trend=0.0, bar_minutes=60):
+                 commission_per_lot=7.0, t0=1_700_000_000.0, trend=0.0, bar_minutes=60,
+                 specs=None, start_prices=None, spread_prices=None, sigma_by_symbol=None):
         self.rng = random.Random(seed)
         self.specs = dict(DEFAULT_SPECS)
+        if specs:
+            self.specs.update(specs)
         self.mid = dict(START)
+        if start_prices:
+            self.mid.update(start_prices)
+        missing_prices = set(self.specs) - set(self.mid)
+        if missing_prices:
+            raise ValueError("Missing simulator start prices: " + ", ".join(sorted(missing_prices)))
         self.balance = equity
         self.spread_pips, self.sigma, self.commission = spread_pips, sigma, commission_per_lot
+        # Explicit price-unit spreads and fractional-return volatility per instrument.
+        # Gold defaults are illustrative; calibrate from the target broker's history.
+        self.spread_prices = {"XAUUSD": 0.30}
+        self.spread_prices.update(spread_prices or {})
+        self.sigma_by_symbol = {"XAUUSD": 0.0012}
+        self.sigma_by_symbol.update(sigma_by_symbol or {})
         self.t = t0
         self._positions, self.history = {}, {}
         self._ticket = 1000
@@ -45,6 +88,8 @@ class SimBroker:
             raise ConnectionError("sim broker offline")
 
     def _half_spread(self, sym):
+        if sym in self.spread_prices:
+            return self.spread_prices[sym] / 2
         spec = self.specs[sym]
         return self.spread_pips * (10 * spec.tick_size) / 2
 
@@ -69,6 +114,13 @@ class SimBroker:
         spec = self.specs[p.symbol]
         move = (exit_price - p.open_price) if p.side == "BUY" else (p.open_price - exit_price)
         return move / spec.tick_size * spec.tick_value * p.volume - self.commission * p.volume
+
+    def floating_net_pnl(self, position):
+        """Net P&L at the executable close price, including commission."""
+        self._guard()
+        bid, ask = self.quote(position.symbol)
+        exit_price = bid if position.side == "BUY" else ask
+        return self._pnl(position, exit_price)
 
     def account(self):
         self._guard()
@@ -140,7 +192,8 @@ class SimBroker:
         hi, lo = dict(self.mid), dict(self.mid)
         for _ in range(micro):
             for sym in self.mid:
-                self.mid[sym] *= 1 + self.rng.gauss(0, self.sigma * f ** 0.5 / micro ** 0.5) + self._drift[sym] * f / micro
+                symbol_sigma = self.sigma_by_symbol.get(sym, self.sigma)
+                self.mid[sym] *= 1 + self.rng.gauss(0, symbol_sigma * f ** 0.5 / micro ** 0.5) + self._drift[sym] * f / micro
                 hi[sym], lo[sym] = max(hi[sym], self.mid[sym]), min(lo[sym], self.mid[sym])
             for p in list(self._positions.values()):
                 bid, ask = self.quote(p.symbol)
@@ -161,8 +214,34 @@ class SimBroker:
             self.step()
 
     def candles(self, symbol, n, tf="H1"):
+        """Return completed candles; M1 simulations can be aggregated to higher TFs."""
         self._guard()
-        rows = self.bars[symbol][-n:]
+        rows = self.bars[symbol]
         df = pd.DataFrame(rows, columns=["time", "open", "high", "low", "close"])
         df.index = pd.to_datetime(df.pop("time"), unit="s")
-        return df
+
+        # Existing simulations retain their native-bar behaviour.
+        if self.bar_minutes != 1 or tf == "M1":
+            return df.tail(n)
+
+        minutes = {"M1": 1, "M5": 5, "M15": 15, "H1": 60}.get(tf)
+        if minutes is None:
+            raise ValueError(f"Unsupported timeframe: {tf}")
+
+        if minutes == 1:
+            return df.tail(n)
+
+        # Aggregate bars using their epoch-aligned opening times.
+        grouped = df.groupby(df.index.floor(f"{minutes}min")).agg({
+            "open": "first",
+            "high": "max",
+            "low": "min",
+            "close": "last",
+        })
+
+        # Never expose a higher-timeframe candle before it has fully closed.
+        completed_at = pd.to_datetime(self.t, unit="s")
+        grouped = grouped.loc[
+            grouped.index + pd.Timedelta(minutes=minutes) <= completed_at
+        ]
+        return grouped.tail(n)

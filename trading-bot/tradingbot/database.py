@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS nodes(
   budget REAL NOT NULL, planned_loss REAL NOT NULL,
   symbol TEXT, side TEXT, client_id TEXT, ticket INTEGER, attempts INTEGER DEFAULT 0,
   volume REAL, entry REAL, sl REAL, tp REAL, risk_amount REAL, net_pnl REAL,
+  signal_id TEXT,
   created_ts REAL, sent_ts REAL, opened_ts REAL, closed_ts REAL, expires_ts REAL
 );
 CREATE TABLE IF NOT EXISTS risk_decisions(
@@ -26,7 +27,7 @@ CREATE TABLE IF NOT EXISTS snapshots(ts REAL, balance REAL, equity REAL, margin_
 NODE_COLS = {
     "parent_id", "root_id", "level", "state", "budget", "planned_loss", "symbol", "side",
     "client_id", "ticket", "attempts", "volume", "entry", "sl", "tp", "risk_amount",
-    "net_pnl", "created_ts", "sent_ts", "opened_ts", "closed_ts", "expires_ts",
+    "net_pnl", "created_ts", "sent_ts", "opened_ts", "closed_ts", "expires_ts", "signal_id",
 }
 
 
@@ -36,6 +37,14 @@ class Database:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.executescript(SCHEMA)
+        columns = {r[1] for r in self.conn.execute("PRAGMA table_info(nodes)")}
+        if "signal_id" not in columns:
+            self.conn.execute("ALTER TABLE nodes ADD COLUMN signal_id TEXT")
+        self.conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_nodes_signal_id "
+            "ON nodes(signal_id) WHERE signal_id IS NOT NULL"
+        )
+        self.conn.commit()
         self.clock = time.time       # replaced by the broker clock in simulations
 
     # ---- nodes ----
@@ -56,6 +65,21 @@ class Database:
             self.conn.execute("UPDATE nodes SET root_id=? WHERE node_id=?", (nid, nid))
         self.conn.commit()
         return nid
+
+    def add_root_once(self, signal_id, **fields):
+        """Create a root once per signal; return None when it was already recorded."""
+        if not signal_id:
+            return self.add_node(**fields)
+        fields["signal_id"] = signal_id
+        try:
+            return self.add_node(**fields)
+        except sqlite3.IntegrityError:
+            row = self.conn.execute(
+                "SELECT node_id FROM nodes WHERE signal_id=?", (signal_id,)
+            ).fetchone()
+            if row is not None:
+                return None
+            raise
 
     def update_node(self, node_id: int, **f) -> None:
         self._check(f)

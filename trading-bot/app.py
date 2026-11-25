@@ -14,7 +14,7 @@ import time
 from tradingbot.advanced_bot import AdvancedBot
 from tradingbot.config import Config
 from tradingbot.costs import affordability
-from tradingbot.market_context import ContextCache
+from tradingbot.market_context import ContextCache, MultiTimeframeContextCache
 from tradingbot.database import Database
 from tradingbot.models import Signal
 from tradingbot.orchestrator import Bot
@@ -28,34 +28,68 @@ def bot_loop(cfg, mode, speed, equity, interval, legacy=False, stop_event=None):
     rng = random.Random()
     if mode == "sim":
         from tradingbot.broker_sim import SimBroker
+        bar_minutes = {"M1": 1, "M5": 5, "M15": 15, "H1": 60}[cfg.ctx_tf]
+        sim_commission = cfg.commission_per_lot or cfg.sim_commission_per_lot
+        cfg.commission_per_lot = sim_commission
         broker = SimBroker(equity=equity, seed=rng.randint(1, 9999), t0=1_699_999_200, sigma=0.0008,
-                           spread_pips=0.7, bar_minutes=5 if cfg.ctx_tf == "M5" else 60)
-        broker.warmup(700)
+                           spread_pips=0.7, bar_minutes=bar_minutes,
+                           commission_per_lot=sim_commission)
+        broker.warmup(18000 if cfg.ctx_tf == "M1" and not legacy else 700)
     else:
         from tradingbot.broker_mt5 import MT5Broker
-        broker = MT5Broker(require_demo=True)
+        broker = MT5Broker(require_demo=True, cfg=cfg)
         cfg.root_risk_pct = min(cfg.root_risk_pct, 0.001) if not cfg.regime_gating else cfg.root_risk_pct
 
-    symbols = ["EURUSD", "GBPUSD", "USDJPY"]
-    try:                                            # screen out symbols this account cannot afford at all
-        from tradingbot.market_context import build_context
-        eq = broker.account().equity
-        keep = []
-        for sym in symbols:
-            ctx = build_context(broker.candles(sym, 450, cfg.ctx_tf), cfg.ctx_htf)
+    default_symbols = [
+        "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "NZDUSD",
+        "USDCAD", "USDCHF", "EURGBP", "EURJPY", "GBPJPY", "EURCHF",
+        "XAUUSD",
+    ]
+    requested_symbols = getattr(cfg, "symbols", None)
+    explicit_symbols = requested_symbols is not None
+    symbols = list(requested_symbols) if explicit_symbols else default_symbols
+
+    # Explicit selections fail clearly; unavailable defaults are skipped.
+    available = []
+    unavailable = []
+    for sym in symbols:
+        try:
+            broker.spec(sym)
+            available.append(sym)
+        except Exception:
+            unavailable.append(sym)
+
+    if explicit_symbols and unavailable:
+        raise ValueError("Unsupported symbols for this broker: " + ", ".join(unavailable))
+
+    if unavailable:
+        print("  Skipping unavailable default symbols: " + ", ".join(unavailable))
+
+    symbols = available
+    if not symbols:
+        raise ValueError("No requested/default symbols are available on this broker.")
+
+    from tradingbot.market_context import build_context
+    eq = broker.account().equity
+    keep = []
+    for sym in symbols:
+        try:
+            check_tf = "M5" if cfg.ctx_tf == "M1" else cfg.ctx_tf
+            check_htf = "15min" if cfg.ctx_tf == "M1" else cfg.ctx_htf
+            ctx = build_context(broker.candles(sym, 450, check_tf), check_htf)
             spec, atr = broker.spec(sym), float(ctx["atr"].iloc[-1])
             a = affordability(spec, eq, cfg, cfg.ck_stop_atr_lo * atr)
             print(f"  {sym}: smallest trade risks {a['min_risk']:.2f}, budget {a['budget']:.2f}  ->  "
                   + ("OK" if a["ok"] else f"TOO BIG (needs a balance of about {a['needs_equity']:,.0f})"))
             if a["ok"]:
                 keep.append(sym)
-        if keep:
-            symbols = keep
-        else:
-            print("  No symbol fits this balance: the bot will watch but cannot trade. Use a cent account "
-                  "or a larger balance.")
-    except Exception as e:
-        print("  (affordability screen skipped:", repr(e)[:80], ")")
+        except Exception as e:
+            print(f"  {sym}: affordability check failed ({repr(e)[:80]})")
+
+    if keep:
+        symbols = keep
+    else:
+        print("  No symbol passed the affordability screen. The bot will watch but cannot trade.")
 
     def strat(now, b):                       # PLACEHOLDER: random entries, no edge
         if rng.random() > (0.3 if mode == "sim" else 0.02):
@@ -68,7 +102,8 @@ def bot_loop(cfg, mode, speed, equity, interval, legacy=False, stop_event=None):
     if legacy:
         bot = Bot(cfg, db, broker, strat)                  # the original bot, random placeholder
     else:
-        cache = ContextCache(tf=cfg.ctx_tf, htf=cfg.ctx_htf)
+        cache = (MultiTimeframeContextCache() if cfg.ctx_tf == "M1"
+                 else ContextCache(tf=cfg.ctx_tf, htf=cfg.ctx_htf))
         bot = AdvancedBot(cfg, db, broker, ScannerStrategy(cfg, symbols, cache), cache)
     db.kv_set("run_mode", mode)
     if stop_event is None:
@@ -111,19 +146,37 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", choices=["sim", "demo"], default="sim")
     ap.add_argument("--port", type=int, default=8765)
-    ap.add_argument("--speed", type=float, default=0.15, help="sim: seconds per simulated hour")
+    ap.add_argument("--speed", type=float, default=0.15, help="sim: seconds between simulated bars")
     ap.add_argument("--equity", type=float, default=10000)
     ap.add_argument("--interval", type=float, default=60, help="demo: seconds between ticks")
     ap.add_argument("--db", help="database file: give EACH broker account its own (e.g. exness1.db)")
     ap.add_argument("--host", default="127.0.0.1", help="0.0.0.0 or a Tailscale IP to open it to your phone")
     ap.add_argument("--profile", choices=["standard", "small", "scalp"], default="standard",
-                    help="small = H1, one trade at a time, strict costs (for $10-50 accounts); scalp = M5 (cost-bound, test first)")
+                    help="small = H1, strict costs; scalp = M5 (cost-bound, test first)")
+    ap.add_argument("--timeframe", choices=["M1", "M5", "M15", "H1"],
+                    help="override the profile timeframe")
+    ap.add_argument("--symbols",
+                    help="comma-separated broker symbols, e.g. EURUSD,GBPUSD,USDJPY")
     ap.add_argument("--legacy", action="store_true", help="original bot with random placeholder signals")
     a = ap.parse_args()
 
     cfg = (Config if a.legacy else Config.scalp if a.profile == "scalp" else Config.small if a.profile == "small" else Config.improved)(db_path=a.db or ("sim.db" if a.mode == "sim" else "bot.db"))
     if not a.legacy:
         load_settings(cfg, default_profile=a.profile)
+
+    # Explicit CLI choices take priority over saved profile settings.
+    if a.timeframe:
+        cfg.ctx_tf = a.timeframe
+        cfg.ctx_htf = {"M1": "5min", "M5": "15min", "M15": "1h", "H1": "4h"}[a.timeframe]
+
+    if a.symbols is not None:
+        symbols = list(dict.fromkeys(
+            item.strip().upper() for item in a.symbols.split(",") if item.strip()
+        ))
+        if not symbols:
+            ap.error("--symbols must contain at least one symbol")
+        cfg.symbols = symbols
+
     token = os.environ.get("DASHBOARD_TOKEN") or secrets.token_urlsafe(8)
     engine_args = (cfg, a.mode, a.speed, a.equity, a.interval, a.legacy)
     supervisor = EngineSupervisor(bot_loop, args=engine_args)

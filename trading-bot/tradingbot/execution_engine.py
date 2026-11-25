@@ -77,6 +77,17 @@ class ExecutionEngine:
             self.kill.trigger(Mode.PAUSE, "broker_unreachable")
             self.db.audit("exec", "reconcile_failed", {"err": repr(e)})
             return []
+
+        # In capped demo mode, unmanaged positions make account-wide risk unknown.
+        demo_cap = float(getattr(self.cfg, "demo_risk_cap_pct", 0.0) or 0.0)
+        unmanaged = [p for p in live if not p.client_id.startswith(PREFIX)]
+        if demo_cap > 0 and unmanaged:
+            if self.kill.trigger(Mode.PAUSE, "unmanaged_position"):
+                self.db.audit("risk", "unmanaged_positions_detected", {
+                    "tickets": [p.ticket for p in unmanaged],
+                    "symbols": [p.symbol for p in unmanaged],
+                })
+
         tagged = {p.client_id: p for p in live if p.client_id.startswith(PREFIX)}
         closed_nodes = []
 
@@ -94,7 +105,7 @@ class ExecutionEngine:
                 if n["state"] == "SENDING":
                     self.db.update_node(n["node_id"], state="OPEN", ticket=pos.ticket,
                                         entry=pos.open_price, opened_ts=now)
-                elif now - (n["opened_ts"] or now) > self.cfg.max_hold_s:
+                elif self.cfg.max_hold_s > 0 and now - (n["opened_ts"] or now) > self.cfg.max_hold_s:
                     self.db.audit("exec", "time_stop", {"node": n["node_id"]})
                     try:
                         self.broker.close_position(pos.ticket)

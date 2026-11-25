@@ -318,14 +318,14 @@ class Server(unittest.TestCase):
             "allocated_capital": 500,
             "risk_per_trade_amount": 5,
             "daily_loss_pct": 0.03,
-            "max_open": 2,
+            "max_open_risk_pct": 0.025,
         })
         self.assertEqual(status, 200)
         self.assertTrue(result["saved"])
         self.assertEqual(result["settings"]["profile"], "small")
         self.assertEqual(result["settings"]["allocated_capital"], 500)
         self.assertEqual(result["settings"]["risk_per_trade_amount"], 5)
-        self.assertEqual(result["settings"]["max_open"], 2)
+        self.assertEqual(result["settings"]["max_open_risk_pct"], 0.025)
 
         status, result = self.get_json(base + "/api/settings", "secret")
         self.assertEqual(status, 200)
@@ -348,7 +348,7 @@ class Server(unittest.TestCase):
 
         for payload in (
             {"daily_loss_pct": 0.5},
-            {"max_open": 6},
+            {"max_open_risk_pct": 0.11},
             {"allocated_capital": -10},
             {"profile": "unknown"},
         ):
@@ -370,7 +370,7 @@ class Server(unittest.TestCase):
                 "allocated_capital": 750,
                 "risk_per_trade_amount": 7.5,
                 "daily_loss_pct": 0.04,
-                "max_open": 3,
+                "max_open_risk_pct": 0.03,
             }, supervisor)
             self.assertEqual(status, 200)
         finally:
@@ -383,7 +383,7 @@ class Server(unittest.TestCase):
         self.assertEqual(restored.allocated_capital, 750)
         self.assertEqual(restored.risk_per_trade_amount, 7.5)
         self.assertEqual(restored.daily_loss_pct, 0.04)
-        self.assertEqual(restored.max_open, 3)
+        self.assertEqual(restored.max_open_risk_pct, 0.03)
 
     def test_a_fresh_bot_with_no_trades_sends_json_a_browser_can_parse(self):
         def strict(const):                                   # what a browser does: Infinity/NaN are errors

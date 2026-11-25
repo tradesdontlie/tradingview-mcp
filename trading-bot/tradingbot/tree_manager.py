@@ -18,7 +18,8 @@ class TreeManager:
         self.min_risk_fn = None          # optional: node -> risk of one minimum lot at that node's stop
 
     def create_root(self, signal, risk_amount: float, now: float) -> int:
-        return self.db.add_node(
+        return self.db.add_root_once(
+            getattr(signal, "signal_id", None),
             parent_id=None, root_id=None, level=0, state="QUEUED",
             budget=risk_amount, planned_loss=risk_amount,
             symbol=signal.symbol, side=signal.side, created_ts=now)

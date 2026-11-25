@@ -14,7 +14,7 @@ class Config:
     root_pool_frac: float = 0.10       # share of a ROOT win's profit recorded in the pool
     max_depth: int = 6
     child_ttl_s: float = 3 * 24 * 3600     # unused child budgets expire
-    max_hold_s: float = 48 * 3600          # time stop so a zombie trade cannot block slots
+    max_hold_s: float = 0                 # disabled; protective exits remain active
 
     # --- account protection ---
     root_risk_pct: float = 0.005       # planned loss of a root trade (fraction of equity)
@@ -22,6 +22,7 @@ class Config:
     risk_per_trade_amount: float = 0.0  # fixed account-currency risk amount; 0 = use profile percentage
     max_trade_risk_pct: float = 0.01   # hard cap per trade
     max_open_risk_pct: float = 0.015   # hard cap on total planned risk across open trades
+    demo_risk_cap_pct: float = 0.0    # demo-only per-entry and total-risk ceiling; 0 = disabled
     daily_loss_pct: float = 0.03       # -> PAUSE
     max_drawdown_pct: float = 0.10     # from peak equity -> FREEZE
     min_free_margin_pct: float = 0.50  # free margin must be >= this share of equity
@@ -38,6 +39,8 @@ class Config:
     journal_enabled: bool = False          # record every trade, learn from outcomes
     multi_slot_enabled: bool = False       # extra slots for proven high-confidence trades
     one_open_per_tree: bool = False        # never two open trades from the same tree
+    one_open_per_symbol: bool = False     # never overlap positions on the same pair
+    pyramiding_enabled: bool = False      # validated same-symbol add-ons only
     max_open_high_conf: int = 4            # hard cap even for high-confidence trades
     extra_slot_min_prob: float = 0.80      # journal-proven win probability needed (lower bound)
     extra_slot_min_trades: int = 30        # journal sample needed before that probability counts
@@ -79,17 +82,20 @@ class Config:
     ck_er_range: float = 0.20              # at/below this = ranging
     news_blackouts: tuple = ()             # ("2026-11-20 13:25-13:45", ...) UTC windows with no entries
     commission_per_lot: float = 0.0        # round-turn commission per 1.0 lot, account currency
+    sim_commission_per_lot: float = 7.0   # simulator round-turn commission per 1.0 lot
     slippage_price: float = 0.0            # slippage allowance in price units, added to every trade's cost
     max_trades_per_day: int = 0            # 0 = no cap
 
     @classmethod
     def scalp(cls, **kw):
-        """Small-account scalping profile (M5 setups, M15 trend, one trade at a time, tighter limits).
+        """Scalping profile (M1 entries, independent positions, tighter risk limits).
         Starting points to be tested on YOUR data, not proven settings."""
         base = dict(ctx_tf="M5", ctx_htf="15min", rr=2.0, max_open=1, reserve_root_slots=0,
+                    one_open_per_symbol=False,
                     multi_slot_enabled=False, max_depth=2, root_risk_pct=0.01, max_trade_risk_pct=0.01,
                     regime_gating=True, ck_stop_atr_lo=1.5, ck_stop_atr_hi=3.0, ck_spread_frac=0.20,
-                    ck_room_r=1.5, max_hold_s=2 * 3600, child_ttl_s=12 * 3600, max_trades_per_day=8,
+                    ck_room_r=1.5, ck_max_dist_atr=1.2, max_hold_s=0,
+                    child_ttl_s=12 * 3600, max_trades_per_day=8,
                     signal_max_age_s=120, streak_cooldown_s=3600)
         base.update(kw)
         return cls.improved(**base)
@@ -107,7 +113,8 @@ class Config:
     def improved(cls, **kw):
         """Preset with all advancements on."""
         base = dict(checklist_enabled=True, equity_guard_enabled=True, journal_enabled=True,
-                    multi_slot_enabled=True, one_open_per_tree=True, child_min_win_r=1.0,
+                    multi_slot_enabled=True, one_open_per_tree=True, one_open_per_symbol=True,
+                    child_min_win_r=1.0,
                     merge_small_children=True, dust_use_full_budget=True, max_queued_children=4,
                     correlated_risk_scale=0.5, weekly_loss_pct=0.04, daily_loss_pct=0.02,
                     child_ttl_s=7 * 24 * 3600, ck_room_r=1.5)

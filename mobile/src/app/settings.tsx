@@ -38,7 +38,7 @@ export default function SettingsScreen() {
   const [allocation, setAllocation] = useState('');
   const [riskAmount, setRiskAmount] = useState('');
   const [dailyLoss, setDailyLoss] = useState('');
-  const [maxOpen, setMaxOpen] = useState('');
+  const [maxOpenRisk, setMaxOpenRisk] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -56,7 +56,7 @@ export default function SettingsScreen() {
       setAllocation(String(data.allocated_capital));
       setRiskAmount(String(data.risk_per_trade_amount));
       setDailyLoss(String(Number((data.daily_loss_pct * 100).toFixed(3))));
-      setMaxOpen(String(data.max_open));
+      setMaxOpenRisk(String(Number((data.max_open_risk_pct * 100).toFixed(3))));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load settings.');
     } finally {
@@ -79,7 +79,7 @@ export default function SettingsScreen() {
       Number(allocation),
       Number(riskAmount),
       Number(dailyLoss),
-      Number(maxOpen),
+      Number(maxOpenRisk),
     ];
 
     if (values.some((value) => !Number.isFinite(value))) {
@@ -97,8 +97,8 @@ export default function SettingsScreen() {
       return;
     }
 
-    if (!Number.isInteger(values[3]) || values[3] < 1 || values[3] > 5) {
-      Alert.alert('Invalid maximum trades', 'Choose a whole number between 1 and 5.');
+    if (values[3] < 0.1 || values[3] > 10) {
+      Alert.alert('Invalid portfolio risk', 'Enter a percentage between 0.1 and 10.');
       return;
     }
 
@@ -109,7 +109,7 @@ export default function SettingsScreen() {
         allocated_capital: values[0],
         risk_per_trade_amount: values[1],
         daily_loss_pct: values[2] / 100,
-        max_open: values[3],
+        max_open_risk_pct: values[3] / 100,
       };
 
       const result = await saveSettings(updated);
@@ -249,10 +249,10 @@ export default function SettingsScreen() {
             hint="Allowed range: 0.1% to 20%."
           />
           <Field
-            label="Maximum open trades"
-            value={maxOpen}
-            onChangeText={setMaxOpen}
-            hint="Allowed range: 1 to 5."
+            label="Maximum combined open risk (%)"
+            value={maxOpenRisk}
+            onChangeText={setMaxOpenRisk}
+            hint="Total planned risk across all open trades. Allowed range: 0.1% to 10%."
           />
         </View>
 

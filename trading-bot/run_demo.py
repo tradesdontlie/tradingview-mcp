@@ -27,7 +27,7 @@ def main():
     args = ap.parse_args()
 
     cfg = Config(root_risk_pct=0.001)                      # tiny risk for the plumbing test
-    broker = MT5Broker(require_demo=True)
+    broker = MT5Broker(require_demo=True, cfg=cfg)
     rng = random.Random()
 
     def strat(now, b):
