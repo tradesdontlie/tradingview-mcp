@@ -1,81 +1,84 @@
-# MT5 tree-trading bot: foundation
+# MT5 Tree Bot
 
-Risk-first engine for the tree design: a winning trade funds two smaller child trades,
-a losing trade ends its branch, at most two positions open account-wide, kill switch on top.
+A risk-first MT5 trading engine and demo console.
 
-**No strategy has passed validation yet (see research.py results). This is infrastructure.
-Do not use real money. The only live target for now is an MT5 DEMO account.**
+> [!CAUTION]
+> **No strategy has passed validation.** Use simulation or an MT5 DEMO account only. Do not risk real funds with the included placeholder signals or research experiments.
 
-## Web console
-    python app.py --mode sim      # simulated broker, any OS -> open http://127.0.0.1:8765
-    python app.py --mode demo     # MT5 DEMO account (Windows), random placeholder signals
-The page shows equity, the live trade trees, open trades, refused trades, the event log,
-the rules in force, and an account planner (how deep your tree can really grow).
-Pause / Freeze / Liquidate / Reset need the control token printed at startup. The server
-binds to 127.0.0.1 only. Never expose it to a network.
+## Components
 
-## Layout
-| File | Role |
+| Path | Role |
 |---|---|
-| tradingbot/tree_manager.py | parent/child ledger, budgets, branch death, expiry |
-| tradingbot/trade_scheduler.py | slot limit, reserved root slot |
-| tradingbot/risk_manager.py | approval gate: sizing (round down), min-lot, spread, headroom, correlation, daily/drawdown limits |
-| tradingbot/kill_switch.py | persistent PAUSE / FREEZE / LIQUIDATE, explicit reset |
-| tradingbot/execution_engine.py | intent-first orders, ambiguity resolution, reconciliation, time stops |
-| tradingbot/orchestrator.py | the tick loop |
-| tradingbot/database.py, analytics.py | SQLite persistence, statistics |
-| tradingbot/broker_sim.py | offline broker with failure injection |
-| tradingbot/broker_mt5.py | MT5 adapter (**not yet run against a terminal**) |
-| tradingbot/server.py + dashboard/index.html | browser console (stdlib server, no dependencies) |
-| app.py | one command: bot + console |
-| run_sim.py / run_demo.py / check_mt5.py / kill.py | simulator, demo plumbing test, read-only health check, kill CLI |
+| `tradingbot/tree_manager.py` | Parent/child ledger, budgets, branch cancellation, expiry |
+| `tradingbot/trade_scheduler.py` | Signal ranking and queued-child assignment |
+| `tradingbot/risk_manager.py` | Position sizing and account risk gates |
+| `tradingbot/kill_switch.py` | Persistent PAUSE/FREEZE/LIQUIDATE control |
+| `tradingbot/execution_engine.py` | Order intent, reconciliation, and ambiguous-order handling |
+| `tradingbot/orchestrator.py` | Tick loop and component orchestration |
+| `tradingbot/database.py` | SQLite persistence |
+| `tradingbot/analytics.py` | Trading statistics |
+| `tradingbot/broker_sim.py` | Offline simulated broker |
+| `tradingbot/broker_mt5.py` | MetaTrader 5 broker adapter |
+| `tradingbot/server.py`, `dashboard/` | Browser console and HTTP API |
+| `app.py` | Combined engine and console entry point |
 
-## Research (evidence-based strategies)
-    python portfolio_research.py --synthetic random   # negative control: all must fail
-    python portfolio_research.py --synthetic trend    # positive control: trend rules must pass
-    python portfolio_research.py                      # your data in data/ (daily files)
-Tests volatility-targeted trend (time-series momentum) across many instruments and FX
-cross-sectional momentum, with costs, 2x-cost stress, both-halves check and the Deflated
-Sharpe Ratio. A strategy must pass here before it goes anywhere near the bot.
+## Start in simulation
 
-## Advancements (all additive: the original Config() and Bot behave exactly as before)
-Config.improved() switches on: the pre-trade checklist (CHECKLIST.md), the trade journal and
-learning gate, the equity guard (profit lock, drawdown ladder, loss-streak cooldown), one open trade
-per tree, marginal wins no longer funding children, and optional extra slots for proven setups.
-    python app.py --mode sim                       # improved bot + scanner (add --legacy for the original)
-    python setup_research.py --synthetic random    # checklist on 8 years of data: must find NOTHING
-    python setup_research.py --synthetic trend     # ...and must find an edge where one exists
-    python setup_research.py --ablation            # on YOUR data/<PAIR>_H1.csv: which items earn their place
-    python setup_research.py --learn               # same, with the journal blocking losing buckets as it goes
-    python analyze_journal.py                      # what is working and what the bot has learned
-    python compare_modes.py --market random        # original vs improved on identical simulated markets
+```bash
+python -m venv venv
+# macOS/Linux
+source venv/bin/activate
+# Windows
+# venv\Scripts\activate
 
-## Small accounts and scalping (v5)
-    python check_mt5.py                              # can THIS balance trade at all? (minimum-lot risk vs budget)
-    python app.py --mode demo --profile small        # H1, one trade at a time, strict cost cap (for $10-50)
-    python app.py --mode demo --profile scalp        # M5: cost-bound, only after setup_research proves it on M5 data
-    python setup_research.py --profile scalp         # needs data/<PAIR>_M5.csv (fetch_data.py --timeframe M5)
-Profiles: standard (Config.improved), small (Config.small), scalp (Config.scalp). Original Config() is unchanged.
+pip install -r requirements.txt
+python app.py --mode sim
+```
 
-## Commands
-    python -m unittest discover -s tests -v   # 22 tests, any OS
-    python run_sim.py --equity 10000          # whole bot on the simulated broker
-    python run_sim.py --equity 1000           # see the tree collapse on a small account
-    python check_mt5.py                       # Windows, read-only: hedging? min lot? tree depth?
-    python run_demo.py --interval 60          # Windows, DEMO only, random placeholder signal
-    python kill.py freeze                     # from a second window, any time
+Open `http://127.0.0.1:8765` unless a different `--host` or `--port` is used.
 
-## Rules implemented (defaults in config.py)
-- Win = net P&L after costs > 0. Winner's profit x 1/3, split in two = child budget (1/6 each).
-- Child planned loss = 50% of its budget; target 1:3. Child risk = 1/4 of its parent's.
-- Root win also adds 10% of its profit to a root pool (recorded, **not spent**: undecided).
-- Loss ends the branch and cancels unopened descendants; siblings continue.
-- Max 2 open account-wide; children may not take the last slot.
-- Unused child budgets expire after 3 days. Trades are time-stopped after 48 hours.
-- Child below one minimum lot becomes DUST: skipped, never rounded up.
+## Start against MT5 demo
 
-## Known limits
-- Weekly loss limit and broker-day boundaries are not implemented (daily uses UTC).
-- Emergency liquidation exists but default policy should stay FREEZE.
-- Correlation guard is currency-based and simple.
-- MT5 adapter, filling modes, history lookup and tick-value maths need demo validation.
+```bash
+python app.py --mode demo
+```
+
+MT5 demo mode requires Windows and a running MetaTrader 5 terminal logged into a demo account. The demo adapter has not been validated against every broker configuration. Emergency or real-account use is outside this project's validated scope.
+
+## Profiles
+
+- `standard`: improved checklist, journal, equity guard, and tree controls
+- `small`: one-trade-at-a-time profile for smaller accounts
+- `scalp`: M5-oriented profile; cost and edge assumptions require proof on your own data
+
+Profiles are still defaults to validate, not proven profitable configurations.
+
+## Research and validation
+
+```bash
+python portfolio_research.py --synthetic random
+python portfolio_research.py --synthetic trend
+python setup_research.py --synthetic random
+python setup_research.py --synthetic trend
+python setup_research.py --ablation
+python analyze_journal.py
+python compare_modes.py --market random
+```
+
+Real-data research requires files such as `data/<PAIR>_H1.csv` or `data/<PAIR>_M5.csv`. Research scripts do not prove future profitability and must not be used as an automatic trading recommendation.
+
+## Tests
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+Core coverage includes tree rules, risk gates, kill switches, execution reconciliation, Supabase/mobile API behavior, settings, small-account/scalp profiles, and broker assumptions.
+
+## Safety rules
+
+- Never expose the console directly to the public internet.
+- Use HTTPS and private networking when accessing a remote console.
+- Keep emergency control available; test it in simulation first.
+- Add a real demo-account validation report before any live-broker expansion.
+- Preserve server-side stops and reconcile broker state after every restart.
