@@ -21,6 +21,11 @@ register('alert', {
         message: opts.message,
       }),
     }],
+    ['webhook', {
+      description: 'Send an existing alert to the webhook in TV_ALERT_WEBHOOK_URL',
+      options: { id: { type: 'string', description: 'Alert id (from alert list)' } },
+      handler: (opts) => core.setWebhook({ alert_id: Number(opts.id) }),
+    }],
     ['delete', {
       description: 'Delete alerts',
       options: {

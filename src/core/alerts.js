@@ -85,6 +85,7 @@ export async function list() {
               created: a.create_time,
               last_fired: a.last_fire_time,
               expiration: a.expiration,
+              has_webhook: !!a.web_hook,
             };
           })
         };
@@ -125,4 +126,51 @@ export async function deleteAlerts({ delete_all, alert_ids, alert_id } = {}) {
     return { success: true, source: 'internal_api', deleted_count: ids.length, alert_ids: ids };
   }
   return { success: false, source: 'internal_api', alert_ids: ids, error: (result && (result.error || result.response)) || 'delete failed' };
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Webhook for an existing alert (alert_set_webhook). Sends a TradingView alert to your own webhook endpoint when it
+// fires. The URL is read from the TV_ALERT_WEBHOOK_URL environment variable of the MCP process, never from a tool
+// argument, and it is never returned or logged: results carry only the host. Only https URLs are accepted.
+// Inactive alerts are refused, because re-saving one would re-arm it.
+// ---------------------------------------------------------------------------------------------------------------------
+const WEBHOOK_FIELDS = ['conditions', 'symbol', 'resolution', 'message', 'sound_file', 'sound_duration', 'popup',
+  'auto_deactivate', 'email', 'sms_over_email', 'mobile_push', 'name', 'notification_schedule'];
+
+export async function setWebhook({ alert_id } = {}) {
+  const id = Number(alert_id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return { success: false, source: 'internal_api', error: 'alert_id must be a positive integer (from alert_list)' };
+  }
+  const raw = process.env.TV_ALERT_WEBHOOK_URL || '';
+  let url = null;
+  try { url = new URL(raw); } catch { url = null; }
+  if (!url || url.protocol !== 'https:') {
+    return { success: false, source: 'internal_api', error: 'set TV_ALERT_WEBHOOK_URL (an https URL) in the MCP environment' };
+  }
+
+  const result = await evaluateAsync(`
+    (async function() {
+      try {
+        var ID = ${id}, HOOK = ${safeString(raw)}, F = ${JSON.stringify(WEBHOOK_FIELDS)};
+        var d = await (await fetch('https://pricealerts.tradingview.com/list_alerts', { credentials: 'include' })).json();
+        if (d.s !== 'ok') return { ok: false, why: 'could not list alerts' };
+        var a = (d.r || []).find(function(x) { return x.alert_id === ID; });
+        if (!a) return { ok: false, why: 'no such alert' };
+        if (!a.active) return { ok: false, why: 'alert is not active: saving it would re-arm it' };
+        if (a.web_hook === HOOK) return { ok: true, already: true };
+        var p = {};
+        F.forEach(function(k) { if (k in a && a[k] !== undefined) p[k] = a[k]; });
+        if (a.expiration_policy) p.expiration_policy = a.expiration_policy; else p.expiration = a.expiration;
+        p.web_hook = HOOK; p.active = true; p.ignore_warnings = true; p.alert_id = ID;
+        var u = new URL('https://pricealerts.tradingview.com/modify_restart_alert');
+        u.searchParams.set('log_username', (window.user && window.user.username) || '');
+        var j = await (await fetch(u.toString(), { method: 'POST', credentials: 'include', body: JSON.stringify({ payload: p }) })).json();
+        if (j.s !== 'ok') return { ok: false, why: 'TradingView refused: ' + ((j.err && j.err.code) || j.errmsg || 'unknown') };
+        return { ok: true, already: false };
+      } catch (e) { return { ok: false, why: 'page error: ' + (e && e.name) }; }
+    })()
+  `);
+  if (!result?.ok) return { success: false, source: 'internal_api', alert_id: id, error: result?.why || 'unknown' };
+  return { success: true, source: 'internal_api', alert_id: id, webhook_host: url.host, already_set: !!result.already };
 }
