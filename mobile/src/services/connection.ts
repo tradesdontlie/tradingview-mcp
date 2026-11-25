@@ -11,7 +11,12 @@ export type BackendConfig = {
 
 function cleanUrl(value: string) {
   const url = value.trim().replace(/\/+$/, '');
-  if (!/^https?:\/\//i.test(url)) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error();
+    }
+  } catch {
     throw new Error('Enter a valid server URL beginning with http:// or https://');
   }
   return url;
@@ -19,7 +24,7 @@ function cleanUrl(value: string) {
 
 export async function saveConnection(config: BackendConfig) {
   if (Platform.OS === 'web') {
-    throw new Error('Secure connection storage is available in the Android app.');
+    throw new Error('Secure connection storage is available in the mobile app.');
   }
   await SecureStore.setItemAsync(URL_KEY, cleanUrl(config.serverUrl));
   await SecureStore.deleteItemAsync(OLD_TOKEN_KEY);
@@ -59,18 +64,35 @@ export async function testConnection(config: BackendConfig) {
       signal: controller.signal,
     });
 
+    const text = await response.text();
+    let result: unknown;
+
+    try {
+      result = text ? JSON.parse(text) : {};
+    } catch {
+      throw new Error(`Backend returned invalid JSON (HTTP ${response.status}).`);
+    }
+
     if (!response.ok) {
+      const message =
+        result && typeof result === 'object' && 'error' in result
+          ? String((result as { error?: unknown }).error)
+          : '';
       throw new Error(
         response.status === 401 || response.status === 403
-          ? 'Authentication failed. The server may not yet support Supabase login.'
-          : `Backend returned HTTP ${response.status}.`,
+          ? message || 'Authentication failed. The server may not support Supabase login.'
+          : message || `Backend returned HTTP ${response.status}.`,
       );
     }
 
-    const result = await response.json();
-    if (!result || typeof result !== 'object' || !('run_mode' in result)) {
+    if (
+      !result ||
+      typeof result !== 'object' ||
+      !('run_mode' in result)
+    ) {
       throw new Error('The server is not a recognised Tree Bot backend.');
     }
+
     return result;
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {

@@ -1,6 +1,17 @@
 import { loadConnection } from './connection';
 import { supabase } from './supabase';
 
+async function readJson(response: Response) {
+  const text = await response.text();
+  if (!text) return {};
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`Backend returned invalid JSON (HTTP ${response.status}).`);
+  }
+}
+
 export async function apiRequest(
   path: string,
   method = 'GET',
@@ -22,9 +33,11 @@ export async function apiRequest(
     throw new Error('Your session has expired. Please sign in again.');
   }
 
-  const response = await fetch(
-    `${config.serverUrl}${path}`,
-    {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+
+  try {
+    const response = await fetch(`${config.serverUrl}${path}`, {
       method,
       headers: {
         Accept: 'application/json',
@@ -32,16 +45,24 @@ export async function apiRequest(
         Authorization: `Bearer ${accessToken}`,
       },
       body: body ? JSON.stringify(body) : undefined,
-    },
-  );
+      signal: controller.signal,
+    });
 
-  const result = await response.json();
+    const result = await readJson(response);
 
-  if (!response.ok) {
-    throw new Error(
-      result.error || `Backend returned HTTP ${response.status}.`,
-    );
+    if (!response.ok) {
+      throw new Error(
+        result.error || `Backend returned HTTP ${response.status}.`,
+      );
+    }
+
+    return result;
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('Request timed out. Check the server address and network.');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
   }
-
-  return result;
 }
