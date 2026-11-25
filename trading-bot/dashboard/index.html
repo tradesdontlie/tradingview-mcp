@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tree Bot Console</title>
+<style>
+:root{--bg:#eef2f4;--panel:#fff;--ink:#1b2b34;--mute:#5f7380;--line:#cbd5db;--win:#1f7a5a;--loss:#b3412f;--open:#2b5fa8;--dust:#8a8f94;--warn:#c98a00;--bar:#1b2b34;--barink:#eef2f4}
+@media (prefers-color-scheme:dark){:root{--bg:#10181d;--panel:#18232a;--ink:#e3ebef;--mute:#8da0ac;--line:#2d3d46;--win:#4cc39a;--loss:#f0816e;--open:#7fa8e8;--dust:#7d8a92;--warn:#e8b64a;--bar:#050a0d;--barink:#e3ebef}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 "Segoe UI",system-ui,sans-serif}
+.num{font-family:"Cascadia Mono",Consolas,monospace;font-variant-numeric:tabular-nums}
+header{background:var(--bar);color:var(--barink);padding:12px 20px;display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+header h1{font-size:16px;margin:0 auto 0 0;font-weight:600}
+#kill{padding:5px 12px;border-radius:4px;font-weight:600;background:var(--win);color:#fff}
+#kill.PAUSE,#kill.FREEZE{background:var(--warn);color:#1b2b34}#kill.LIQUIDATE{background:var(--loss)}
+button,input{font:inherit}
+button{border:1px solid currentColor;background:transparent;color:inherit;padding:5px 11px;border-radius:4px;cursor:pointer}
+button:hover{background:rgba(127,127,127,.2)}button:focus-visible,input:focus-visible{outline:2px solid var(--open);outline-offset:2px}
+header input{width:130px;padding:5px 8px;border-radius:4px;border:1px solid #6b7e8a;background:transparent;color:inherit}
+nav{display:flex;gap:4px;padding:10px 20px 0}
+nav button{border:0;border-bottom:2px solid transparent;border-radius:0;color:var(--mute)}
+nav button.on{color:var(--ink);border-color:var(--ink);font-weight:600}
+main{padding:14px 20px 40px;display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:16px}
+@media (max-width:900px){main{grid-template-columns:1fr}}
+section{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px 16px;min-width:0}
+h2{font-size:14px;margin:0 0 10px}
+.kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.kpis b{display:block;font-size:19px}.kpis span{color:var(--mute);font-size:12px}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;padding:4px 6px;border-bottom:1px solid var(--line)}th{color:var(--mute);font-weight:500}
+.tree{overflow:auto;max-height:520px}.root{margin-bottom:12px}
+.node{display:flex;gap:8px;align-items:baseline;padding:2px 0}
+.kids{margin-left:12px;padding-left:14px;border-left:2px solid var(--line)}
+.chip{padding:0 7px;border-radius:9px;font-size:12px;color:#fff;white-space:nowrap}
+.WON{background:var(--win)}.LOST{background:var(--loss)}.OPEN,.SENDING{background:var(--open)}
+.QUEUED{background:transparent;color:var(--ink);border:1px solid var(--mute)}.DUST,.EXPIRED,.CANCELLED{background:var(--dust)}
+.pos{color:var(--win)}.neg{color:var(--loss)}.mute{color:var(--mute)}
+canvas{width:100%;height:190px;display:block}
+.stack{display:grid;gap:16px;align-content:start}
+.log{max-height:230px;overflow:auto;font-size:12px}
+.plan label{display:inline-grid;gap:2px;margin:0 12px 8px 0;color:var(--mute);font-size:12px}.plan input{width:110px;padding:4px 6px;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:4px}
+#msg{margin-left:8px;font-size:12px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Tree Bot Console <span class="mute" id="mode"></span></h1>
+  <span id="kill" class="NONE">connecting</span>
+  <input id="tok" type="password" placeholder="control token" aria-label="Control token">
+  <button data-a="pause">Pause</button><button data-a="freeze">Freeze</button>
+  <button data-a="liquidate">Liquidate</button><button data-a="reset">Reset</button>
+  <span id="msg"></span>
+</header>
+<nav><button class="on" data-t="live">Live</button><button data-t="plan">Account planner</button><button data-t="cfg">Rules</button></nav>
+
+<main id="live">
+  <div class="stack">
+    <section><h2>Equity</h2><canvas id="chart"></canvas></section>
+    <section><h2>Trade trees</h2><div class="tree" id="tree"></div></section>
+  </div>
+  <div class="stack">
+    <section><h2>Account</h2><div class="kpis" id="kpis"></div></section>
+    <section><h2>Open trades</h2><div id="open"></div></section>
+    <section><h2>Trades the risk manager refused</h2><div id="rej"></div></section>
+    <section><h2>Event log</h2><div class="log" id="audit"></div></section>
+  </div>
+</main>
+
+<main id="plan" hidden>
+  <section style="grid-column:1/-1" class="plan">
+    <h2>How deep can your tree grow?</h2>
+    <p class="mute">Each child risks a quarter of its parent. Once that is below the risk of one minimum lot, the branch cannot trade.</p>
+    <label>Equity<input id="p_eq" type="number" value="1000"></label>
+    <label>Root risk, % of equity<input id="p_r" type="number" step="0.1" value="0.5"></label>
+    <label>Stop, pips<input id="p_s" type="number" value="20"></label>
+    <label>Cost of 1 pip at 0.01 lot<input id="p_pv" type="number" step="0.01" value="0.10"></label>
+    <label>Win rate, %<input id="p_w" type="number" step="1" value="30"></label>
+    <div id="plan_out"></div>
+  </section>
+</main>
+
+<main id="cfg" hidden><section style="grid-column:1/-1"><h2>Rules in force (edit tradingbot/config.py)</h2><table id="cfgt"></table></section></main>
+
+<script>
+const $=s=>document.querySelector(s), money=v=>(v<0?"-":"")+Math.abs(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+const cls=v=>v>0?"pos":v<0?"neg":"";
+$("#tok").value=sessionStorage.getItem("tok")||"";$("#tok").oninput=e=>sessionStorage.setItem("tok",e.target.value);
+document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("on",x==b));["live","plan","cfg"].forEach(t=>$("#"+t).hidden=t!=b.dataset.t)});
+
+document.querySelectorAll("header button").forEach(b=>b.onclick=async()=>{
+  const a=b.dataset.a;let body={action:a};
+  if(a==="liquidate"&&!confirm("Close ALL open positions at market now?"))return;
+  if(a==="reset"){body.confirm=prompt("Type RESET to allow new trades again")||""}
+  const r=await fetch("/api/kill",{method:"POST",headers:{"X-Token":$("#tok").value,"Content-Type":"application/json"},body:JSON.stringify(body)});
+  const j=await r.json();$("#msg").textContent=r.ok?"Kill switch: "+j.mode:j.error;load()});
+
+function chart(pts){const c=$("#chart"),d=devicePixelRatio||1,w=c.clientWidth,h=c.clientHeight;c.width=w*d;c.height=h*d;const g=c.getContext("2d");g.scale(d,d);
+  const st=getComputedStyle(document.body);g.clearRect(0,0,w,h);if(pts.length<2){g.fillStyle=st.getPropertyValue("--mute");g.fillText("Waiting for data",10,20);return}
+  const ys=pts.map(p=>p[1]),lo=Math.min(...ys),hi=Math.max(...ys),sp=(hi-lo)||1;
+  g.strokeStyle=st.getPropertyValue("--open");g.lineWidth=1.6;g.beginPath();pts.forEach((p,i)=>{const x=i/(pts.length-1)*(w-8)+4,y=h-14-(p[1]-lo)/sp*(h-28);i?g.lineTo(x,y):g.moveTo(x,y)});g.stroke();
+  g.fillStyle=st.getPropertyValue("--mute");g.font="11px Consolas,monospace";g.fillText(money(hi),4,11);g.fillText(money(lo),4,h-2)}
+
+function treeHtml(nodes){const by={};nodes.forEach(n=>(by[n.parent_id||0]=by[n.parent_id||0]||[]).push(n));
+  const one=n=>`<div class="node"><span class="chip ${n.state}">${n.state.toLowerCase()}</span><span>L${n.level} ${n.symbol||""} ${n.side||""}</span><span class="num mute">risk ${money(n.risk_amount||n.planned_loss)}</span>${n.net_pnl!=null?`<span class="num ${cls(n.net_pnl)}">${money(n.net_pnl)}</span>`:""}</div>`+((by[n.node_id]||[]).length?`<div class="kids">${by[n.node_id].map(one).join("")}</div>`:"");
+  const roots=(by[0]||[]).slice(-25).reverse();return roots.length?roots.map(r=>`<div class="root">${one(r)}</div>`).join(""):'<p class="mute">No trades yet. They appear here as the bot opens them.</p>'}
+
+function render(s){
+  $("#mode").textContent=s.run_mode.toUpperCase();const k=$("#kill");k.className=s.kill.mode;k.textContent=s.kill.mode==="NONE"?"Trading enabled":s.kill.mode+(s.kill.reason?": "+s.kill.reason:"");
+  const a=s.account,t=s.stats;
+  $("#kpis").innerHTML=[["Equity",money(a.equity),""],["Today",money(a.day_pnl),cls(a.day_pnl)],["Drawdown from peak",a.drawdown_pct.toFixed(2)+"%",""],["Net P&L",money(t.net_pnl),cls(t.net_pnl)],["Win rate",(t.win_rate*100).toFixed(1)+"%",""],["Profit factor",typeof t.profit_factor==="number"&&isFinite(t.profit_factor)?t.profit_factor.toFixed(2):"n/a",""],["Trades per tree",t.trades_per_root.toFixed(2),""],["Root pool (not spent)",money(t.root_pool),""]].map(x=>`<div><b class="num ${x[2]}">${x[1]}</b><span>${x[0]}</span></div>`).join("");
+  const open=s.nodes.filter(n=>n.state==="OPEN"||n.state==="SENDING");
+  $("#open").innerHTML=open.length?`<table><tr><th>Level</th><th>Pair</th><th>Lots</th><th>Stop</th><th>Target</th></tr>${open.map(n=>`<tr><td>L${n.level}</td><td>${n.symbol} ${n.side}</td><td class="num">${n.volume}</td><td class="num">${n.sl}</td><td class="num">${n.tp}</td></tr>`).join("")}</table>`:'<p class="mute">No open trades.</p>';
+  $("#rej").innerHTML=s.rejections.length?`<table>${s.rejections.map(r=>`<tr><td>${r[0].replace(/_/g," ")}</td><td class="num">${r[1]}</td></tr>`).join("")}</table>`:'<p class="mute">None so far.</p>';
+  $("#audit").innerHTML=`<table>${s.audit.map(e=>`<tr><td>${e[2].replace(/_/g," ")}</td><td class="mute">${e[1]}</td></tr>`).join("")}</table>`;
+  $("#tree").innerHTML=treeHtml(s.nodes);chart(s.equity);
+  $("#cfgt").innerHTML=Object.entries(s.config).map(([k,v])=>`<tr><td>${k}</td><td class="num">${v}</td></tr>`).join("")}
+
+function plan(){const eq=+$("#p_eq").value,rp=+$("#p_r").value/100,st=+$("#p_s").value,pv=+$("#p_pv").value,p=+$("#p_w").value/100;
+  const minRisk=st*pv*1,root=eq*rp;let rows="";for(let l=0;l<5;l++){const r=root/4**l,ok=r>=minRisk;rows+=`<tr><td>Level ${l}</td><td class="num">${money(r)}</td><td class="${ok?"pos":"neg"}">${ok?"can trade":"too small for 0.01 lot"}</td></tr>`}
+  const mult=1/(1-p/2),be=25;$("#plan_out").innerHTML=`<p>A 0.01 lot with a ${st}-pip stop risks <b class="num">${money(minRisk)}</b>. Your root trade risks <b class="num">${money(root)}</b>.</p><table style="max-width:520px"><tr><th>Branch</th><th>Planned risk</th><th>Can it trade?</th></tr>${rows}</table><p>At a ${(p*100).toFixed(0)}% win rate and 1:3 reward, a whole tree earns about <b class="num">${mult.toFixed(2)}x</b> what its first trade earns alone. That multiplier helps only if the first trade is profitable (break-even before costs is ${be}%).</p>`}
+document.querySelectorAll(".plan input").forEach(i=>i.oninput=plan);plan();
+
+async function load(){try{const r=await fetch("/api/state");render(await r.json())}catch(e){$("#kill").textContent="Server not reachable";$("#kill").className="LIQUIDATE"}}
+load();setInterval(load,2000);addEventListener("resize",load);
+</script>
+</body>
+</html>
