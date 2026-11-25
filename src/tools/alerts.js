@@ -12,6 +12,13 @@ export function registerAlertTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
+  server.tool('alert_set_webhook', 'Send an existing alert to your webhook (TV_ALERT_WEBHOOK_URL, an https URL set in the MCP environment). The URL is never returned; only its host.', {
+    alert_id: z.coerce.number().int().positive().describe('Alert id to edit (from alert_list)'),
+  }, async ({ alert_id }) => {
+    try { return jsonResult(await core.setWebhook({ alert_id })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
   server.tool('alert_list', 'List active alerts', {}, async () => {
     try { return jsonResult(await core.list()); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
