@@ -5,3 +5,22 @@ temp_*
 *.log
 discovery-log.json
 rules.json
+
+# Local credentials and environment files
+.env
+.env.*
+!.env.example
+
+# Operating-system and Python-generated files
+.DS_Store
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Trading-bot local datasets, reports, and SQLite runtime state
+/trading-bot/data/
+/trading-bot/results/
+/trading-bot/*.db
+/trading-bot/*.db-wal
+/trading-bot/*.db-shm
