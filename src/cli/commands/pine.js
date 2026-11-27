@@ -77,17 +77,19 @@ register('pine', {
       handler: () => core.save(),
     }],
     ['new', {
-      description: 'Create a new blank Pine Script (indicator, strategy, library)',
+      description: 'Create a new unsaved Pine Script (indicator, strategy, library); --discard-unsaved to drop edits in the open script',
+      options: { 'discard-unsaved': { type: 'boolean', description: 'Discard unsaved edits in the open script' } },
       handler: (opts, positionals) => {
         const type = positionals[0] || 'indicator';
-        return core.newScript({ type });
+        return core.newScript({ type, discard_unsaved: !!opts['discard-unsaved'] });
       },
     }],
     ['open', {
-      description: 'Open a saved Pine Script by name',
+      description: 'Switch the editor to a saved Pine Script by name; --discard-unsaved to drop edits in the open script',
+      options: { 'discard-unsaved': { type: 'boolean', description: 'Discard unsaved edits in the open script' } },
       handler: (opts, positionals) => {
         if (!positionals[0]) throw new Error('Script name required. Usage: tv pine open "My Script"');
-        return core.openScript({ name: positionals.join(' ') });
+        return core.openScript({ name: positionals.join(' '), discard_unsaved: !!opts['discard-unsaved'] });
       },
     }],
     ['list', {

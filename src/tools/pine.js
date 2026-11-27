@@ -8,7 +8,7 @@ export function registerPineTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('pine_set_source', 'Set Pine Script source code in the editor', {
+  server.tool('pine_set_source', 'Replace the source in the currently open editor script (does not change which saved script the editor is bound to — see editor_script in the result; use pine_new first for a new script)', {
     source: z.string().describe('Pine Script source code to inject'),
   }, async ({ source }) => {
     try { return jsonResult(await core.setSource({ source })); }
@@ -40,17 +40,19 @@ export function registerPineTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('pine_new', 'Create a new blank Pine Script', {
+  server.tool('pine_new', 'Create a new, unsaved Pine Script in the editor (unbinds the editor from the previously open saved script, so later saves cannot overwrite it). Fails if the open script has unsaved changes unless discard_unsaved is true.', {
     type: z.enum(['indicator', 'strategy', 'library']).describe('Type of script to create'),
-  }, async ({ type }) => {
-    try { return jsonResult(await core.newScript({ type })); }
+    discard_unsaved: z.boolean().optional().describe('Discard unsaved edits in the currently open script (default false)'),
+  }, async ({ type, discard_unsaved }) => {
+    try { return jsonResult(await core.newScript({ type, discard_unsaved })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('pine_open', 'Open a saved Pine Script by name', {
+  server.tool('pine_open', 'Switch the Pine Editor to a saved Pine Script by name (later saves go to that script). Fails if the open script has unsaved changes unless discard_unsaved is true.', {
     name: z.string().describe('Name of the saved script to open (case-insensitive match)'),
-  }, async ({ name }) => {
-    try { return jsonResult(await core.openScript({ name })); }
+    discard_unsaved: z.boolean().optional().describe('Discard unsaved edits in the currently open script (default false)'),
+  }, async ({ name, discard_unsaved }) => {
+    try { return jsonResult(await core.openScript({ name, discard_unsaved })); }
     catch (err) { return jsonResult({ success: false, source: 'internal_api', error: err.message }, true); }
   });
 

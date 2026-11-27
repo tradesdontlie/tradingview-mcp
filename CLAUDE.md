@@ -48,8 +48,10 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 4. `pine_get_console` → read log.info() output
 5. `pine_get_source` → read current code back (WARNING: can be very large for complex scripts)
 6. `pine_save` → save to TradingView cloud
-7. `pine_new` → create blank indicator/strategy/library
-8. `pine_open` → load a saved script by name
+7. `pine_new` → create a new unsaved indicator/strategy/library (unbinds the editor from the open saved script)
+8. `pine_open` → switch the editor to a saved script by name
+
+`pine_set_source` replaces the code of whatever script is open, and compiling/saving a saved script writes a new version of it. To write a new script without touching an existing one, call `pine_new` first. Check `editor_script` in the results; `pine_new`/`pine_open` refuse to discard unsaved edits unless `discard_unsaved: true`.
 
 ### "Practice trading with replay"
 1. `replay_start` with `date: "2025-03-01"` → enter replay mode

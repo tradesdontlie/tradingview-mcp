@@ -8,7 +8,11 @@ import { evaluate, evaluateAsync, getClient } from '../connection.js';
 // ── Monaco finder (injected into TV page) ──
 const FIND_MONACO = `
   (function findMonacoEditor() {
-    var container = document.querySelector('.monaco-editor.pine-editor-monaco');
+    // TradingView can keep a hidden (0x0) editor instance in the DOM; prefer the visible one.
+    var all = document.querySelectorAll('.monaco-editor.pine-editor-monaco');
+    var container = null;
+    for (var c = 0; c < all.length; c++) { if (all[c].offsetParent !== null) { container = all[c]; break; } }
+    if (!container) container = all[0] || null;
     if (!container) return null;
     var el = container;
     var fiberKey;
@@ -35,17 +39,108 @@ const FIND_MONACO = `
   })()
 `;
 
+// ── Pine editor controller finder (injected into TV page) ──
+// The editor's React context exposes a controller with openScript / openNewScript /
+// getScriptIdVersion / isModified. Using it is the only way to actually switch the
+// script the editor is bound to — setValue() alone keeps the CURRENT script's identity,
+// so a later save would overwrite that saved script.
+const FIND_PINE_CTL = `
+  (function findPineController() {
+    var all = document.querySelectorAll('.monaco-editor.pine-editor-monaco');
+    var starts = [];
+    for (var c = 0; c < all.length; c++) { if (all[c].offsetParent !== null) starts.push(all[c]); }
+    var names = document.querySelectorAll('[class*="nameButton-"]');
+    for (var n = 0; n < names.length; n++) { if (names[n].offsetParent !== null) starts.push(names[n]); }
+    for (var s = 0; s < starts.length; s++) {
+      var el = starts[s], fiberKey = null;
+      for (var i = 0; i < 20 && el; i++) {
+        fiberKey = Object.keys(el).find(function(k) { return k.startsWith('__reactFiber$'); });
+        if (fiberKey) break;
+        el = el.parentElement;
+      }
+      if (!fiberKey) continue;
+      var cur = el[fiberKey];
+      for (var d = 0; d < 80 && cur; d++) {
+        var v = cur.memoizedProps && cur.memoizedProps.value;
+        if (v && typeof v.openScript === 'function' && typeof v.getScriptIdVersion === 'function') return v;
+        cur = cur.return;
+      }
+    }
+    return null;
+  })()
+`;
+
+// Describes which saved script (if any) the editor is currently bound to.
+const SCRIPT_INFO_JS = `
+  function _scriptInfo(ctl) {
+    var nb = null, names = document.querySelectorAll('[class*="nameButton-"]');
+    for (var n = 0; n < names.length; n++) { if (names[n].offsetParent !== null) { nb = names[n]; break; } }
+    var idv = null, modified = null, draft = null;
+    try { idv = ctl ? ctl.getScriptIdVersion() : null; } catch (e) {}
+    try { modified = ctl ? !!ctl.isModified() : null; } catch (e) {}
+    try { draft = ctl ? !!ctl.isDraft() : null; } catch (e) {}
+    return {
+      name: nb ? nb.textContent.trim() : null,
+      script_id: idv ? idv.scriptIdPart : null,
+      version: idv ? idv.version : null,
+      is_new_unsaved: ctl ? idv === null : null,
+      is_draft: draft,
+      has_unsaved_changes: modified,
+    };
+  }
+`;
+
+// Clicks the editor's compile button. Matches data-qa-id first so it works in any UI
+// language (the English-text-only match fell through to "Save" in e.g. Korean UI).
+// The add/update button shares data-qa-id "add-script-to-chart" (its title switches
+// between "Add to chart" and "Update on chart"), so qa matches report 'Add/update on chart'.
+// Returns 'Save and add to chart' | 'Add to chart' | 'Update on chart' | 'Add/update on chart' | 'Pine Save' | null.
+const CLICK_COMPILE_BUTTON_JS = `
+  (function() {
+    function vis(el) { return el && el.offsetParent !== null; }
+    var btns = Array.prototype.slice.call(document.querySelectorAll('button')).filter(vis);
+    var qaBtn = null, addBtn = null, updateBtn = null, saveBtn = null;
+    for (var i = 0; i < btns.length; i++) {
+      var b = btns[i], qa = b.getAttribute('data-qa-id') || '', text = b.textContent.trim();
+      if (/save and add to chart/i.test(text)) { b.click(); return 'Save and add to chart'; }
+      if (!qaBtn && qa === 'add-script-to-chart') qaBtn = b;
+      if (!addBtn && /^add to chart$/i.test(text)) addBtn = b;
+      if (!updateBtn && /^update on chart$/i.test(text)) updateBtn = b;
+      if (!saveBtn && (qa === 'pine-script-save-button' || b.className.indexOf('saveButton') !== -1)) saveBtn = b;
+    }
+    if (addBtn) { addBtn.click(); return 'Add to chart'; }
+    if (updateBtn) { updateBtn.click(); return 'Update on chart'; }
+    if (qaBtn) { qaBtn.click(); return 'Add/update on chart'; }
+    if (saveBtn) { saveBtn.click(); return 'Pine Save'; }
+    return null;
+  })()
+`;
+
+/** Returns the saved script the editor is bound to: { name, script_id, version, ... }. */
+export async function getEditorScript() {
+  return evaluate(`
+    (function() {
+      ${SCRIPT_INFO_JS}
+      return _scriptInfo(${FIND_PINE_CTL});
+    })()
+  `);
+}
+
 /**
  * Opens the Pine Editor panel and waits for Monaco to become available.
  * Returns true if editor is accessible, false on timeout.
  */
+const VISIBLE_EDITOR_JS = `
+  (function() {
+    var all = document.querySelectorAll('.monaco-editor.pine-editor-monaco');
+    // Parenthesized: FIND_MONACO starts with a newline, and a bare "return <newline>" returns undefined (ASI).
+    for (var c = 0; c < all.length; c++) { if (all[c].offsetParent !== null) return (${FIND_MONACO}) !== null; }
+    return false;
+  })()
+`;
+
 export async function ensurePineEditorOpen() {
-  const already = await evaluate(`
-    (function() {
-      var m = ${FIND_MONACO};
-      return m !== null;
-    })()
-  `);
+  const already = await evaluate(VISIBLE_EDITOR_JS);
   if (already) return true;
 
   await evaluate(`
@@ -57,17 +152,23 @@ export async function ensurePineEditorOpen() {
     })()
   `);
 
+  for (let i = 0; i < 5; i++) {
+    await new Promise(r => setTimeout(r, 200));
+    if (await evaluate(VISIBLE_EDITOR_JS)) return true;
+  }
+
   await evaluate(`
     (function() {
-      var btn = document.querySelector('[aria-label="Pine"]')
-        || document.querySelector('[data-name="pine-dialog-button"]');
-      if (btn) btn.click();
+      var btn = document.querySelector('[data-name="pine-dialog-button"]')
+        || document.querySelector('[aria-label="Pine"]');
+      // It's a toggle: clicking an already-pressed button would close the editor.
+      if (btn && btn.getAttribute('aria-pressed') !== 'true') btn.click();
     })()
   `);
 
   for (let i = 0; i < 50; i++) {
     await new Promise(r => setTimeout(r, 200));
-    const ready = await evaluate(`(function() { return ${FIND_MONACO} !== null; })()`);
+    const ready = await evaluate(VISIBLE_EDITOR_JS);
     if (ready) return true;
   }
   return false;
@@ -278,36 +379,15 @@ export async function setSource({ source }) {
   `);
 
   if (!set) throw new Error('Monaco found but setValue() failed.');
-  return { success: true, lines_set: source.split('\n').length };
+  return { success: true, lines_set: source.split('\n').length, editor_script: await getEditorScript() };
 }
 
 export async function compile() {
   const editorReady = await ensurePineEditorOpen();
   if (!editorReady) throw new Error('Could not open Pine Editor.');
 
-  const clicked = await evaluate(`
-    (function() {
-      var btns = document.querySelectorAll('button');
-      var fallback = null;
-      var saveBtn = null;
-      for (var i = 0; i < btns.length; i++) {
-        var text = btns[i].textContent.trim();
-        if (/save and add to chart/i.test(text)) {
-          btns[i].click();
-          return 'Save and add to chart';
-        }
-        if (!fallback && /^(Add to chart|Update on chart)/i.test(text)) {
-          fallback = btns[i];
-        }
-        if (!saveBtn && btns[i].className.indexOf('saveButton') !== -1 && btns[i].offsetParent !== null) {
-          saveBtn = btns[i];
-        }
-      }
-      if (fallback) { fallback.click(); return fallback.textContent.trim(); }
-      if (saveBtn) { saveBtn.click(); return 'Pine Save'; }
-      return null;
-    })()
-  `);
+  const scriptBefore = await getEditorScript();
+  const clicked = await evaluate(CLICK_COMPILE_BUTTON_JS);
 
   if (!clicked) {
     const c = await getClient();
@@ -316,7 +396,10 @@ export async function compile() {
   }
 
   await new Promise(r => setTimeout(r, 2000));
-  return { success: true, button_clicked: clicked || 'keyboard_shortcut', source: 'dom_fallback' };
+  return {
+    success: true, button_clicked: clicked || 'keyboard_shortcut', source: 'dom_fallback',
+    editor_script: scriptBefore, ...savedScriptNote(clicked, scriptBefore),
+  };
 }
 
 export async function getErrors() {
@@ -348,6 +431,7 @@ export async function save() {
   const editorReady = await ensurePineEditorOpen();
   if (!editorReady) throw new Error('Could not open Pine Editor.');
 
+  const scriptBefore = await getEditorScript();
   const c = await getClient();
   await c.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: 2, key: 's', code: 'KeyS', windowsVirtualKeyCode: 83 });
   await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 's', code: 'KeyS' });
@@ -373,7 +457,11 @@ export async function save() {
 
   if (dialogHandled) await new Promise(r => setTimeout(r, 500));
 
-  return { success: true, action: dialogHandled ? 'saved_with_dialog' : 'Ctrl+S_dispatched' };
+  return {
+    success: true, action: dialogHandled ? 'saved_with_dialog' : 'Ctrl+S_dispatched',
+    editor_script: scriptBefore,
+    ...(scriptBefore?.script_id && { saved_to_script: { name: scriptBefore.name, script_id: scriptBefore.script_id, previous_version: scriptBefore.version } }),
+  };
 }
 
 export async function getConsole() {
@@ -440,28 +528,8 @@ export async function smartCompile() {
     })()
   `);
 
-  const buttonClicked = await evaluate(`
-    (function() {
-      var btns = document.querySelectorAll('button');
-      var addBtn = null;
-      var updateBtn = null;
-      var saveBtn = null;
-      for (var i = 0; i < btns.length; i++) {
-        var text = btns[i].textContent.trim();
-        if (/save and add to chart/i.test(text)) {
-          btns[i].click();
-          return 'Save and add to chart';
-        }
-        if (!addBtn && /^add to chart$/i.test(text)) addBtn = btns[i];
-        if (!updateBtn && /^update on chart$/i.test(text)) updateBtn = btns[i];
-        if (!saveBtn && btns[i].className.indexOf('saveButton') !== -1 && btns[i].offsetParent !== null) saveBtn = btns[i];
-      }
-      if (addBtn) { addBtn.click(); return 'Add to chart'; }
-      if (updateBtn) { updateBtn.click(); return 'Update on chart'; }
-      if (saveBtn) { saveBtn.click(); return 'Pine Save'; }
-      return null;
-    })()
-  `);
+  const scriptBefore = await getEditorScript();
+  const buttonClicked = await evaluate(CLICK_COMPILE_BUTTON_JS);
 
   if (!buttonClicked) {
     const c = await getClient();
@@ -502,45 +570,92 @@ export async function smartCompile() {
     has_errors: errors?.length > 0,
     errors: errors || [],
     study_added: studyAdded,
+    editor_script: scriptBefore,
+    ...savedScriptNote(buttonClicked, scriptBefore),
   };
 }
 
-export async function newScript({ type }) {
+// For a saved (non-draft) script with unsaved edits, every compile path — "Save",
+// "Update on chart", and "Add to chart" (which shares data-qa-id add-script-to-chart
+// with the update button) — writes a new version of that script. Make that visible.
+function savedScriptNote(buttonClicked, script) {
+  if (!buttonClicked || !script?.script_id || script.is_draft || !script.has_unsaved_changes) return {};
+  return {
+    saved_to_script: { name: script.name, script_id: script.script_id, previous_version: script.version },
+    note: `This saved a new version of "${script.name}". To keep it untouched, use pine_new (or open another script) before setting source.`,
+  };
+}
+
+/**
+ * Refuses to navigate away from a script with unsaved edits (they would be lost),
+ * unless the caller explicitly opts in. Returns the current editor script info.
+ */
+async function guardUnsaved(discardUnsaved, action) {
+  const current = await getEditorScript();
+  if (!current || current.has_unsaved_changes === null) {
+    throw new Error('Pine Editor controller not found — refusing to ' + action + ' by overwriting the open script. Open the Pine Editor and retry.');
+  }
+  if (current.has_unsaved_changes && !discardUnsaved) {
+    throw new Error(`The open script "${current.name}" has unsaved changes. Save it first (pine_save), or pass discard_unsaved: true to ${action} anyway.`);
+  }
+  return current;
+}
+
+async function waitForEditorScript(predicate, timeoutMs = 10000) {
+  let info = null;
+  for (let waited = 0; waited <= timeoutMs; waited += 250) {
+    info = await getEditorScript();
+    if (info && predicate(info)) return info;
+    await new Promise(r => setTimeout(r, 250));
+  }
+  return info;
+}
+
+/**
+ * Creates a real new (unsaved) script in the Pine Editor. Unlike replacing the
+ * editor text, this unbinds the editor from the previously open saved script, so
+ * a later save prompts for a new name instead of overwriting that script.
+ */
+export async function newScript({ type, discard_unsaved = false }) {
   const editorReady = await ensurePineEditorOpen();
   if (!editorReady) throw new Error('Could not open Pine Editor.');
 
-  const typeMap = { indicator: 'indicator', strategy: 'strategy', library: 'library' };
-  const templates = {
-    indicator: '//@version=6\nindicator("My script")\nplot(close)',
-    strategy: '//@version=6\nstrategy("My strategy", overlay=true)\n',
-    library: '//@version=6\n// @description TODO: add library description here\nlibrary("MyLibrary")\n',
-  };
+  const kind = ['indicator', 'strategy', 'library'].includes(type) ? type : 'indicator';
+  const previous = await guardUnsaved(discard_unsaved, 'create a new script');
 
-  const template = templates[type] || templates.indicator;
-
-  // Simply set the source to a new template — this is the most reliable approach
-  const escaped = JSON.stringify(template);
-  const set = await evaluate(`
+  const started = await evaluate(`
     (function() {
-      var m = ${FIND_MONACO};
-      if (!m) return false;
-      m.editor.setValue(${escaped});
+      var ctl = ${FIND_PINE_CTL};
+      if (!ctl || typeof ctl.openNewScript !== 'function') return false;
+      ctl.openNewScript(${JSON.stringify(kind)});
       return true;
     })()
   `);
+  if (!started) throw new Error('Pine Editor controller not found — cannot create a new script.');
 
-  if (!set) throw new Error('Monaco editor not found. Ensure Pine Editor is open.');
+  const now = await waitForEditorScript(info => info.is_new_unsaved === true);
+  if (!now || now.is_new_unsaved !== true) {
+    throw new Error(`New script was not created; the editor is still bound to "${now?.name}" (${now?.script_id}). Nothing was changed.`);
+  }
 
-  return { success: true, type, action: 'new_script_created', template: typeMap[type] };
+  return {
+    success: true, type: kind, action: 'new_script_created',
+    editor_script: now,
+    previous_script: previous.script_id ? { name: previous.name, script_id: previous.script_id, version: previous.version } : null,
+    note: 'Editor now holds a new unsaved script. Use pine_set_source, then pine_save (prompts for a name) or pine_smart_compile.',
+  };
 }
 
-export async function openScript({ name }) {
+/**
+ * Switches the Pine Editor to a saved script by name. The editor is re-bound to
+ * that script, so later saves go to it — not to whatever was open before.
+ */
+export async function openScript({ name, discard_unsaved = false }) {
   const editorReady = await ensurePineEditorOpen();
   if (!editorReady) throw new Error('Could not open Pine Editor.');
 
   const escapedName = JSON.stringify(name.toLowerCase());
-
-  const result = await evaluateAsync(`
+  const match = await evaluateAsync(`
     (function() {
       var target = ${escapedName};
       return fetch('https://pine-facade.tradingview.com/pine-facade/list/?filter=saved', { credentials: 'include' })
@@ -561,31 +676,40 @@ export async function openScript({ name }) {
             }
           }
           if (!match) return {error: 'Script "' + target + '" not found. Use pine_list_scripts to see available scripts.'};
-
-          var id = match.scriptIdPart;
-          var ver = match.version || 1;
-          return fetch('https://pine-facade.tradingview.com/pine-facade/get/' + id + '/' + ver, { credentials: 'include' })
-            .then(function(r2) { return r2.json(); })
-            .then(function(data) {
-              var source = data.source || '';
-              if (!source) return {error: 'Script source is empty', name: match.scriptName || match.scriptTitle};
-              var m = ${FIND_MONACO};
-              if (m) {
-                m.editor.setValue(source);
-                return {success: true, name: match.scriptName || match.scriptTitle, id: id, lines: source.split('\\n').length};
-              }
-              return {error: 'Monaco editor not found to inject source', name: match.scriptName || match.scriptTitle};
-            });
+          return {id: match.scriptIdPart, version: String(match.version || '1.0'), name: match.scriptName || match.scriptTitle};
         })
         .catch(function(e) { return {error: e.message}; });
     })()
   `);
+  if (match?.error) throw new Error(match.error);
 
-  if (result?.error) {
-    throw new Error(result.error);
+  const previous = await getEditorScript();
+  if (previous?.script_id === match.id && !previous.has_unsaved_changes) {
+    const lines = await evaluate(`(function() { var m = ${FIND_MONACO}; return m ? m.editor.getValue().split('\\n').length : null; })()`);
+    return { success: true, name: match.name, script_id: match.id, version: previous.version, lines, source: 'internal_api', opened: true, already_open: true };
   }
+  await guardUnsaved(discard_unsaved, `open "${match.name}"`);
 
-  return { success: true, name: result.name, script_id: result.id, lines: result.lines, source: 'internal_api', opened: true };
+  const started = await evaluate(`
+    (function() {
+      var ctl = ${FIND_PINE_CTL};
+      if (!ctl) return false;
+      ctl.openScript({ scriptIdPart: ${JSON.stringify(match.id)}, version: ${JSON.stringify(match.version)} });
+      return true;
+    })()
+  `);
+  if (!started) throw new Error('Pine Editor controller not found — refusing to inject source into the currently open script.');
+
+  const now = await waitForEditorScript(info => info.script_id === match.id);
+  if (!now || now.script_id !== match.id) {
+    throw new Error(`Could not switch the editor to "${match.name}"; it is bound to "${now?.name}" (${now?.script_id}). Nothing was changed.`);
+  }
+  const lines = await evaluate(`(function() { var m = ${FIND_MONACO}; return m ? m.editor.getValue().split('\\n').length : null; })()`);
+
+  return {
+    success: true, name: match.name, script_id: match.id, version: now.version, lines, source: 'internal_api', opened: true,
+    previous_script: previous?.script_id ? { name: previous.name, script_id: previous.script_id } : null,
+  };
 }
 
 export async function listScripts() {
